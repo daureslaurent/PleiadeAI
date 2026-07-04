@@ -1,0 +1,92 @@
+# ==============================================================================
+# PleiadeAI Core Git Ignore
+# ==============================================================================
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Directory for instrumented code coverage downloads
+.nyc_output
+
+# Cypress science / coverage
+coverage
+.next
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# TypeScript / Build Outputs
+**/dist/
+**/build/
+**/out/
+**/.cache/
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rts2_cache_main
+.rts2_cache_es
+.rts2_cache_umd
+.rts2_cache_cjs
+
+# Feedback submissions from sub-packages
+.tsbuildinfo
+
+# ==============================================================================
+# Environment and Secret Files (CRITICAL SECRETS)
+# ==============================================================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
+
+# ==============================================================================
+# Docker & Local Database Volatile Data
+# ==============================================================================
+# Ignores local data folders if you ever run databases natively instead of named volumes
+**/data/db/
+**/qdrant/storage/
+.docker-volumes/
+
+# ==============================================================================
+# IDEs, Editors, and OS Files
+# ==============================================================================
+.jsorg/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json

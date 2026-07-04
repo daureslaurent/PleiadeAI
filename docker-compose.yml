@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------
+  # 1. CORE DATABASES
+  # ----------------------------------------
+  mongodb:
+    image: mongo:7.0
+    container_name: pleiade_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - pleiade_mongo_data:/data/db
+    networks:
+      - pleiade_net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: pleiade_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - pleiade_qdrant_data:/qdrant/storage
+    networks:
+      - pleiade_net
+
+  # ----------------------------------------
+  # 2. PLEIADE APPLICATION SERVICES
+  # ----------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pleiade_backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - MONGO_URI=mongodb://mongodb:27017/pleiade
+      - QDRANT_URL=http://qdrant:6333
+      - LLAMA_API_URL=http://192.168.1.100:8080 # Update to your remote llama instance
+    depends_on:
+      - mongodb
+      - qdrant
+    networks:
+      - pleiade_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Pass build-time variables so Vite/Next can bake them into the client build
+        - VITE_API_URL=http://localhost:4000
+        - VITE_WS_URL=ws://localhost:4000
+    container_name: pleiade_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - pleiade_net
+
+volumes:
+  pleiade_mongo_data:
+  pleiade_qdrant_data:
+
+networks:
+  pleiade_net:
+    driver: bridge
