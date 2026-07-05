@@ -1,0 +1,108 @@
+import { createLogger } from '../config/logger';
+import { skillRepository } from '../domain/skills/skill.repository';
+import { toolConfigService } from '../domain/tools/tool-config.service';
+import { skillRunner } from './sandbox/SkillRunner';
+import { setAgentParameter } from './core/setAgentParameter';
+import { updateAgentsMd } from './core/updateAgentsMd';
+import { webSearch } from './core/webSearch';
+import { webFetch } from './core/webFetch';
+import { remember } from './core/remember';
+import { askAgent } from './core/askAgent';
+import { askParent } from './core/askParent';
+import { askUser } from './core/askUser';
+import { annuaire } from './core/annuaire';
+import { bash } from './core/bash';
+import { scheduleTask } from './core/scheduleTask';
+import { read } from './core/fs/read';
+import { write } from './core/fs/write';
+import { edit } from './core/fs/edit';
+import { list } from './core/fs/list';
+import { glob } from './core/fs/glob';
+import { grep } from './core/fs/grep';
+import { patch } from './core/fs/patch';
+import type { Tool } from './types';
+
+const log = createLogger('tool-registry');
+
+/** Static core tools every agent implicitly gets, keyed by name. */
+const CORE_TOOLS: Record<string, Tool> = {
+  [setAgentParameter.name]: setAgentParameter,
+  [updateAgentsMd.name]: updateAgentsMd,
+  [webSearch.name]: webSearch,
+  [webFetch.name]: webFetch,
+  [remember.name]: remember,
+  [askAgent.name]: askAgent,
+  [askParent.name]: askParent,
+  [askUser.name]: askUser,
+  [annuaire.name]: annuaire,
+  [bash.name]: bash,
+  [scheduleTask.name]: scheduleTask,
+  // OpenCode-compatible file tools (opt-in per agent via tools_allowed).
+  [read.name]: read,
+  [write.name]: write,
+  [edit.name]: edit,
+  [list.name]: list,
+  [glob.name]: glob,
+  [grep.name]: grep,
+  [patch.name]: patch,
+};
+
+/**
+ * Resolve an agent's `tools_allowed` list into concrete callable tools.
+ *
+ * Names that match a core tool bind directly; the rest are looked up as dynamic skills and
+ * wrapped so the LLM sees them as ordinary tools while execution routes through the sandbox
+ * (with its timeout + circuit breaker). Disabled skills are silently omitted so a tripped
+ * skill simply disappears from the agent's toolset until re-enabled.
+ */
+export async function resolveTools(toolsAllowed: string[]): Promise<Tool[]> {
+  const resolved: Tool[] = [];
+  const skillNames: string[] = [];
+  const disabled = await toolConfigService.disabledNames();
+
+  for (const name of toolsAllowed) {
+    const core = CORE_TOOLS[name];
+    if (core) {
+      // Honour the operator's global kill-switch from the Tools page.
+      if (!disabled.has(name)) resolved.push(core);
+    } else skillNames.push(name);
+  }
+
+  if (skillNames.length) {
+    const skills = await skillRepository.findByNames(skillNames);
+    for (const skill of skills) {
+      if (!skill.enabled) {
+        log.debug({ skill: skill.name }, 'skipping disabled skill');
+        continue;
+      }
+      resolved.push(wrapSkill(skill));
+    }
+  }
+
+  return resolved;
+}
+
+/** Adapt a stored skill document into the Tool interface. */
+function wrapSkill(skill: import('../domain/skills/skill.model').SkillDoc): Tool {
+  return {
+    name: skill.name,
+    description: skill.description || `Dynamic ${skill.language} skill`,
+    parameters:
+      (skill.parameters_schema as Record<string, unknown>) ?? {
+        type: 'object',
+        properties: {},
+        additionalProperties: true,
+      },
+    execute: (args, ctx) => skillRunner.run(skill, args, ctx),
+  };
+}
+
+/** Always-available core tools (used when assembling the base toolset). */
+export function coreTools(): Tool[] {
+  return Object.values(CORE_TOOLS);
+}
+
+/** Look up a single core tool by name (used by the Tools config API). */
+export function getCoreTool(name: string): Tool | undefined {
+  return CORE_TOOLS[name];
+}

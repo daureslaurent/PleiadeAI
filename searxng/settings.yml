@@ -1,0 +1,20 @@
+# SearXNG configuration for Pleiade's web_search tool.
+# Layered on top of the image's built-in defaults (use_default_settings: true),
+# so this only overrides what Pleiade needs.
+use_default_settings: true
+
+server:
+  # Overridden by the SEARXNG_SECRET env var in docker-compose; the value here is
+  # only a fallback for running the container standalone.
+  secret_key: "d2551d3b874c4611b369264d2ac11dd752417b43a19223aaf34981591373ab47"
+  # The backend calls SearXNG server-to-server on the internal network, so the
+  # bot/rate limiter would only get in the way. Keep it off for this trusted caller.
+  limiter: false
+  image_proxy: true
+
+search:
+  # CRITICAL: SearXNG serves only HTML by default. The web_search tool requests
+  # `format=json`, so JSON must be enabled here or every query 403s.
+  formats:
+    - html
+    - json
