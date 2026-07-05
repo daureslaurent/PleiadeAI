@@ -88,16 +88,16 @@ services:
   # ----------------------------------------
   # 2b. FALLBACK INFERENCE (CPU llama.cpp — last-resort chat model)
   # ----------------------------------------
-  # Always up: a small CPU Qwen2.5-3B (Q4) served with --jinja so native tool-calls work. The backend
-  # fails over to it (base_url http://llama-fallback:8080, model id `qwen2.5-3b-instruct`) only when a
+  # Always up: a small CPU Qwen2.5-1.5B (Q4) served with --jinja so native tool-calls work. The backend
+  # fails over to it (base_url http://llama-fallback:8080, model id `qwen2.5-1.5b-instruct`) only when a
   # primary endpoint is unreachable. Note: plain llama-server keeps the model resident while running.
   llama-fallback:
     image: ghcr.io/ggml-org/llama.cpp:server
     container_name: pleiade_llama_fallback
     restart: unless-stopped
     command: >
-      -hf bartowski/Qwen2.5-3B-Instruct-GGUF:Q4_K_M
-      --alias qwen2.5-3b-instruct
+      -hf bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M
+      --alias qwen2.5-1.5b-instruct
       --jinja
       --ctx-size 8192
       --host 0.0.0.0 --port 8080
@@ -155,7 +155,7 @@ services:
       EMBEDDING_API_URL: http://embeddings:8080
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text-v1.5}
       LLAMA_FALLBACK_URL: http://llama-fallback:8080
-      LLAMA_FALLBACK_MODEL: qwen2.5-3b-instruct
+      LLAMA_FALLBACK_MODEL: qwen2.5-1.5b-instruct
       # Primary inference — hosted endpoint (REQUIRED; the LAN default is gone).
       LLAMA_API_URL: ${LLAMA_API_URL:?set LLAMA_API_URL in .env (hosted inference endpoint)}
       LLAMA_API_KEY: ${LLAMA_API_KEY:-sk-no-key-required}
