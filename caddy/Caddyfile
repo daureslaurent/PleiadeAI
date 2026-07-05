@@ -1,0 +1,33 @@
+# PleiadeAI public edge (single entrypoint).
+#
+# Caddy is the ONLY container that publishes a host port. It terminates the public HTTP
+# connection and reverse-proxies inward on the private docker network:
+#   /api/*, /socket.io/*, /health   -> backend:4000   (REST + websockets)
+#   everything else                 -> frontend:3000  (React SPA served by internal nginx)
+#
+# All data/inference services (mongo, qdrant, embeddings, searxng, llama-fallback) have NO
+# published ports and are unreachable from the internet — only Caddy and the backend can see them.
+#
+# TLS: plain HTTP for now (auto_https off). To switch to HTTPS later: point a domain's A record at
+# this host, replace the `:80` site label below with `yourdomain.com`, remove the `auto_https off`
+# line, publish 443 in docker-compose, and Caddy will auto-provision + renew Let's Encrypt certs.
+
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	encode gzip
+
+	# Backend: REST API, health probe, and socket.io. Caddy upgrades the websocket automatically.
+	@backend path /api/* /socket.io/* /health
+	handle @backend {
+		reverse_proxy backend:4000
+	}
+
+	# Everything else: the SPA. nginx inside the frontend image does the history/BrowserRouter fallback.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

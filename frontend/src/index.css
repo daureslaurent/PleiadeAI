@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Themed scrollbars (spec §1): slim accent thumb on a surface track so scroll
+   affordances match the dark UI instead of the browser default. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.accent') theme('colors.surface');
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: theme('colors.surface');
+}
+
+*::-webkit-scrollbar-thumb {
+  background: theme('colors.accent');
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #60a5fa;
+}
+
+*::-webkit-scrollbar-corner {
+  background: theme('colors.surface');
+}

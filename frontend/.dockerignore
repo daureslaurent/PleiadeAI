@@ -1,0 +1,25 @@
+# Build context hygiene for the frontend image. The Dockerfile does `COPY . .` before the Vite
+# build, so excluding these is REQUIRED — otherwise a huge/local node_modules and prior build
+# output get copied into the build stage (slow, and can shadow the clean `npm ci` install).
+node_modules
+dist
+
+# Secrets & local env — never bake into an image layer.
+.env
+.env.*
+!.env.example
+
+# VCS / tooling / editor
+.git
+.gitignore
+.dockerignore
+Dockerfile
+*.log
+npm-debug.log*
+.DS_Store
+.vscode
+.idea
+
+# Docs / scratch
+*.md
+tmp

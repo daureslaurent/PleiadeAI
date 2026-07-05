@@ -1,0 +1,26 @@
+# Build context hygiene for the backend image. The Dockerfile copies only package*.json,
+# tsconfig.json, scripts/ and src/, but excluding the rest keeps the context small and prevents
+# secrets/artifacts from ever entering a layer.
+node_modules
+dist
+coverage
+
+# Secrets & local env — never bake into an image layer.
+.env
+.env.*
+!.env.example
+
+# VCS / tooling / editor
+.git
+.gitignore
+.dockerignore
+Dockerfile
+*.log
+npm-debug.log*
+.DS_Store
+.vscode
+.idea
+
+# Docs / scratch (not needed at build time)
+*.md
+tmp
