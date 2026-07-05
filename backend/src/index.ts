@@ -21,6 +21,9 @@ import { endpointService } from './domain/endpoints/endpoint.service';
 import { toolsRouter } from './transport/http/routes/tools.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
 import { transferRouter } from './transport/http/routes/transfer.routes';
+import { hostRouter } from './transport/http/routes/host.routes';
+import { scheduleUpdateCheck } from './host';
+import { settingsService } from './domain/settings/settings.service';
 import { telegramBot } from './telegram/TelegramBot';
 
 /**
@@ -55,12 +58,21 @@ async function main(): Promise<void> {
   app.use('/api/tools', requireAuth, toolsRouter);
   app.use('/api/isolations', requireAuth, isolationsRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
+  app.use('/api/host', requireAuth, hostRouter);
 
   const httpServer = http.createServer(app);
   attachSocket(httpServer);
   await setupAgenda();
   // Interactive Telegram bot (long-poll). Best-effort: a Telegram outage never blocks boot.
   telegramBot.start().catch((err) => rootLogger.error({ err }, 'telegram bot failed to start'));
+
+  // Periodic host update check (only actually runs when update_enabled is on — see runUpdateCheck).
+  settingsService
+    .get()
+    .then((s) => {
+      if (s.update_enabled) scheduleUpdateCheck(s.update_check_interval_hours);
+    })
+    .catch((err) => rootLogger.error({ err }, 'failed to schedule update check'));
 
   httpServer.listen(env.PORT, () => {
     rootLogger.info({ port: env.PORT }, 'pleiade backend listening');

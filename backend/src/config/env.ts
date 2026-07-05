@@ -52,6 +52,11 @@ const EnvSchema = z.object({
   // Working directory for the `bash` terminal tool (inside the container).
   BASH_CWD: z.string().default('/workspace'),
 
+  // Host self-update bridge. The backend drops trigger files here (bind-mounted to the repo's
+  // ./.update on the host); a host-side systemd watcher runs update_run.sh / check_run.sh. See
+  // tools/updater/install-updater.sh. Override for non-Docker / custom layouts.
+  UPDATE_TRIGGER_DIR: z.string().default('/app/.update'),
+
   // Per-agent Docker isolation. The backend talks to the host daemon via the mounted
   // /var/run/docker.sock using the `docker` CLI. These are defaults for new agents' containers
   // (each agent can override cpus/memory/network/idle in its Isolation panel).

@@ -76,6 +76,14 @@ jspm_packages/
 .docker-volumes/
 
 # ==============================================================================
+# Host self-update bridge (tools/updater) — runtime trigger/status/log files
+# ==============================================================================
+# The ./.update dir is bind-mounted into the backend; its contents are runtime state
+# (triggers, status.json, update.log), never committed. Keep the dir via .gitkeep.
+.update/*
+!.update/.gitkeep
+
+# ==============================================================================
 # IDEs, Editors, and OS Files
 # ==============================================================================
 .jsorg/

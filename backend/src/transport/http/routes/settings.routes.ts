@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { settingsService, type EffectiveSettings } from '../../../domain/settings/settings.service';
+import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
 
 /** Runtime inference settings (llama.cpp options) for the Settings page. */
 export const settingsRouter = Router();
@@ -23,6 +24,14 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.title_model === 'string') patch.title_model = b.title_model;
   // Guard against a value too low to fit a reasoning model's <think> block (would truncate titles).
   if (b.title_max_tokens !== undefined) patch.title_max_tokens = Math.max(32, Number(b.title_max_tokens) || 256);
+  if (b.update_enabled !== undefined) patch.update_enabled = Boolean(b.update_enabled);
+  // At least hourly; a shorter loop just spams `git fetch` on the host with no benefit.
+  if (b.update_check_interval_hours !== undefined)
+    patch.update_check_interval_hours = Math.max(1, Number(b.update_check_interval_hours) || 1);
 
-  res.json(await settingsService.update(patch));
+  const updated = await settingsService.update(patch);
+  // (Re)arm or stop the periodic host update check to match the new settings.
+  if (updated.update_enabled) scheduleUpdateCheck(updated.update_check_interval_hours);
+  else stopUpdateCheck();
+  res.json(updated);
 });

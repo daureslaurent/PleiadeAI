@@ -9,6 +9,7 @@ import {
   MonitorCog,
   Plus,
   RefreshCw,
+  RefreshCcwDot,
   Server,
   SlidersHorizontal,
   Star,
@@ -27,6 +28,7 @@ import {
   type InferenceSettings,
 } from '../lib/api';
 import { usePrefs } from '../store/prefs';
+import { UpdatePanel } from '../components/UpdatePanel';
 
 /** Settings page: tune llama.cpp connection + generation options at runtime (spec §1 dark UI). */
 export function SettingsView() {
@@ -191,6 +193,34 @@ export function SettingsView() {
             checked={showSubagentThinking}
             onChange={setShowSubagentThinking}
           />
+        </Section>
+
+        {/* System & Updates — host self-update bridge (git pull + rebuild). Off by default. */}
+        <Section
+          icon={RefreshCcwDot}
+          title="System & Updates"
+          subtitle="Pull the latest master and rebuild the stack from here. Requires the host update watcher (tools/updater)."
+        >
+          <Toggle
+            label="Enable app updates"
+            hint="Master switch for the update check and the 'Update app' action. Off by default — the host watcher must also be installed."
+            checked={form.update_enabled}
+            onChange={(v) => set('update_enabled', v)}
+          />
+          <Field
+            label="Check interval (hours)"
+            hint="How often the backend runs a read-only update check (git fetch + compare). Minimum 1."
+          >
+            <NumberInput
+              value={form.update_check_interval_hours}
+              min={1}
+              step={1}
+              onChange={(v) => set('update_check_interval_hours', v)}
+            />
+          </Field>
+          <div className="border-t border-border pt-4">
+            <UpdatePanel enabled={form.update_enabled} />
+          </div>
         </Section>
 
         {/* Backup & Transfer — export/import agents + isolations; export Qdrant memory (archival) */}

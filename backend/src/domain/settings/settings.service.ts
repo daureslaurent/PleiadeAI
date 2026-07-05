@@ -19,6 +19,10 @@ export interface EffectiveSettings {
   title_model: string;
   /** Token budget for the title call — big enough to fit a reasoning model's `<think>` block + title. */
   title_max_tokens: number;
+  /** Host self-update master switch — gates the "Update app" action + the periodic check. */
+  update_enabled: boolean;
+  /** How often the backend triggers a read-only host update check (git fetch + compare). */
+  update_check_interval_hours: number;
 }
 
 const KEY = 'global';
@@ -44,6 +48,8 @@ export const settingsService = {
       title_endpoint_id: doc?.title_endpoint_id ?? '',
       title_model: doc?.title_model ?? '',
       title_max_tokens: doc?.title_max_tokens ?? 256,
+      update_enabled: doc?.update_enabled ?? false,
+      update_check_interval_hours: doc?.update_check_interval_hours ?? 1,
     };
   },
 

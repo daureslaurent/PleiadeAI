@@ -171,12 +171,19 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Host self-update bridge: the backend drops trigger files here; a host systemd watcher
+      # (tools/updater) sees them and runs update_run.sh / check_run.sh. See UPDATE_SYSTEM_PLAN.md.
+      UPDATE_TRIGGER_DIR: /app/.update
     volumes:
       # Per-agent isolation: the backend builds/runs each isolated agent's container on the HOST
       # Docker daemon via this socket (Docker-out-of-Docker). SECURITY: this grants the backend
       # root-equivalent control of the host, so its only defence is app auth (JWT + AUTH_PASSWORD).
       # That is why NOTHING but caddy is published and JWT_SECRET/AUTH_PASSWORD must be strong.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Host self-update bridge: the "Update app" button drops a trigger file here; the host
+      # systemd watcher (tools/updater) sees it and runs update_run.sh. Bind-mounted so the
+      # trigger reaches the host and status.json/update.log flow back to the backend.
+      - ./.update:/app/.update
     healthcheck:
       test:
         - CMD

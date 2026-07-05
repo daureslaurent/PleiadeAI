@@ -555,12 +555,65 @@ export interface InferenceSettings {
   title_model: string;
   /** Token budget for the title call — big enough to fit a reasoning model's `<think>` block + title. */
   title_max_tokens: number;
+  /** Host self-update master switch — gates the "Update app" action + the periodic check. */
+  update_enabled: boolean;
+  /** How often the backend triggers a read-only host update check (git fetch + compare). */
+  update_check_interval_hours: number;
 }
 
 export const settingsApi = {
   get: () => api.get<InferenceSettings>('/settings').then((r) => r.data),
   update: (patch: Partial<InferenceSettings>) =>
     api.put<InferenceSettings>('/settings', patch).then((r) => r.data),
+};
+
+/** One commit that the tracked branch is ahead of the deployed checkout. */
+export interface UpdateCommit {
+  sha: string;
+  shortSha: string;
+  date: string;
+  author: string;
+  subject: string;
+  body: string;
+}
+
+/** Host-side `git fetch` comparison, written by check_run.sh and read back by the backend. */
+export interface UpdateStatus {
+  checkedAt: string;
+  currentSha: string;
+  currentShortSha: string;
+  remoteSha: string;
+  remoteShortSha: string;
+  branch: string;
+  behindBy: number;
+  currentVersion: string;
+  remoteVersion: string;
+  commits: UpdateCommit[];
+  error?: string;
+}
+
+/** GET /host/update — feature toggle + host-bridge readiness + last known comparison. */
+export interface UpdateInfo {
+  enabled: boolean;
+  ready: boolean;
+  reason?: string;
+  status: UpdateStatus | null;
+  updateAvailable: boolean;
+}
+
+/** A slice of the host update log (byte-offset tailing for the "Updating…" overlay). */
+export interface UpdateLogChunk {
+  text: string;
+  offset: number;
+  size: number;
+}
+
+export const hostApi = {
+  getUpdate: () => api.get<UpdateInfo>('/host/update').then((r) => r.data),
+  checkUpdate: () => api.post<UpdateInfo>('/host/update/check').then((r) => r.data),
+  runUpdate: () => api.post<{ ok: boolean; logOffset: number }>('/host/update').then((r) => r.data),
+  updateLog: (since: number) =>
+    api.get<UpdateLogChunk>('/host/update/log', { params: { since } }).then((r) => r.data),
 };
 
 /** One OpenAI-compatible inference endpoint with its autodiscovered model list. */

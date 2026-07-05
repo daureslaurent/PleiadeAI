@@ -1,0 +1,4 @@
+#!/bin/sh
+# Auto-bump the app version on every commit.
+# Install with: sh scripts/install-hooks.sh  (or: git config core.hooksPath scripts/hooks)
+node "$(git rev-parse --show-toplevel)/scripts/bump-version.mjs" || exit 1

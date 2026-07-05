@@ -29,6 +29,11 @@ const SettingsSchema = new Schema(
     // block fits *and* leaves room for the title afterward — too low truncates mid-reasoning and
     // yields an empty/garbage title (see session-titler).
     title_max_tokens: { type: Number, default: 256 },
+    // Host self-update master switch (off by default). Gates the "Update app" action and the
+    // periodic update check. See backend/src/host + tools/updater.
+    update_enabled: { type: Boolean, default: false },
+    // How often the backend triggers a read-only host update check (git fetch + compare).
+    update_check_interval_hours: { type: Number, default: 1 },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

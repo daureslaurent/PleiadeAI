@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Bot, Box, Cpu, Database, LogOut, MessagesSquare, PanelLeftClose, PanelLeftOpen, Settings2, Terminal, Users, Wrench, Blocks } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { usePersistentState } from '../hooks/usePersistentState';
+import { hostApi } from '../lib/api';
+import { APP_VERSION } from '../version';
 
 export interface NavItem {
   to: string;
@@ -25,6 +28,24 @@ export const NAV_ITEMS: NavItem[] = [
 export function Sidebar() {
   const logout = useAuth((s) => s.logout);
   const [collapsed, setCollapsed] = usePersistentState('sidebar:collapsed', false);
+  const [updateCount, setUpdateCount] = useState(0);
+
+  // Poll the host bridge so the "update available" pin survives reloads and refreshes while the
+  // app is open. No-op unless updates are enabled + the watcher has written a status.
+  useEffect(() => {
+    let alive = true;
+    const poll = () =>
+      hostApi
+        .getUpdate()
+        .then((u) => alive && setUpdateCount(u.updateAvailable ? u.status?.behindBy ?? 0 : 0))
+        .catch(() => undefined);
+    poll();
+    const id = setInterval(poll, 5 * 60 * 1000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
 
   return (
     <aside
@@ -40,7 +61,9 @@ export function Sidebar() {
         {!collapsed && (
           <div className="leading-tight">
             <div className="font-mono text-sm font-semibold text-slate-100">PleiadeAI</div>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500">Command Center</div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">
+              Command Center · <span className="normal-case tracking-normal text-slate-600">v{APP_VERSION}</span>
+            </div>
           </div>
         )}
         {!collapsed && (
@@ -81,17 +104,33 @@ export function Sidebar() {
               ].join(' ')
             }
           >
-            {({ isActive }) => (
-              <>
-                <span
-                  className={`absolute left-0 h-5 w-0.5 rounded-r bg-accent transition-opacity ${
-                    isActive ? 'opacity-100' : 'opacity-0'
-                  }`}
-                />
-                <Icon size={17} className="shrink-0" />
-                {!collapsed && label}
-              </>
-            )}
+            {({ isActive }) => {
+              const showPin = to === '/settings' && updateCount > 0;
+              return (
+                <>
+                  <span
+                    className={`absolute left-0 h-5 w-0.5 rounded-r bg-accent transition-opacity ${
+                      isActive ? 'opacity-100' : 'opacity-0'
+                    }`}
+                  />
+                  <span className="relative shrink-0">
+                    <Icon size={17} />
+                    {showPin && collapsed && (
+                      <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-surface" />
+                    )}
+                  </span>
+                  {!collapsed && label}
+                  {showPin && !collapsed && (
+                    <span
+                      title={`${updateCount} update${updateCount === 1 ? '' : 's'} available`}
+                      className="ml-auto rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400"
+                    >
+                      {updateCount}
+                    </span>
+                  )}
+                </>
+              );
+            }}
           </NavLink>
         ))}
       </nav>
