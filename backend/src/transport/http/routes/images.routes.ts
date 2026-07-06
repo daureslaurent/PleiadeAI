@@ -18,6 +18,15 @@ function pickImageFields(body: Record<string, unknown>): Record<string, unknown>
   for (const key of ['name', 'description', 'dockerfile', 'no_cache', 'pull'] as const) {
     if (body[key] !== undefined) patch[key] = body[key];
   }
+  // Build timeout: a positive number sets it; null/'' clears it (→ server default). A non-numeric
+  // or non-positive value is ignored so a bad input can't disable the timeout entirely.
+  if (body.build_timeout_ms !== undefined) {
+    if (body.build_timeout_ms === null || body.build_timeout_ms === '') patch.build_timeout_ms = null;
+    else {
+      const n = Number(body.build_timeout_ms);
+      if (Number.isFinite(n) && n > 0) patch.build_timeout_ms = Math.floor(n);
+    }
+  }
   // build_args: normalise to [{key,value}] and drop entries without a key.
   if (Array.isArray(body.build_args)) {
     patch.build_args = (body.build_args as Array<{ key?: unknown; value?: unknown }>)

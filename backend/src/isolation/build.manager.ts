@@ -162,6 +162,7 @@ class BuildManager {
         buildArgs: (image.build_args ?? []).map((a) => ({ key: a.key, value: a.value ?? '' })),
         noCache: image.no_cache,
         pull: image.pull,
+        timeoutMs: image.build_timeout_ms ?? undefined,
       });
       const size = await dockerService.imageSize(tag);
       job.status = 'done';

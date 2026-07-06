@@ -70,6 +70,8 @@ export interface Image {
   build_args: BuildArg[];
   no_cache: boolean;
   pull: boolean;
+  /** `docker build` timeout override in ms; null → server default (AGENT_BUILD_TIMEOUT_MS). */
+  build_timeout_ms: number | null;
   image_status: ImageStatus;
   image_built_at: string | null;
   last_build_error: string | null;
@@ -79,7 +81,7 @@ export interface Image {
 }
 
 export type NewImage = Pick<Image, 'name' | 'description' | 'dockerfile'> &
-  Partial<Pick<Image, 'build_args' | 'no_cache' | 'pull'>>;
+  Partial<Pick<Image, 'build_args' | 'no_cache' | 'pull' | 'build_timeout_ms'>>;
 export type ImagePatch = Partial<NewImage>;
 
 /** Live status for an image (GET /images/:id/status). */

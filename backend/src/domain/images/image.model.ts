@@ -32,6 +32,12 @@ const ImageSchema = new Schema(
     no_cache: { type: Boolean, default: false },
     /** `--pull`: always re-fetch the base image (`FROM`) even if present locally. */
     pull: { type: Boolean, default: false },
+    /**
+     * Hard wall-clock timeout for `docker build`, in ms. Null → fall back to the server default
+     * (`AGENT_BUILD_TIMEOUT_MS`). Raise it for slow builds (large `apt`/`pip`/`npm` installs); on
+     * expiry the build is killed and marked `error`.
+     */
+    build_timeout_ms: { type: Number, default: null },
 
     // Build lifecycle (driven by the manual Build action via `buildManager`).
     image_status: {

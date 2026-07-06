@@ -224,9 +224,16 @@ class DockerService {
     image: string,
     dockerfile: string,
     onOutput: (chunk: string) => void,
-    opts: { buildArgs?: Array<{ key: string; value: string }>; noCache?: boolean; pull?: boolean } = {},
+    opts: {
+      buildArgs?: Array<{ key: string; value: string }>;
+      noCache?: boolean;
+      pull?: boolean;
+      /** Wall-clock timeout override; falls back to `AGENT_BUILD_TIMEOUT_MS` when unset. */
+      timeoutMs?: number;
+    } = {},
   ): Promise<void> {
-    log.info({ image, noCache: opts.noCache, pull: opts.pull }, 'building image');
+    const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : env.AGENT_BUILD_TIMEOUT_MS;
+    log.info({ image, noCache: opts.noCache, pull: opts.pull, timeoutMs }, 'building image');
     // `docker build -` reads the Dockerfile from stdin with an empty build context (no COPY/ADD
     // of local files — the default template doesn't need any). Progress is streamed via onOutput.
     const argv = ['build', '-t', image];
@@ -241,7 +248,7 @@ class DockerService {
     const res = await this.run(argv, {
       stdin: dockerfile,
       onOutput,
-      timeoutMs: env.AGENT_BUILD_TIMEOUT_MS,
+      timeoutMs,
     });
     if (res.exitCode !== 0) {
       throw new Error(res.timedOut ? 'docker build timed out' : `docker build failed (exit ${res.exitCode})`);

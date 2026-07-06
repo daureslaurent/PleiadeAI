@@ -9,6 +9,7 @@ export interface ImageInput {
   build_args?: Array<{ key: string; value: string }>;
   no_cache?: boolean;
   pull?: boolean;
+  build_timeout_ms?: number | null;
 }
 
 /** Data-access for Docker image entities. Thin wrapper over the Mongoose model. */

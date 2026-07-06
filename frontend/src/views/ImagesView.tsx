@@ -31,6 +31,8 @@ interface Draft {
   build_args: BuildArg[];
   no_cache: boolean;
   pull: boolean;
+  /** Build timeout in minutes; empty string = use the server default. */
+  build_timeout_min: string;
 }
 
 const DEFAULT_DOCKERFILE = `# Docker image for isolated agent runtimes.
@@ -53,6 +55,7 @@ const blank = (): Draft => ({
   build_args: [],
   no_cache: false,
   pull: false,
+  build_timeout_min: '',
 });
 
 const toDraft = (i: Image): Draft => ({
@@ -63,6 +66,7 @@ const toDraft = (i: Image): Draft => ({
   build_args: i.build_args ?? [],
   no_cache: i.no_cache,
   pull: i.pull,
+  build_timeout_min: i.build_timeout_ms ? String(Math.round(i.build_timeout_ms / 60000)) : '',
 });
 
 /**
@@ -174,6 +178,10 @@ export function ImagesView() {
         build_args: draft.build_args.filter((a) => a.key.trim()),
         no_cache: draft.no_cache,
         pull: draft.pull,
+        // Minutes → ms; blank/invalid clears the override (server default applies).
+        build_timeout_ms: draft.build_timeout_min.trim()
+          ? Math.max(1, Number(draft.build_timeout_min) || 0) * 60000
+          : null,
       };
       if (isNew) {
         const created = await imagesApi.create(body);
@@ -456,6 +464,19 @@ function BuildOptions({
           <span className="font-mono">--pull</span>
           <span className="text-slate-500">(always re-fetch base image)</span>
         </label>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs text-slate-300">
+        <span className="text-slate-400">Build timeout</span>
+        <input
+          type="number"
+          min={1}
+          value={draft.build_timeout_min}
+          onChange={(e) => setDraft({ ...draft, build_timeout_min: e.target.value })}
+          placeholder="default"
+          className="w-24 rounded border border-border bg-surface px-2 py-1 outline-none focus:border-accent"
+        />
+        <span className="text-slate-500">minutes — leave blank for the server default. Raise it for slow builds.</span>
       </div>
     </div>
   );
