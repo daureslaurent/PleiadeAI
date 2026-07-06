@@ -77,6 +77,11 @@ export interface Image {
    * pyautogui). Agents on a profile that references it are auto-granted the visual_* tools.
    */
   visual: boolean;
+  /** Visual desktop resolution (Xvfb/VNC screen); null → the boot default (1280×800). */
+  visual_width: number | null;
+  visual_height: number | null;
+  /** Stored click calibration for this visual image's desktop (null until measured). */
+  visual_calibration: VisualCalibration | null;
   image_status: ImageStatus;
   image_built_at: string | null;
   last_build_error: string | null;
@@ -85,8 +90,26 @@ export interface Image {
   build_job?: BuildJob | null;
 }
 
+/** Per-axis affine click calibration measured for a (visual image + vision model) pair. */
+export interface VisualCalibration {
+  vision_model: string;
+  width: number;
+  height: number;
+  ax: number;
+  bx: number;
+  ay: number;
+  by: number;
+  samples: number;
+  /** Mean absolute pixel error before / after the correction — how much it helped. */
+  error_before: number;
+  error_after: number;
+  measured_at: string;
+}
+
 export type NewImage = Pick<Image, 'name' | 'description' | 'dockerfile'> &
-  Partial<Pick<Image, 'build_args' | 'no_cache' | 'pull' | 'build_timeout_ms' | 'visual'>>;
+  Partial<
+    Pick<Image, 'build_args' | 'no_cache' | 'pull' | 'build_timeout_ms' | 'visual' | 'visual_width' | 'visual_height'>
+  >;
 export type ImagePatch = Partial<NewImage>;
 
 /** Live status for an image (GET /images/:id/status). */
@@ -408,6 +431,11 @@ export const visualApi = {
   /** Signal that a human has taken (`true`) or released (`false`) manual control, pausing `visual_act`. */
   control: (id: string, human: boolean) =>
     api.post(`/agents/${id}/container/visual/control`, { human }).then((r) => r.data),
+  /** Measure + store click calibration for this agent's desktop (long-running; several vision calls). */
+  calibrate: (id: string) =>
+    api
+      .post<{ calibration: VisualCalibration }>(`/agents/${id}/container/visual/calibrate`)
+      .then((r) => r.data.calibration),
   /** Build the `ws(s)://…` relay URL (with JWT) the noVNC RFB client connects to. */
   wsUrl: (wsPath: string): string => {
     const token = localStorage.getItem('pleiade_token') ?? '';
@@ -475,6 +503,9 @@ export const imagesApi = {
 
   /** Enqueue a background build (returns immediately; attach to `streamLogs` to watch). */
   enqueueBuild: (id: string) => api.post(`/images/${id}/build`).then((r) => r.data),
+
+  /** Clear this image's stored visual click calibration. */
+  clearCalibration: (id: string) => api.delete(`/images/${id}/calibration`).then((r) => r.data),
 
   /**
    * Attach to an image's build-log SSE stream. Reattaches to an in-flight or just-finished build
@@ -657,6 +688,8 @@ export interface InferenceSettings {
   llama_api_key: string;
   max_tokens: number;
   context_window: number;
+  /** Fleet default: auto-detect the context-meter max from each server's real n_ctx (else manual). */
+  context_window_auto: boolean;
   temperature: number;
   top_p: number;
   embedding_url: string;
@@ -750,6 +783,10 @@ export interface Endpoint {
   /** Model used by agents on this endpoint that don't pick one ('' → first discovered model). */
   default_model: string;
   context_window: number;
+  /** How the context-meter max is chosen: follow the global default, auto-detect n_ctx, or manual. */
+  context_window_mode: 'inherit' | 'auto' | 'manual';
+  /** Probed real n_ctx per model id (from /props at discovery). Drives the auto-mode resolved value. */
+  model_contexts?: Record<string, number>;
   is_default: boolean;
   /** Failover position: 0 = not in the fallback chain; >0 = ascending order tried when the primary fails. */
   fallback_order: number;
@@ -766,7 +803,14 @@ export type NewEndpoint = Pick<Endpoint, 'name' | 'base_url' | 'api_key' | 'cont
 export type EndpointPatch = Partial<
   Pick<
     Endpoint,
-    'name' | 'base_url' | 'api_key' | 'context_window' | 'default_model' | 'fallback_order' | 'supports_vision'
+    | 'name'
+    | 'base_url'
+    | 'api_key'
+    | 'context_window'
+    | 'context_window_mode'
+    | 'default_model'
+    | 'fallback_order'
+    | 'supports_vision'
   >
 >;
 

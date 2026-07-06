@@ -8,6 +8,8 @@ export interface EffectiveSettings {
   llama_api_key: string;
   max_tokens: number;
   context_window: number;
+  /** Fleet default: auto-detect the context-meter max from each server's real n_ctx (else manual). */
+  context_window_auto: boolean;
   temperature: number;
   top_p: number;
   embedding_url: string;
@@ -50,6 +52,7 @@ export const settingsService = {
       llama_api_key: doc?.llama_api_key ?? env.LLAMA_API_KEY,
       max_tokens: doc?.max_tokens ?? 2048,
       context_window: doc?.context_window ?? env.LLAMA_CONTEXT_WINDOW,
+      context_window_auto: doc?.context_window_auto ?? true,
       temperature: doc?.temperature ?? 0.7,
       top_p: doc?.top_p ?? 0.95,
       embedding_url: doc?.embedding_url || env.EMBEDDING_API_URL,

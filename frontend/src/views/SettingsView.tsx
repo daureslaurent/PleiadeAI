@@ -96,7 +96,7 @@ export function SettingsView() {
               </div>
             );
           })()}
-          <EndpointsManager endpoints={endpoints} reload={loadEndpoints} />
+          <EndpointsManager endpoints={endpoints} reload={loadEndpoints} globalAuto={form.context_window_auto} />
         </Section>
 
         {/* Embeddings — separate CPU llama.cpp server backing Qdrant vector memory */}
@@ -117,7 +117,20 @@ export function SettingsView() {
           <Field label="Max tokens" hint="Upper bound on generated tokens per turn">
             <NumberInput value={form.max_tokens} min={1} step={1} onChange={(v) => set('max_tokens', v)} />
           </Field>
-          <Field label="Context window" hint="Model n_ctx — used to show session context usage in chat">
+          <Toggle
+            label="Auto-detect context window"
+            hint="Read each server's real n_ctx (probed at model discovery) for the chat context meter. Endpoints can override this. When off, the number below is used for every endpoint that inherits."
+            checked={form.context_window_auto}
+            onChange={(v) => set('context_window_auto', v)}
+          />
+          <Field
+            label="Context window"
+            hint={
+              form.context_window_auto
+                ? 'Fallback n_ctx — used only when a server doesn’t report its context size.'
+                : 'Model n_ctx — used to show session context usage in chat'
+            }
+          >
             <NumberInput value={form.context_window} min={1} step={1} onChange={(v) => set('context_window', v)} />
           </Field>
           <Slider
@@ -620,11 +633,13 @@ function NumberInput({
   onChange,
   min,
   step,
+  disabled,
 }: {
   value: number;
   onChange: (v: number) => void;
   min?: number;
   step?: number;
+  disabled?: boolean;
 }) {
   return (
     <input
@@ -632,8 +647,9 @@ function NumberInput({
       value={value}
       min={min}
       step={step}
+      disabled={disabled}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="w-40 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+      className="w-40 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-50"
     />
   );
 }
@@ -712,11 +728,81 @@ function Slider({
 }
 
 /**
+ * Per-endpoint context-window control: pick how the meter's max is chosen (inherit the global
+ * default / auto-detect / manual). In effective-auto it shows the real n_ctx probed for the
+ * endpoint's default model (read-only); in manual it's an editable number. "Inherit" resolves auto
+ * vs manual from the global toggle so the shown value always matches what the meter will use.
+ */
+function ContextWindowControl({
+  endpoint: e,
+  globalAuto,
+  onPatch,
+}: {
+  endpoint: Endpoint;
+  globalAuto: boolean;
+  onPatch: (p: EndpointPatch) => void;
+}) {
+  const mode = e.context_window_mode ?? 'inherit';
+  const effectiveAuto = mode === 'auto' || (mode !== 'manual' && globalAuto);
+  const autoModel = e.default_model || e.models[0] || '';
+  const probed = autoModel ? e.model_contexts?.[autoModel] : undefined;
+
+  return (
+    <div className="flex gap-2">
+      <select
+        value={mode}
+        title="How this endpoint's context-meter max is chosen"
+        onChange={(ev) => onPatch({ context_window_mode: ev.target.value as Endpoint['context_window_mode'] })}
+        className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-accent"
+      >
+        <option value="inherit">Auto (global{globalAuto ? '' : ': manual'})</option>
+        <option value="auto">Auto (this endpoint)</option>
+        <option value="manual">Manual</option>
+      </select>
+      {effectiveAuto ? (
+        <input
+          type="text"
+          readOnly
+          value={probed ? `${probed.toLocaleString()} (auto)` : autoModel ? 'not probed — refresh models' : 'no model'}
+          title={
+            probed
+              ? `Detected n_ctx for ${autoModel}`
+              : 'Run "Refresh models" to probe this server\'s real n_ctx'
+          }
+          className="w-40 cursor-default rounded-md border border-border bg-panel px-2 py-1.5 text-sm text-slate-400 outline-none"
+        />
+      ) : (
+        <input
+          type="number"
+          defaultValue={e.context_window}
+          min={0}
+          title="Manual context window (0 = use global)"
+          onBlur={(ev) =>
+            Number(ev.target.value) !== e.context_window &&
+            void onPatch({ context_window: Number(ev.target.value) })
+          }
+          className="w-28 rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
+        />
+      )}
+    </div>
+  );
+}
+
+/**
  * Manage inference endpoints: add/edit URL+key, autodiscover the model list (`/v1/models`), pick
  * the fleet default, delete. Edits to an existing endpoint's fields save on blur; discovery and
  * default/delete apply immediately. `reload` re-pulls the list after every mutation.
  */
-function EndpointsManager({ endpoints, reload }: { endpoints: Endpoint[]; reload: () => Promise<void> }) {
+function EndpointsManager({
+  endpoints,
+  reload,
+  globalAuto,
+}: {
+  endpoints: Endpoint[];
+  reload: () => Promise<void>;
+  /** Fleet default for auto-detect, so an endpoint on `inherit` can show its effective resolved n_ctx. */
+  globalAuto: boolean;
+}) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
@@ -820,17 +906,7 @@ function EndpointsManager({ endpoints, reload }: { endpoints: Endpoint[]; reload
               onBlur={(ev) => ev.target.value !== e.api_key && void patch(e._id, { api_key: ev.target.value })}
               className="flex-1 rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
             />
-            <input
-              type="number"
-              defaultValue={e.context_window}
-              min={0}
-              title="Context window (0 = use global)"
-              onBlur={(ev) =>
-                Number(ev.target.value) !== e.context_window &&
-                void patch(e._id, { context_window: Number(ev.target.value) })
-              }
-              className="w-28 rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
-            />
+            <ContextWindowControl endpoint={e} globalAuto={globalAuto} onPatch={(p) => patch(e._id, p)} />
           </div>
 
           <div className="flex items-center justify-between gap-2">

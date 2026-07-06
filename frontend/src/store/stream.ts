@@ -14,6 +14,7 @@ import type {
   ToolStartEvent,
   TruncatedEvent,
   VisionEvent,
+  VisualActEvent,
 } from '../lib/ws-events.types';
 
 /** Session context size shown in the chat header (prompt tokens vs the model's context window). */
@@ -29,6 +30,27 @@ export interface VisionInfo {
   question: string;
   answer: string;
   model: string;
+  /** Located pixel (localize mode) + coordinate space, so the vision card marks it on the preview. */
+  x?: number | null;
+  y?: number | null;
+  width?: number;
+  height?: number;
+  /** Set when the located point was snapped to an OCR text box — shows an "OCR" chip on the card. */
+  snap?: { text: string; x: number; y: number } | null;
+}
+
+/** Where a `visual_act` call acted: a screenshot + the marked pixel(s), surfaced on its tool block. */
+export interface VisualActInfo {
+  image: string;
+  width: number;
+  height: number;
+  action: string;
+  x: number | null;
+  y: number | null;
+  x2?: number | null;
+  y2?: number | null;
+  /** Set when a visual_click target was snapped to an OCR text box — shows an "OCR" chip. */
+  snap?: { text: string; x: number; y: number } | null;
 }
 
 export type Block =
@@ -45,6 +67,8 @@ export type Block =
       result?: unknown;
       /** Vision analysis attached to a `visual_screenshot` call: screenshot thumbnail + the model's answer. */
       vision?: VisionInfo;
+      /** Action marker attached to a `visual_act` call: screenshot + where the action landed. */
+      visualAct?: VisualActInfo;
     }
   /**
    * A delegated sub-agent run (`ask_agent`). Rendered as a nested, color-coded bubble at the exact
@@ -85,6 +109,7 @@ type LiveItem =
       status: 'running' | 'success' | 'error';
       result?: unknown;
       vision?: VisionInfo;
+      visualAct?: VisualActInfo;
     }
   /** Placeholder marking where a child agent frame was spawned within this frame's stream. */
   | { kind: 'agent'; id: string; frameId: string; refFrameId: string };
@@ -148,6 +173,7 @@ export function buildBlocks(
         status: it.status,
         result: it.result,
         vision: it.vision,
+        visualAct: it.visualAct,
       });
     } else {
       const f = frames[it.refFrameId];
@@ -194,10 +220,22 @@ interface StreamState {
   frameStack: string[];
   liveReasoning: string;
   trace: TraceEntry[];
-  /** Latest reported context size for the active session (null until the first turn completes). */
+  /** Settled context size (blue "total") — the last turn's peak. Null until the first turn completes. */
   contextUsage: ContextUsage | null;
+  /**
+   * Transient in-turn context size (amber "live"), set from per-iteration readings while a turn runs
+   * and cleared when it settles. Non-null only during an active turn; drives the amber overlay + the
+   * ghost tick (which sits at `contextUsage`, the prior total).
+   */
+  liveContext: ContextUsage | null;
   /** An agent is blocking on `ask_user`; drives the operator prompt modal. Null when nothing waits. */
   pendingAsk: { requestId: string; agent: string; question: string } | null;
+  /**
+   * The most recent `visual_act` marker, so the live desktop panel can flash a transient pulse where
+   * the agent just acted. `ts` re-triggers the animation on each new action; `agentId` lets a panel
+   * ignore actions from other agents.
+   */
+  lastVisualAct: (VisualActInfo & { agentId: string; ts: number }) | null;
   /**
    * The last turn on the active session was cut off by the tool-round cap (agent stopped mid-task).
    * Drives the composer's auto-continue: it re-nudges only when this is set, never after a clean
@@ -274,7 +312,9 @@ export const useStream = create<StreamState>((set, get) => ({
   liveReasoning: '',
   trace: [],
   contextUsage: null,
+  liveContext: null,
   pendingAsk: null,
+  lastVisualAct: null,
   lastTurnTruncated: false,
   streaming: false,
   workingSessions: [],
@@ -355,9 +395,44 @@ export const useStream = create<StreamState>((set, get) => ({
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
-            ? { ...it, vision: { image: e.image, question: e.question, answer: e.answer, model: e.model } }
+            ? {
+                ...it,
+                vision: {
+                  image: e.image,
+                  question: e.question,
+                  answer: e.answer,
+                  model: e.model,
+                  x: e.x,
+                  y: e.y,
+                  width: e.width,
+                  height: e.height,
+                  snap: e.snap,
+                },
+              }
             : it,
         ),
+      }));
+    });
+
+    // Action marker for a visual_act: attach the screenshot + marked pixel to its tool block, and
+    // stash it as `lastVisualAct` so an open live desktop can flash a pulse where the agent acted.
+    socket.on('visual_act', (e: VisualActEvent) => {
+      const info: VisualActInfo = {
+        image: e.image,
+        width: e.width,
+        height: e.height,
+        action: e.action,
+        x: e.x,
+        y: e.y,
+        x2: e.x2,
+        y2: e.y2,
+        snap: e.snap,
+      };
+      set((s) => ({
+        liveItems: s.liveItems.map((it) =>
+          it.kind === 'tool' && it.callId === e.callId ? { ...it, visualAct: info } : it,
+        ),
+        lastVisualAct: { ...info, agentId: e.agentId, ts: Date.now() },
       }));
     });
 
@@ -452,8 +527,11 @@ export const useStream = create<StreamState>((set, get) => ({
       // Only reflect the on-screen session; background runs update their own persisted messages.
       if (e.sessionId !== get().activeSessionId) return;
       if (e.depth === 0) {
-        // The user-facing agent: drives the session header meter.
-        set({ contextUsage: { promptTokens: e.promptTokens, contextWindow: e.contextWindow } });
+        // The user-facing agent drives the session header meter. A `live` reading is the transient
+        // amber overlay (context climbing mid-turn); `final` is the settled blue total (this turn's
+        // peak), which also clears the amber so the bar rests on the total between turns.
+        const reading = { promptTokens: e.promptTokens, contextWindow: e.contextWindow };
+        set(e.phase === 'live' ? { liveContext: reading } : { contextUsage: reading, liveContext: null });
         return;
       }
       // A delegated sub-agent: attribute its usage to its own live frame. Its run reports just
@@ -579,6 +657,9 @@ export const useStream = create<StreamState>((set, get) => ({
           frameStack: ['root'],
           liveReasoning: '',
           trace,
+          // Safety net: the `final` context reading normally clears this just before `chat:done`;
+          // drop it here too so a stopped/errored turn never leaves the amber overlay stuck.
+          liveContext: null,
         });
 
         // `persisted` → the backend already saved this turn (client was absent at completion); don't
@@ -634,6 +715,7 @@ export const useStream = create<StreamState>((set, get) => ({
         lastCtx?.context_tokens !== undefined
           ? { promptTokens: lastCtx.context_tokens, contextWindow: lastCtx.context_window ?? 0 }
           : null,
+      liveContext: null,
       liveItems: [],
       liveFrames: {},
       frameStack: ['root'],
@@ -651,6 +733,7 @@ export const useStream = create<StreamState>((set, get) => ({
       turns: [],
       trace: [],
       contextUsage: null,
+      liveContext: null,
       liveItems: [],
       liveFrames: {},
       frameStack: ['root'],

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Eye, Loader2, TerminalSquare, Wrench, Check, X } from 'lucide-react';
+import { ChevronRight, Eye, Loader2, Magnet, MousePointerClick, TerminalSquare, Wrench, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
@@ -7,9 +7,103 @@ type ToolBlock = Extract<Block, { kind: 'tool' }>;
 /** Renders one tool invocation inline. bash → terminal; visual_screenshot → vision card; else card. */
 export function ToolCall({ block }: { block: ToolBlock }) {
   if (block.tool === 'bash') return <BashBlock block={block} />;
+  if (block.tool === 'visual_act' || block.visualAct) return <VisualActBlock block={block} />;
   if (block.tool === 'visual_screenshot' || block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
   return <GenericToolBlock block={block} />;
+}
+
+/**
+ * Action-marker card for `visual_act`: shows the screenshot the action landed on with a marker at the
+ * acted pixel (a line + endpoints for a drag). Lets the operator see *where* the agent clicked/typed.
+ */
+function VisualActBlock({ block }: { block: ToolBlock }) {
+  const [zoom, setZoom] = useState(false);
+  const v = block.visualAct;
+  const action = String(v?.action ?? block.args?.action ?? 'act');
+  const isDrag = v?.x2 != null && v?.y2 != null;
+
+  return (
+    <div className="my-2 overflow-hidden rounded-md border border-border bg-surface text-xs">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <MousePointerClick size={13} className="shrink-0 text-accent" />
+        <span className="font-medium text-slate-200">{block.tool}</span>
+        <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+          {action}
+        </span>
+        {v?.snap && <OcrChip snap={v.snap} />}
+        <span className="ml-auto">
+          <StatusIcon status={block.status} />
+        </span>
+      </div>
+
+      <div className="space-y-2 border-t border-border p-3">
+        {v?.image ? (
+          <button onClick={() => setZoom((z) => !z)} className="block" title="Click to zoom">
+            <span className="relative inline-block">
+              <img
+                src={v.image}
+                alt="agent desktop action"
+                className={`block rounded border border-border object-contain ${zoom ? 'w-full' : 'max-h-52'}`}
+              />
+              {v.x != null && v.y != null && (
+                <svg
+                  className="pointer-events-none absolute inset-0 h-full w-full"
+                  viewBox={`0 0 ${v.width} ${v.height}`}
+                  preserveAspectRatio="none"
+                >
+                  {isDrag && (
+                    <line
+                      x1={v.x}
+                      y1={v.y}
+                      x2={v.x2!}
+                      y2={v.y2!}
+                      stroke="#f43f5e"
+                      strokeWidth={Math.max(2, v.width / 240)}
+                      strokeDasharray={`${v.width / 90} ${v.width / 120}`}
+                    />
+                  )}
+                  <ActMarker cx={v.x} cy={v.y} r={v.width} />
+                  {isDrag && <ActMarker cx={v.x2!} cy={v.y2!} r={v.width} />}
+                </svg>
+              )}
+            </span>
+          </button>
+        ) : (
+          <div className="text-slate-500">
+            {block.status === 'running' ? 'Acting on the desktop…' : 'No screenshot captured.'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A crosshair-style marker: an outer ring + a filled centre, sized relative to the screen width. */
+function ActMarker({ cx, cy, r, color = '#f43f5e' }: { cx: number; cy: number; r: number; color?: string }) {
+  const ring = Math.max(8, r / 55);
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={ring} fill="none" stroke={color} strokeWidth={Math.max(2, r / 300)} />
+      <circle cx={cx} cy={cy} r={Math.max(2, r / 260)} fill={color} />
+    </g>
+  );
+}
+
+/**
+ * "OCR" chip shown when a located/clicked point was snapped to an OCR-detected text box (pixel-exact
+ * text targeting). The magnet reads as "snap"; hover reveals the matched text + snapped coordinate.
+ */
+function OcrChip({ snap }: { snap: { text: string; x: number; y: number } }) {
+  return (
+    <span
+      className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+      title={`Snapped to OCR text "${snap.text}" at (${snap.x}, ${snap.y})`}
+    >
+      <Magnet size={10} className="text-accent" />
+      OCR
+    </span>
+  );
 }
 
 function StatusIcon({ status }: { status: ToolBlock['status'] }) {
@@ -76,6 +170,7 @@ function VisionBlock({ block }: { block: ToolBlock }) {
             {v.model}
           </span>
         )}
+        {v?.snap && <OcrChip snap={v.snap} />}
         <span className="ml-auto">
           <StatusIcon status={block.status} />
         </span>
@@ -91,11 +186,23 @@ function VisionBlock({ block }: { block: ToolBlock }) {
 
         {v?.image ? (
           <button onClick={() => setZoom((z) => !z)} className="block" title="Click to zoom">
-            <img
-              src={v.image}
-              alt="agent desktop screenshot"
-              className={`rounded border border-border object-contain ${zoom ? 'w-full' : 'max-h-52'}`}
-            />
+            <span className="relative inline-block">
+              <img
+                src={v.image}
+                alt="agent desktop screenshot"
+                className={`block rounded border border-border object-contain ${zoom ? 'w-full' : 'max-h-52'}`}
+              />
+              {v.x != null && v.y != null && v.width && v.height && (
+                <svg
+                  className="pointer-events-none absolute inset-0 h-full w-full"
+                  viewBox={`0 0 ${v.width} ${v.height}`}
+                  preserveAspectRatio="none"
+                >
+                  {/* Cyan for contrast against the red coordinate grid in the preview. */}
+                  <ActMarker cx={v.x} cy={v.y} r={v.width} color="#22d3ee" />
+                </svg>
+              )}
+            </span>
           </button>
         ) : (
           <div className="text-slate-500">

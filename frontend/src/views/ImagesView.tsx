@@ -3,6 +3,7 @@ import Editor from '@monaco-editor/react';
 import {
   AlertTriangle,
   Boxes,
+  Crosshair,
   Hammer,
   Layers,
   Monitor,
@@ -21,6 +22,7 @@ import {
   type Image,
   type ImageStatus,
   type ImageStatusDetail,
+  type VisualCalibration,
 } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
 
@@ -36,6 +38,9 @@ interface Draft {
   build_timeout_min: string;
   /** Visual-desktop image: Dockerfile carries the visual layer; agents get the visual_* tools. */
   visual: boolean;
+  /** Visual desktop resolution; null → boot default (1280×800). */
+  visual_width: number | null;
+  visual_height: number | null;
 }
 
 /**
@@ -50,6 +55,7 @@ const VISUAL_SNIPPET = `# --- PleiadeAI visual layer (Xvfb desktop + loopback VN
 RUN apt-get update && apt-get install -y --no-install-recommends \\
       xvfb x11vnc fluxbox xdotool scrot socat procps \\
       x11-utils x11-xserver-utils fonts-dejavu-core \\
+      tesseract-ocr \\
       python3-tk python3-pip \\
     && pip3 install --no-cache-dir --break-system-packages pyautogui pillow \\
     && rm -rf /var/lib/apt/lists/*`;
@@ -88,6 +94,8 @@ const blank = (): Draft => ({
   pull: false,
   build_timeout_min: '',
   visual: false,
+  visual_width: null,
+  visual_height: null,
 });
 
 const toDraft = (i: Image): Draft => ({
@@ -100,6 +108,8 @@ const toDraft = (i: Image): Draft => ({
   pull: i.pull,
   build_timeout_min: i.build_timeout_ms ? String(Math.round(i.build_timeout_ms / 60000)) : '',
   visual: Boolean(i.visual),
+  visual_width: i.visual_width ?? null,
+  visual_height: i.visual_height ?? null,
 });
 
 /**
@@ -212,6 +222,8 @@ export function ImagesView() {
         no_cache: draft.no_cache,
         pull: draft.pull,
         visual: draft.visual,
+        visual_width: draft.visual_width,
+        visual_height: draft.visual_height,
         // Minutes → ms; blank/invalid clears the override (server default applies).
         build_timeout_ms: draft.build_timeout_min.trim()
           ? Math.max(1, Number(draft.build_timeout_min) || 0) * 60000
@@ -358,6 +370,22 @@ export function ImagesView() {
             }
           />
 
+          {draft.visual && (
+            <ResolutionSelect
+              width={draft.visual_width}
+              height={draft.visual_height}
+              onChange={(w, h) => setDraft({ ...draft, visual_width: w, visual_height: h })}
+            />
+          )}
+
+          {draft.visual && !isNew && (
+            <CalibrationRow
+              imageId={draft._id!}
+              calibration={items.find((i) => i._id === draft._id)?.visual_calibration ?? null}
+              onCleared={refresh}
+            />
+          )}
+
           <div className="flex items-center justify-between">
             <Label>Dockerfile</Label>
             {status && <StatusBadge status={status.image_status} />}
@@ -441,6 +469,130 @@ function isBuildingStatus(status: ImageStatusDetail | null): boolean {
  * operator keeps full control to edit it after) and flags the image so agents on a profile using it
  * are auto-granted the visual_screenshot / visual_act tools. Turning it off strips the layer again.
  */
+/** Common visual desktop resolutions offered in the selector (Xvfb screen size, 24-bit depth). */
+const RESOLUTION_PRESETS: Array<[number, number]> = [
+  [700, 700],
+  [800, 800],
+  [900, 900],
+  [1000, 1000],
+  [1024, 768],
+  [1280, 800],
+  [1366, 768],
+  [1440, 900],
+  [1600, 900],
+  [1920, 1080],
+];
+
+/**
+ * Visual desktop resolution selector. `null` width/height = the boot default (1280×800). A change
+ * applies on the next desktop start (the running desktop must restart), and drops any calibration.
+ */
+function ResolutionSelect({
+  width,
+  height,
+  onChange,
+}: {
+  width: number | null;
+  height: number | null;
+  onChange: (w: number | null, h: number | null) => void;
+}) {
+  const current = width && height ? `${width}x${height}` : 'default';
+  // Show a custom (API-set) resolution that isn't among the presets so it round-trips.
+  const custom =
+    width && height && !RESOLUTION_PRESETS.some(([w, h]) => w === width && h === height)
+      ? ([width, height] as [number, number])
+      : null;
+  return (
+    <div className="flex flex-col gap-1">
+      <Label>Desktop resolution</Label>
+      <select
+        value={current}
+        onChange={(e) => {
+          if (e.target.value === 'default') return onChange(null, null);
+          const [w, h] = e.target.value.split('x').map(Number);
+          onChange(w!, h!);
+        }}
+        className="w-fit rounded border border-border bg-surface px-2 py-1.5 text-xs text-slate-200"
+      >
+        <option value="default">Default (1280×800)</option>
+        {custom && (
+          <option value={`${custom[0]}x${custom[1]}`}>
+            {custom[0]}×{custom[1]} (custom)
+          </option>
+        )}
+        {RESOLUTION_PRESETS.map(([w, h]) => (
+          <option key={`${w}x${h}`} value={`${w}x${h}`}>
+            {w}×{h}
+          </option>
+        ))}
+      </select>
+      <p className="text-[11px] text-slate-500">
+        The Xvfb/VNC screen size. Applies on the next desktop start — stop the agent’s container to apply
+        now. Changing it clears any click calibration. No rebuild needed.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Click-calibration status for a visual image. Calibration itself is *run* from an agent's live
+ * desktop (VisualPanel → Calibrate), where a booted desktop exists; here we only display the stored
+ * result and offer a manual Clear. Auto-cleared on rebuild by the backend.
+ */
+function CalibrationRow({
+  imageId,
+  calibration,
+  onCleared,
+}: {
+  imageId: string;
+  calibration: VisualCalibration | null;
+  onCleared: () => Promise<unknown> | void;
+}) {
+  const [clearing, setClearing] = useState(false);
+  const clear = async () => {
+    setClearing(true);
+    try {
+      await imagesApi.clearCalibration(imageId);
+      await onCleared();
+    } finally {
+      setClearing(false);
+    }
+  };
+  return (
+    <div className="flex items-start gap-2 rounded border border-border bg-surface/40 p-2 text-xs">
+      <Crosshair size={14} className="mt-0.5 shrink-0 text-accent" />
+      {calibration ? (
+        <div className="flex-1">
+          <div className="text-slate-300">
+            Click calibration active — mean error{' '}
+            <span className="text-slate-400">{calibration.error_before.toFixed(1)}px</span> →{' '}
+            <span className="text-emerald-400">{calibration.error_after.toFixed(1)}px</span> over{' '}
+            {calibration.samples} points.
+          </div>
+          <div className="mt-0.5 text-[11px] text-slate-500">
+            {calibration.width}×{calibration.height} · {calibration.vision_model} ·{' '}
+            {new Date(calibration.measured_at).toLocaleString()}
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 text-slate-400">
+          No click calibration. Open an agent’s desktop (this image) and click <b>Calibrate</b> to correct
+          where clicks land.
+        </div>
+      )}
+      {calibration && (
+        <button
+          onClick={clear}
+          disabled={clearing}
+          className="shrink-0 rounded px-2 py-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
+        >
+          {clearing ? 'Clearing…' : 'Clear'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function VisualToggle({ visual, onToggle }: { visual: boolean; onToggle: (on: boolean) => void }) {
   return (
     <div

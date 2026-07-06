@@ -186,6 +186,45 @@ export class LlamaClient {
   }
 
   /**
+   * Exact prompt-token count for a set of chat messages, for the context meter when a server doesn't
+   * report streaming `usage` (`stream_options.include_usage` unsupported). Uses llama.cpp's
+   * `/apply-template` (messages → the templated prompt string) then `/tokenize` (string → token ids),
+   * so the count reflects the real chat-template formatting rather than a naive char estimate.
+   *
+   * Best-effort: returns `null` if either endpoint is missing (non-llama.cpp server) or errors, and
+   * the caller falls back to whatever it had (usually the previous reading).
+   */
+  async tokenizeMessages(target: ResolvedInference, messages: ChatMessage[]): Promise<number | null> {
+    const base = target.url.replace(/\/$/, '');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(target.apiKey ? { Authorization: `Bearer ${target.apiKey}` } : {}),
+    };
+    try {
+      const tpl = await fetch(`${base}/apply-template`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ messages }),
+      });
+      if (!tpl.ok) return null;
+      const { prompt } = (await tpl.json()) as { prompt?: string };
+      if (typeof prompt !== 'string') return null;
+
+      const tok = await fetch(`${base}/tokenize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ content: prompt }),
+      });
+      if (!tok.ok) return null;
+      const { tokens } = (await tok.json()) as { tokens?: unknown[] };
+      return Array.isArray(tokens) ? tokens.length : null;
+    } catch (err) {
+      log.debug({ url: base, err: err instanceof Error ? err.message : String(err) }, 'tokenize fallback failed');
+      return null;
+    }
+  }
+
+  /**
    * Stream one assistant turn. Text deltas are handed to `onToken` as they arrive; tool-call
    * fragments are accumulated and returned assembled once the stream ends.
    *

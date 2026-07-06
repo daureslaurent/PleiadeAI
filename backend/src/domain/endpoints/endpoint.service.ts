@@ -4,6 +4,7 @@ import { env } from '../../config/env';
 import { createLogger } from '../../config/logger';
 import { endpointRepository } from './endpoint.repository';
 import { EndpointModel, type EndpointDoc } from './endpoint.model';
+import { fetchModelContexts } from '../../inference/llama-introspect';
 
 const log = createLogger('endpoint-service');
 
@@ -28,8 +29,14 @@ export const endpointService = {
     const client = new OpenAI({ baseURL: openAiBase(ep.base_url), apiKey: ep.api_key });
     const res = await client.models.list();
     const models = res.data.map((m) => m.id).filter(Boolean).sort();
-    log.info({ endpoint: ep.name, count: models.length }, 'discovered models');
-    await endpointRepository.setModels(id, models);
+    // Probe each model's real context size (runtime n_ctx from /props, else trained n_ctx_train) so
+    // the context meter renders against the honest ceiling instead of a manually-typed number.
+    const modelContexts = await fetchModelContexts(ep.base_url, ep.api_key);
+    log.info(
+      { endpoint: ep.name, count: models.length, contexts: Object.keys(modelContexts).length },
+      'discovered models',
+    );
+    await endpointRepository.setModels(id, models, modelContexts);
     // Seed a default model on first discovery (or if the previous default vanished) so agents
     // using this endpoint always resolve to something without an extra manual step.
     let defaultModel = ep.default_model;

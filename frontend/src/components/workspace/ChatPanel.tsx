@@ -112,26 +112,43 @@ function fmtTokens(n: number): string {
 }
 
 /**
- * Session context-size meter for the chat header: prompt tokens of the last turn against the
- * model's context window, with a fill bar that warms to amber/red as the window fills up.
+ * Session context-size meter for the chat header. Two readings against the model's real context
+ * window (n_ctx):
+ *  - `total` (blue): the last completed turn's peak — the settled size, persisted and restored.
+ *  - `live` (amber): the in-flight size while a turn runs, climbing per tool iteration. When present
+ *    it takes over the fill and the label, and a faint "ghost" tick marks where `total` sits so you
+ *    can see the current turn grow past (or start below) the previous total. It clears on turn end,
+ *    letting the blue total retake the bar.
  */
-function ContextMeter({ usage }: { usage: ContextUsage }) {
-  const { promptTokens, contextWindow } = usage;
-  const pct = contextWindow > 0 ? Math.min(100, (promptTokens / contextWindow) * 100) : 0;
-  const tone = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-accent';
-  const label = contextWindow > 0 ? `${fmtTokens(promptTokens)} / ${fmtTokens(contextWindow)}` : fmtTokens(promptTokens);
+function ContextMeter({ total, live }: { total: ContextUsage | null; live: ContextUsage | null }) {
+  const contextWindow = total?.contextWindow || live?.contextWindow || 0;
+  const totalTokens = total?.promptTokens ?? 0;
+  const totalPct = contextWindow > 0 ? Math.min(100, (totalTokens / contextWindow) * 100) : 0;
+
+  const liveActive = live != null;
+  const shownTokens = liveActive ? live.promptTokens : totalTokens;
+  const shownPct = contextWindow > 0 ? Math.min(100, (shownTokens / contextWindow) * 100) : 0;
+
+  // Blue while settled; amber for the live overlay; both warm to red near the ceiling.
+  const tone = shownPct >= 90 ? 'bg-red-500' : liveActive ? 'bg-amber-500' : shownPct >= 75 ? 'bg-amber-500' : 'bg-accent';
+  const label = contextWindow > 0 ? `${fmtTokens(shownTokens)} / ${fmtTokens(contextWindow)}` : fmtTokens(shownTokens);
+
   return (
     <div
       className="flex items-center gap-2 rounded-md border border-border bg-panel px-2.5 py-1.5"
-      title={`Session context: ${promptTokens.toLocaleString()}${
-        contextWindow > 0 ? ` of ${contextWindow.toLocaleString()} tokens (${Math.round(pct)}%)` : ' tokens'
-      }`}
+      title={`Session context: ${shownTokens.toLocaleString()}${
+        contextWindow > 0 ? ` of ${contextWindow.toLocaleString()} tokens (${Math.round(shownPct)}%)` : ' tokens'
+      }${liveActive ? ` — live this turn (last total ${totalTokens.toLocaleString()})` : ''}`}
     >
-      <Gauge size={13} className="shrink-0 text-slate-500" />
-      <div className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-surface sm:block">
-        <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${pct}%` }} />
+      <Gauge size={13} className={`shrink-0 ${liveActive ? 'text-amber-500' : 'text-slate-500'}`} />
+      <div className="relative hidden h-1.5 w-16 overflow-hidden rounded-full bg-surface sm:block">
+        <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${shownPct}%` }} />
+        {/* Ghost tick at the settled total, shown only while a live reading is overlaying it. */}
+        {liveActive && contextWindow > 0 && (
+          <div className="absolute top-0 h-full w-px bg-slate-400/70" style={{ left: `${totalPct}%` }} />
+        )}
       </div>
-      <span className="font-mono text-[11px] text-slate-400">{label}</span>
+      <span className={`font-mono text-[11px] ${liveActive ? 'text-amber-500' : 'text-slate-400'}`}>{label}</span>
     </div>
   );
 }
@@ -195,7 +212,7 @@ function AskUserPrompt({
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
 export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, onOpenVisual, onSend }: Props) {
-  const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, pendingAsk, lastTurnTruncated, answerAsk, stop } =
+  const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -301,9 +318,9 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
             </div>
           )}
         </div>
-        {hasSession && contextUsage && (
+        {hasSession && (contextUsage || liveContext) && (
           <div className="ml-auto">
-            <ContextMeter usage={contextUsage} />
+            <ContextMeter total={contextUsage} live={liveContext} />
           </div>
         )}
         {agent?.visual && (
@@ -312,7 +329,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
             title="Open the agent's live desktop (Visual)"
             className={[
               'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200',
-              !(hasSession && contextUsage) ? 'ml-auto' : '',
+              !(hasSession && (contextUsage || liveContext)) ? 'ml-auto' : '',
             ].join(' ')}
           >
             <Monitor size={14} /> Desktop
@@ -322,7 +339,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
           onClick={onToggleDebugger}
           className={[
             'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors',
-            !(hasSession && contextUsage) && !agent?.visual ? 'ml-auto' : '',
+            !(hasSession && (contextUsage || liveContext)) && !agent?.visual ? 'ml-auto' : '',
             debuggerOpen
               ? 'bg-reasoning/15 text-reasoning'
               : 'text-slate-400 hover:bg-panel hover:text-slate-200',

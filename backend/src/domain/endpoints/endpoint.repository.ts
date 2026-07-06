@@ -54,19 +54,32 @@ export const endpointRepository = {
   update(
     id: string | Types.ObjectId,
     patch: Partial<
-      Pick<EndpointDoc, 'name' | 'base_url' | 'api_key' | 'context_window' | 'default_model' | 'fallback_order'>
+      Pick<
+        EndpointDoc,
+        | 'name'
+        | 'base_url'
+        | 'api_key'
+        | 'context_window'
+        | 'context_window_mode'
+        | 'default_model'
+        | 'fallback_order'
+      >
     >,
   ): Promise<EndpointDoc | null> {
     return EndpointModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).exec();
   },
 
-  /** Cache the discovered model list on the endpoint. */
-  setModels(id: string | Types.ObjectId, models: string[]): Promise<EndpointDoc | null> {
-    return EndpointModel.findByIdAndUpdate(
-      id,
-      { $set: { models, models_updated_at: new Date() } },
-      { new: true },
-    ).exec();
+  /** Cache the discovered model list (and probed per-model context sizes) on the endpoint. */
+  setModels(
+    id: string | Types.ObjectId,
+    models: string[],
+    modelContexts?: Record<string, number>,
+  ): Promise<EndpointDoc | null> {
+    const set: Record<string, unknown> = { models, models_updated_at: new Date() };
+    // Only overwrite the probed contexts when we actually got some, so a transient probe failure
+    // doesn't wipe a previously-discovered map.
+    if (modelContexts && Object.keys(modelContexts).length) set.model_contexts = modelContexts;
+    return EndpointModel.findByIdAndUpdate(id, { $set: set }, { new: true }).exec();
   },
 
   /** Promote one endpoint to default, demoting all others (single-default invariant). */

@@ -49,6 +49,7 @@ export const VISUAL_DOCKERFILE_SNIPPET = `# --- PleiadeAI visual layer (Xvfb des
 RUN apt-get update && apt-get install -y --no-install-recommends \\
       xvfb x11vnc fluxbox xdotool scrot socat procps \\
       x11-utils x11-xserver-utils fonts-dejavu-core \\
+      tesseract-ocr \\
       python3-tk python3-pip \\
     && pip3 install --no-cache-dir --break-system-packages pyautogui pillow \\
     && rm -rf /var/lib/apt/lists/*`;

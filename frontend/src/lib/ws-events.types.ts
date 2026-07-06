@@ -66,6 +66,36 @@ export interface VisionEvent {
   answer: string;
   /** The vision model id (empty when unavailable). */
   model: string;
+  /** Located pixel (localize mode) + its coordinate space, so the card marks it on the preview. */
+  x?: number | null;
+  y?: number | null;
+  width?: number;
+  height?: number;
+  /** Present when the located point was snapped to an OCR text box — shows an "OCR" chip on the card. */
+  snap?: { text: string; x: number; y: number } | null;
+}
+
+/** Action marker for a `visual_act` call: a screenshot + where the action landed (drive-the-desktop). */
+export interface VisualActEvent {
+  type: 'visual_act';
+  callId: string;
+  /** The agent whose desktop was acted on — lets the live desktop panel filter to its own agent. */
+  agentId: string;
+  /** Screenshot thumbnail (data URL) the marker is drawn over. */
+  image: string;
+  /** Coordinate space of the marker = the desktop screen size in pixels. */
+  width: number;
+  height: number;
+  /** Canonical action performed (click, drag, type, …). */
+  action: string;
+  /** Primary marker point in screen pixels (drag start / click / final cursor). */
+  x: number | null;
+  y: number | null;
+  /** Drag destination in screen pixels (action=drag only). */
+  x2?: number | null;
+  y2?: number | null;
+  /** Present when a visual_click target was snapped to an OCR text box — shows an "OCR" chip. */
+  snap?: { text: string; x: number; y: number } | null;
 }
 
 /**
@@ -102,6 +132,8 @@ export interface ContextUsageEvent {
   completionTokens: number;
   totalTokens: number;
   contextWindow: number;
+  /** `live` = a real-time in-turn reading (amber); `final` = the settled peak (blue total). */
+  phase: 'live' | 'final';
 }
 
 export type WsEvent =

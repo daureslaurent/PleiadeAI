@@ -12,8 +12,13 @@ const SettingsSchema = new Schema(
     llama_model: { type: String, required: true },
     llama_api_key: { type: String, default: 'sk-no-key-required' },
     max_tokens: { type: Number, default: 2048 },
-    // Model context window (n_ctx); only used to render session context usage as a fraction.
+    // Model context window (n_ctx); used to render session context usage as a fraction, and as the
+    // fallback when auto-detection is off or a server doesn't report its n_ctx.
     context_window: { type: Number, default: 8192 },
+    // Fleet default for the context-meter max: `true` = auto-detect each endpoint's real n_ctx from
+    // the server (probed at model discovery into `endpoint.model_contexts`); `false` = use the manual
+    // `context_window` numbers. Endpoints may override this per-endpoint (`context_window_mode`).
+    context_window_auto: { type: Boolean, default: true },
     temperature: { type: Number, default: 0.7 },
     top_p: { type: Number, default: 0.95 },
     // Separate embeddings endpoint (CPU llama.cpp) backing Qdrant vector memory.

@@ -276,6 +276,20 @@ export class AgentRunner {
       );
       if (usage) lastUsage = usage;
 
+      // Live meter: report this pass's context size immediately so the UI amber reading climbs
+      // through a long tool loop (e.g. a DesktopAgent piling up screenshots) instead of only
+      // revealing the size once the whole turn settles. The turn's `final` (peak) emit follows below.
+      if (usage) {
+        eventBus.emit('agent:context_usage', {
+          ctx,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          contextWindow: inference.contextWindow,
+          phase: 'live',
+        });
+      }
+
       // The app relies on native function-calling, but a misconfigured server / unreliable model can
       // narrate a call as prose (e.g. `[ask_user] …`) with no native `tool_calls`. When that happens,
       // recover the intended call from the text so the tool still runs, and drop the leaked prose from
@@ -389,6 +403,14 @@ export class AgentRunner {
     // identity + depth): the user-facing agent (depth 0) drives the chat header, while a sub-agent
     // hop's usage is attributed to its own bubble so the operator can see how much context each
     // delegated run consumed.
+    // Exactness fallback: a server that doesn't emit streaming `usage` leaves `lastUsage` null, so
+    // the meter would never settle. Count the final message set via llama.cpp's tokenizer instead.
+    if (!lastUsage) {
+      const counted = await llamaClient.tokenizeMessages(inference, messages).catch(() => null);
+      if (counted != null) {
+        lastUsage = { promptTokens: counted, completionTokens: 0, totalTokens: counted };
+      }
+    }
     if (lastUsage) {
       eventBus.emit('agent:context_usage', {
         ctx,
@@ -396,6 +418,7 @@ export class AgentRunner {
         completionTokens: lastUsage.completionTokens,
         totalTokens: lastUsage.totalTokens,
         contextWindow: inference.contextWindow,
+        phase: 'final',
       });
     }
 
@@ -540,6 +563,8 @@ export class AgentRunner {
         eventBus.emit('tool:output_chunk', { ctx, callId: call.id, chunk }),
       emitVision: (payload) =>
         eventBus.emit('tool:vision', { ctx, callId: call.id, ...payload }),
+      emitVisualAct: (payload) =>
+        eventBus.emit('tool:visual_act', { ctx, callId: call.id, ...payload }),
       attachedImages: delegation.images,
       exec,
       isolationError,

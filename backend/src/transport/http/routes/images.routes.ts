@@ -20,6 +20,17 @@ function pickImageFields(body: Record<string, unknown>): Record<string, unknown>
     if (body[key] !== undefined) patch[key] = body[key];
   }
   if (body.visual !== undefined) patch.visual = Boolean(body.visual);
+  // Visual desktop resolution: a sane positive integer sets it; null/'' clears it (→ boot default).
+  // Out-of-range/non-numeric values are dropped so a bad input can't produce a broken geometry.
+  for (const key of ['visual_width', 'visual_height'] as const) {
+    if (body[key] === undefined) continue;
+    if (body[key] === null || body[key] === '') {
+      patch[key] = null;
+    } else {
+      const n = Number(body[key]);
+      if (Number.isFinite(n) && n >= 480 && n <= 3840) patch[key] = Math.floor(n);
+    }
+  }
   // Build timeout: a positive number sets it; null/'' clears it (→ server default). A non-numeric
   // or non-positive value is ignored so a bad input can't disable the timeout entirely.
   if (body.build_timeout_ms !== undefined) {
@@ -118,6 +129,11 @@ imagesRouter.patch('/:id', async (req, res) => {
     return;
   }
   const patch = pickImageFields(req.body ?? {});
+  // A resolution change invalidates the click calibration (measured at the old geometry) — drop it.
+  const resChanged =
+    (patch.visual_width !== undefined && patch.visual_width !== image.visual_width) ||
+    (patch.visual_height !== undefined && patch.visual_height !== image.visual_height);
+  if (resChanged && image.visual_calibration) patch.visual_calibration = null;
   try {
     res.json(await imageRepository.update(String(image._id), patch));
   } catch (err) {
@@ -136,8 +152,24 @@ imagesRouter.post('/:id/build', async (req, res) => {
     res.status(404).json({ error: 'not found' });
     return;
   }
+  // A rebuild can change the desktop (packages, resolution), so any stored click calibration is now
+  // stale — clear it so the operator re-calibrates against the new image.
+  if (image.visual_calibration) {
+    await imageRepository.update(String(image._id), { visual_calibration: null });
+  }
   await buildManager.enqueue(String(image._id));
   res.status(202).json({ status: 'queued' });
+});
+
+/** Clear this image's stored visual click calibration (manual "Clear" on the Images page). */
+imagesRouter.delete('/:id/calibration', async (req, res) => {
+  const image = await imageRepository.findById(req.params.id);
+  if (!image) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  await imageRepository.update(String(image._id), { visual_calibration: null });
+  res.status(204).end();
 });
 
 /**

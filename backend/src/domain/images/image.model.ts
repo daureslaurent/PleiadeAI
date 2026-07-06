@@ -20,6 +20,35 @@ const BuildArgSchema = new Schema(
   { _id: false },
 );
 
+/**
+ * Visual-desktop click calibration (see `tools/core/visual.ts`). A vision model reads pixel
+ * coordinates a few px off (a consistent bias, worsened by the server's internal image resize), so
+ * clicks land slightly off-target. Calibration measures that bias with synthetic on-screen targets
+ * and fits a per-axis affine correction `x' = ax·x + bx`, `y' = ay·y + by` applied to every located
+ * coordinate. Keyed by the vision model + resolution it was measured at — a mismatch is ignored and
+ * re-calibration is prompted. Cleared on rebuild (the image, hence its desktop, may change).
+ */
+const VisualCalibrationSchema = new Schema(
+  {
+    /** Vision model id the bias was measured against; a different model ignores this calibration. */
+    vision_model: { type: String, required: true },
+    /** Desktop resolution it was measured at; a mismatch ignores this calibration. */
+    width: { type: Number, required: true },
+    height: { type: Number, required: true },
+    ax: { type: Number, required: true },
+    bx: { type: Number, required: true },
+    ay: { type: Number, required: true },
+    by: { type: Number, required: true },
+    /** Number of synthetic targets that were successfully located during the fit. */
+    samples: { type: Number, default: 0 },
+    /** Mean absolute pixel error before / after the fit — surfaced so the operator can judge it. */
+    error_before: { type: Number, default: 0 },
+    error_after: { type: Number, default: 0 },
+    measured_at: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 const ImageSchema = new Schema(
   {
     name: { type: String, required: true, unique: true, trim: true },
@@ -34,6 +63,17 @@ const ImageSchema = new Schema(
      * the visual-layer checks. Purely declarative — the boot script's preflight remains authoritative.
      */
     visual: { type: Boolean, default: false },
+
+    /**
+     * Visual desktop resolution (the Xvfb/VNC screen size). Null → the boot script default
+     * (1280×800). Injected as `PLEIADE_VISUAL_GEOMETRY=<w>x<h>x24` when the desktop boots, so a change
+     * applies on the next desktop start (no rebuild). A change invalidates any click calibration.
+     */
+    visual_width: { type: Number, default: null },
+    visual_height: { type: Number, default: null },
+
+    /** Click calibration for this visual image's desktop (null until measured; cleared on rebuild). */
+    visual_calibration: { type: VisualCalibrationSchema, default: null },
 
     // Build options, forwarded to `docker build`.
     build_args: { type: [BuildArgSchema], default: [] },

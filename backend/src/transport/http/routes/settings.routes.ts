@@ -18,6 +18,7 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.llama_api_key === 'string') patch.llama_api_key = b.llama_api_key;
   if (b.max_tokens !== undefined) patch.max_tokens = Number(b.max_tokens);
   if (b.context_window !== undefined) patch.context_window = Number(b.context_window);
+  if (b.context_window_auto !== undefined) patch.context_window_auto = Boolean(b.context_window_auto);
   if (b.temperature !== undefined) patch.temperature = Number(b.temperature);
   if (b.top_p !== undefined) patch.top_p = Number(b.top_p);
   if (typeof b.title_endpoint_id === 'string') patch.title_endpoint_id = b.title_endpoint_id;

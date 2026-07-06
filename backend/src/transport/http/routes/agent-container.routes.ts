@@ -9,6 +9,7 @@ import {
   type IsolationProfile,
 } from '../../../isolation/AgentContainerManager';
 import { dockerService } from '../../../isolation/docker.service';
+import { measureVisualCalibration } from '../../../tools/core/visual';
 import { agentContainerName, agentVolumeName, WORKSPACE_DIR } from '../../../isolation/names';
 import { createLogger } from '../../../config/logger';
 
@@ -192,6 +193,58 @@ agentContainerRouter.post('/visual/session', async (req, res) => {
     );
     const endpoint = await agentContainerManager.ensureVisual(id);
     res.json({ password: endpoint.password, ws_path: `/api/agents/${id}/container/visual/vnc` });
+  } catch (err) {
+    res.status(409).json({ error: 'not_ready', message: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * Measure and store this desktop's click calibration (see `visual.ts`). Boots the desktop, runs the
+ * synthetic-target routine, and persists the fitted per-axis affine on the underlying **image** (so it
+ * applies to every agent on that image, and is cleared when the image rebuilds). Long-running (several
+ * vision calls); the panel shows a spinner. `422 calibration_failed` if too few targets were located.
+ */
+agentContainerRouter.post('/visual/calibrate', async (req, res) => {
+  const agent = await agentRepository.findById(agentId(req));
+  if (!agent) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  if (!agent.isolation_id) {
+    res.status(409).json({ error: 'no_isolation', message: 'agent has no isolation profile' });
+    return;
+  }
+  const iso = await isolationRepository.findById(agent.isolation_id);
+  if (!iso) {
+    res.status(409).json({ error: 'no_isolation', message: 'isolation profile missing' });
+    return;
+  }
+  const image = iso.image_id ? await imageRepository.findById(String(iso.image_id)) : null;
+  if (!image?.visual) {
+    res.status(409).json({
+      error: 'not_visual',
+      message: "This agent's isolation image is not a visual image. Enable the Visual desktop toggle and rebuild it.",
+    });
+    return;
+  }
+  const id = String(agent._id);
+  try {
+    const exec = await agentContainerManager.ensureReady(
+      agent as unknown as IsolatedAgent,
+      iso as unknown as IsolationProfile,
+    );
+    // scrot (resolution probe) needs the X display up, so boot the desktop before measuring.
+    await agentContainerManager.ensureVisual(id);
+    const result = await measureVisualCalibration(exec, agent.name);
+    if ('error' in result) {
+      res.status(422).json({ error: 'calibration_failed', message: result.error });
+      return;
+    }
+    const updated = await imageRepository.update(String(image._id), {
+      visual_calibration: { ...result, measured_at: new Date() },
+    });
+    log.info({ id, image: String(image._id), error_after: result.error_after }, 'visual calibration stored');
+    res.json({ calibration: updated?.visual_calibration ?? result });
   } catch (err) {
     res.status(409).json({ error: 'not_ready', message: err instanceof Error ? err.message : String(err) });
   }

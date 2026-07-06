@@ -297,6 +297,8 @@ export class TurnRecorder {
 
   private handleContext(p: ContextUsagePayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
+    // Persist only the settled peak (`final`); the transient `live` readings are UI-only.
+    if (p.phase === 'live') return;
     if (p.ctx.depth === 0) {
       this.contextTokens = p.promptTokens;
       this.contextWindow = p.contextWindow;

@@ -102,16 +102,51 @@ export interface VisionAnalysisPayload {
   answer: string;
   /** The vision model id that produced the answer (empty when unavailable). */
   model: string;
+  /** Located pixel (localize mode only) so the UI can mark it on the preview. Absent for describe mode. */
+  x?: number | null;
+  y?: number | null;
+  /** Coordinate space of `x`/`y` = the screenshot's pixel size (present when `x`/`y` are). */
+  width?: number;
+  height?: number;
+  /** Present when the located point was snapped to an OCR text box — drives the chat "OCR" chip. */
+  snap?: { text: string; x: number; y: number } | null;
+}
+
+export interface VisualActPayload {
+  ctx: EventContext;
+  /** Correlates with the `visual_act` tool call that produced it. */
+  callId: string;
+  /** Small JPEG thumbnail (data URL) of the frame the action was marked on — display only. */
+  image: string;
+  /** Coordinate space of the marker: the desktop screen size in pixels. */
+  width: number;
+  height: number;
+  /** Canonical action performed (click, drag, type, …). */
+  action: string;
+  /** Primary marker point in screen pixels (drag start / click / final cursor). Null if unknown. */
+  x: number | null;
+  y: number | null;
+  /** Drag destination in screen pixels (only for action=drag). */
+  x2?: number | null;
+  y2?: number | null;
+  /** Present when a visual_click target was snapped to an OCR text box — drives the "OCR" chip. */
+  snap?: { text: string; x: number; y: number } | null;
 }
 
 export interface ContextUsagePayload {
   ctx: EventContext;
-  /** Prompt tokens on the final inference pass — the session's live context size. */
+  /** Prompt tokens on this inference pass — the current context size. */
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
   /** Model context window (n_ctx) so the UI can show usage as a fraction. */
   contextWindow: number;
+  /**
+   * `live` fires after every tool iteration so the UI meter climbs in real time (the transient
+   * amber reading); `final` fires once when the turn settles, carrying its peak (the blue total
+   * that persists). Only `final` is persisted.
+   */
+  phase: 'live' | 'final';
 }
 
 export interface AskUserPayload {
@@ -145,6 +180,7 @@ export interface EventMap {
   'agent:tool_invoke': ToolInvokePayload;
   'tool:output_chunk': ToolOutputChunkPayload;
   'tool:vision': VisionAnalysisPayload;
+  'tool:visual_act': VisualActPayload;
   'tool:execution_complete': ToolCompletePayload;
   'agent:ask_agent': AskAgentPayload;
   'agent:ask_agent_done': AskAgentDonePayload;

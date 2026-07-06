@@ -47,7 +47,36 @@ export interface ToolContext {
    * answer) for the current tool call. Used by `visual_screenshot` so the operator sees what the
    * vision model saw and said, without folding the raw image into the (text-only) agent's context.
    */
-  emitVision?: (payload: { image: string; question: string; answer: string; model: string }) => void;
+  emitVision?: (payload: {
+    image: string;
+    question: string;
+    answer: string;
+    model: string;
+    /** Located pixel + its coordinate space (localize mode) so the UI marks it on the preview. */
+    x?: number | null;
+    y?: number | null;
+    width?: number;
+    height?: number;
+    /** Set when the located point was snapped to an OCR text box, so the UI shows an "OCR" chip. */
+    snap?: { text: string; x: number; y: number } | null;
+  }) => void;
+  /**
+   * Emit an action-marker panel to the UI for the current tool call: a screenshot thumbnail plus the
+   * pixel where `visual_act` acted (and, for drags, the destination). Lets the operator see *where* an
+   * action landed, both as an inline card and as a transient pulse on the live desktop.
+   */
+  emitVisualAct?: (payload: {
+    image: string;
+    width: number;
+    height: number;
+    action: string;
+    x: number | null;
+    y: number | null;
+    x2?: number | null;
+    y2?: number | null;
+    /** Set when the click target was snapped to an OCR text box (visual_click), for the "OCR" chip. */
+    snap?: { text: string; x: number; y: number } | null;
+  }) => void;
   /**
    * Images the user attached to this turn (data URLs). Available to `analyze_image` (to describe them
    * via the Vision endpoint) and forwardable to a subagent via `ask_agent`. A multimodal agent also

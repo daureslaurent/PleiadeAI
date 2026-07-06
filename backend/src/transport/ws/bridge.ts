@@ -57,7 +57,7 @@ export function attachBridge(io: Server): void {
     });
   });
 
-  eventBus.on('tool:vision', ({ ctx, callId, image, question, answer, model }) => {
+  eventBus.on('tool:vision', ({ ctx, callId, image, question, answer, model, x, y, width, height, snap }) => {
     io.to(ctx.sessionId).emit('vision', {
       type: 'vision',
       callId,
@@ -65,6 +65,28 @@ export function attachBridge(io: Server): void {
       question,
       answer,
       model,
+      x,
+      y,
+      width,
+      height,
+      snap,
+    });
+  });
+
+  eventBus.on('tool:visual_act', ({ ctx, callId, image, width, height, action, x, y, x2, y2, snap }) => {
+    io.to(ctx.sessionId).emit('visual_act', {
+      type: 'visual_act',
+      callId,
+      agentId: ctx.agentId,
+      image,
+      width,
+      height,
+      action,
+      x,
+      y,
+      x2,
+      y2,
+      snap,
     });
   });
 
@@ -79,7 +101,7 @@ export function attachBridge(io: Server): void {
     });
   });
 
-  eventBus.on('agent:context_usage', ({ ctx, promptTokens, completionTokens, totalTokens, contextWindow }) => {
+  eventBus.on('agent:context_usage', ({ ctx, promptTokens, completionTokens, totalTokens, contextWindow, phase }) => {
     io.to(ctx.sessionId).emit('context_usage', {
       type: 'context_usage',
       sessionId: ctx.sessionId,
@@ -91,6 +113,7 @@ export function attachBridge(io: Server): void {
       completionTokens,
       totalTokens,
       contextWindow,
+      phase,
     });
   });
 

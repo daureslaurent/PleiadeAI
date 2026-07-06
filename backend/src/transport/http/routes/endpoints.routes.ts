@@ -45,6 +45,9 @@ endpointsRouter.patch('/:id', async (req, res) => {
   if (typeof b.api_key === 'string') patch.api_key = b.api_key;
   if (typeof b.default_model === 'string') patch.default_model = b.default_model;
   if (b.context_window !== undefined) patch.context_window = Number(b.context_window);
+  if (b.context_window_mode === 'inherit' || b.context_window_mode === 'auto' || b.context_window_mode === 'manual') {
+    patch.context_window_mode = b.context_window_mode;
+  }
   if (b.fallback_order !== undefined) patch.fallback_order = Number(b.fallback_order);
   if (b.supports_vision !== undefined) patch.supports_vision = Boolean(b.supports_vision);
   const ep = await endpointRepository.update(req.params.id, patch);

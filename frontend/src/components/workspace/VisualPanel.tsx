@@ -1,5 +1,8 @@
-import { Monitor, Hand, Eye, X, RefreshCw, AlertTriangle, Loader2, Keyboard, ExternalLink } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Monitor, Hand, Eye, X, RefreshCw, AlertTriangle, Loader2, Keyboard, ExternalLink, Crosshair } from 'lucide-react';
 import { useVisualDesktop, type VisualStatus } from './useVisualDesktop';
+import { useStream } from '../../store/stream';
+import { visualApi, type VisualCalibration } from '../../lib/api';
 
 interface Props {
   agentId: string;
@@ -22,6 +25,24 @@ export function openDesktopWindow(agentId: string, agentName: string) {
 export function VisualPanel({ agentId, agentName, onClose }: Props) {
   const { screenRef, status, error, takeover, setTakeover, reconnect, sendCtrlAltDel } =
     useVisualDesktop(agentId);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibResult, setCalibResult] = useState<VisualCalibration | null>(null);
+  const [calibError, setCalibError] = useState<string | null>(null);
+
+  const runCalibration = async () => {
+    setCalibrating(true);
+    setCalibError(null);
+    setCalibResult(null);
+    try {
+      setCalibResult(await visualApi.calibrate(agentId));
+    } catch (err) {
+      const data = (err as { response?: { data?: { message?: string } } })?.response?.data;
+      setCalibError(data?.message || (err instanceof Error ? err.message : 'Calibration failed.'));
+    } finally {
+      setCalibrating(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -57,6 +78,15 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
               <Keyboard size={14} /> Ctrl+Alt+Del
             </button>
             <button
+              onClick={runCalibration}
+              disabled={status !== 'connected' || calibrating}
+              title="Measure this desktop's click calibration (corrects where clicks land). Takes ~1 min."
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
+            >
+              {calibrating ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
+              {calibrating ? 'Calibrating…' : 'Calibrate'}
+            </button>
+            <button
               onClick={() => {
                 openDesktopWindow(agentId, agentName);
                 onClose();
@@ -77,8 +107,9 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
         </div>
 
         {/* Screen — RFB mounts its canvas here. Always present so it can attach. */}
-        <div className="relative min-h-[60vh] flex-1 bg-[#0b0f19]">
+        <div ref={frameRef} className="relative min-h-[60vh] flex-1 bg-[#0b0f19]">
           <div ref={screenRef} className="absolute inset-0" />
+          <LiveActPulse agentId={agentId} frameRef={frameRef} screenRef={screenRef} />
 
           {status === 'connecting' && (
             <Overlay>
@@ -104,12 +135,79 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
 
         {/* Footer hint */}
         <div className="border-t border-slate-700 px-3 py-1.5 text-[11px] text-slate-500">
-          {takeover
-            ? 'You are driving. Clicks and keystrokes go to the agent’s desktop — release to let the agent work.'
-            : 'View only — watching the agent. Take control to intervene.'}
+          {calibrating ? (
+            <span className="text-slate-400">
+              Calibrating clicks — rendering targets and measuring the vision model’s offset (several vision
+              calls, ~1 min)…
+            </span>
+          ) : calibError ? (
+            <span className="text-amber-400">Calibration failed: {calibError}</span>
+          ) : calibResult ? (
+            <span className="text-emerald-400">
+              Calibrated ({calibResult.samples} pts): mean click error {calibResult.error_before.toFixed(1)}px →{' '}
+              {calibResult.error_after.toFixed(1)}px. Saved to the image for {calibResult.vision_model}.
+            </span>
+          ) : takeover ? (
+            'You are driving. Clicks and keystrokes go to the agent’s desktop — release to let the agent work.'
+          ) : (
+            'View only — watching the agent. Take control to intervene.'
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Transient pulse marking where the agent's most recent `visual_act` landed, drawn over the live
+ * canvas. Reads `lastVisualAct` from the stream store, maps the screen-pixel coord onto the actual
+ * (scaled, possibly letterboxed) noVNC canvas rect, and fades after ~1.6s. Ignores actions from other
+ * agents and stale marks (only fires on a newer `ts` than last shown).
+ */
+function LiveActPulse({
+  agentId,
+  frameRef,
+  screenRef,
+}: {
+  agentId: string;
+  frameRef: React.RefObject<HTMLDivElement | null>;
+  screenRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const mark = useStream((s) => s.lastVisualAct);
+  const [pulse, setPulse] = useState<{ left: number; top: number; ts: number } | null>(null);
+  const shownTs = useRef(0);
+
+  useEffect(() => {
+    if (!mark || mark.agentId !== agentId || mark.x == null || mark.y == null) return;
+    if (mark.ts === shownTs.current) return;
+    // Don't replay a stale action when the panel is (re)opened — only pulse for a just-fired one.
+    if (Date.now() - mark.ts > 5000) return;
+    const frame = frameRef.current;
+    const canvas = screenRef.current?.querySelector('canvas');
+    if (!frame || !canvas) return;
+    const cRect = canvas.getBoundingClientRect();
+    const fRect = frame.getBoundingClientRect();
+    // Prefer the drag destination as the "landed" point when present; else the primary marker.
+    const px = mark.x2 ?? mark.x;
+    const py = mark.y2 ?? mark.y;
+    const left = cRect.left - fRect.left + (px / mark.width) * cRect.width;
+    const top = cRect.top - fRect.top + (py / mark.height) * cRect.height;
+    shownTs.current = mark.ts;
+    setPulse({ left, top, ts: mark.ts });
+    const t = setTimeout(() => setPulse((p) => (p?.ts === mark.ts ? null : p)), 1600);
+    return () => clearTimeout(t);
+  }, [mark, agentId, frameRef, screenRef]);
+
+  if (!pulse) return null;
+  return (
+    <span
+      key={pulse.ts}
+      className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2"
+      style={{ left: pulse.left, top: pulse.top }}
+    >
+      <span className="absolute inset-0 -m-3 animate-ping rounded-full border-2 border-rose-500" />
+      <span className="block h-3 w-3 rounded-full bg-rose-500 shadow-[0_0_8px_2px_rgba(244,63,94,0.7)]" />
+    </span>
   );
 }
 

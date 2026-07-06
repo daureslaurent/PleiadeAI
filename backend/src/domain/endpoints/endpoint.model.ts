@@ -26,6 +26,19 @@ const EndpointSchema = new Schema(
      * a fraction. `0` means "fall back to the global settings' context_window".
      */
     context_window: { type: Number, default: 0 },
+    /**
+     * How this endpoint picks the context-meter max: `inherit` follows the global
+     * `context_window_auto` default; `auto` uses the probed real n_ctx (`model_contexts`); `manual`
+     * uses the typed `context_window` above. Auto falls back to the manual number if nothing was probed.
+     */
+    context_window_mode: { type: String, enum: ['inherit', 'auto', 'manual'], default: 'inherit' },
+    /**
+     * Per-model real context size (`n_ctx`), keyed by model id, probed from the server at model
+     * discovery (`/props` runtime n_ctx, else `/v1/models` `meta.n_ctx_train`). This is the honest
+     * ceiling the context meter renders against; it takes precedence over the manual `context_window`
+     * above. Empty until the first discovery (then falls back to `context_window`/global settings).
+     */
+    model_contexts: { type: Map, of: Number, default: {} },
     /** Exactly one endpoint is the default (used by agents that don't pick one). Enforced on write. */
     is_default: { type: Boolean, default: false },
     /**

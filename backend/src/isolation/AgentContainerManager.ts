@@ -23,8 +23,13 @@ import {
   VISUAL_VNC_SOCK,
 } from './visual.template';
 import { imageRepository } from '../domain/images/image.repository';
+import { agentRepository } from '../domain/agents/agent.repository';
+import { isolationRepository } from '../domain/isolations/isolation.repository';
 
 const log = createLogger('agent-container');
+
+/** Fallback Xvfb geometry when the image sets no explicit resolution (matches the boot-script default). */
+const DEFAULT_VISUAL_GEOMETRY = '1280x800x24';
 
 // Remote sudo password material, planted at a fixed (home-independent) path so a static
 // `SUDO_ASKPASS` env var can point at the helper regardless of which user the image runs as.
@@ -216,7 +221,15 @@ class AgentContainerManager {
     await dockerService.exec(container, ['sh', '-c', `cat > ${VISUAL_BOOT_FILE}`], {
       stdin: VISUAL_BOOT_SCRIPT,
     });
-    const res = await dockerService.exec(container, ['bash', VISUAL_BOOT_FILE]);
+    // Inject the image's configured screen resolution (default when unset). The boot script reads
+    // PLEIADE_VISUAL_GEOMETRY; since it's idempotent, a changed resolution only takes effect on a
+    // fresh boot (i.e. after the container/desktop restarts).
+    const geometry = await this.visualGeometry(agentId);
+    const res = await dockerService.exec(container, [
+      'sh',
+      '-c',
+      `PLEIADE_VISUAL_GEOMETRY='${geometry}' bash ${VISUAL_BOOT_FILE}`,
+    ]);
     if (res.exitCode !== 0) {
       if (res.stderr.includes('VISUAL_MISSING_BINARIES')) {
         throw new IsolationNotReadyError(
@@ -234,6 +247,22 @@ class AgentContainerManager {
     this.resetIdle(agentId, 0);
     log.info({ agentId, container }, 'visual desktop ready');
     return session;
+  }
+
+  /** Resolve the Xvfb geometry (`<w>x<h>x24`) from the agent's image resolution, else the default. */
+  private async visualGeometry(agentId: string): Promise<string> {
+    try {
+      const agent = await agentRepository.findById(agentId);
+      if (!agent?.isolation_id) return DEFAULT_VISUAL_GEOMETRY;
+      const iso = await isolationRepository.findById(agent.isolation_id);
+      const image = iso?.image_id ? await imageRepository.findById(iso.image_id) : null;
+      const w = image?.visual_width;
+      const h = image?.visual_height;
+      if (w && h && Number.isFinite(w) && Number.isFinite(h)) return `${Math.floor(w)}x${Math.floor(h)}x24`;
+    } catch (err) {
+      log.warn({ agentId, err: String(err) }, 'visual geometry lookup failed — using default');
+    }
+    return DEFAULT_VISUAL_GEOMETRY;
   }
 
   /**
