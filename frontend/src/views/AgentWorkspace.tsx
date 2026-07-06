@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { agentsApi, sessionsApi, type Agent, type Session } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { registerAgentIdentities } from '../lib/agentColor';
@@ -7,6 +7,11 @@ import { usePersistentState } from '../hooks/usePersistentState';
 import { WorkspaceNav } from '../components/workspace/WorkspaceNav';
 import { ChatPanel } from '../components/workspace/ChatPanel';
 import { DebuggerDrawer } from '../components/workspace/DebuggerDrawer';
+
+// Lazy: the noVNC client is only pulled in when an operator actually opens a desktop.
+const VisualPanel = lazy(() =>
+  import('../components/workspace/VisualPanel').then((m) => ({ default: m.VisualPanel })),
+);
 
 /**
  * Agent Workspace (spec §2): an expandable "Workspace" navigator (agents → sessions) feeding a
@@ -25,6 +30,7 @@ export function AgentWorkspace() {
   const [activeAgentId, setActiveAgentId] = usePersistentState<string | null>('workspace:activeAgentId', null);
   const [activeSessionId, setActiveSessionId] = usePersistentState<string | null>('workspace:activeSessionId', null);
   const [drawer, setDrawer] = useState(true);
+  const [visualOpen, setVisualOpen] = useState(false);
   // Sessions whose auto-title is currently being generated → render a spinner beside the name.
   const [titlingSessionIds, setTitlingSessionIds] = useState<Set<string>>(new Set());
 
@@ -192,9 +198,19 @@ export function AgentWorkspace() {
         hasSession={!!activeSessionId}
         debuggerOpen={drawer}
         onToggleDebugger={() => setDrawer((d) => !d)}
+        onOpenVisual={() => setVisualOpen(true)}
         onSend={handleSend}
       />
       {drawer && <DebuggerDrawer onClose={() => setDrawer(false)} agent={activeAgent} />}
+      {visualOpen && activeAgent && (
+        <Suspense fallback={null}>
+          <VisualPanel
+            agentId={activeAgent._id}
+            agentName={activeAgent.name}
+            onClose={() => setVisualOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

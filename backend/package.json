@@ -29,6 +29,7 @@
     "openai": "^4.73.0",
     "pino": "^9.5.0",
     "socket.io": "^4.8.1",
+    "ws": "^8.21.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -36,6 +37,7 @@
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.9.0",
+    "@types/ws": "^8.18.1",
     "migrate-mongo": "^11.0.0",
     "pino-pretty": "^13.0.0",
     "tsx": "^4.19.2",

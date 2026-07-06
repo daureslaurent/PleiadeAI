@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square } from 'lucide-react';
+import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { useStream, buildBlocks, type ContextUsage, type Turn } from '../../store/stream';
@@ -66,6 +66,7 @@ interface Props {
   hasSession: boolean;
   debuggerOpen: boolean;
   onToggleDebugger: () => void;
+  onOpenVisual: () => void;
   onSend: (text: string) => void;
 }
 
@@ -157,7 +158,7 @@ function AskUserPrompt({
 }
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
-export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, onSend }: Props) {
+export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, onOpenVisual, onSend }: Props) {
   const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, pendingAsk, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
@@ -217,11 +218,23 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
             <ContextMeter usage={contextUsage} />
           </div>
         )}
+        {agent?.isolation_id && (
+          <button
+            onClick={onOpenVisual}
+            title="Open the agent's live desktop (Visual)"
+            className={[
+              'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200',
+              !(hasSession && contextUsage) ? 'ml-auto' : '',
+            ].join(' ')}
+          >
+            <Monitor size={14} /> Desktop
+          </button>
+        )}
         <button
           onClick={onToggleDebugger}
           className={[
             'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors',
-            !(hasSession && contextUsage) ? 'ml-auto' : '',
+            !(hasSession && contextUsage) && !agent?.isolation_id ? 'ml-auto' : '',
             debuggerOpen
               ? 'bg-reasoning/15 text-reasoning'
               : 'text-slate-400 hover:bg-panel hover:text-slate-200',

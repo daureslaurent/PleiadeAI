@@ -6,6 +6,7 @@ import { rootLogger } from './config/logger';
 import { connectMongo, disconnectMongo } from './db/mongoose';
 import { setupAgenda } from './autonomy/agenda.setup';
 import { attachSocket } from './transport/ws/socket';
+import { attachVisualProxy } from './transport/ws/visual-proxy';
 import { requireAuth } from './transport/http/middleware/auth';
 import { authRouter } from './transport/http/routes/auth.routes';
 import { agentsRouter } from './transport/http/routes/agents.routes';
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
 
   const httpServer = http.createServer(app);
   attachSocket(httpServer);
+  attachVisualProxy(httpServer);
   await setupAgenda();
   // Interactive Telegram bot (long-poll). Best-effort: a Telegram outage never blocks boot.
   telegramBot.start().catch((err) => rootLogger.error({ err }, 'telegram bot failed to start'));

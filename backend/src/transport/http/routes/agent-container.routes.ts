@@ -151,6 +151,58 @@ agentContainerRouter.post('/start', async (req, res) => {
   }
 });
 
+/**
+ * Boot the agent's live visual desktop (Xvfb + loopback VNC) and return the credentials the noVNC
+ * client needs. Brings the container up first (like `/start`), then boots the desktop stack on
+ * demand. The pixel stream itself flows over the WebSocket at `ws_path` (see the visual proxy) —
+ * this endpoint is the authenticated handshake that hands back the one-per-container VNC password.
+ * `409 not_ready` (with the underlying message) if the image lacks the visual layer or it times out.
+ */
+agentContainerRouter.post('/visual/session', async (req, res) => {
+  const agent = await agentRepository.findById(agentId(req));
+  if (!agent) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  if (!agent.isolation_id) {
+    res.status(409).json({ error: 'no_isolation', message: 'agent has no isolation profile' });
+    return;
+  }
+  const iso = await isolationRepository.findById(agent.isolation_id);
+  if (!iso) {
+    res.status(409).json({ error: 'no_isolation', message: 'isolation profile missing' });
+    return;
+  }
+  const id = String(agent._id);
+  try {
+    await agentContainerManager.ensureReady(
+      agent as unknown as IsolatedAgent,
+      iso as unknown as IsolationProfile,
+    );
+    const endpoint = await agentContainerManager.ensureVisual(id);
+    res.json({ password: endpoint.password, ws_path: `/api/agents/${id}/container/visual/vnc` });
+  } catch (err) {
+    res.status(409).json({ error: 'not_ready', message: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * Toggle human manual control of the visual desktop. `{ human: true }` when the operator takes over
+ * in the noVNC panel (drops a lock the `visual_act` skill honours), `false` when they release it.
+ */
+agentContainerRouter.post('/visual/control', async (req, res) => {
+  const agent = await agentRepository.findById(agentId(req));
+  if (!agent) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  const human = req.body?.human === true;
+  await agentContainerManager.setVisualHumanControl(String(agent._id), human).catch((err) => {
+    log.warn({ id: String(agent._id), err: String(err) }, 'visual control toggle failed');
+  });
+  res.status(204).end();
+});
+
 /** Live resource usage: `docker stats` (CPU/mem/net/block I/O) plus `/workspace` disk footprint. */
 agentContainerRouter.get('/stats', async (req, res) => {
   const container = await requireRunningContainer(req, res);

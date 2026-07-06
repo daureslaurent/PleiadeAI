@@ -1,4 +1,5 @@
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { env } from '../config/env';
 import { createLogger } from '../config/logger';
 import { dockerService } from './docker.service';
@@ -13,6 +14,14 @@ import {
   HARNESS_DIR,
   WORKSPACE_DIR,
 } from './names';
+import {
+  VISUAL_BOOT_FILE,
+  VISUAL_BOOT_SCRIPT,
+  VISUAL_CONTROL_LOCK,
+  VISUAL_DIR,
+  VISUAL_PASS_FILE,
+  VISUAL_VNC_SOCK,
+} from './visual.template';
 import { imageRepository } from '../domain/images/image.repository';
 
 const log = createLogger('agent-container');
@@ -56,6 +65,18 @@ export class IsolationNotReadyError extends Error {
 export interface IsolatedAgent {
   _id: unknown;
   isolation_volume_mode: 'individual' | 'shared';
+}
+
+/**
+ * How the backend VNC proxy reaches an agent's live desktop. The relay streams over the Docker
+ * socket (`docker exec -i <container> socat - UNIX-CONNECT:<vncSock>`), so `container` is the docker
+ * container name and `vncSock` the path to x11vnc's RFB Unix socket inside it; `password` is the
+ * runtime-generated VNC secret handed to the noVNC client. See `VISUAL_SKILL_PLAN.md` §2.
+ */
+export interface VisualEndpoint {
+  container: string;
+  vncSock: string;
+  password: string;
 }
 
 /** The isolation-profile inputs the manager needs (from the isolation doc). */
@@ -132,6 +153,10 @@ class AgentContainerManager {
   private readonly inflight = new Map<string, Promise<AgentExecutor>>();
   /** Idle auto-stop timers, keyed by agent id. */
   private readonly idleTimers = new Map<string, NodeJS.Timeout>();
+  /** Booted visual sessions, keyed by agent id (host/port/password for the VNC proxy). */
+  private readonly visualSessions = new Map<string, VisualEndpoint>();
+  /** Serialises concurrent `ensureVisual` calls for the same agent. */
+  private readonly visualInflight = new Map<string, Promise<VisualEndpoint>>();
 
   private readonly harnessLocalDir = path.join(__dirname, 'harness');
 
@@ -148,6 +173,80 @@ class AgentContainerManager {
     const p = this.doEnsure(agent, iso, agentId).finally(() => this.inflight.delete(agentId));
     this.inflight.set(agentId, p);
     return p;
+  }
+
+  /**
+   * Ensure the agent's visual desktop is booted inside its (already-running) container and return
+   * the endpoint the backend VNC proxy should connect to. Idempotent: the boot script is a no-op if
+   * the stack is already up, and the generated VNC password is cached per agent so repeat calls hand
+   * back a stable secret. The caller must have run `ensureReady` first (the container must exist and
+   * be running); otherwise this throws `IsolationNotReadyError`.
+   *
+   * Surfaces a clear `IsolationNotReadyError` when the profile image lacks the visual layer (the boot
+   * script's preflight fails) — mirroring the "never fall back" isolation contract.
+   */
+  async ensureVisual(agentId: string): Promise<VisualEndpoint> {
+    const existing = this.visualInflight.get(agentId);
+    if (existing) return existing;
+
+    const p = this.doEnsureVisual(agentId).finally(() => this.visualInflight.delete(agentId));
+    this.visualInflight.set(agentId, p);
+    return p;
+  }
+
+  private async doEnsureVisual(agentId: string): Promise<VisualEndpoint> {
+    const container = agentContainerName(agentId);
+
+    if ((await dockerService.containerState(container)) !== 'running') {
+      throw new IsolationNotReadyError(
+        'The agent container is not running. The desktop can only start once the agent has been used at least once in this session.',
+      );
+    }
+
+    // One VNC password per agent for the container's lifetime; plant it (mode 600) before boot.
+    let session = this.visualSessions.get(agentId);
+    const password = session?.password ?? crypto.randomBytes(12).toString('base64url').slice(0, 8);
+    await dockerService.exec(
+      container,
+      ['sh', '-c', `umask 077; mkdir -p ${VISUAL_DIR} && cat > ${VISUAL_PASS_FILE}`],
+      { stdin: `${password}\n` },
+    );
+
+    // Plant the (idempotent) boot script, then run it and interpret the contract on its result.
+    await dockerService.exec(container, ['sh', '-c', `cat > ${VISUAL_BOOT_FILE}`], {
+      stdin: VISUAL_BOOT_SCRIPT,
+    });
+    const res = await dockerService.exec(container, ['bash', VISUAL_BOOT_FILE]);
+    if (res.exitCode !== 0) {
+      if (res.stderr.includes('VISUAL_MISSING_BINARIES')) {
+        throw new IsolationNotReadyError(
+          "This agent's Docker image was built without the visual layer. Open the Images page, add the visual layer snippet to its Dockerfile, and rebuild.",
+        );
+      }
+      throw new IsolationNotReadyError(
+        `The visual desktop did not come up: ${res.stderr.trim() || 'timed out'}`,
+      );
+    }
+
+    session = { container, vncSock: VISUAL_VNC_SOCK, password };
+    this.visualSessions.set(agentId, session);
+    // Keep the container alive while a desktop is attached.
+    this.resetIdle(agentId, 0);
+    log.info({ agentId, container }, 'visual desktop ready');
+    return session;
+  }
+
+  /**
+   * Toggle human manual control of the desktop. When `on`, drop a lock file the `visual_act` driver
+   * skill checks and refuses to act against — so the operator (driving via noVNC) and the agent don't
+   * fight over the mouse/keyboard. Best-effort: requires a running container with the visual dir.
+   */
+  async setVisualHumanControl(agentId: string, on: boolean): Promise<void> {
+    const container = agentContainerName(agentId);
+    const cmd = on
+      ? `mkdir -p ${VISUAL_DIR} && : > ${VISUAL_CONTROL_LOCK}`
+      : `rm -f ${VISUAL_CONTROL_LOCK}`;
+    await dockerService.exec(container, ['sh', '-c', cmd]);
   }
 
   private async doEnsure(
@@ -355,6 +454,7 @@ class AgentContainerManager {
     const ms = idleMs > 0 ? idleMs : env.AGENT_CONTAINER_IDLE_MS;
     const timer = setTimeout(() => {
       this.idleTimers.delete(agentId);
+      this.visualSessions.delete(agentId);
       log.info({ agentId }, 'idle timeout — stopping container');
       void dockerService.stopContainer(agentContainerName(agentId)).catch((err) => {
         log.warn({ agentId, err: String(err) }, 'idle stop failed');
@@ -373,12 +473,14 @@ class AgentContainerManager {
   /** Stop (but keep) the agent's container. */
   async stopAgent(agentId: string): Promise<void> {
     this.clearIdle(agentId);
+    this.visualSessions.delete(agentId);
     await dockerService.stopContainer(agentContainerName(agentId));
   }
 
   /** Remove just the agent's container (e.g. after a rebuild or profile change → recreated fresh). */
   async removeAgentContainer(agentId: string): Promise<void> {
     this.clearIdle(agentId);
+    this.visualSessions.delete(agentId);
     await dockerService.removeContainer(agentContainerName(agentId));
   }
 

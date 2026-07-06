@@ -380,6 +380,31 @@ export const agentsApi = {
     api.delete<Agent>(`/agents/${id}/parameters/${encodeURIComponent(key)}`).then((r) => r.data),
 };
 
+/** Handshake for the live visual desktop: boots the VNC stack and returns the noVNC credentials. */
+export interface VisualSession {
+  /** VNC password to hand the noVNC client. */
+  password: string;
+  /** Backend path to open the raw-binary WebSocket relay at (append `?token=`). */
+  ws_path: string;
+}
+
+export const visualApi = {
+  /** POST the visual-session handshake for an agent; `409 not_ready` if the image lacks the layer. */
+  session: (id: string) =>
+    api.post<VisualSession>(`/agents/${id}/container/visual/session`).then((r) => r.data),
+  /** Signal that a human has taken (`true`) or released (`false`) manual control, pausing `visual_act`. */
+  control: (id: string, human: boolean) =>
+    api.post(`/agents/${id}/container/visual/control`, { human }).then((r) => r.data),
+  /** Build the `ws(s)://…` relay URL (with JWT) the noVNC RFB client connects to. */
+  wsUrl: (wsPath: string): string => {
+    const token = localStorage.getItem('pleiade_token') ?? '';
+    const base = API_BASE
+      ? API_BASE.replace(/^http/, 'ws')
+      : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+    return `${base}${wsPath}?token=${encodeURIComponent(token)}`;
+  },
+};
+
 /** Callbacks for the streamed image build (Server-Sent Events over fetch). */
 export interface BuildHandlers {
   onLog?: (chunk: string) => void;
