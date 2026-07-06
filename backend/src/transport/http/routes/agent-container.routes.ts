@@ -173,6 +173,17 @@ agentContainerRouter.post('/visual/session', async (req, res) => {
     res.status(409).json({ error: 'no_isolation', message: 'isolation profile missing' });
     return;
   }
+  // Gate on the image's `visual` flag: only images explicitly built with the visual layer expose a
+  // desktop. Refuse early (before booting the container) with a clear code the panel can surface.
+  const image = iso.image_id ? await imageRepository.findById(iso.image_id) : null;
+  if (!image?.visual) {
+    res.status(409).json({
+      error: 'not_visual',
+      message:
+        "This agent's isolation image is not a visual image. On the Images page, enable the Visual desktop toggle and rebuild it.",
+    });
+    return;
+  }
   const id = String(agent._id);
   try {
     await agentContainerManager.ensureReady(

@@ -49,7 +49,7 @@ sessionsRouter.get('/:id/messages', async (req, res) => {
 });
 
 sessionsRouter.post('/:id/messages', async (req, res) => {
-  const { role, text, blocks, reasoning, trace, context_tokens, context_window } = req.body ?? {};
+  const { role, text, images, blocks, reasoning, trace, context_tokens, context_window } = req.body ?? {};
   if (role !== 'user' && role !== 'assistant') {
     res.status(400).json({ error: 'role must be user|assistant' });
     return;
@@ -57,6 +57,7 @@ sessionsRouter.post('/:id/messages', async (req, res) => {
   const msg = await sessionRepository.addMessage(req.params.id, {
     role,
     text,
+    images: Array.isArray(images) ? images.filter((s) => typeof s === 'string') : undefined,
     blocks,
     reasoning,
     trace,

@@ -13,9 +13,10 @@ import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/Llam
 import { resolveInference, resolveFallbacks, type ResolvedInference } from '../inference/inference-resolver';
 import { ReasoningParser } from './streaming/ReasoningParser';
 import { parseFallbackToolCalls, detectNarratedTools } from './streaming/ToolCallFallbackParser';
-import { resolveTools } from '../tools/registry';
+import { resolveTools, VISUAL_TOOL_NAMES } from '../tools/registry';
 import { annuaire } from '../tools/core/annuaire';
 import { askAgent } from '../tools/core/askAgent';
+import { analyzeImage } from '../tools/core/analyzeImage';
 import { askParent } from '../tools/core/askParent';
 import { askUser } from '../tools/core/askUser';
 import { askUserBroker } from '../transport/ws/AskUserBroker';
@@ -28,11 +29,18 @@ import {
   type IsolationProfile,
 } from '../isolation/AgentContainerManager';
 import { isolationRepository } from '../domain/isolations/isolation.repository';
+import { imageRepository } from '../domain/images/image.repository';
+import { sessionRepository } from '../domain/sessions/session.repository';
 
 const log = createLogger('agent-runner');
 
-/** Hard cap on tool round-trips within a single turn, guarding against tool loops. */
-const MAX_TOOL_ITERATIONS = 8;
+/**
+ * Default cap on tool round-trips within a single turn, guarding against tool loops. An agent can
+ * raise it via `max_tool_iterations` (e.g. visual/desktop agents that take many screenshot→act
+ * cycles). When the cap is hit the turn ends without a final answer; the UI surfaces a `truncated`
+ * signal so the operator (or auto-continue) can nudge the run onward.
+ */
+const DEFAULT_MAX_TOOL_ITERATIONS = 20;
 
 /**
  * How many times, per turn, we nudge a model that narrated a tool call as prose (e.g. a bare
@@ -105,12 +113,40 @@ export class AgentRunner {
       depth: input.depth,
     };
 
+    // Resolve the images this turn can work with. Attachments live only for the turn they're sent on
+    // (history is text-only), so a follow-up like "forward the last image to X" would otherwise have
+    // nothing to act on. When THIS turn carries no attachment, fall back to the most recent image(s)
+    // the user attached earlier in the session (persisted on the message docs) — so images are usable
+    // across turns. Only the user-facing run (depth 0, no caller) looks them up; a sub-agent acts on
+    // exactly the images its parent forwarded to it.
+    const currentImages = input.images ?? [];
+    const sessionImages =
+      currentImages.length === 0 && input.depth === 0 && !input.caller
+        ? await this.recentSessionImages(input.sessionId)
+        : [];
+    // Images reachable by this turn's tools (analyze_image, ask_agent forwarding): this turn's own
+    // attachments if present, else the session fallback. Raw pixels still only enter a multimodal
+    // model's context for THIS turn's attachments (see userMessage below) — old images aren't re-fed.
+    const attachedImages = currentImages.length ? currentImages : sessionImages;
+
+    // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides
+    // whether we auto-grant the visual-desktop tools below, and the profile drives container boot.
+    const iso = agent.isolation_id ? await isolationRepository.findById(agent.isolation_id) : null;
+    const image = iso?.image_id ? await imageRepository.findById(iso.image_id) : null;
+    // A visual image auto-grants the visual-desktop control tools (like the delegation tools below),
+    // so the operator needn't list them in `tools_allowed`. The global kill-switch still applies.
+    const visualTools = image?.visual ? [...VISUAL_TOOL_NAMES] : [];
+    // When image(s) are in scope for this turn (attached now, or carried over from earlier in the
+    // session), auto-grant `analyze_image` so a (possibly text-only) agent can read them via the
+    // Vision endpoint. Only present when there's an image to act on.
+    const imageTools = attachedImages.length ? [analyzeImage.name] : [];
+
     // Top-level agents orchestrate, so they always get the delegation tools even if the operator
     // didn't tick them in `tools_allowed` (a subagent honours its explicit list as before). The
     // global kill-switch in resolveTools still wins if either tool is disabled fleet-wide.
     const orchestrationTools = agent.subagent
-      ? agent.tools_allowed
-      : [...agent.tools_allowed, annuaire.name, askAgent.name];
+      ? [...agent.tools_allowed, ...visualTools, ...imageTools]
+      : [...agent.tools_allowed, annuaire.name, askAgent.name, ...visualTools, ...imageTools];
     // Every agent can reach the operator via `ask_user`; only a delegated run (has a caller) gets
     // `ask_parent` to bounce a question back up. The global kill-switch in resolveTools still wins.
     const effectiveTools = [
@@ -146,7 +182,45 @@ export class AgentRunner {
       systemMessage.content = `${systemMessage.content}\n\n${memoryMessage.content}`;
     }
 
-    const userMessage = buildUserMessage(input.userText, input.images);
+    // Resolve the inference target now: whether the agent's own model is multimodal decides whether
+    // the raw attached images go into its context. (Failover chain resolved alongside.)
+    const inference = await resolveInference(agent);
+    const fallbacks = await resolveFallbacks(inference.url);
+
+    // Tell the model, in the user turn, what images it can act on and how — otherwise a model that
+    // doesn't get the raw pixels has no signal an image exists and silently ignores it. Two cases:
+    //  - this turn's own attachments on a text-only model (multimodal gets the raw pixels instead);
+    //  - image(s) carried over from earlier in the session (never fed as raw pixels regardless of
+    //    modality, so the note is what makes them reachable via analyze_image / ask_agent).
+    const idxRange = (n: number) => (n > 1 ? `..${n - 1}` : '');
+    const userText = (() => {
+      if (currentImages.length && !inference.supportsVision) {
+        const n = currentImages.length;
+        return `${input.userText}\n\n[${n} image${n > 1 ? 's are' : ' is'} attached to this message. You cannot see ${
+          n > 1 ? 'them' : 'it'
+        } directly — call the \`analyze_image\` tool (index 0${idxRange(n)}) to read ${
+          n > 1 ? 'each one' : 'it'
+        } before answering.]`;
+      }
+      if (currentImages.length === 0 && sessionImages.length) {
+        const n = sessionImages.length;
+        return `${input.userText}\n\n[${n} image${n > 1 ? 's' : ''} from earlier in this conversation ${
+          n > 1 ? 'are' : 'is'
+        } available. You cannot see ${
+          n > 1 ? 'them' : 'it'
+        } directly — call \`analyze_image\` (index 0${idxRange(n)}) to read ${
+          n > 1 ? 'them' : 'it'
+        }, or forward ${n > 1 ? 'them' : 'it'} to another agent with \`ask_agent\` (include_image: true).]`;
+      }
+      return input.userText;
+    })();
+    // Raw images enter the model context only for a multimodal agent, and only for THIS turn's own
+    // attachments — a text-only endpoint would choke on them, and re-feeding old session images every
+    // turn would bloat/confuse the context. Carried-over images stay reachable via the tools above.
+    const userMessage = buildUserMessage(
+      userText,
+      inference.supportsVision ? currentImages : undefined,
+    );
     const messages: ChatMessage[] = [systemMessage, ...(input.history ?? []), userMessage];
 
     // The clean conversational context to hand any sub-agent this run delegates to: everything up to
@@ -154,10 +228,9 @@ export class AgentRunner {
     // so a sub-agent's `ask_parent` re-runs this agent with a well-formed, context-aware history.
     const callerHistory: ChatMessage[] = [...(input.history ?? []), userMessage];
 
-    // Isolation: when the agent is assigned an isolation profile, lazily bring up its container on
-    // first tool use and reuse the executor for the rest of the turn (memoised so parallel tool
-    // calls share one boot). No assignment → tools run on the backend as before.
-    const iso = agent.isolation_id ? await isolationRepository.findById(agent.isolation_id) : null;
+    // Isolation: when the agent is assigned an isolation profile (resolved above), lazily bring up
+    // its container on first tool use and reuse the executor for the rest of the turn (memoised so
+    // parallel tool calls share one boot). No assignment → tools run on the backend as before.
     let execPromise: Promise<AgentExecutor> | undefined;
     const resolveExec = iso
       ? () =>
@@ -169,26 +242,29 @@ export class AgentRunner {
 
     const { signal } = input;
 
-    // Resolve this agent's inference target once per turn: its assigned endpoint + model (or the
-    // fleet default) plus global sampling. Threaded into every streamed pass below.
-    const inference = await resolveInference(agent);
-    // Ordered failover chain, resolved once per turn. Empty unless endpoints opt into fallback.
-    const fallbacks = await resolveFallbacks(inference.url);
-
     let finalText = '';
     // Latest usage across tool iterations; the final pass reflects the full session context size.
     let lastUsage: TokenUsage | null = null;
 
+    // Per-agent tool-round ceiling (falls back to the global default). The loop breaks cleanly once
+    // the model stops calling tools; if instead it exhausts every round we mark the turn `truncated`
+    // and signal the UI so a "continue" (manual or auto) can pick the run back up.
+    const maxIterations =
+      typeof agent.max_tool_iterations === 'number' && agent.max_tool_iterations > 0
+        ? agent.max_tool_iterations
+        : DEFAULT_MAX_TOOL_ITERATIONS;
+    let finishedCleanly = false;
+
     // Results of tool calls already run this turn, keyed by name+args. If the model re-issues an
     // *identical* call (a common failure mode that shows up as a sub-agent "repeating itself" — the
     // same `ask_agent` fired every iteration), we short-circuit with the earlier result instead of
-    // re-running the tool. Combined with MAX_TOOL_ITERATIONS this breaks the repeat loop.
+    // re-running the tool. Combined with the tool-round cap this breaks the repeat loop.
     const toolResultCache = new Map<string, string>();
 
     // Times we've nudged the model back onto the native tool channel this turn (see below).
     let narrationRetries = 0;
 
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    for (let iteration = 0; iteration < maxIterations; iteration++) {
       if (signal?.aborted) throw new RunAbortedError();
       const { text, toolCalls: nativeCalls, usage } = await this.streamTurn(
         messages,
@@ -262,6 +338,7 @@ export class AgentRunner {
         finalText = narratedTools.length
           ? stripNarratedBrackets(assistantText, narratedTools)
           : assistantText;
+        finishedCleanly = true; // the model produced a final answer — not a cap truncation
         break;
       }
 
@@ -289,14 +366,23 @@ export class AgentRunner {
           callerHistory,
           caller: input.caller,
           signal,
+          images: attachedImages,
         });
+        // executeToolCall already appended the tool message (and any following image message) to
+        // `messages` in the correct order; here we only cache its content for the duplicate short-circuit.
         if (typeof toolMsg.content === 'string') toolResultCache.set(cacheKey, toolMsg.content);
-        messages.push(toolMsg);
       }
 
       // A sub-agent hop's abort surfaces here as a swallowed tool error; bail immediately so a
       // stopped run doesn't grind on through the remaining iterations.
       if (signal?.aborted) throw new RunAbortedError();
+    }
+
+    // The loop ran out of tool rounds before the model produced a final answer: the turn is cut off
+    // mid-task. Signal the user-facing run (depth 0) so the UI can offer / auto-fire a "continue"
+    // instead of leaving the operator to notice the stall and retype it.
+    if (!finishedCleanly && ctx.depth === 0) {
+      eventBus.emit('agent:turn_truncated', { ctx });
     }
 
     // Report this run's live context size to the UI. Every agent emits (the payload carries its
@@ -324,6 +410,27 @@ export class AgentRunner {
     }
 
     return finalText;
+  }
+
+  /**
+   * The most recent image(s) the user attached earlier in this session, read back from the persisted
+   * message docs. Lets a later, image-less turn ("forward the last image to X") still act on them —
+   * attachments are otherwise per-turn (history is text-only). Returns the newest user message that
+   * carried images; best-effort — a read failure just yields no images.
+   */
+  private async recentSessionImages(sessionId: string): Promise<ImageBlock[]> {
+    try {
+      const msgs = await sessionRepository.messages(sessionId);
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m && m.role === 'user' && Array.isArray(m.images) && m.images.length) {
+          return m.images.map((dataUrl) => ({ dataUrl }));
+        }
+      }
+    } catch (err) {
+      log.warn({ err: err instanceof Error ? err.message : String(err), sessionId }, 'failed to load session images');
+    }
+    return [];
   }
 
   /** One streamed inference pass; forwards reasoning-tagged chunks to the bus. */
@@ -368,7 +475,12 @@ export class AgentRunner {
     ctx: EventContext,
     messages: ChatMessage[],
     resolveExec: (() => Promise<AgentExecutor>) | null,
-    delegation: { callerHistory: ChatMessage[]; caller?: RunInput['caller']; signal?: AbortSignal },
+    delegation: {
+      callerHistory: ChatMessage[];
+      caller?: RunInput['caller'];
+      signal?: AbortSignal;
+      images?: ImageBlock[];
+    },
   ): Promise<ChatMessage> {
     let args: Record<string, unknown> = {};
     try {
@@ -426,6 +538,9 @@ export class AgentRunner {
       callId: call.id,
       emitOutput: (chunk) =>
         eventBus.emit('tool:output_chunk', { ctx, callId: call.id, chunk }),
+      emitVision: (payload) =>
+        eventBus.emit('tool:vision', { ctx, callId: call.id, ...payload }),
+      attachedImages: delegation.images,
       exec,
       isolationError,
     };
@@ -453,12 +568,21 @@ export class AgentRunner {
       durationMs,
     });
 
-    // Tool-acquired images: fold into context so the agent analyses them automatically (spec §1).
+    // Push the tool result first — it must immediately follow the assistant's tool_call message —
+    // then fold any tool-acquired images into a *following* user message so the agent analyses them
+    // automatically (spec §1). Ordering matters: an image wedged between the assistant tool_call and
+    // its tool response is malformed OpenAI/llama chat, and llama.cpp's multimodal path only reliably
+    // embeds an image when it isn't breaking that pairing (a common "the model can't see it" cause).
+    const toolMsg: ChatMessage = {
+      role: 'tool',
+      tool_call_id: call.id,
+      content: JSON.stringify(payload),
+    };
+    messages.push(toolMsg);
     if (images?.length) {
       messages.push(buildUserMessage('', images));
     }
-
-    return { role: 'tool', tool_call_id: call.id, content: JSON.stringify(payload) };
+    return toolMsg;
   }
 
   /**
@@ -466,9 +590,10 @@ export class AgentRunner {
    * agent's clean conversation, threaded onto the child as `caller` so the child can `ask_parent`.
    */
   private makeInvoker(parentCtx: EventContext, callerHistory: ChatMessage[], signal?: AbortSignal) {
-    return (targetAgentName: string, query: string): Promise<string> =>
+    return (targetAgentName: string, query: string, images?: ImageBlock[]): Promise<string> =>
       this.hop(parentCtx, targetAgentName, query, {
         userText: query,
+        images,
         caller: { agentName: parentCtx.agentName, task: query, history: callerHistory },
         signal,
       });
@@ -507,7 +632,7 @@ export class AgentRunner {
     fromCtx: EventContext,
     targetAgentName: string,
     query: string,
-    run: Pick<RunInput, 'userText' | 'history' | 'caller' | 'signal'>,
+    run: Pick<RunInput, 'userText' | 'history' | 'caller' | 'signal' | 'images'>,
   ): Promise<string> {
     const childDepth = fromCtx.depth + 1;
     if (!hopGuard.canHop(childDepth)) {

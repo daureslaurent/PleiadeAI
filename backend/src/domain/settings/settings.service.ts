@@ -19,6 +19,16 @@ export interface EffectiveSettings {
   title_model: string;
   /** Token budget for the title call — big enough to fit a reasoning model's `<think>` block + title. */
   title_max_tokens: number;
+  /** Vision analysis endpoint for the visual tools ('' → vision analysis unavailable). */
+  vision_endpoint_id: string;
+  /** Model on `vision_endpoint_id` for screenshot analysis ('' → that endpoint's default). */
+  vision_model: string;
+  /** Vision sampling params. `null` = disabled (not sent → server default); a number overrides it. */
+  vision_temperature: number | null;
+  vision_top_p: number | null;
+  vision_max_tokens: number | null;
+  vision_frequency_penalty: number | null;
+  vision_presence_penalty: number | null;
   /** Host self-update master switch — gates the "Update app" action + the periodic check. */
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */
@@ -48,6 +58,17 @@ export const settingsService = {
       title_endpoint_id: doc?.title_endpoint_id ?? '',
       title_model: doc?.title_model ?? '',
       title_max_tokens: doc?.title_max_tokens ?? 256,
+      vision_endpoint_id: doc?.vision_endpoint_id ?? '',
+      vision_model: doc?.vision_model ?? '',
+      // `null` is meaningful here (= disabled), so only fall back to the default when the field is
+      // truly absent (old doc / never set). `??` would wrongly turn an explicit null back into a value.
+      vision_temperature: doc?.vision_temperature === undefined ? 0.2 : doc.vision_temperature,
+      vision_top_p: doc?.vision_top_p === undefined ? null : doc.vision_top_p,
+      vision_max_tokens: doc?.vision_max_tokens === undefined ? 1024 : doc.vision_max_tokens,
+      vision_frequency_penalty:
+        doc?.vision_frequency_penalty === undefined ? 0.4 : doc.vision_frequency_penalty,
+      vision_presence_penalty:
+        doc?.vision_presence_penalty === undefined ? 0.2 : doc.vision_presence_penalty,
       update_enabled: doc?.update_enabled ?? false,
       update_check_interval_hours: doc?.update_check_interval_hours ?? 1,
     };

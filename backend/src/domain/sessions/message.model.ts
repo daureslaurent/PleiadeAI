@@ -11,6 +11,8 @@ const MessageSchema = new Schema(
     session_id: { type: Schema.Types.ObjectId, ref: 'Session', required: true, index: true },
     role: { type: String, enum: ['user', 'assistant'], required: true },
     text: { type: String, default: '' },
+    /** User only: data-URL images attached to the message, so a reload re-shows the thumbnails. */
+    images: { type: [String], default: undefined },
     /** Assistant only: ordered prose/tool blocks exactly as rendered. */
     blocks: { type: Schema.Types.Mixed, default: undefined },
     /** Assistant only: reasoning stream for this turn. */

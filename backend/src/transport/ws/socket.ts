@@ -38,6 +38,9 @@ interface ChatMessageInput {
 export function attachSocket(httpServer: HttpServer): Server {
   const io = new Server(httpServer, {
     cors: { origin: true, credentials: true },
+    // Chat messages can carry attached images (base64 data URLs); the default 1MB cap would drop a
+    // message with a couple of photos. 16MB comfortably fits several downscaled images per turn.
+    maxHttpBufferSize: 16 * 1024 * 1024,
   });
 
   // Handshake auth middleware.

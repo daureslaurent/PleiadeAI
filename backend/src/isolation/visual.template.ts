@@ -113,33 +113,61 @@ fi
 
 export DISPLAY="$DNUM"
 
-# Ready == x11vnc's RFB Unix socket is present and accepting (the true readiness signal). Kept
-# independent of pgrep so a missing procps can't cause a false timeout.
+# Readiness is judged by the daemons being ALIVE, not by leftover files. A container restart preserves
+# the writable layer (this dir, the "ready" marker, even the x11vnc socket *file*) while killing every
+# process — so a file-only check would report "already up" and never revive the dead stack, leaving the
+# noVNC relay to connect to a stale socket nothing listens on. Gate on the live x11vnc process (procps
+# ships in the visual layer and the rest of this script already relies on pgrep) plus its bound socket.
 is_up() {
-  [ -S "$SOCK" ]
+  [ -S "$SOCK" ] && pgrep -f "x11vnc.*-unixsock $SOCK" >/dev/null 2>&1
 }
 
-if [ -f "$VDIR/ready" ] && is_up; then
+if is_up; then
   echo "VISUAL_ALREADY_UP"
   exit 0
 fi
 
+# Partly (or fully) down — a leftover "ready" marker is now a lie. Drop it so a failure below can't
+# leave it behind; it's re-touched only once the stack is genuinely up again.
+rm -f "$VDIR/ready"
+
 # Detach a daemon so it survives this exec (reparented to PID1) and log to its own file.
 start() { local name="$1"; shift; setsid nohup "$name" "$@" >>"$VDIR/\${name##*/}.log" 2>&1 </dev/null & }
 
+# The X lock + display socket live in /tmp, which also survives a container restart; a stale pair makes
+# a fresh Xvfb abort with "server already active for display". Clear them before (re)starting Xvfb.
+xnum="\${DNUM#:}"
 if ! pgrep -f "Xvfb $DNUM" >/dev/null 2>&1; then
+  rm -f "/tmp/.X\${xnum}-lock" "/tmp/.X11-unix/X$xnum" 2>/dev/null || true
   start Xvfb "$DNUM" -screen 0 "$GEOMETRY" -nolisten tcp
 fi
 
 # Wait for the X socket before starting anything that needs DISPLAY.
-xnum="\${DNUM#:}"
 for _ in $(seq 1 50); do
   [ -S "/tmp/.X11-unix/X$xnum" ] && break
   sleep 0.1
 done
 
-if command -v fluxbox >/dev/null 2>&1 && ! pgrep -x fluxbox >/dev/null 2>&1; then
-  start fluxbox
+# Start a window manager / desktop session (once) so windows get decorations and xdotool /
+# visual_windows can manage them. Prefer a full desktop session (MATE/XFCE), then a bare WM. Override
+# with the PLEIADE_VISUAL_WM env var — a full command is allowed (e.g. "mate-session", "marco",
+# "startxfce4", or your own launcher). Set it in the image Dockerfile: ENV PLEIADE_VISUAL_WM=marco.
+WM_CMD="\${PLEIADE_VISUAL_WM:-}"
+if [ -z "$WM_CMD" ]; then
+  for cand in mate-session marco xfce4-session openbox fluxbox; do
+    if command -v "$cand" >/dev/null 2>&1; then WM_CMD="$cand"; break; fi
+  done
+fi
+# Desktop *session* managers need a D-Bus session bus; wrap them if one isn't already present.
+case "$WM_CMD" in
+  *session*)
+    if [ -z "\${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-launch >/dev/null 2>&1; then
+      WM_CMD="dbus-launch --exit-with-session $WM_CMD"
+    fi ;;
+esac
+WM_PROBE="\${WM_CMD##* }"
+if [ -n "$WM_CMD" ] && ! pgrep -f "$WM_PROBE" >/dev/null 2>&1; then
+  setsid nohup sh -c "exec $WM_CMD" >>"$VDIR/wm.log" 2>&1 </dev/null &
 fi
 
 # Stale socket from a previous run would make x11vnc refuse to bind — clear it if x11vnc is dead.

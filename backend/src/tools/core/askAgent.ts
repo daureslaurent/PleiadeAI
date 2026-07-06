@@ -1,4 +1,7 @@
+import { createLogger } from '../../config/logger';
 import type { Tool } from '../types';
+
+const log = createLogger('tool:ask_agent');
 
 /**
  * Core cross-agent tool (spec §4). Delegates a query to another agent and returns its answer.
@@ -16,6 +19,11 @@ export const askAgent: Tool = {
     properties: {
       agent: { type: 'string', description: 'Target agent name, e.g. "home_coordinator".' },
       query: { type: 'string', description: 'The question or task to delegate.' },
+      include_image: {
+        type: 'boolean',
+        description:
+          "Forward the image(s) the user attached to this message to the sub-agent (e.g. hand a screenshot to a vision specialist). Defaults to true when an image is attached; ignored otherwise.",
+      },
     },
     required: ['agent', 'query'],
     additionalProperties: false,
@@ -37,9 +45,18 @@ export const askAgent: Tool = {
       return { result: { ok: false, error: 'agent and query are required' } };
     }
 
+    // Forward attached images unless the caller opts out. `include_image` defaults to true so a plain
+    // "delegate this image to X" works; there's nothing to forward when no image is attached.
+    const forward = args.include_image === false ? false : true;
+    const images = forward ? ctx.attachedImages : undefined;
+    log.info(
+      { from: ctx.agentName, to: target, forwarding: images?.length ?? 0 },
+      'ask_agent delegating',
+    );
+
     try {
-      const answer = await ctx.invokeSubAgent(target, query);
-      return { result: { ok: true, agent: target, answer } };
+      const answer = await ctx.invokeSubAgent(target, query, images);
+      return { result: { ok: true, agent: target, answer, forwarded_images: images?.length ?? 0 } };
     } catch (err) {
       return { result: { ok: false, error: err instanceof Error ? err.message : String(err) } };
     }

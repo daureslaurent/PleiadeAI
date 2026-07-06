@@ -5,6 +5,7 @@ import { dockerService } from '../../../isolation/docker.service';
 import { buildManager } from '../../../isolation/build.manager';
 import { imgImageName } from '../../../isolation/names';
 import { assertRuntimes } from '../../../isolation/dockerfile.template';
+import { assertVisualLayer } from '../../../isolation/visual.template';
 import { createLogger } from '../../../config/logger';
 
 const log = createLogger('images-routes');
@@ -18,6 +19,7 @@ function pickImageFields(body: Record<string, unknown>): Record<string, unknown>
   for (const key of ['name', 'description', 'dockerfile', 'no_cache', 'pull'] as const) {
     if (body[key] !== undefined) patch[key] = body[key];
   }
+  if (body.visual !== undefined) patch.visual = Boolean(body.visual);
   // Build timeout: a positive number sets it; null/'' clears it (→ server default). A non-numeric
   // or non-positive value is ignored so a bad input can't disable the timeout entirely.
   if (body.build_timeout_ms !== undefined) {
@@ -82,7 +84,12 @@ imagesRouter.get('/:id/status', async (req, res) => {
     image_built_at: image.image_built_at,
     last_build_error: image.last_build_error,
     build_active: job?.status === 'queued' || job?.status === 'running',
-    warnings: assertRuntimes(image.dockerfile ?? ''),
+    // Base runtime lint always applies; a visual image additionally lints for the visual layer so a
+    // missing Xvfb/x11vnc/socat is surfaced before the desktop fails to boot.
+    warnings: [
+      ...assertRuntimes(image.dockerfile ?? ''),
+      ...(image.visual ? assertVisualLayer(image.dockerfile ?? '') : []),
+    ],
     referenced_by: profiles.map((p) => ({ _id: String(p._id), name: p.name })),
   });
 });

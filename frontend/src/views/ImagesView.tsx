@@ -5,6 +5,7 @@ import {
   Boxes,
   Hammer,
   Layers,
+  Monitor,
   Package,
   Plus,
   RefreshCw,
@@ -33,6 +34,36 @@ interface Draft {
   pull: boolean;
   /** Build timeout in minutes; empty string = use the server default. */
   build_timeout_min: string;
+  /** Visual-desktop image: Dockerfile carries the visual layer; agents get the visual_* tools. */
+  visual: boolean;
+}
+
+/**
+ * Visual layer appended to the Dockerfile when the "Visual desktop" toggle is on. Mirrors the
+ * backend source of truth `VISUAL_DOCKERFILE_SNIPPET` (isolation/visual.template.ts) — kept in sync
+ * by hand since the frontend can't import backend modules. Provisions Xvfb + x11vnc + the input
+ * tooling the visual_screenshot / visual_act tools drive. Injected up front so the operator can
+ * still edit it freely before building.
+ */
+const VISUAL_MARKER = '# --- PleiadeAI visual layer';
+const VISUAL_SNIPPET = `# --- PleiadeAI visual layer (Xvfb desktop + loopback VNC, driven by the visual_* tools) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+      xvfb x11vnc fluxbox xdotool scrot socat procps \\
+      x11-utils x11-xserver-utils fonts-dejavu-core \\
+      python3-tk python3-pip \\
+    && pip3 install --no-cache-dir --break-system-packages pyautogui pillow \\
+    && rm -rf /var/lib/apt/lists/*`;
+
+/** Append the visual layer once (no-op if already present). */
+function withVisualLayer(dockerfile: string): string {
+  if (dockerfile.includes(VISUAL_MARKER)) return dockerfile;
+  return `${dockerfile.replace(/\s*$/, '')}\n\n${VISUAL_SNIPPET}\n`;
+}
+
+/** Strip the appended visual layer (everything from its marker to the end — we always append last). */
+function withoutVisualLayer(dockerfile: string): string {
+  const idx = dockerfile.indexOf(VISUAL_MARKER);
+  return idx === -1 ? dockerfile : `${dockerfile.slice(0, idx).replace(/\s*$/, '')}\n`;
 }
 
 const DEFAULT_DOCKERFILE = `# Docker image for isolated agent runtimes.
@@ -56,6 +87,7 @@ const blank = (): Draft => ({
   no_cache: false,
   pull: false,
   build_timeout_min: '',
+  visual: false,
 });
 
 const toDraft = (i: Image): Draft => ({
@@ -67,6 +99,7 @@ const toDraft = (i: Image): Draft => ({
   no_cache: i.no_cache,
   pull: i.pull,
   build_timeout_min: i.build_timeout_ms ? String(Math.round(i.build_timeout_ms / 60000)) : '',
+  visual: Boolean(i.visual),
 });
 
 /**
@@ -178,6 +211,7 @@ export function ImagesView() {
         build_args: draft.build_args.filter((a) => a.key.trim()),
         no_cache: draft.no_cache,
         pull: draft.pull,
+        visual: draft.visual,
         // Minutes → ms; blank/invalid clears the override (server default applies).
         build_timeout_ms: draft.build_timeout_min.trim()
           ? Math.max(1, Number(draft.build_timeout_min) || 0) * 60000
@@ -311,6 +345,19 @@ export function ImagesView() {
             </div>
           )}
 
+          <VisualToggle
+            visual={draft.visual}
+            onToggle={(on) =>
+              setDraft({
+                ...draft,
+                visual: on,
+                dockerfile: on
+                  ? withVisualLayer(draft.dockerfile)
+                  : withoutVisualLayer(draft.dockerfile),
+              })
+            }
+          />
+
           <div className="flex items-center justify-between">
             <Label>Dockerfile</Label>
             {status && <StatusBadge status={status.image_status} />}
@@ -387,6 +434,40 @@ export function ImagesView() {
 
 function isBuildingStatus(status: ImageStatusDetail | null): boolean {
   return status?.image_status === 'building' || status?.image_status === 'queued';
+}
+
+/**
+ * "Visual desktop" toggle. Turning it on injects the visual layer into the Dockerfile up front (the
+ * operator keeps full control to edit it after) and flags the image so agents on a profile using it
+ * are auto-granted the visual_screenshot / visual_act tools. Turning it off strips the layer again.
+ */
+function VisualToggle({ visual, onToggle }: { visual: boolean; onToggle: (on: boolean) => void }) {
+  return (
+    <div
+      className={`flex items-start gap-3 rounded-md border p-3 ${
+        visual ? 'border-accent/60 bg-accent/5' : 'border-border bg-surface/40'
+      }`}
+    >
+      <Monitor size={16} className={`mt-0.5 shrink-0 ${visual ? 'text-accent' : 'text-slate-500'}`} />
+      <div className="min-w-0 flex-1">
+        <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-200">
+          <input
+            type="checkbox"
+            checked={visual}
+            onChange={(e) => onToggle(e.target.checked)}
+            className="accent-accent"
+          />
+          Visual desktop
+        </label>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+          Adds a headless X desktop (Xvfb + VNC) so agents can see and drive a GUI. Injects the visual
+          layer into the Dockerfile below (editable) and auto-grants{' '}
+          <span className="font-mono text-slate-400">visual_screenshot</span> /{' '}
+          <span className="font-mono text-slate-400">visual_act</span> to agents using this image.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /** Build args (key/value) + `--no-cache` / `--pull` toggles. */

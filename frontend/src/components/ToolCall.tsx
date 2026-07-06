@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { ChevronRight, Loader2, TerminalSquare, Wrench, Check, X } from 'lucide-react';
+import { ChevronRight, Eye, Loader2, TerminalSquare, Wrench, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
 
-/** Renders one tool invocation inline in the conversation. bash → terminal; others → card. */
+/** Renders one tool invocation inline. bash → terminal; visual_screenshot → vision card; else card. */
 export function ToolCall({ block }: { block: ToolBlock }) {
-  return block.tool === 'bash' ? <BashBlock block={block} /> : <GenericToolBlock block={block} />;
+  if (block.tool === 'bash') return <BashBlock block={block} />;
+  if (block.tool === 'visual_screenshot' || block.tool === 'analyze_image' || block.vision)
+    return <VisionBlock block={block} />;
+  return <GenericToolBlock block={block} />;
 }
 
 function StatusIcon({ status }: { status: ToolBlock['status'] }) {
@@ -50,6 +53,65 @@ function BashBlock({ block }: { block: ToolBlock }) {
           {block.output || (block.status === 'running' ? '…' : '(no output)')}
         </pre>
       )}
+    </div>
+  );
+}
+
+/**
+ * Vision card for `visual_screenshot`: shows the screenshot the vision model saw and the analysis it
+ * returned (the "input/output" of the vision model, inline in the chat). Click the image to zoom.
+ */
+function VisionBlock({ block }: { block: ToolBlock }) {
+  const [zoom, setZoom] = useState(false);
+  const v = block.vision;
+  const question = String(block.args?.question ?? v?.question ?? '').trim();
+
+  return (
+    <div className="my-2 overflow-hidden rounded-md border border-border bg-surface text-xs">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <Eye size={13} className="shrink-0 text-accent" />
+        <span className="font-medium text-slate-200">{block.tool}</span>
+        {v?.model && (
+          <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+            {v.model}
+          </span>
+        )}
+        <span className="ml-auto">
+          <StatusIcon status={block.status} />
+        </span>
+      </div>
+
+      <div className="space-y-2 border-t border-border p-3">
+        {question && (
+          <div className="text-slate-300">
+            <span className="text-slate-500">Q: </span>
+            {question}
+          </div>
+        )}
+
+        {v?.image ? (
+          <button onClick={() => setZoom((z) => !z)} className="block" title="Click to zoom">
+            <img
+              src={v.image}
+              alt="agent desktop screenshot"
+              className={`rounded border border-border object-contain ${zoom ? 'w-full' : 'max-h-52'}`}
+            />
+          </button>
+        ) : (
+          <div className="text-slate-500">
+            {block.status === 'running' ? 'Capturing & analysing the screen…' : 'No screenshot captured.'}
+          </div>
+        )}
+
+        {v?.answer && (
+          <div>
+            <div className="mb-0.5 flex items-center gap-1 text-[10px] uppercase text-slate-500">
+              <Eye size={11} /> vision
+            </div>
+            <div className="whitespace-pre-wrap leading-relaxed text-slate-300">{v.answer}</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -26,6 +26,15 @@ const ImageSchema = new Schema(
     description: { type: String, default: '' },
     dockerfile: { type: String, default: () => DEFAULT_DOCKERFILE },
 
+    /**
+     * Visual-desktop image: the Dockerfile is expected to include the visual layer (Xvfb + x11vnc +
+     * xdotool/scrot/pyautogui, see `visual.template.ts`). Set from the "Visual desktop" toggle on the
+     * Images page. Agents whose isolation profile references a visual image are auto-granted the
+     * `visual_screenshot` / `visual_act` core tools (see `AgentRunner`), and the Dockerfile lint adds
+     * the visual-layer checks. Purely declarative — the boot script's preflight remains authoritative.
+     */
+    visual: { type: Boolean, default: false },
+
     // Build options, forwarded to `docker build`.
     build_args: { type: [BuildArgSchema], default: [] },
     /** `--no-cache`: ignore the layer cache for a clean rebuild. */

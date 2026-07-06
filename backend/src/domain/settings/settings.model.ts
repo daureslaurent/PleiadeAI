@@ -25,6 +25,21 @@ const SettingsSchema = new Schema(
     // `title_model` picks the model there ('' → that endpoint's default). Failover applies either way.
     title_endpoint_id: { type: String, default: '' },
     title_model: { type: String, default: '' },
+    // Vision analysis endpoint+model for the visual tools (approach A). `visual_screenshot` sends the
+    // captured screenshot here and returns the model's textual analysis to a (text-only) agent. Empty
+    // `vision_endpoint_id` → vision analysis is unavailable. `vision_model` '' → that endpoint's default.
+    vision_endpoint_id: { type: String, default: '' },
+    vision_model: { type: String, default: '' },
+    /**
+     * Sampling params for the vision analysis call. `null` = **disabled** → the value is NOT sent to
+     * the server, so llama.cpp applies its own default. A number overrides it. Defaults preserve the
+     * previous hard-coded behaviour (low temperature + light penalties to avoid repetition loops).
+     */
+    vision_temperature: { type: Number, default: 0.2 },
+    vision_top_p: { type: Number, default: null },
+    vision_max_tokens: { type: Number, default: 1024 },
+    vision_frequency_penalty: { type: Number, default: 0.4 },
+    vision_presence_penalty: { type: Number, default: 0.2 },
     // Token budget for the title call. Must be generous enough that a reasoning model's `<think>`
     // block fits *and* leaves room for the title afterward — too low truncates mid-reasoning and
     // yields an empty/garbage title (see session-titler).

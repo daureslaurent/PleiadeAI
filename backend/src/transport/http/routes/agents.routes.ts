@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { agentRepository } from '../../../domain/agents/agent.repository';
+import { imageRepository } from '../../../domain/images/image.repository';
+import { isolationRepository } from '../../../domain/isolations/isolation.repository';
 import { agentContainerManager } from '../../../isolation/AgentContainerManager';
 import { agentContainerRouter } from './agent-container.routes';
 import { suggestAgentIdentity } from '../../../domain/agents/identity-suggester';
@@ -14,7 +16,26 @@ export const agentsRouter = Router();
 agentsRouter.use('/:id/container', agentContainerRouter);
 
 agentsRouter.get('/', async (_req, res) => {
-  res.json(await agentRepository.list());
+  // Annotate each agent with a computed `visual` capability so the workspace can gate the Desktop
+  // panel button: true only when the agent's isolation profile references a `visual` image. Resolved
+  // with three list queries + set membership (single-operator scale) rather than a join per agent.
+  const [agents, images, isolations] = await Promise.all([
+    agentRepository.list(),
+    imageRepository.list(),
+    isolationRepository.list(),
+  ]);
+  const visualImageIds = new Set(images.filter((i) => i.visual).map((i) => String(i._id)));
+  const visualIsolationIds = new Set(
+    isolations
+      .filter((iso) => iso.image_id && visualImageIds.has(String(iso.image_id)))
+      .map((iso) => String(iso._id)),
+  );
+  res.json(
+    agents.map((a) => ({
+      ...a.toObject(),
+      visual: Boolean(a.isolation_id && visualIsolationIds.has(String(a.isolation_id))),
+    })),
+  );
 });
 
 /**

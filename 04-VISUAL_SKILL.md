@@ -37,18 +37,20 @@ Design decisions (see `VISUAL_SKILL_PLAN.md` §2/§4 for the trade-offs):
 | Boot-on-demand, VNC password, takeover lock | `backend/src/isolation/AgentContainerManager.ts` (`ensureVisual`, `setVisualHumanControl`) |
 | WS↔socat relay | `backend/src/transport/ws/visual-proxy.ts` |
 | Session + control HTTP routes | `backend/src/transport/http/routes/agent-container.routes.ts` (`/visual/session`, `/visual/control`) |
-| Driver skills | `backend/scripts/seed-visual-skill.mjs` (`visual_screenshot`, `visual_act`) |
+| Driver tools (built-in) | `backend/src/tools/core/visual.ts` (`visual_screenshot`, `visual_act`, `visual_windows`), registered in `tools/registry.ts` |
 | Frontend panel + client | `frontend/src/components/workspace/VisualPanel.tsx`, `frontend/src/lib/api.ts` (`visualApi`) |
 
 ## Operator setup
 
-1. **Build a visual image.** On the Images page, create/edit an image and append the visual layer
-   (from `VISUAL_DOCKERFILE_SNIPPET` in `visual.template.ts`) — `xvfb x11vnc fluxbox xdotool scrot
-   socat` + `pyautogui`/`pillow`. Build it.
+1. **Build a visual image.** On the Images page, create/edit an image and flip the **Visual desktop**
+   toggle. It injects the visual layer (`VISUAL_DOCKERFILE_SNIPPET` in `visual.template.ts` — `xvfb
+   x11vnc fluxbox xdotool scrot socat` + `pyautogui`/`pillow`) into the Dockerfile, which you can
+   still edit, and flags the image `visual`. Build it.
 2. **Point an isolation profile at that image**, and assign the agent to the profile. For **concurrent**
    visual agents use `bridge`/`vpn` network mode (see Limitations).
-3. **Seed the driver skills:** `node backend/scripts/seed-visual-skill.mjs` (backend up + login), then
-   add `visual_screenshot` and `visual_act` to the agent's `tools_allowed`.
+3. **Nothing to seed.** `visual_screenshot` / `visual_act` are built-in core tools, auto-granted to any
+   agent whose isolation image is flagged `visual` (no `tools_allowed` entry needed). They can still
+   be globally disabled from the Tools page.
 4. **Watch / drive.** In the agent workspace, click **Desktop** (shown when the agent is isolated).
    The panel opens view-only; **Take control** flips to interactive (and pauses the agent's driver).
 
@@ -69,7 +71,12 @@ Design decisions (see `VISUAL_SKILL_PLAN.md` §2/§4 for the trade-offs):
   is shared across containers, so two visual agents on `:99` collide — run them on `bridge`/`vpn`
   network mode (recommended for isolation anyway), where each container has its own namespaces.
 - **Seeing screenshots requires a vision model.** `visual_screenshot` saves a PNG under
-  `/workspace/.visual` and returns its path + size; pass `inline=true` for base64. A text-only
-  inference model can act on coordinates but cannot *see* the image.
+  `/workspace/.visual` and returns it inline as an image block (plus path + pixel size). A text-only
+  inference model can act on coordinates but cannot *see* the image. Because vision capability can't
+  be autodiscovered from `/v1/models`, mark the endpoint **Model supports vision** (Settings →
+  Endpoints; `supports_vision` on the endpoint). A visual agent paired with an unmarked endpoint shows
+  a warning in its model selector, `visual_screenshot` returns a `note` in its result, and the backend
+  logs `prompt carries images but endpoint is not marked vision-capable`. The llama.cpp server must be
+  launched with `--mmproj <projector>` and a vision GGUF (Qwen2.5-VL, Llava, MiniCPM-V, …).
 - The desktop boots lazily on first `Desktop` open / first `visual_*` call and idle-stops with the
   container.

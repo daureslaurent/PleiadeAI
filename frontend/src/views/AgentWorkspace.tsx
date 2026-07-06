@@ -155,7 +155,7 @@ export function AgentWorkspace() {
     }
   }
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, images?: string[]) {
     if (!activeAgent) return;
     let sid = activeSessionId;
     if (!sid) {
@@ -168,7 +168,7 @@ export function AgentWorkspace() {
       hydrate(sn._id, []);
       sid = sn._id;
     }
-    send(activeAgent.name, text, sid);
+    send(activeAgent.name, text, sid, images);
   }
 
   const workingAgentNames = new Set(Object.keys(workingAgents));

@@ -90,6 +90,20 @@ export interface ToolOutputChunkPayload {
   chunk: string;
 }
 
+export interface VisionAnalysisPayload {
+  ctx: EventContext;
+  /** Correlates with the `visual_screenshot` tool call that produced it. */
+  callId: string;
+  /** Small JPEG thumbnail (data URL) of the screenshot the vision model analysed — display only. */
+  image: string;
+  /** The question the agent asked about the screen (empty → a general description was requested). */
+  question: string;
+  /** The vision model's textual answer (or a config hint when no vision endpoint is set). */
+  answer: string;
+  /** The vision model id that produced the answer (empty when unavailable). */
+  model: string;
+}
+
 export interface ContextUsagePayload {
   ctx: EventContext;
   /** Prompt tokens on the final inference pass — the session's live context size. */
@@ -105,6 +119,11 @@ export interface AskUserPayload {
   /** Correlates the modal shown in the UI with the client's `ask_user:response`. */
   requestId: string;
   question: string;
+}
+
+/** A turn hit the tool-round cap before producing a final answer — it was cut off mid-task. */
+export interface TurnTruncatedPayload {
+  ctx: EventContext;
 }
 
 export type AlertLevel = 'info' | 'warn' | 'error';
@@ -125,10 +144,12 @@ export interface EventMap {
   'agent:stream_chunk': StreamChunkPayload;
   'agent:tool_invoke': ToolInvokePayload;
   'tool:output_chunk': ToolOutputChunkPayload;
+  'tool:vision': VisionAnalysisPayload;
   'tool:execution_complete': ToolCompletePayload;
   'agent:ask_agent': AskAgentPayload;
   'agent:ask_agent_done': AskAgentDonePayload;
   'agent:context_usage': ContextUsagePayload;
+  'agent:turn_truncated': TurnTruncatedPayload;
   'agent:ask_user': AskUserPayload;
   'system:alert': SystemAlertPayload;
 }

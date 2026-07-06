@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './store/auth';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { AuthGuard } from './views/AuthGuard';
@@ -12,6 +12,7 @@ import { MemoryVault } from './views/MemoryVault';
 import { AutonomyInbox } from './views/AutonomyInbox';
 import { LLMView } from './views/LLMView';
 import { SettingsView } from './views/SettingsView';
+import { VisualDesktopWindow } from './views/VisualDesktopWindow';
 
 function PageHeader() {
   const { pathname } = useLocation();
@@ -25,31 +26,42 @@ function PageHeader() {
   );
 }
 
-export default function App() {
-  const token = useAuth((s) => s.token);
-  if (!token) return <AuthGuard />;
-
+/** Main app chrome (sidebar + header) hosting the routed pages via `<Outlet />`. */
+function MainLayout() {
   return (
     <div className="flex h-full">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader />
         <main className="min-h-0 flex-1 overflow-hidden">
-          <Routes>
-            <Route path="/workspace" element={<AgentWorkspace />} />
-            <Route path="/agents" element={<AgentsView />} />
-            <Route path="/skills" element={<SkillsView />} />
-            <Route path="/tools" element={<ToolsView />} />
-            <Route path="/images" element={<ImagesView />} />
-            <Route path="/isolation" element={<IsolationsView />} />
-            <Route path="/memory" element={<MemoryVault />} />
-            <Route path="/autonomy" element={<AutonomyInbox />} />
-            <Route path="/llm" element={<LLMView />} />
-            <Route path="/settings" element={<SettingsView />} />
-            <Route path="*" element={<Navigate to="/workspace" replace />} />
-          </Routes>
+          <Outlet />
         </main>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  const token = useAuth((s) => s.token);
+  if (!token) return <AuthGuard />;
+
+  return (
+    <Routes>
+      {/* Chrome-free popped-out agent desktop (opened via window.open) — no sidebar/header. */}
+      <Route path="/desktop/:agentId" element={<VisualDesktopWindow />} />
+      <Route element={<MainLayout />}>
+        <Route path="/workspace" element={<AgentWorkspace />} />
+        <Route path="/agents" element={<AgentsView />} />
+        <Route path="/skills" element={<SkillsView />} />
+        <Route path="/tools" element={<ToolsView />} />
+        <Route path="/images" element={<ImagesView />} />
+        <Route path="/isolation" element={<IsolationsView />} />
+        <Route path="/memory" element={<MemoryVault />} />
+        <Route path="/autonomy" element={<AutonomyInbox />} />
+        <Route path="/llm" element={<LLMView />} />
+        <Route path="/settings" element={<SettingsView />} />
+        <Route path="*" element={<Navigate to="/workspace" replace />} />
+      </Route>
+    </Routes>
   );
 }

@@ -43,6 +43,7 @@ export const endpointRepository = {
     default_model?: string;
     models?: string[];
     managed?: boolean;
+    supports_vision?: boolean;
   }): Promise<EndpointDoc> {
     // First endpoint ever created is implicitly the default so agents always have a target.
     const makeDefault = input.is_default || (await this.count()) === 0;

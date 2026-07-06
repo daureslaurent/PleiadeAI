@@ -45,8 +45,12 @@ interface Draft {
   isolation_volume_mode: 'individual' | 'shared';
   endpoint_id: string | null;
   model: string;
+  /** Max tool round-trips per turn (`null` = global default). Empty input in the form → null. */
+  max_tool_iterations: number | null;
   color: number | null;
   icon: string;
+  /** Server-computed: agent's isolation image has the visual layer. Drives the vision-endpoint warning. */
+  visual: boolean;
 }
 
 const blank = (): Draft => ({
@@ -62,8 +66,10 @@ const blank = (): Draft => ({
   isolation_volume_mode: 'individual',
   endpoint_id: null,
   model: '',
+  max_tool_iterations: null,
   color: null,
   icon: '',
+  visual: false,
 });
 
 /** Agents CRUD page (master-detail): create, edit, delete agents + their tools and parameters. */
@@ -117,8 +123,10 @@ export function AgentsView() {
       isolation_volume_mode: a.isolation_volume_mode ?? 'individual',
       endpoint_id: a.endpoint_id ?? null,
       model: a.model ?? '',
+      max_tool_iterations: a.max_tool_iterations ?? null,
       color: a.color ?? null,
       icon: a.icon ?? '',
+      visual: Boolean(a.visual),
     });
   }
 
@@ -151,6 +159,7 @@ export function AgentsView() {
         isolation_volume_mode: draft.isolation_volume_mode,
         endpoint_id: draft.endpoint_id,
         model: draft.model,
+        max_tool_iterations: draft.max_tool_iterations,
         color: draft.color,
         icon: draft.icon,
       });
@@ -163,6 +172,7 @@ export function AgentsView() {
         subagent: draft.subagent,
         system_prompt: draft.system_prompt,
         tools_allowed: draft.tools_allowed,
+        max_tool_iterations: draft.max_tool_iterations,
         color: draft.color,
         icon: draft.icon,
       });
@@ -365,6 +375,24 @@ export function AgentsView() {
             </span>
           </label>
 
+          <FieldLabel>Max tool steps per turn</FieldLabel>
+          <input
+            type="number"
+            min={1}
+            value={draft.max_tool_iterations ?? ''}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              setDraft({ ...draft, max_tool_iterations: Number.isFinite(n) && n > 0 ? n : null });
+            }}
+            placeholder="default (20)"
+            className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+          />
+          <p className="-mt-1 mb-1 text-xs text-slate-500">
+            How many tool round-trips the agent may take before a turn is cut off. Raise it for
+            visual/desktop agents that take many screenshot→act steps (they otherwise stall and need a
+            manual “Continue”). Blank = global default.
+          </p>
+
           <FieldLabel>Qdrant namespace</FieldLabel>
           <input
             value={draft.qdrant_namespace}
@@ -475,6 +503,7 @@ export function AgentsView() {
                 agentId={draft._id}
                 endpointId={draft.endpoint_id}
                 model={draft.model}
+                visual={draft.visual}
               />
 
               <FieldLabel>

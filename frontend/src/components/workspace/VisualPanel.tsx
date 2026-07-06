@@ -1,9 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import RFB from '@novnc/novnc';
-import { Monitor, Hand, Eye, X, RefreshCw, AlertTriangle, Loader2, Keyboard } from 'lucide-react';
-import { visualApi } from '../../lib/api';
-
-type Status = 'connecting' | 'connected' | 'error' | 'closed';
+import { Monitor, Hand, Eye, X, RefreshCw, AlertTriangle, Loader2, Keyboard, ExternalLink } from 'lucide-react';
+import { useVisualDesktop, type VisualStatus } from './useVisualDesktop';
 
 interface Props {
   agentId: string;
@@ -11,89 +7,21 @@ interface Props {
   onClose: () => void;
 }
 
-/** Pull the backend's `{ message }` out of an axios error, else a sensible fallback. */
-function extractMessage(err: unknown): string {
-  const data = (err as { response?: { data?: { message?: string } } })?.response?.data;
-  if (data?.message) return data.message;
-  return err instanceof Error ? err.message : 'Failed to open the desktop.';
+/** Open the chrome-free desktop route in a separate browser window (same origin → shares auth). */
+export function openDesktopWindow(agentId: string, agentName: string) {
+  const url = `${window.location.origin}/desktop/${agentId}?name=${encodeURIComponent(agentName)}`;
+  // A stable per-agent window name so re-opening focuses the existing window instead of duplicating.
+  window.open(url, `pleiade-desktop-${agentId}`, 'width=1320,height=880');
 }
 
 /**
- * Live visual desktop for an isolated agent (Visual skill). Runs the handshake
- * (`POST …/container/visual/session`), opens the raw-binary WebSocket relay, and mounts a noVNC RFB
- * client on it. Starts **view-only** (watch the agent work); the takeover toggle flips
- * `rfb.viewOnly` so the operator can drive mouse/keyboard. See `VISUAL_SKILL_PLAN.md` Phase 3.
+ * Live visual desktop for an isolated agent (Visual skill), shown as an inline modal. Connection is
+ * handled by `useVisualDesktop`; this component is the modal chrome (header controls + overlays).
+ * "Open in window" pops the same desktop out into a standalone browser window (`/desktop/:agentId`).
  */
 export function VisualPanel({ agentId, agentName, onClose }: Props) {
-  const screenRef = useRef<HTMLDivElement>(null);
-  const rfbRef = useRef<RFB | null>(null);
-  const [status, setStatus] = useState<Status>('connecting');
-  const [error, setError] = useState<string | null>(null);
-  const [takeover, setTakeover] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-
-  // Keep the live session's input-gating in sync with the takeover toggle, and tell the backend so
-  // the agent's `visual_act` skill pauses while the human drives (best-effort).
-  useEffect(() => {
-    if (rfbRef.current) rfbRef.current.viewOnly = !takeover;
-    visualApi.control(agentId, takeover).catch(() => undefined);
-  }, [takeover, agentId]);
-
-  // Always release manual control when the panel closes.
-  useEffect(() => () => void visualApi.control(agentId, false).catch(() => undefined), [agentId]);
-
-  // (Re)connect on agent change or manual retry. The screen div stays mounted so RFB always has a
-  // target; connection state is shown as an overlay on top of it.
-  useEffect(() => {
-    let disposed = false;
-    let rfb: RFB | null = null;
-    setStatus('connecting');
-    setError(null);
-
-    void (async () => {
-      try {
-        const { password, ws_path } = await visualApi.session(agentId);
-        if (disposed || !screenRef.current) return;
-        rfb = new RFB(screenRef.current, visualApi.wsUrl(ws_path), { credentials: { password } });
-        rfb.viewOnly = !takeover;
-        rfb.scaleViewport = true;
-        rfb.background = '#0b0f19';
-        rfb.addEventListener('connect', () => {
-          if (!disposed) setStatus('connected');
-        });
-        rfb.addEventListener('disconnect', (e: Event) => {
-          if (disposed) return;
-          const clean = (e as CustomEvent<{ clean: boolean }>).detail?.clean;
-          setStatus(clean ? 'closed' : 'error');
-          if (!clean) setError('Connection to the desktop was lost.');
-        });
-        rfb.addEventListener('securityfailure', (e: Event) => {
-          if (disposed) return;
-          const reason = (e as CustomEvent<{ reason?: string }>).detail?.reason;
-          setError(reason || 'VNC authentication failed.');
-          setStatus('error');
-        });
-        rfbRef.current = rfb;
-      } catch (err) {
-        if (!disposed) {
-          setError(extractMessage(err));
-          setStatus('error');
-        }
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      try {
-        rfb?.disconnect();
-      } catch {
-        /* already gone */
-      }
-      rfbRef.current = null;
-    };
-    // takeover is applied via the sync effect above, not a reconnect trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agentId, attempt]);
+  const { screenRef, status, error, takeover, setTakeover, reconnect, sendCtrlAltDel } =
+    useVisualDesktop(agentId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -109,7 +37,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
 
           <div className="ml-auto flex items-center gap-1.5">
             <button
-              onClick={() => setTakeover((t) => !t)}
+              onClick={() => setTakeover(!takeover)}
               disabled={status !== 'connected'}
               title={takeover ? 'Release control (view only)' : 'Take control (mouse & keyboard)'}
               className={[
@@ -121,12 +49,22 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
               {takeover ? 'Controlling' : 'View only'}
             </button>
             <button
-              onClick={() => rfbRef.current?.sendCtrlAltDel()}
+              onClick={sendCtrlAltDel}
               disabled={status !== 'connected' || !takeover}
               title="Send Ctrl+Alt+Del"
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
             >
               <Keyboard size={14} /> Ctrl+Alt+Del
+            </button>
+            <button
+              onClick={() => {
+                openDesktopWindow(agentId, agentName);
+                onClose();
+              }}
+              title="Open the desktop in a separate window"
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+            >
+              <ExternalLink size={14} /> Open in window
             </button>
             <button
               onClick={onClose}
@@ -155,7 +93,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
                 {error || (status === 'closed' ? 'The desktop session ended.' : 'Something went wrong.')}
               </p>
               <button
-                onClick={() => setAttempt((a) => a + 1)}
+                onClick={reconnect}
                 className="flex items-center gap-1.5 rounded-md bg-slate-800 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-700"
               >
                 <RefreshCw size={14} /> Reconnect
@@ -175,8 +113,8 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
   );
 }
 
-function StatusPill({ status }: { status: Status }) {
-  const map: Record<Status, { label: string; cls: string }> = {
+function StatusPill({ status }: { status: VisualStatus }) {
+  const map: Record<VisualStatus, { label: string; cls: string }> = {
     connecting: { label: 'Connecting', cls: 'bg-slate-700/60 text-slate-300' },
     connected: { label: 'Live', cls: 'bg-emerald-500/15 text-emerald-400' },
     error: { label: 'Error', cls: 'bg-amber-500/15 text-amber-400' },

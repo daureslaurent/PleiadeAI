@@ -183,6 +183,64 @@ export function SettingsView() {
               onChange={(v) => set('title_max_tokens', v)}
             />
           </Field>
+          <Field
+            label="Vision endpoint (for visual agents)"
+            hint="Screenshots from visual_screenshot are analysed here and returned to the agent as text + coordinates. Pick an endpoint whose model supports vision (llama.cpp with --mmproj)."
+          >
+            <div className="flex gap-2">
+              <select
+                value={form.vision_endpoint_id}
+                onChange={(e) => {
+                  set('vision_endpoint_id', e.target.value);
+                  set('vision_model', '');
+                }}
+                className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+              >
+                <option value="">None — visual agents can't see the screen</option>
+                {endpoints.map((e) => (
+                  <option key={e._id} value={e._id}>
+                    {e.name}
+                    {e.supports_vision ? '' : ' — not marked vision'}
+                  </option>
+                ))}
+              </select>
+              {form.vision_endpoint_id && (
+                <select
+                  value={form.vision_model}
+                  onChange={(e) => set('vision_model', e.target.value)}
+                  className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+                >
+                  <option value="">Endpoint default</option>
+                  {(endpoints.find((e) => e._id === form.vision_endpoint_id)?.models ?? []).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {form.vision_endpoint_id &&
+              !endpoints.find((e) => e._id === form.vision_endpoint_id)?.supports_vision && (
+                <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-400">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  This endpoint isn't marked <span className="font-medium">Model supports vision</span>{' '}
+                  (below) — screenshots may not be interpreted. Tick it once you've launched it with a
+                  vision model + <code>--mmproj</code>.
+                </p>
+              )}
+          </Field>
+          <Field
+            label="Vision sampling"
+            hint="Sampling for the vision analysis call. Leave a box blank to disable it — that parameter is then not sent, so the model server uses its own default."
+          >
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+              <NullableNumber label="temperature" value={form.vision_temperature} step={0.05} min={0} onChange={(v) => set('vision_temperature', v)} />
+              <NullableNumber label="top_p" value={form.vision_top_p} step={0.05} min={0} max={1} onChange={(v) => set('vision_top_p', v)} />
+              <NullableNumber label="max_tokens" value={form.vision_max_tokens} step={1} min={1} onChange={(v) => set('vision_max_tokens', v)} />
+              <NullableNumber label="frequency_penalty" value={form.vision_frequency_penalty} step={0.1} onChange={(v) => set('vision_frequency_penalty', v)} />
+              <NullableNumber label="presence_penalty" value={form.vision_presence_penalty} step={0.1} onChange={(v) => set('vision_presence_penalty', v)} />
+            </div>
+          </Field>
         </Section>
 
         {/* Interface — client-side display preferences (applied instantly, not part of Save) */}
@@ -580,6 +638,45 @@ function NumberInput({
   );
 }
 
+/**
+ * A labelled number input that models a nullable value: an empty box means `null` (disabled → the
+ * parameter is not sent to the model). Typing a number sets it; clearing the box disables it again.
+ */
+function NullableNumber({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="font-mono text-[11px] text-slate-400">{label}</span>
+      <input
+        type="number"
+        value={value ?? ''}
+        placeholder="off"
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => {
+          const t = e.target.value.trim();
+          onChange(t === '' ? null : Number(t));
+        }}
+        className="w-full rounded-md border border-border bg-panel px-2 py-1.5 text-sm outline-none focus:border-accent"
+      />
+    </label>
+  );
+}
+
 function Slider({
   label,
   value,
@@ -796,6 +893,19 @@ function EndpointsManager({ endpoints, reload }: { endpoints: Endpoint[]; reload
               className="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
             />
             <span className="text-xs text-slate-500">0 = off</span>
+          </label>
+
+          {/* Vision marker: we can't autodiscover multimodality from /v1/models, so the operator
+              declares it. Visual agents warn when paired with an endpoint that isn't ticked here. */}
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(e.supports_vision)}
+              onChange={(ev) => void patch(e._id, { supports_vision: ev.target.checked })}
+              className="accent-accent"
+            />
+            <span>Model supports vision (multimodal)</span>
+            <span className="text-slate-500">— llama.cpp launched with <code>--mmproj</code>, or a vision model</span>
           </label>
         </div>
       ))}

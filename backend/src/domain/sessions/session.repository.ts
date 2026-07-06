@@ -64,6 +64,7 @@ export const sessionRepository = {
     input: {
       role: 'user' | 'assistant';
       text?: string;
+      images?: string[];
       blocks?: unknown;
       reasoning?: string;
       trace?: unknown;

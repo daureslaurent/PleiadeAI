@@ -72,6 +72,11 @@ export interface Image {
   pull: boolean;
   /** `docker build` timeout override in ms; null → server default (AGENT_BUILD_TIMEOUT_MS). */
   build_timeout_ms: number | null;
+  /**
+   * Visual-desktop image: its Dockerfile carries the visual layer (Xvfb + x11vnc + xdotool/scrot/
+   * pyautogui). Agents on a profile that references it are auto-granted the visual_* tools.
+   */
+  visual: boolean;
   image_status: ImageStatus;
   image_built_at: string | null;
   last_build_error: string | null;
@@ -81,7 +86,7 @@ export interface Image {
 }
 
 export type NewImage = Pick<Image, 'name' | 'description' | 'dockerfile'> &
-  Partial<Pick<Image, 'build_args' | 'no_cache' | 'pull' | 'build_timeout_ms'>>;
+  Partial<Pick<Image, 'build_args' | 'no_cache' | 'pull' | 'build_timeout_ms' | 'visual'>>;
 export type ImagePatch = Partial<NewImage>;
 
 /** Live status for an image (GET /images/:id/status). */
@@ -259,12 +264,19 @@ export interface Agent {
   agents_md: string;
   /** Assigned isolation profile (null = runs on the backend). */
   isolation_id: string | null;
+  /**
+   * Computed by the list endpoint: true when the assigned isolation profile references a `visual`
+   * image, so the workspace can gate the Desktop panel button. Absent on other agent responses.
+   */
+  visual?: boolean;
   /** Workspace volume scope under the assigned isolation. */
   isolation_volume_mode: 'individual' | 'shared';
   /** Assigned inference endpoint (null = the fleet default endpoint). */
   endpoint_id: string | null;
   /** Chosen model on that endpoint ('' = endpoint's first model, then the global default). */
   model: string;
+  /** Max tool round-trips per turn before the run is cut off (`null` = global default). */
+  max_tool_iterations: number | null;
   /** Operator-chosen identity hue (HSL, 0–360). `null` = unset → deterministic name-hash color. */
   color: number | null;
   /** Operator-chosen lucide icon key (see `agentIcons`). `''` = unset → initial letter. */
@@ -310,6 +322,7 @@ export const agentsApi = {
         | 'isolation_volume_mode'
         | 'endpoint_id'
         | 'model'
+        | 'max_tool_iterations'
         | 'color'
         | 'icon'
       >
@@ -514,6 +527,8 @@ export interface StoredMessage {
   session_id: string;
   role: 'user' | 'assistant';
   text: string;
+  /** User only: data-URL images attached to the message. */
+  images?: string[];
   blocks?: unknown[];
   reasoning?: string;
   trace?: unknown[];
@@ -527,6 +542,7 @@ export interface StoredMessage {
 export interface NewMessage {
   role: 'user' | 'assistant';
   text?: string;
+  images?: string[];
   blocks?: unknown[];
   reasoning?: string;
   trace?: unknown[];
@@ -652,6 +668,16 @@ export interface InferenceSettings {
   title_model: string;
   /** Token budget for the title call — big enough to fit a reasoning model's `<think>` block + title. */
   title_max_tokens: number;
+  /** Vision analysis endpoint for the visual tools ('' → vision analysis unavailable). */
+  vision_endpoint_id: string;
+  /** Model on `vision_endpoint_id` for screenshot analysis ('' → that endpoint's default). */
+  vision_model: string;
+  /** Vision sampling params. `null` = disabled (not sent to the model → server default). */
+  vision_temperature: number | null;
+  vision_top_p: number | null;
+  vision_max_tokens: number | null;
+  vision_frequency_penalty: number | null;
+  vision_presence_penalty: number | null;
   /** Host self-update master switch — gates the "Update app" action + the periodic check. */
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */
@@ -729,11 +755,19 @@ export interface Endpoint {
   fallback_order: number;
   /** System-managed built-in local docker fallback: read-only name/URL, cannot be deleted. */
   managed: boolean;
+  /**
+   * Operator marker: this endpoint's model is multimodal (vision). Advisory — used to warn when a
+   * visual agent is paired with a text-only endpoint (its screenshots would be silently ignored).
+   */
+  supports_vision: boolean;
 }
 
 export type NewEndpoint = Pick<Endpoint, 'name' | 'base_url' | 'api_key' | 'context_window'>;
 export type EndpointPatch = Partial<
-  Pick<Endpoint, 'name' | 'base_url' | 'api_key' | 'context_window' | 'default_model' | 'fallback_order'>
+  Pick<
+    Endpoint,
+    'name' | 'base_url' | 'api_key' | 'context_window' | 'default_model' | 'fallback_order' | 'supports_vision'
+  >
 >;
 
 /** Result of importing a config bundle (agents + isolations, overwrite-by-name policy). */

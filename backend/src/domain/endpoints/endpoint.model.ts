@@ -29,6 +29,14 @@ const EndpointSchema = new Schema(
     /** Exactly one endpoint is the default (used by agents that don't pick one). Enforced on write. */
     is_default: { type: Boolean, default: false },
     /**
+     * Operator marker: this endpoint's model is multimodal (vision), i.e. its llama.cpp was launched
+     * with `--mmproj` (or it's a vision-capable vLLM/Ollama model). We can't autodiscover this from
+     * `/v1/models`, so it's a manual flag. Used to warn when a *visual* agent (one whose isolation
+     * image has the visual layer) is paired with a text-only endpoint — its screenshots would be
+     * silently ignored. Purely advisory; it does not gate inference.
+     */
+    supports_vision: { type: Boolean, default: false },
+    /**
      * Runtime failover position. `0` means this endpoint is *not* part of the fallback chain.
      * Endpoints with `fallback_order > 0` form the ordered chain the inference client walks (ascending)
      * when the primary target can't be reached — e.g. a local CPU llama.cpp container as a last resort.

@@ -11,9 +11,10 @@ export interface ToolContext {
   /**
    * Cross-agent dispatcher, injected by the orchestrator. Present only when the current
    * run is allowed to spawn sub-agents (the hop guard may withhold it at max depth).
-   * Returns the sub-agent's final text answer.
+   * Returns the sub-agent's final text answer. `images` (optional) forwards attachments to the
+   * sub-agent's turn (e.g. hand a user-dropped image to a vision specialist).
    */
-  invokeSubAgent?: (targetAgentName: string, query: string) => Promise<string>;
+  invokeSubAgent?: (targetAgentName: string, query: string, images?: ImageBlock[]) => Promise<string>;
   /**
    * Back-channel to the agent that delegated this run (present only on a delegated sub-agent run
    * while a hop remains). Re-runs the caller as an inference turn — seeded with the caller's
@@ -41,6 +42,18 @@ export interface ToolContext {
    * back to the backend — the isolation guarantee is strict.
    */
   isolationError?: string;
+  /**
+   * Emit a vision-analysis panel to the UI (screenshot thumbnail + the question + the vision model's
+   * answer) for the current tool call. Used by `visual_screenshot` so the operator sees what the
+   * vision model saw and said, without folding the raw image into the (text-only) agent's context.
+   */
+  emitVision?: (payload: { image: string; question: string; answer: string; model: string }) => void;
+  /**
+   * Images the user attached to this turn (data URLs). Available to `analyze_image` (to describe them
+   * via the Vision endpoint) and forwardable to a subagent via `ask_agent`. A multimodal agent also
+   * receives them directly in its context; a text-only agent only reaches them through these tools.
+   */
+  attachedImages?: ImageBlock[];
 }
 
 export interface ToolResult {

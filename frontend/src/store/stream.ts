@@ -12,6 +12,8 @@ import type {
   ToolEndEvent,
   ToolOutputEvent,
   ToolStartEvent,
+  TruncatedEvent,
+  VisionEvent,
 } from '../lib/ws-events.types';
 
 /** Session context size shown in the chat header (prompt tokens vs the model's context window). */
@@ -21,6 +23,14 @@ export interface ContextUsage {
 }
 
 /** Ordered pieces of an assistant turn: prose interleaved with inline tool blocks. */
+/** Vision analysis surfaced on a `visual_screenshot` tool block (screenshot + the model's answer). */
+export interface VisionInfo {
+  image: string;
+  question: string;
+  answer: string;
+  model: string;
+}
+
 export type Block =
   | { kind: 'text'; text: string }
   /** The agent's streamed `<think>` reasoning, rendered as a collapsible thinking block. */
@@ -33,6 +43,8 @@ export type Block =
       output: string;
       status: 'running' | 'success' | 'error';
       result?: unknown;
+      /** Vision analysis attached to a `visual_screenshot` call: screenshot thumbnail + the model's answer. */
+      vision?: VisionInfo;
     }
   /**
    * A delegated sub-agent run (`ask_agent`). Rendered as a nested, color-coded bubble at the exact
@@ -72,6 +84,7 @@ type LiveItem =
       output: string;
       status: 'running' | 'success' | 'error';
       result?: unknown;
+      vision?: VisionInfo;
     }
   /** Placeholder marking where a child agent frame was spawned within this frame's stream. */
   | { kind: 'agent'; id: string; frameId: string; refFrameId: string };
@@ -134,6 +147,7 @@ export function buildBlocks(
         output: it.output,
         status: it.status,
         result: it.result,
+        vision: it.vision,
       });
     } else {
       const f = frames[it.refFrameId];
@@ -156,7 +170,7 @@ export function buildBlocks(
 }
 
 export type Turn =
-  | { role: 'user'; blocks: [{ kind: 'text'; text: string }] }
+  | { role: 'user'; blocks: [{ kind: 'text'; text: string }]; images?: string[] }
   | { role: 'assistant'; blocks: Block[] };
 
 /** Raw trace entries for the debugger drawer (kept alongside the inline blocks). */
@@ -184,6 +198,12 @@ interface StreamState {
   contextUsage: ContextUsage | null;
   /** An agent is blocking on `ask_user`; drives the operator prompt modal. Null when nothing waits. */
   pendingAsk: { requestId: string; agent: string; question: string } | null;
+  /**
+   * The last turn on the active session was cut off by the tool-round cap (agent stopped mid-task).
+   * Drives the composer's auto-continue: it re-nudges only when this is set, never after a clean
+   * finish. Cleared when a new turn starts.
+   */
+  lastTurnTruncated: boolean;
   streaming: boolean;
   /** Session ids with an in-flight agent run — drives the per-session "working" shimmer. */
   workingSessions: string[];
@@ -202,7 +222,7 @@ interface StreamState {
   /** Load a persisted session's messages into the panel (reconstructs chat + debugger). */
   hydrate: (sessionId: string, messages: StoredMessage[]) => void;
   clearActive: () => void;
-  send: (agentName: string, content: string, sessionId: string) => void;
+  send: (agentName: string, content: string, sessionId: string, images?: string[]) => void;
   /** Ask the backend to stop the in-flight run for the active session (the "stop" button). */
   stop: () => void;
   /** Send the operator's answer to a pending `ask_user`, unblocking the waiting agent run. */
@@ -255,6 +275,7 @@ export const useStream = create<StreamState>((set, get) => ({
   trace: [],
   contextUsage: null,
   pendingAsk: null,
+  lastTurnTruncated: false,
   streaming: false,
   workingSessions: [],
   workingAgents: {},
@@ -325,6 +346,17 @@ export const useStream = create<StreamState>((set, get) => ({
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId ? { ...it, output: it.output + e.chunk } : it,
+        ),
+      }));
+    });
+
+    // Vision analysis of a visual_screenshot: attach the thumbnail + Q&A to its tool block.
+    socket.on('vision', (e: VisionEvent) => {
+      set((s) => ({
+        liveItems: s.liveItems.map((it) =>
+          it.kind === 'tool' && it.callId === e.callId
+            ? { ...it, vision: { image: e.image, question: e.question, answer: e.answer, model: e.model } }
+            : it,
         ),
       }));
     });
@@ -439,6 +471,13 @@ export const useStream = create<StreamState>((set, get) => ({
       });
     });
 
+    // The active session's turn was cut off by the tool-round cap. Record it so the composer can
+    // offer / auto-fire a "continue"; it's cleared the moment the next turn starts.
+    socket.on('truncated', (e: TruncatedEvent) => {
+      if (e.sessionId !== get().activeSessionId) return;
+      set({ lastTurnTruncated: true });
+    });
+
     // A run is still in flight for a session we just re-opened (e.g. the user refreshed mid-turn).
     // Reflect the working state so the UI doesn't look stopped; the terminal `chat:done` (broadcast
     // to the room) will resolve it.
@@ -447,6 +486,7 @@ export const useStream = create<StreamState>((set, get) => ({
         sessionId === s.activeSessionId
           ? {
               streaming: true,
+              lastTurnTruncated: false,
               workingSessions: s.workingSessions.includes(sessionId)
                 ? s.workingSessions
                 : [...s.workingSessions, sessionId],
@@ -466,6 +506,7 @@ export const useStream = create<StreamState>((set, get) => ({
         itemSeq = Math.max(itemSeq, snap.seq);
         return {
           streaming: true,
+          lastTurnTruncated: false,
           liveItems: snap.items,
           liveFrames: snap.frames,
           frameStack: snap.frameStack.length ? snap.frameStack : ['root'],
@@ -577,7 +618,7 @@ export const useStream = create<StreamState>((set, get) => ({
 
     const turns: Turn[] = messages.map((m) =>
       m.role === 'user'
-        ? { role: 'user', blocks: [{ kind: 'text', text: m.text }] }
+        ? { role: 'user', blocks: [{ kind: 'text', text: m.text }], images: m.images?.length ? m.images : undefined }
         : { role: 'assistant', blocks: (m.blocks as Block[] | undefined) ?? [{ kind: 'text', text: m.text }] },
     );
     const trace: TraceEntry[] = messages.flatMap((m) => (m.trace as TraceEntry[] | undefined) ?? []);
@@ -599,6 +640,7 @@ export const useStream = create<StreamState>((set, get) => ({
       liveReasoning: '',
       streaming: false,
       pendingAsk: null,
+      lastTurnTruncated: false,
       turnTraceStart: trace.length,
     });
   },
@@ -615,15 +657,17 @@ export const useStream = create<StreamState>((set, get) => ({
       liveReasoning: '',
       streaming: false,
       pendingAsk: null,
+      lastTurnTruncated: false,
       turnTraceStart: 0,
     }),
 
-  send: (agentName, content, sessionId) => {
+  send: (agentName, content, sessionId, images) => {
     get().wire();
     const history = turnsToHistory(get().turns);
+    const imgs = images?.length ? images : undefined;
     set((s) => ({
       activeSessionId: sessionId,
-      turns: [...s.turns, { role: 'user', blocks: [{ kind: 'text', text: content }] }],
+      turns: [...s.turns, { role: 'user', blocks: [{ kind: 'text', text: content }], images: imgs }],
       liveItems: [],
       // Seed the root frame so top-level stream chunks have a home before any hop occurs.
       liveFrames: {
@@ -641,6 +685,7 @@ export const useStream = create<StreamState>((set, get) => ({
       liveReasoning: '',
       streaming: true,
       pendingAsk: null,
+      lastTurnTruncated: false,
       turnTraceStart: s.trace.length,
       workingSessions: s.workingSessions.includes(sessionId)
         ? s.workingSessions
@@ -649,8 +694,14 @@ export const useStream = create<StreamState>((set, get) => ({
       sessionAgent: { ...s.sessionAgent, [sessionId]: agentName },
     }));
 
-    void sessionsApi.addMessage(sessionId, { role: 'user', text: content }).catch(() => {});
-    getSocket().emit('chat:message', { agentName, content, sessionId, history });
+    void sessionsApi.addMessage(sessionId, { role: 'user', text: content, images: imgs }).catch(() => {});
+    getSocket().emit('chat:message', {
+      agentName,
+      content,
+      sessionId,
+      history,
+      images: imgs?.map((dataUrl) => ({ dataUrl })),
+    });
   },
 
   stop: () => {

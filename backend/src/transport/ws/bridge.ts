@@ -57,6 +57,17 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  eventBus.on('tool:vision', ({ ctx, callId, image, question, answer, model }) => {
+    io.to(ctx.sessionId).emit('vision', {
+      type: 'vision',
+      callId,
+      image,
+      question,
+      answer,
+      model,
+    });
+  });
+
   eventBus.on('tool:execution_complete', ({ ctx, callId, tool, status, result }) => {
     io.to(ctx.sessionId).emit('tool_end', {
       type: 'tool_end',
@@ -80,6 +91,14 @@ export function attachBridge(io: Server): void {
       completionTokens,
       totalTokens,
       contextWindow,
+    });
+  });
+
+  eventBus.on('agent:turn_truncated', ({ ctx }) => {
+    io.to(ctx.sessionId).emit('truncated', {
+      type: 'truncated',
+      sessionId: ctx.sessionId,
+      agent: ctx.agentName,
     });
   });
 

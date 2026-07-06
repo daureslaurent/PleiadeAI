@@ -10,6 +10,7 @@ export interface ImageInput {
   no_cache?: boolean;
   pull?: boolean;
   build_timeout_ms?: number | null;
+  visual?: boolean;
 }
 
 /** Data-access for Docker image entities. Thin wrapper over the Mongoose model. */

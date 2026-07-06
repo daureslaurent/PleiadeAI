@@ -25,6 +25,7 @@ endpointsRouter.post('/', async (req, res) => {
     context_window: b.context_window !== undefined ? Number(b.context_window) : undefined,
     is_default: Boolean(b.is_default),
     fallback_order: b.fallback_order !== undefined ? Number(b.fallback_order) : undefined,
+    supports_vision: b.supports_vision !== undefined ? Boolean(b.supports_vision) : undefined,
   });
   res.status(201).json(ep);
 });
@@ -45,6 +46,7 @@ endpointsRouter.patch('/:id', async (req, res) => {
   if (typeof b.default_model === 'string') patch.default_model = b.default_model;
   if (b.context_window !== undefined) patch.context_window = Number(b.context_window);
   if (b.fallback_order !== undefined) patch.fallback_order = Number(b.fallback_order);
+  if (b.supports_vision !== undefined) patch.supports_vision = Boolean(b.supports_vision);
   const ep = await endpointRepository.update(req.params.id, patch);
   if (!ep) {
     res.status(404).json({ error: 'not found' });

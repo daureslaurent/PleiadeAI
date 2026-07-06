@@ -11,6 +11,8 @@ export interface ResolvedInference {
   maxTokens: number;
   temperature: number;
   topP: number;
+  /** Operator-declared: this endpoint's model is multimodal (vision). Advisory only. */
+  supportsVision: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ export async function resolveInference(agent: Pick<AgentDoc, 'endpoint_id' | 'mo
     maxTokens: settings.max_tokens,
     temperature: settings.temperature,
     topP: settings.top_p,
+    supportsVision: Boolean(endpoint?.supports_vision),
   };
 }
 
@@ -63,6 +66,7 @@ export async function resolveForEndpoint(
     maxTokens: settings.max_tokens,
     temperature: settings.temperature,
     topP: settings.top_p,
+    supportsVision: Boolean(endpoint.supports_vision),
   };
 }
 
@@ -90,5 +94,6 @@ export async function resolveFallbacks(excludeUrl?: string): Promise<ResolvedInf
       maxTokens: settings.max_tokens,
       temperature: settings.temperature,
       topP: settings.top_p,
+      supportsVision: Boolean(ep.supports_vision),
     }));
 }

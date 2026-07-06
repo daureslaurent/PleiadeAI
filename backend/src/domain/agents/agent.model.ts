@@ -56,6 +56,13 @@ const AgentSchema = new Schema(
     endpoint_id: { type: Schema.Types.ObjectId, ref: 'Endpoint', default: null },
     model: { type: String, default: '' },
     /**
+     * Max tool-call rounds the agent may take in a single turn before the run is cut off (see
+     * `AgentRunner`'s tool loop). `null` → the global default. Agents that drive long multi-step
+     * flows — notably the visual/desktop agents that burn ~2 rounds per screenshot→act cycle — want
+     * a higher ceiling so they don't stall mid-task and force a manual "continue".
+     */
+    max_tool_iterations: { type: Number, default: null },
+    /**
      * Visual identity shown wherever the agent surfaces (chat avatar, `ask_agent` bubbles). Operator-
      * chosen on the Agents page; both fall back to a deterministic name-hash color + initial letter
      * when unset. `color` is an HSL hue (0–360, `null` = unset); `icon` is a curated lucide key (see

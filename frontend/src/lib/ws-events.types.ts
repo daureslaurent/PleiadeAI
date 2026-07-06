@@ -54,6 +54,31 @@ export interface SystemAlertEvent {
   message: string;
 }
 
+/** Vision analysis of a `visual_screenshot` call: the screenshot thumbnail + the model's answer. */
+export interface VisionEvent {
+  type: 'vision';
+  callId: string;
+  /** Small JPEG thumbnail (data URL) of the analysed screenshot. */
+  image: string;
+  /** The question the agent asked about the screen (empty → general description). */
+  question: string;
+  /** The vision model's textual answer (or a config hint when no vision endpoint is set). */
+  answer: string;
+  /** The vision model id (empty when unavailable). */
+  model: string;
+}
+
+/**
+ * The directly-addressed agent's turn hit its tool-round cap before producing a final answer — it was
+ * cut off mid-task. Lets the composer offer / auto-fire a "continue" instead of the operator having to
+ * notice the stall. Only emitted for the user-facing (depth 0) run.
+ */
+export interface TruncatedEvent {
+  type: 'truncated';
+  sessionId: string;
+  agent: string;
+}
+
 /** An agent is blocked asking the operator a question; the run resumes on `ask_user:response`. */
 export interface AskUserEvent {
   type: 'ask_user';
@@ -86,6 +111,8 @@ export type WsEvent =
   | ToolStartEvent
   | ToolOutputEvent
   | ToolEndEvent
+  | VisionEvent
   | SystemAlertEvent
   | AskUserEvent
+  | TruncatedEvent
   | ContextUsageEvent;

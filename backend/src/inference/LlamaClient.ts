@@ -50,6 +50,19 @@ export interface StreamResult {
   usage: TokenUsage | null;
 }
 
+/** Normalise an OpenAI `message.content` (string, null, or an array of content parts) to plain text. */
+function extractText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) =>
+        p && typeof p === 'object' && 'text' in p ? String((p as { text?: unknown }).text ?? '') : '',
+      )
+      .join('');
+  }
+  return '';
+}
+
 export class LlamaClient {
   /** Cache one OpenAI client per url+key so failover between targets doesn't rebuild the healthy one. */
   private clients = new Map<string, OpenAI>();
@@ -93,6 +106,83 @@ export class LlamaClient {
     const vector = res.data[0]?.embedding;
     if (!vector?.length) throw new Error('embeddings response contained no vector');
     return vector;
+  }
+
+  /**
+   * One-shot, non-streaming chat completion against a resolved target — returns the full assistant
+   * text. Used for side calls that want a single answer rather than a streamed turn (e.g. the vision
+   * analysis behind `visual_screenshot`). Goes through the per-endpoint gate for metrics/serialisation.
+   * Throws on transport/HTTP failure; callers decide how to degrade.
+   */
+  async complete(
+    target: ResolvedInference,
+    messages: ChatMessage[],
+    opts: {
+      maxTokens?: number;
+      temperature?: number;
+      topP?: number;
+      /** OpenAI-style penalties (honored by llama-server) to break repetition loops. */
+      frequencyPenalty?: number;
+      presencePenalty?: number;
+    } = {},
+  ): Promise<string> {
+    const client = this.clientFor(target.url, target.apiKey);
+    const gate = await endpointGate.acquire(target.url, target.model);
+    try {
+      // Pass-through: only send sampling fields the caller actually provided. An omitted (undefined)
+      // field is dropped from the JSON, so the server applies its own default (used for the "disabled"
+      // vision params). The SDK omits `undefined` keys, so this is safe.
+      const body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+        model: target.model,
+        messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+        stream: false,
+      };
+      if (opts.maxTokens != null) body.max_tokens = opts.maxTokens;
+      if (opts.temperature != null) body.temperature = opts.temperature;
+      if (opts.topP != null) body.top_p = opts.topP;
+      if (opts.frequencyPenalty != null) body.frequency_penalty = opts.frequencyPenalty;
+      if (opts.presencePenalty != null) body.presence_penalty = opts.presencePenalty;
+      const res = await client.chat.completions.create(body);
+      gate.success(
+        res.usage
+          ? {
+              promptTokens: res.usage.prompt_tokens,
+              completionTokens: res.usage.completion_tokens,
+              totalTokens: res.usage.total_tokens,
+            }
+          : null,
+      );
+      const choice = res.choices[0];
+      // Extract the answer robustly: `content` may be a plain string or (rarely) an array of parts;
+      // some servers/reasoning models leave `content` empty and put the answer in `reasoning_content`.
+      const msg = choice?.message as
+        | { content?: unknown; reasoning_content?: unknown }
+        | undefined;
+      let text = extractText(msg?.content);
+      if (!text && typeof msg?.reasoning_content === 'string') text = msg.reasoning_content;
+      // Drop a `<think>…</think>` block a reasoning model may prepend, keeping the actual answer.
+      text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      if (!text || text.length < 24) {
+        // Nothing (or almost nothing) usable came back. For a vision call this usually means the image
+        // wasn't integrated — a mismatched/wrong `mmproj`, or a bad chat template — so the model emits
+        // a token or two then EOS. Surface finish_reason + token counts so the cause is visible.
+        log.warn(
+          {
+            url: target.url,
+            model: target.model,
+            finishReason: choice?.finish_reason,
+            usage: res.usage,
+            textPreview: text.slice(0, 80),
+            rawMessage: JSON.stringify(msg)?.slice(0, 600),
+          },
+          'complete(): model returned little/no usable text (vision: suspect mmproj/template)',
+        );
+      }
+      return text;
+    } catch (err) {
+      gate.fail();
+      throw err;
+    }
   }
 
   /**
@@ -176,6 +266,28 @@ export class LlamaClient {
     signal: AbortSignal | undefined,
   ): Promise<StreamResult> {
     const client = this.clientFor(target.url, target.apiKey);
+
+    // Count multimodal image parts in the outgoing prompt so it's obvious in the logs whether images
+    // (e.g. visual_screenshot output) actually reach the server — a text-only model / a llama.cpp
+    // launched without `--mmproj` silently ignores them, which reads as "the model can't see it".
+    const imageParts = messages.reduce(
+      (n, m) =>
+        n + (Array.isArray(m.content) ? m.content.filter((p) => p.type === 'image_url').length : 0),
+      0,
+    );
+    if (imageParts > 0) {
+      if (target.supportsVision) {
+        log.info({ url: target.url, model: target.model, imageParts }, 'sending prompt with image parts');
+      } else {
+        // The image is on the wire but the endpoint isn't marked multimodal — llama.cpp without
+        // `--mmproj` (or a text-only model) silently ignores it. This is the usual "the model can't
+        // see the screenshot" cause; flag the endpoint as vision-capable once you've verified it.
+        log.warn(
+          { url: target.url, model: target.model, imageParts },
+          'prompt carries images but endpoint is not marked vision-capable — images will likely be ignored',
+        );
+      }
+    }
 
     // Serialize per endpoint: a single llama.cpp slot can't stream two turns at once, so wait for
     // any in-flight call to this URL to finish before we start. The gate also tallies the metrics

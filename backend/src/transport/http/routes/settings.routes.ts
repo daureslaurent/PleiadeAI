@@ -22,6 +22,22 @@ settingsRouter.put('/', async (req, res) => {
   if (b.top_p !== undefined) patch.top_p = Number(b.top_p);
   if (typeof b.title_endpoint_id === 'string') patch.title_endpoint_id = b.title_endpoint_id;
   if (typeof b.title_model === 'string') patch.title_model = b.title_model;
+  if (typeof b.vision_endpoint_id === 'string') patch.vision_endpoint_id = b.vision_endpoint_id;
+  if (typeof b.vision_model === 'string') patch.vision_model = b.vision_model;
+  // Vision sampling params: `null`/'' → disabled (stored null, not sent to the model); a finite
+  // number overrides. Anything else for a present key is ignored.
+  for (const key of [
+    'vision_temperature',
+    'vision_top_p',
+    'vision_max_tokens',
+    'vision_frequency_penalty',
+    'vision_presence_penalty',
+  ] as const) {
+    if (!(key in b)) continue;
+    const v = b[key];
+    if (v === null || v === '') patch[key] = null;
+    else if (Number.isFinite(Number(v))) patch[key] = Number(v);
+  }
   // Guard against a value too low to fit a reasoning model's <think> block (would truncate titles).
   if (b.title_max_tokens !== undefined) patch.title_max_tokens = Math.max(32, Number(b.title_max_tokens) || 256);
   if (b.update_enabled !== undefined) patch.update_enabled = Boolean(b.update_enabled);

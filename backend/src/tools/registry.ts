@@ -13,6 +13,8 @@ import { askUser } from './core/askUser';
 import { annuaire } from './core/annuaire';
 import { bash } from './core/bash';
 import { scheduleTask } from './core/scheduleTask';
+import { visualScreenshot, visualAct, visualWindows } from './core/visual';
+import { analyzeImage } from './core/analyzeImage';
 import { read } from './core/fs/read';
 import { write } from './core/fs/write';
 import { edit } from './core/fs/edit';
@@ -23,6 +25,13 @@ import { patch } from './core/fs/patch';
 import type { Tool } from './types';
 
 const log = createLogger('tool-registry');
+
+/**
+ * Names of the visual-desktop control tools. Auto-added to an agent's toolset by `AgentRunner` when
+ * the agent's isolation image is flagged `visual` (like `annuaire`/`ask_agent` are always granted to
+ * top-level agents). The global kill-switch in `resolveTools` still applies.
+ */
+export const VISUAL_TOOL_NAMES = ['visual_screenshot', 'visual_act', 'visual_windows'] as const;
 
 /** Static core tools every agent implicitly gets, keyed by name. */
 const CORE_TOOLS: Record<string, Tool> = {
@@ -37,6 +46,11 @@ const CORE_TOOLS: Record<string, Tool> = {
   [annuaire.name]: annuaire,
   [bash.name]: bash,
   [scheduleTask.name]: scheduleTask,
+  // Visual-desktop control — auto-granted to agents on a visual isolation image (see AgentRunner).
+  [visualScreenshot.name]: visualScreenshot,
+  [visualAct.name]: visualAct,
+  [visualWindows.name]: visualWindows,
+  [analyzeImage.name]: analyzeImage,
   // OpenCode-compatible file tools (opt-in per agent via tools_allowed).
   [read.name]: read,
   [write.name]: write,
