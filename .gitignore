@@ -98,3 +98,6 @@ Thumbs.db
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.json
+# Kubernetes files
+k8s.yaml
+

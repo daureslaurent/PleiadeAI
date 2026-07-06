@@ -1,17 +1,16 @@
 import { Router } from 'express';
 import { isolationRepository } from '../../../domain/isolations/isolation.repository';
+import { imageRepository } from '../../../domain/images/image.repository';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { agentContainerManager } from '../../../isolation/AgentContainerManager';
 import { dockerService } from '../../../isolation/docker.service';
 import {
-  isoImageName,
   isoSharedVolumeName,
   isoGluetunName,
   agentContainerName,
   agentVolumeName,
   agentIdFromContainerName,
 } from '../../../isolation/names';
-import { assertRuntimes } from '../../../isolation/dockerfile.template';
 import { encryptSecret } from '../../../isolation/ssh.service';
 import { parseWireguardConf } from '../../../isolation/vpn.service';
 import { createLogger } from '../../../config/logger';
@@ -142,15 +141,15 @@ isolationsRouter.get('/:id/status', async (req, res) => {
     return;
   }
   const id = String(iso._id);
-  const [imageExists, sharedVolumeExists, assigned, sshKeySet, vpnConfSet, sudoPasswordSet, vpnState] =
+  const [sharedVolumeExists, assigned, sshKeySet, vpnConfSet, sudoPasswordSet, vpnState, image] =
     await Promise.all([
-      dockerService.imageExists(isoImageName(id)),
       dockerService.volumeExists(isoSharedVolumeName(id)),
       agentRepository.listByIsolation(id),
       isolationRepository.hasSshKey(id),
       isolationRepository.hasVpnConf(id),
       isolationRepository.hasSudoPassword(id),
       dockerService.containerState(isoGluetunName(id)),
+      iso.image_id ? imageRepository.findById(String(iso.image_id)) : Promise.resolve(null),
     ]);
 
   // One running instance (container) per assigned agent, built from this profile's image.
@@ -218,13 +217,13 @@ isolationsRouter.get('/:id/status', async (req, res) => {
     .map(({ mode: _mode, ...v }) => v);
 
   res.json({
-    image_status: iso.image_status,
-    image_exists: imageExists,
+    image_id: iso.image_id ? String(iso.image_id) : null,
+    image_name: image?.name ?? null,
+    image_status: image?.image_status ?? null,
     shared_volume_exists: sharedVolumeExists,
     assigned_agents: assigned.map((a) => ({ _id: String(a._id), name: a.name })),
     instances,
     volumes,
-    warnings: assertRuntimes(iso.dockerfile ?? ''),
     ssh_key_set: sshKeySet,
     vpn_conf_set: vpnConfSet,
     sudo_password_set: sudoPasswordSet,
@@ -295,6 +294,8 @@ isolationsRouter.post('/', async (req, res) => {
   if (typeof sudo_password === 'string' && sudo_password.trim()) {
     input.sudo_password_enc = encryptSecret(sudo_password.trim());
   }
+  // Empty image_id means "no image assigned".
+  if (input.image_id === '') input.image_id = null;
   const iso = await isolationRepository.create(
     input as Parameters<typeof isolationRepository.create>[0],
   );
@@ -314,9 +315,11 @@ isolationsRouter.patch('/:id', async (req, res) => {
   const id = String(iso._id);
   const body = req.body ?? {};
   const patch: Record<string, unknown> = {};
-  for (const key of ['name', 'description', 'dockerfile', 'cpus', 'memory', 'network', 'idle_timeout_ms', 'ssh_public_key', 'ssh_known_hosts'] as const) {
+  for (const key of ['name', 'description', 'image_id', 'cpus', 'memory', 'network', 'idle_timeout_ms', 'ssh_public_key', 'ssh_known_hosts'] as const) {
     if (body[key] !== undefined) patch[key] = body[key];
   }
+  // Empty image_id means "unassign the image".
+  if (patch.image_id === '') patch.image_id = null;
 
   // Private key is write-only: a non-empty value is encrypted and stored; an explicit empty string
   // clears it; absence leaves it unchanged. The plaintext key is never persisted or echoed back.
@@ -365,6 +368,7 @@ isolationsRouter.patch('/:id', async (req, res) => {
   // Recreate assigned containers when the runtime policy, SSH material, or VPN config changes, so
   // the new settings/keys take effect on next use.
   const needsRecreate =
+    patch.image_id !== undefined ||
     patch.cpus !== undefined ||
     patch.memory !== undefined ||
     patch.network !== undefined ||
@@ -383,54 +387,9 @@ isolationsRouter.patch('/:id', async (req, res) => {
 });
 
 /**
- * Build (or rebuild) the profile's shared image, streaming docker output as SSE. On success, drop
- * assigned agents' containers so they recreate from the fresh image on next use.
- */
-isolationsRouter.post('/:id/build', async (req, res) => {
-  const iso = await isolationRepository.findById(req.params.id);
-  if (!iso) {
-    res.status(404).json({ error: 'not found' });
-    return;
-  }
-  const id = String(iso._id);
-  const dockerfile = iso.dockerfile ?? '';
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-  const send = (event: string, data: unknown) =>
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-
-  await isolationRepository.update(id, { image_status: 'building', last_build_error: null });
-  for (const w of assertRuntimes(dockerfile)) send('warn', w);
-
-  try {
-    await dockerService.build(isoImageName(id), dockerfile, (chunk) => send('log', chunk));
-    for (const agentId of await idsOf(id)) {
-      await agentContainerManager.removeAgentContainer(agentId).catch(() => undefined);
-    }
-    await isolationRepository.update(id, {
-      image_status: 'built',
-      image_built_at: new Date(),
-      last_build_error: null,
-    });
-    send('done', { status: 'built' });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ id, err: message }, 'isolation image build failed');
-    await isolationRepository.update(id, { image_status: 'error', last_build_error: message });
-    send('error', { message });
-  } finally {
-    res.end();
-  }
-});
-
-/**
- * Delete a profile: tear down every assigned agent's container, remove the shared image + shared
- * volume, unassign all agents, then remove the document. Individual agent volumes are left intact.
+ * Delete a profile: tear down every assigned agent's container + shared volume, unassign all
+ * agents, then remove the document. The image is left intact (it belongs to the Image entity and
+ * may back other profiles). Individual agent volumes are left intact too.
  */
 isolationsRouter.delete('/:id', async (req, res) => {
   const iso = await isolationRepository.findById(req.params.id);
@@ -441,7 +400,7 @@ isolationsRouter.delete('/:id', async (req, res) => {
   const id = String(iso._id);
   const agentIds = await idsOf(id);
   await agentContainerManager
-    .teardownIsolation(id, agentIds, { removeImage: true, removeSharedVolume: true })
+    .teardownIsolation(id, agentIds, { removeSharedVolume: true })
     .catch((err) => log.warn({ id, err: String(err) }, 'isolation teardown failed'));
   await agentRepository.unassignIsolation(id);
   await isolationRepository.delete(id);

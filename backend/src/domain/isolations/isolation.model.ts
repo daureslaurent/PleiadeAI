@@ -11,9 +11,17 @@ const IsolationSchema = new Schema(
   {
     name: { type: String, required: true, unique: true, trim: true },
     description: { type: String, default: '' },
-    dockerfile: { type: String, default: () => DEFAULT_DOCKERFILE },
 
-    // Build lifecycle of the shared image (driven by the manual Build action).
+    /**
+     * The Docker image this profile runs (see `images` collection). Agent containers are created
+     * from the referenced image's tag. Null until the operator picks one — an unassigned profile
+     * can't launch containers (`AgentContainerManager` raises `IsolationNotReadyError`).
+     */
+    image_id: { type: Schema.Types.ObjectId, ref: 'Image', default: null },
+
+    // NOTE: the Dockerfile + image build lifecycle moved to the standalone `Image` entity. These
+    // fields are retained only for backward-compat on older docs and are no longer read/written.
+    dockerfile: { type: String, default: () => DEFAULT_DOCKERFILE },
     image_status: { type: String, enum: ['none', 'building', 'built', 'error'], default: 'none' },
     image_built_at: { type: Date, default: null },
     last_build_error: { type: String, default: null },

@@ -7,6 +7,7 @@ import { AgentsView } from './views/AgentsView';
 import { SkillsView } from './views/SkillsView';
 import { ToolsView } from './views/ToolsView';
 import { IsolationsView } from './views/IsolationsView';
+import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
 import { AutonomyInbox } from './views/AutonomyInbox';
 import { LLMView } from './views/LLMView';
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="/agents" element={<AgentsView />} />
             <Route path="/skills" element={<SkillsView />} />
             <Route path="/tools" element={<ToolsView />} />
+            <Route path="/images" element={<ImagesView />} />
             <Route path="/isolation" element={<IsolationsView />} />
             <Route path="/memory" element={<MemoryVault />} />
             <Route path="/autonomy" element={<AutonomyInbox />} />

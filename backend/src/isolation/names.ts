@@ -9,9 +9,17 @@ import { env } from '../config/env';
  */
 const P = () => env.AGENT_IMAGE_PREFIX;
 
-/** Shared image built once per isolation profile. */
+/** Shared image built once per isolation profile. @deprecated images are their own entity now. */
 export function isoImageName(isolationId: string): string {
   return `${P()}_iso_${isolationId}:latest`;
+}
+
+/**
+ * Image built from a standalone `Image` entity (own Dockerfile + build options). Isolation
+ * profiles reference one of these via `image_id`; agent containers are created from its tag.
+ */
+export function imgImageName(imageId: string): string {
+  return `${P()}_img_${imageId}:latest`;
 }
 
 /** Shared workspace volume for agents on a profile that use `shared` volume mode. */

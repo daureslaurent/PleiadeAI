@@ -42,15 +42,65 @@ export async function login(username: string, password: string): Promise<string>
   return data.token;
 }
 
+/** Build lifecycle of a Docker image (mirrors backend `image.model` / `buildManager`). */
+export type ImageStatus = 'none' | 'queued' | 'building' | 'built' | 'error';
+
+/** One build-arg pair forwarded to `docker build --build-arg`. */
+export interface BuildArg {
+  key: string;
+  value: string;
+}
+
+/** A live build-job snapshot from the in-process build queue (GET /images/builds). */
+export interface BuildJob {
+  image_id: string;
+  status: 'queued' | 'running' | 'done' | 'error';
+  queued_at: number;
+  started_at?: number;
+  ended_at?: number;
+  error?: string;
+}
+
+/** A first-class Docker image entity (mirrors backend `image.model`). */
+export interface Image {
+  _id: string;
+  name: string;
+  description: string;
+  dockerfile: string;
+  build_args: BuildArg[];
+  no_cache: boolean;
+  pull: boolean;
+  image_status: ImageStatus;
+  image_built_at: string | null;
+  last_build_error: string | null;
+  image_size: number | null;
+  /** Live build-job state annotated on the list endpoint (null if none this process). */
+  build_job?: BuildJob | null;
+}
+
+export type NewImage = Pick<Image, 'name' | 'description' | 'dockerfile'> &
+  Partial<Pick<Image, 'build_args' | 'no_cache' | 'pull'>>;
+export type ImagePatch = Partial<NewImage>;
+
+/** Live status for an image (GET /images/:id/status). */
+export interface ImageStatusDetail {
+  image_status: ImageStatus;
+  image_exists: boolean;
+  image_size: number | null;
+  image_built_at: string | null;
+  last_build_error: string | null;
+  build_active: boolean;
+  warnings: string[];
+  referenced_by: Array<{ _id: string; name: string }>;
+}
+
 /** A shared Docker isolation profile (mirrors backend `isolation.model`). */
 export interface Isolation {
   _id: string;
   name: string;
   description: string;
-  dockerfile: string;
-  image_status: 'none' | 'building' | 'built' | 'error';
-  image_built_at: string | null;
-  last_build_error: string | null;
+  /** The image entity this profile runs (see `images`); null until one is picked. */
+  image_id: string | null;
   cpus: string;
   memory: string;
   network: 'host' | 'bridge' | 'none' | 'vpn';
@@ -66,7 +116,7 @@ export type NewIsolation = Pick<
   Isolation,
   | 'name'
   | 'description'
-  | 'dockerfile'
+  | 'image_id'
   | 'cpus'
   | 'memory'
   | 'network'
@@ -115,13 +165,14 @@ export interface IsolationVolume {
 
 /** Live status for an isolation profile (GET /isolations/:id/status). */
 export interface IsolationStatus {
-  image_status: Isolation['image_status'];
-  image_exists: boolean;
+  /** The referenced image (null if none picked) and its build status. */
+  image_id: string | null;
+  image_name: string | null;
+  image_status: ImageStatus | null;
   shared_volume_exists: boolean;
   assigned_agents: Array<{ _id: string; name: string }>;
   instances: IsolationInstance[];
   volumes: IsolationVolume[];
-  warnings: string[];
   ssh_key_set: boolean;
   /** Whether a WireGuard `.conf` is stored, and the gluetun container's docker state. */
   vpn_conf_set: boolean;
@@ -181,7 +232,7 @@ export interface ContainerFilePreview {
 export interface AgentContainerStatus {
   isolation_id: string | null;
   isolation_name: string | null;
-  image_status: Isolation['image_status'] | null;
+  image_status: ImageStatus | null;
   volume_mode: 'individual' | 'shared';
   container_state: string;
   individual_volume_exists: boolean;
@@ -330,10 +381,68 @@ export const agentsApi = {
 /** Callbacks for the streamed image build (Server-Sent Events over fetch). */
 export interface BuildHandlers {
   onLog?: (chunk: string) => void;
-  onWarn?: (msg: string) => void;
-  onDone?: (status: string) => void;
+  onDone?: (size: number | null) => void;
   onError?: (message: string) => void;
 }
+
+/**
+ * Consume a server SSE stream (`fetch`, so we can read the body incrementally), dispatching
+ * `log`/`done`/`error` frames to the handlers. Resolves when the stream closes. Shared by the
+ * image build-log reattach flow.
+ */
+async function consumeBuildStream(url: string, handlers: BuildHandlers): Promise<void> {
+  const token = localStorage.getItem('pleiade_token');
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.body) throw new Error('no response stream');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // SSE frames are separated by a blank line; parse complete frames, keep the remainder.
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() ?? '';
+    for (const frame of frames) {
+      let event = 'message';
+      let data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (!data) continue;
+      const parsed = JSON.parse(data);
+      if (event === 'log') handlers.onLog?.(parsed);
+      else if (event === 'done') handlers.onDone?.(parsed.size ?? null);
+      else if (event === 'error') handlers.onError?.(parsed.message);
+    }
+  }
+}
+
+export const imagesApi = {
+  list: () => api.get<Image[]>('/images').then((r) => r.data),
+  get: (id: string) => api.get<Image>(`/images/${id}`).then((r) => r.data),
+  status: (id: string) => api.get<ImageStatusDetail>(`/images/${id}/status`).then((r) => r.data),
+  builds: () => api.get<BuildJob[]>('/images/builds').then((r) => r.data),
+  create: (body: NewImage) => api.post<Image>('/images', body).then((r) => r.data),
+  update: (id: string, patch: ImagePatch) =>
+    api.patch<Image>(`/images/${id}`, patch).then((r) => r.data),
+  remove: (id: string) => api.delete(`/images/${id}`).then((r) => r.data),
+
+  /** Enqueue a background build (returns immediately; attach to `streamLogs` to watch). */
+  enqueueBuild: (id: string) => api.post(`/images/${id}/build`).then((r) => r.data),
+
+  /**
+   * Attach to an image's build-log SSE stream. Reattaches to an in-flight or just-finished build
+   * (the server replays the buffered log first). Resolves when the stream closes.
+   */
+  streamLogs: (id: string, handlers: BuildHandlers) =>
+    consumeBuildStream(`${API_BASE}/api/images/${id}/build/logs`, handlers),
+};
 
 export const isolationsApi = {
   list: () => api.get<Isolation[]>('/isolations').then((r) => r.data),
@@ -361,45 +470,6 @@ export const isolationsApi = {
         params: force ? { force: 1 } : undefined,
       })
       .then((r) => r.data),
-
-  /**
-   * Trigger an image build and stream its SSE output. Uses `fetch` (not axios) so we can read the
-   * response body incrementally. Resolves when the stream closes.
-   */
-  async build(id: string, handlers: BuildHandlers): Promise<void> {
-    const token = localStorage.getItem('pleiade_token');
-    const res = await fetch(`${API_BASE}/api/isolations/${id}/build`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
-    if (!res.body) throw new Error('no response stream');
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // SSE frames are separated by a blank line; parse complete frames, keep the remainder.
-      const frames = buffer.split('\n\n');
-      buffer = frames.pop() ?? '';
-      for (const frame of frames) {
-        let event = 'message';
-        let data = '';
-        for (const line of frame.split('\n')) {
-          if (line.startsWith('event:')) event = line.slice(6).trim();
-          else if (line.startsWith('data:')) data += line.slice(5).trim();
-        }
-        if (!data) continue;
-        const parsed = JSON.parse(data);
-        if (event === 'log') handlers.onLog?.(parsed);
-        else if (event === 'warn') handlers.onWarn?.(parsed);
-        else if (event === 'done') handlers.onDone?.(parsed.status);
-        else if (event === 'error') handlers.onError?.(parsed.message);
-      }
-    }
-  },
 };
 
 export interface Session {

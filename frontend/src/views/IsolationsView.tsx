@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import Editor from '@monaco-editor/react';
-import { AlertTriangle, Box, Globe, Hammer, HardDrive, KeyRound, Layers, Lock, RefreshCw, Save, Server, Trash2, Users } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, Box, Globe, HardDrive, KeyRound, Layers, Lock, Package, RefreshCw, Save, Server, Trash2, Users } from 'lucide-react';
 import {
   isolationsApi,
+  imagesApi,
+  type Image,
   type Isolation,
   type IsolationStatus,
   type IsolationInstance,
@@ -15,7 +17,8 @@ interface Draft {
   _id?: string;
   name: string;
   description: string;
-  dockerfile: string;
+  /** The Docker image this profile runs (managed on the Images page); '' = none picked. */
+  image_id: string;
   cpus: string;
   memory: string;
   network: Isolation['network'];
@@ -30,23 +33,10 @@ interface Draft {
   sudo_password: string;
 }
 
-const DEFAULT_DOCKERFILE = `# Per-agent isolated runtime.
-# Requirements: bash, python3, and node must remain available for the terminal tool and skills.
-FROM node:22-bookworm-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \\
-    bash python3 python3-pip git curl ca-certificates build-essential \\
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /workspace
-
-# --- Add your customisations here (apt/pip/npm installs, tools, env, etc.) ---
-`;
-
 const blank = (): Draft => ({
   name: '',
   description: '',
-  dockerfile: DEFAULT_DOCKERFILE,
+  image_id: '',
   cpus: '1',
   memory: '1g',
   network: 'host',
@@ -62,7 +52,7 @@ const toDraft = (i: Isolation): Draft => ({
   _id: i._id,
   name: i.name,
   description: i.description,
-  dockerfile: i.dockerfile,
+  image_id: i.image_id ?? '',
   cpus: i.cpus,
   memory: i.memory,
   network: i.network,
@@ -76,17 +66,15 @@ const toDraft = (i: Isolation): Draft => ({
 
 /**
  * Isolation profiles page (master-detail): create/edit/delete reusable Docker environments that
- * agents get assigned to on the Agents page. Each profile owns a Dockerfile + resource/network
- * policy and builds a single shared image.
+ * agents get assigned to on the Agents page. Each profile references a Docker image (built on the
+ * Images page) and layers the resource/network/VPN/SSH runtime policy on top.
  */
 export function IsolationsView() {
   const [items, setItems] = useState<Isolation[]>([]);
+  const [images, setImages] = useState<Image[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<IsolationStatus | null>(null);
-  const [building, setBuilding] = useState(false);
-  const [logs, setLogs] = useState('');
   const [saving, setSaving] = useState(false);
-  const logRef = useRef<HTMLPreElement>(null);
 
   // Global managed-container overview (all profiles): shown in the detail pane instead of an editor.
   const [containers, setContainers] = useState<ManagedContainer[] | null>(null);
@@ -107,11 +95,8 @@ export function IsolationsView() {
   useEffect(() => {
     void refresh();
     void loadContainers();
+    void imagesApi.list().then(setImages).catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    logRef.current?.scrollTo(0, logRef.current.scrollHeight);
-  }, [logs]);
 
   async function loadStatus(id: string) {
     setStatus(await isolationsApi.status(id).catch(() => null));
@@ -120,7 +105,6 @@ export function IsolationsView() {
   function select(i: Isolation) {
     setShowContainers(false);
     setDraft(toDraft(i));
-    setLogs('');
     setStatus(null);
     void loadStatus(i._id);
   }
@@ -128,7 +112,6 @@ export function IsolationsView() {
   function newProfile() {
     setShowContainers(false);
     setDraft(blank());
-    setLogs('');
     setStatus(null);
   }
 
@@ -172,7 +155,7 @@ export function IsolationsView() {
       const fields = {
         name: draft.name,
         description: draft.description,
-        dockerfile: draft.dockerfile,
+        image_id: draft.image_id || null,
         cpus: draft.cpus,
         memory: draft.memory,
         network: draft.network,
@@ -227,26 +210,6 @@ export function IsolationsView() {
     await loadStatus(draft._id);
   }
 
-  async function build() {
-    if (!draft?._id) return;
-    setBuilding(true);
-    setLogs('');
-    try {
-      await isolationsApi.build(draft._id, {
-        onWarn: (m) => setLogs((l) => `${l}⚠ ${m}\n`),
-        onLog: (c) => setLogs((l) => l + c),
-        onDone: (st) => setLogs((l) => `${l}\n✓ build ${st}\n`),
-        onError: (m) => setLogs((l) => `${l}\n✗ ${m}\n`),
-      });
-    } catch (e) {
-      setLogs((l) => `${l}\n✗ ${e instanceof Error ? e.message : String(e)}\n`);
-    } finally {
-      setBuilding(false);
-      await refresh();
-      await loadStatus(draft._id);
-    }
-  }
-
   async function deleteVolume(v: IsolationVolume) {
     if (!draft?._id) return;
     const msg = v.in_use
@@ -267,8 +230,8 @@ export function IsolationsView() {
     if (!draft?._id) return;
     const count = status?.assigned_agents.length ?? 0;
     const warn = count
-      ? `This profile is assigned to ${count} agent(s). Deleting it removes the image, shared volume, and unassigns those agents. Continue?`
-      : 'Delete this isolation profile (removes its image and shared volume)?';
+      ? `This profile is assigned to ${count} agent(s). Deleting it removes the shared volume and unassigns those agents (the image is kept). Continue?`
+      : 'Delete this isolation profile (removes its shared volume; the image is kept)?';
     if (!confirm(warn)) return;
     await isolationsApi.remove(draft._id);
     setDraft(null);
@@ -294,7 +257,11 @@ export function IsolationsView() {
           {items.map((i) => (
             <ListRow key={i._id} active={!showContainers && draft?._id === i._id} onClick={() => select(i)}>
               <Box size={15} /> {i.name}
-              <ImageDot status={i.image_status} />
+              {!i.image_id && (
+                <span className="ml-auto text-[10px] uppercase tracking-wide text-slate-600" title="no image assigned">
+                  no image
+                </span>
+              )}
             </ListRow>
           ))}
         </>
@@ -344,29 +311,47 @@ export function IsolationsView() {
             className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
           />
 
-          {status && status.warnings.length > 0 && (
-            <div className="flex flex-col gap-1 rounded border border-amber-900 bg-amber-950/40 p-2 text-xs text-amber-300">
-              {status.warnings.map((w) => (
-                <span key={w} className="flex items-start gap-1.5">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {w}
-                </span>
-              ))}
+          {/* Docker image — built + managed on the Images page; the profile just references one. */}
+          <div className="space-y-2 rounded-md border border-border bg-surface/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+                <Package size={13} /> Docker image
+              </span>
+              {status && status.image_id && <StatusBadge status={status.image_status ?? 'none'} />}
             </div>
-          )}
-
-          <div className="flex items-center justify-between">
-            <Label>Dockerfile</Label>
-            {status && <StatusBadge status={status.image_status} />}
-          </div>
-          <div className="overflow-hidden rounded border border-border">
-            <Editor
-              height="260px"
-              defaultLanguage="dockerfile"
-              theme="vs-dark"
-              value={draft.dockerfile}
-              onChange={(v) => setDraft({ ...draft, dockerfile: v ?? '' })}
-              options={{ minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
-            />
+            <div className="flex items-center gap-2">
+              <select
+                value={draft.image_id}
+                onChange={(e) => setDraft({ ...draft, image_id: e.target.value })}
+                className="flex-1 rounded border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
+              >
+                <option value="">— no image (agents can't launch) —</option>
+                {images.map((img) => (
+                  <option key={img._id} value={img._id}>
+                    {img.name}
+                    {img.image_status !== 'built' ? ` (${img.image_status})` : ''}
+                  </option>
+                ))}
+              </select>
+              <Link
+                to="/images"
+                className="shrink-0 rounded border border-border px-2.5 py-1.5 text-xs text-slate-300 hover:border-accent"
+              >
+                Manage images
+              </Link>
+            </div>
+            {draft.image_id && status?.image_status && status.image_status !== 'built' && (
+              <p className="flex items-center gap-1.5 text-[11px] text-amber-400">
+                <AlertTriangle size={12} /> This image is not built yet — build it on the{' '}
+                <Link to="/images" className="underline">
+                  Images
+                </Link>{' '}
+                page, or agents on this profile will error.
+              </p>
+            )}
+            <p className="text-[11px] text-slate-500">
+              Save any image change first — assigned agents pick up the new image on their next run.
+            </p>
           </div>
 
           <div className="grid grid-cols-4 gap-2 text-xs">
@@ -576,40 +561,19 @@ export function IsolationsView() {
           </div>
 
           {isNew ? (
-            <p className="text-xs text-slate-500">Save the profile before building its image.</p>
+            <p className="text-xs text-slate-500">Save the profile, then assign a built image and agents.</p>
           ) : (
             <>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  onClick={build}
-                  disabled={building}
-                  className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                >
-                  <Hammer size={13} /> {building ? 'Building…' : 'Build image'}
-                </button>
-                {status && (
-                  <span className="flex items-center gap-1 text-xs text-slate-500">
-                    <Users size={13} /> {status.assigned_agents.length} agent(s) assigned
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Save any Dockerfile edits first, then Build. Assigned agents pick up the new image on
-                their next run. Network <code>{draft.network}</code> — pick <code>host</code> for LAN access.
-              </p>
+              {status && (
+                <div className="flex items-center gap-1 text-xs text-slate-500">
+                  <Users size={13} /> {status.assigned_agents.length} agent(s) assigned · network{' '}
+                  <code>{draft.network}</code> — pick <code>host</code> for LAN access.
+                </div>
+              )}
 
               {status && <InstancesSection instances={status.instances} />}
               {status && <VolumesSection volumes={status.volumes} onDelete={deleteVolume} />}
             </>
-          )}
-
-          {logs && (
-            <pre
-              ref={logRef}
-              className="max-h-64 overflow-auto rounded border border-border bg-black/60 p-2 font-mono text-[11px] leading-relaxed text-slate-300"
-            >
-              {logs}
-            </pre>
           )}
         </div>
       )}
@@ -736,7 +700,7 @@ function StatusBadge({ status }: { status: string }) {
   const color =
     status === 'built'
       ? 'text-emerald-400 border-emerald-900'
-      : status === 'building'
+      : status === 'building' || status === 'queued'
         ? 'text-amber-400 border-amber-900'
         : status === 'error'
           ? 'text-red-400 border-red-900'
@@ -746,18 +710,6 @@ function StatusBadge({ status }: { status: string }) {
       image: {status}
     </span>
   );
-}
-
-function ImageDot({ status }: { status: string }) {
-  const color =
-    status === 'built'
-      ? 'bg-emerald-400'
-      : status === 'building'
-        ? 'bg-amber-400'
-        : status === 'error'
-          ? 'bg-red-400'
-          : 'bg-slate-600';
-  return <span className={`ml-auto h-1.5 w-1.5 rounded-full ${color}`} title={`image: ${status}`} />;
 }
 
 function Label({ children }: { children: ReactNode }) {

@@ -7,6 +7,11 @@ export const isolationRepository = {
     return IsolationModel.find().sort({ name: 1 }).exec();
   },
 
+  /** Profiles that reference a given image (used to fan out container recreation on rebuild). */
+  listByImage(imageId: string | Types.ObjectId): Promise<IsolationDoc[]> {
+    return IsolationModel.find({ image_id: imageId }).exec();
+  },
+
   findById(id: string | Types.ObjectId): Promise<IsolationDoc | null> {
     return IsolationModel.findById(id).exec();
   },
@@ -47,7 +52,7 @@ export const isolationRepository = {
   create(input: {
     name: string;
     description?: string;
-    dockerfile?: string;
+    image_id?: string | null;
     cpus?: string;
     memory?: string;
     network?: string;

@@ -218,13 +218,27 @@ class DockerService {
   /**
    * Build an image from a Dockerfile string. The Dockerfile is streamed to `docker build` via
    * stdin with an empty build context (`-`), so no temp directory or COPY-able files are needed.
-   * Build output is streamed through `onOutput`.
+   * Build output is streamed through `onOutput`. `opts` maps to `--build-arg`/`--no-cache`/`--pull`.
    */
-  async build(image: string, dockerfile: string, onOutput: (chunk: string) => void): Promise<void> {
-    log.info({ image }, 'building agent image');
+  async build(
+    image: string,
+    dockerfile: string,
+    onOutput: (chunk: string) => void,
+    opts: { buildArgs?: Array<{ key: string; value: string }>; noCache?: boolean; pull?: boolean } = {},
+  ): Promise<void> {
+    log.info({ image, noCache: opts.noCache, pull: opts.pull }, 'building image');
     // `docker build -` reads the Dockerfile from stdin with an empty build context (no COPY/ADD
     // of local files — the default template doesn't need any). Progress is streamed via onOutput.
-    const res = await this.run(['build', '-t', image, '-'], {
+    const argv = ['build', '-t', image];
+    if (opts.noCache) argv.push('--no-cache');
+    if (opts.pull) argv.push('--pull');
+    // Build args are passed as argv (never a shell string); an empty value is still forwarded so
+    // `ARG FOO` without a default resolves to "".
+    for (const { key, value } of opts.buildArgs ?? []) {
+      if (key.trim()) argv.push('--build-arg', `${key}=${value}`);
+    }
+    argv.push('-');
+    const res = await this.run(argv, {
       stdin: dockerfile,
       onOutput,
       timeoutMs: env.AGENT_BUILD_TIMEOUT_MS,
@@ -232,6 +246,14 @@ class DockerService {
     if (res.exitCode !== 0) {
       throw new Error(res.timedOut ? 'docker build timed out' : `docker build failed (exit ${res.exitCode})`);
     }
+  }
+
+  /** Size in bytes of a built image, or `null` if it doesn't exist / can't be read. */
+  async imageSize(image: string): Promise<number | null> {
+    const res = await this.run(['image', 'inspect', '-f', '{{.Size}}', image]);
+    if (res.exitCode !== 0) return null;
+    const n = Number(res.stdout.trim());
+    return Number.isFinite(n) ? n : null;
   }
 
   async removeImage(image: string): Promise<void> {

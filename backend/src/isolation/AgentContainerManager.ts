@@ -7,12 +7,13 @@ import { vpnConfigForIsolation, gluetunEnvArgs } from './vpn.service';
 import {
   agentContainerName,
   agentVolumeName,
-  isoImageName,
+  imgImageName,
   isoGluetunName,
   isoSharedVolumeName,
   HARNESS_DIR,
   WORKSPACE_DIR,
 } from './names';
+import { imageRepository } from '../domain/images/image.repository';
 
 const log = createLogger('agent-container');
 
@@ -60,7 +61,8 @@ export interface IsolatedAgent {
 /** The isolation-profile inputs the manager needs (from the isolation doc). */
 export interface IsolationProfile {
   _id: unknown;
-  image_status: string;
+  /** The image entity this profile runs (see `images` collection); null until one is picked. */
+  image_id: unknown;
   cpus: string;
   memory: string;
   network: string;
@@ -154,12 +156,20 @@ class AgentContainerManager {
     agentId: string,
   ): Promise<AgentExecutor> {
     const isoId = String(iso._id);
-    const image = isoImageName(isoId);
     const container = agentContainerName(agentId);
 
-    if (iso.image_status !== 'built' || !(await dockerService.imageExists(image))) {
+    // Resolve the profile's referenced image; the container is created from its tag.
+    if (!iso.image_id) {
       throw new IsolationNotReadyError(
-        `Isolation image is not built. Open the Isolation page, select this agent's profile, and click Build.`,
+        `This agent's isolation profile has no image assigned. Open the Isolation page, select the profile, and pick a Docker image.`,
+      );
+    }
+    const imageId = String(iso.image_id);
+    const image = imgImageName(imageId);
+    const imageDoc = await imageRepository.findById(imageId);
+    if (!imageDoc || imageDoc.image_status !== 'built' || !(await dockerService.imageExists(image))) {
+      throw new IsolationNotReadyError(
+        `The Docker image for this profile is not built. Open the Images page, select it, and click Build.`,
       );
     }
 
@@ -177,7 +187,7 @@ class AgentContainerManager {
 
     const state = await dockerService.containerState(container);
     if (state === null) {
-      await this.createAndProvision(agent, iso, agentId, networkOverride);
+      await this.createAndProvision(agent, iso, agentId, image, networkOverride);
     } else if (state !== 'running') {
       await dockerService.startContainer(container);
     }
@@ -231,11 +241,12 @@ class AgentContainerManager {
     return { name, recreated: true };
   }
 
-  /** Create the container from the profile image, start it, and plant the skill harnesses. */
+  /** Create the container from the profile's image, start it, and plant the skill harnesses. */
   private async createAndProvision(
     agent: IsolatedAgent,
     iso: IsolationProfile,
     agentId: string,
+    image: string,
     networkOverride?: string,
   ): Promise<void> {
     const isoId = String(iso._id);
@@ -251,7 +262,7 @@ class AgentContainerManager {
     log.info({ agentId, isoId, volumeMode: agent.isolation_volume_mode }, 'creating agent container');
     await dockerService.createContainer({
       container: agentContainerName(agentId),
-      image: isoImageName(isoId),
+      image,
       volume,
       workdir: WORKSPACE_DIR,
       cpus: iso.cpus || env.AGENT_CONTAINER_CPUS,
@@ -387,19 +398,20 @@ class AgentContainerManager {
   }
 
   /**
-   * Teardown for an isolation profile: remove every assigned agent's container, then the shared
-   * image and (optionally) the shared workspace volume. Individual agent volumes are left intact.
+   * Teardown for an isolation profile: remove every assigned agent's container, its gluetun
+   * container, and (optionally) the shared workspace volume. Individual agent volumes are left
+   * intact. The image is NOT removed — it belongs to the standalone `Image` entity, which may back
+   * other profiles; images are deleted from the Images page.
    */
   async teardownIsolation(
     isoId: string,
     agentIds: string[],
-    opts: { removeImage?: boolean; removeSharedVolume?: boolean } = {},
+    opts: { removeSharedVolume?: boolean } = {},
   ): Promise<void> {
     for (const agentId of agentIds) {
       await this.removeAgentContainer(agentId).catch(() => undefined);
     }
     await this.teardownGluetun(isoId);
-    if (opts.removeImage) await dockerService.removeImage(isoImageName(isoId));
     if (opts.removeSharedVolume) await dockerService.removeVolume(isoSharedVolumeName(isoId));
   }
 }

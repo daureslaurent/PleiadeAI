@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
+import { ContainerBanner } from './ContainerBanner';
 import { useStream, buildBlocks, type ContextUsage, type Turn } from '../../store/stream';
 import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
@@ -229,6 +230,9 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
           <Bug size={14} /> Debugger
         </button>
       </div>
+
+      {/* Isolation warning: stopped / unbuilt container for the active agent (best-effort, self-hiding) */}
+      <ContainerBanner agent={agent} />
 
       {/* Messages */}
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-6">

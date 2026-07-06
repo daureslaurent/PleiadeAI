@@ -20,6 +20,7 @@ import { llmRouter } from './transport/http/routes/llm.routes';
 import { endpointService } from './domain/endpoints/endpoint.service';
 import { toolsRouter } from './transport/http/routes/tools.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
+import { imagesRouter } from './transport/http/routes/images.routes';
 import { transferRouter } from './transport/http/routes/transfer.routes';
 import { hostRouter } from './transport/http/routes/host.routes';
 import { scheduleUpdateCheck } from './host';
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   app.use('/api/llm', requireAuth, llmRouter);
   app.use('/api/tools', requireAuth, toolsRouter);
   app.use('/api/isolations', requireAuth, isolationsRouter);
+  app.use('/api/images', requireAuth, imagesRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
   app.use('/api/host', requireAuth, hostRouter);
 

@@ -2,7 +2,12 @@ import path from 'node:path';
 import { Router, type Request, type Response } from 'express';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { isolationRepository } from '../../../domain/isolations/isolation.repository';
-import { agentContainerManager } from '../../../isolation/AgentContainerManager';
+import { imageRepository } from '../../../domain/images/image.repository';
+import {
+  agentContainerManager,
+  type IsolatedAgent,
+  type IsolationProfile,
+} from '../../../isolation/AgentContainerManager';
 import { dockerService } from '../../../isolation/docker.service';
 import { agentContainerName, agentVolumeName, WORKSPACE_DIR } from '../../../isolation/names';
 import { createLogger } from '../../../config/logger';
@@ -68,6 +73,7 @@ agentContainerRouter.get('/', async (req, res) => {
   }
   const id = String(agent._id);
   const iso = agent.isolation_id ? await isolationRepository.findById(agent.isolation_id) : null;
+  const image = iso?.image_id ? await imageRepository.findById(String(iso.image_id)) : null;
   const [containerStateRaw, volumeExists] = await Promise.all([
     dockerService.containerState(agentContainerName(id)),
     dockerService.volumeExists(agentVolumeName(id)),
@@ -75,7 +81,7 @@ agentContainerRouter.get('/', async (req, res) => {
   res.json({
     isolation_id: agent.isolation_id ? String(agent.isolation_id) : null,
     isolation_name: iso?.name ?? null,
-    image_status: iso?.image_status ?? null,
+    image_status: image?.image_status ?? null,
     volume_mode: agent.isolation_volume_mode,
     container_state: containerStateRaw ?? 'absent',
     individual_volume_exists: volumeExists,
@@ -135,7 +141,10 @@ agentContainerRouter.post('/start', async (req, res) => {
     return;
   }
   try {
-    await agentContainerManager.ensureReady(agent, iso);
+    await agentContainerManager.ensureReady(
+      agent as unknown as IsolatedAgent,
+      iso as unknown as IsolationProfile,
+    );
     res.status(204).end();
   } catch (err) {
     res.status(409).json({ error: 'not_ready', message: err instanceof Error ? err.message : String(err) });
