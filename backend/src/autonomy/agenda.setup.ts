@@ -73,12 +73,14 @@ export async function setupAgenda(): Promise<Agenda> {
     const startedAt = new Date();
     let answer: string;
     try {
-      answer = await agentRunner.run({
-        agentName,
-        sessionId: `cron-${randomUUID()}`,
-        depth: 0,
-        userText: prompt,
-      });
+      answer = (
+        await agentRunner.run({
+          agentName,
+          sessionId: `cron-${randomUUID()}`,
+          depth: 0,
+          userText: prompt,
+        })
+      ).text;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await runResultRepository

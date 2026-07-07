@@ -11,10 +11,16 @@ export interface ToolContext {
   /**
    * Cross-agent dispatcher, injected by the orchestrator. Present only when the current
    * run is allowed to spawn sub-agents (the hop guard may withhold it at max depth).
-   * Returns the sub-agent's final text answer. `images` (optional) forwards attachments to the
-   * sub-agent's turn (e.g. hand a user-dropped image to a vision specialist).
+   * Returns the sub-agent's final `text` answer plus any `images` it acquired during its turn and is
+   * handing back to the caller (pictures flow both ways). `images` arg (optional) forwards attachments
+   * *down* to the sub-agent's turn (e.g. hand a user-dropped image to a vision specialist). Kept as an
+   * inline structural type so the tool layer never imports the AgentRunner (avoids a dependency cycle).
    */
-  invokeSubAgent?: (targetAgentName: string, query: string, images?: ImageBlock[]) => Promise<string>;
+  invokeSubAgent?: (
+    targetAgentName: string,
+    query: string,
+    images?: ImageBlock[],
+  ) => Promise<{ text: string; images?: ImageBlock[] }>;
   /**
    * Back-channel to the agent that delegated this run (present only on a delegated sub-agent run
    * while a hop remains). Re-runs the caller as an inference turn — seeded with the caller's

@@ -13,7 +13,10 @@ const log = createLogger('tool:ask_agent');
 export const askAgent: Tool = {
   name: 'ask_agent',
   description:
-    'Delegate a question or task to another agent by name and receive its final answer. Use for cross-domain work outside your own scope.',
+    'Delegate a question or task to another agent by name and receive its final answer. Use for ' +
+    'cross-domain work outside your own scope. The sub-agent may hand images back with its answer ' +
+    '(e.g. a screenshot or generated picture); those are loaded into your turn as new img_ handles you ' +
+    'can then analyse (`analyze_image`) or forward onward — the tool result lists their count.',
   parameters: {
     type: 'object',
     properties: {
@@ -77,8 +80,23 @@ export const askAgent: Tool = {
     );
 
     try {
-      const answer = await ctx.invokeSubAgent(target, query, images);
-      return { result: { ok: true, agent: target, answer, forwarded_images: images?.length ?? 0 } };
+      const { text, images: returned } = await ctx.invokeSubAgent(target, query, images);
+      // Images the sub-agent handed back join this turn's pool (via ToolResult.images → the runner
+      // registers them), so the caller can see, analyse, or re-forward them — the return path mirrors
+      // the forward path. Strip the child's handles: they're only meaningful in the child's turn, and
+      // the caller's pool assigns fresh, collision-free ones (preserving them could clobber a handle
+      // the caller already uses).
+      const handedBack = returned?.map((i) => ({ dataUrl: i.dataUrl })) ?? [];
+      return {
+        result: {
+          ok: true,
+          agent: target,
+          answer: text,
+          forwarded_images: images?.length ?? 0,
+          returned_images: handedBack.length,
+        },
+        images: handedBack.length ? handedBack : undefined,
+      };
     } catch (err) {
       return { result: { ok: false, error: err instanceof Error ? err.message : String(err) } };
     }

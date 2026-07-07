@@ -93,7 +93,7 @@ export function attachSocket(httpServer: HttpServer): Server {
 
       sessionLock.acquireUserSession(lockKey);
       try {
-        const answer = await agentRunner.run({
+        const { text: answer } = await agentRunner.run({
           agentName: input.agentName,
           sessionId,
           depth: 0,

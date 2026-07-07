@@ -95,12 +95,23 @@ export interface RunInput {
 }
 
 /**
+ * The outcome of one run: the agent's final text answer, plus any images it acquired during the turn
+ * (read from disk, produced by a skill, or handed back by its own sub-agents). A delegated run hands
+ * those images back to its caller so pictures flow *both* ways across an `ask_agent` hop — the caller
+ * forwards images down, and the sub-agent can return images up. Top-level callers use `.text` only.
+ */
+export interface RunResult {
+  text: string;
+  images: ImageBlock[];
+}
+
+/**
  * Executes a single agent's turn: streams tokens (split into reasoning/output), runs any tool
  * calls through the sandbox, and recurses across `ask_agent` hops. Emits the full event trace
  * on the EventBus so the WS bridge and Pino logs get identical transparency.
  */
 export class AgentRunner {
-  async run(input: RunInput): Promise<string> {
+  async run(input: RunInput): Promise<RunResult> {
     // Resolve tolerantly: an `ask_agent` hop's target comes from the model and is often a near-miss
     // of the exact name (wrong case, or the qdrant namespace). `resolveByName` widens the match so
     // the delegation lands instead of throwing "agent not found". Direct (depth-0) runs pass the
@@ -442,7 +453,12 @@ export class AgentRunner {
       );
     }
 
-    return finalText;
+    // Hand back the images this turn *acquired* (source `tool`: read from disk, produced by a skill,
+    // or returned by its own sub-agents) — not the ones a caller forwarded in (those are already the
+    // caller's). A delegated run's caller folds these into its own turn via `ask_agent`; a top-level
+    // caller ignores them (the images already rendered in this agent's own turn).
+    const handBack = imagePool.all().filter((i) => i.source === 'tool');
+    return { text: finalText, images: handBack };
   }
 
   /**
@@ -644,7 +660,7 @@ export class AgentRunner {
    * agent's clean conversation, threaded onto the child as `caller` so the child can `ask_parent`.
    */
   private makeInvoker(parentCtx: EventContext, callerHistory: ChatMessage[], signal?: AbortSignal) {
-    return (targetAgentName: string, query: string, images?: ImageBlock[]): Promise<string> =>
+    return (targetAgentName: string, query: string, images?: ImageBlock[]): Promise<RunResult> =>
       this.hop(parentCtx, targetAgentName, query, {
         userText: query,
         images,
@@ -663,17 +679,18 @@ export class AgentRunner {
     caller: NonNullable<RunInput['caller']>,
     signal?: AbortSignal,
   ) {
-    return (question: string): Promise<string> => {
+    return async (question: string): Promise<string> => {
       const framed =
         `You previously delegated this task to your sub-agent "${childCtx.agentName}":\n` +
         `"${caller.task}"\n\n` +
         `The sub-agent needs clarification before it can continue:\n"${question}"\n\n` +
         'Answer its question directly so it can proceed.';
-      return this.hop(childCtx, caller.agentName, question, {
+      const { text } = await this.hop(childCtx, caller.agentName, question, {
         userText: framed,
         history: caller.history,
         signal,
       });
+      return text;
     };
   }
 
@@ -687,7 +704,7 @@ export class AgentRunner {
     targetAgentName: string,
     query: string,
     run: Pick<RunInput, 'userText' | 'history' | 'caller' | 'signal' | 'images'>,
-  ): Promise<string> {
+  ): Promise<RunResult> {
     const childDepth = fromCtx.depth + 1;
     if (!hopGuard.canHop(childDepth)) {
       throw new Error(`max agent hop depth (${hopGuard.max}) exceeded`);

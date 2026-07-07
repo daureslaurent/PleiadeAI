@@ -48,3 +48,18 @@ run in different containers), so delegation forwards image *bytes* keyed by hand
 ## UI phase (after backend verified)
 
 - `bridge` passes `images` through on `tool:execution_complete`; tool-result card renders thumbnails.
+
+## Return path — sub-agent hands images back up (added)
+
+Pictures now flow **both** ways across an `ask_agent` hop, not just parent→child.
+
+- `AgentRunner.run` returns `RunResult { text, images }`; a run hands back the images it *acquired*
+  this turn (pool `source === 'tool'`: read from disk, produced by a skill, or returned by its own
+  sub-agents) — not the ones a caller forwarded in. Propagates transitively up a hop chain.
+- `ToolContext.invokeSubAgent` returns `{ text, images }` (inline structural type — no AgentRunner
+  import). `ask_agent` puts `text` in its answer and returns the images as `ToolResult.images`, so the
+  caller's `executeToolCall` registers them into the caller's pool with **fresh** handles (child
+  handles are stripped first — they're only meaningful in the child's turn and could otherwise clobber
+  a caller handle) and folds the handle note + pixels (multimodal) into the caller's turn.
+- Top-level callers (`socket`, `telegram`, `agenda`) use `.text` only.
+

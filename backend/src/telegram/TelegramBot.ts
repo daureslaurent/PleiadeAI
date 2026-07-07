@@ -191,14 +191,16 @@ class TelegramBot {
 
       let answer: string;
       try {
-        answer = await agentRunner.run({
-          agentName: agent.name,
-          sessionId: `telegram-${chatId}`,
-          depth: 0,
-          userText: text,
-          history: session.history,
-          signal: abort.signal,
-        });
+        answer = (
+          await agentRunner.run({
+            agentName: agent.name,
+            sessionId: `telegram-${chatId}`,
+            depth: 0,
+            userText: text,
+            history: session.history,
+            signal: abort.signal,
+          })
+        ).text;
       } finally {
         clearInterval(keepTyping);
       }
