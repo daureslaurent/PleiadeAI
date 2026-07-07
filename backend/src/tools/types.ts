@@ -92,6 +92,12 @@ export interface ToolContext {
    * handle, never by filesystem path.
    */
   attachedImages?: ImageBlock[];
+  /**
+   * The tools this agent can call this turn (name + description + JSON-schema parameters), as resolved
+   * by the orchestrator. Lets the `guide` tool scope its index to what the agent actually has and
+   * auto-generate a guide for any tool that lacks a curated one.
+   */
+  availableTools?: { name: string; description: string; parameters: unknown }[];
 }
 
 export interface ToolResult {

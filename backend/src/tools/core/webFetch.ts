@@ -257,8 +257,10 @@ export const webFetch: Tool = {
             filename,
             note:
               `[binary ${mime}, ${formatBytes(buf.length)} — saved as ${stored.handle}. ` +
-              `Save it with \`write\` (from_handle: "${stored.handle}") or forward with \`ask_agent\`. ` +
-              `Not shown inline${overBytes ? '; body exceeded max_bytes and was capped' : ''}.]`,
+              `Write it to a file with \`write\` (from_handle: "${stored.handle}") or the \`data\` tool. ` +
+              `It's shared across the whole session, so to hand it to another agent just name ` +
+              `"${stored.handle}" when you \`ask_agent\`. Not shown inline` +
+              `${overBytes ? '; body exceeded max_bytes and was capped' : ''}.]`,
           },
           resources: [block],
         };

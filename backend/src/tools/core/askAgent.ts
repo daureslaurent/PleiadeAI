@@ -14,9 +14,11 @@ export const askAgent: Tool = {
   name: 'ask_agent',
   description:
     'Delegate a question or task to another agent by name and receive its final answer. Use for ' +
-    'cross-domain work outside your own scope. The sub-agent may hand images back with its answer ' +
-    '(e.g. a screenshot or generated picture); those are loaded into your turn as new img_ handles you ' +
-    'can then analyse (`analyze_image`) or forward onward — the tool result lists their count.',
+    'cross-domain work outside your own scope. Images available this turn are forwarded so the ' +
+    'delegate can see them. Binary resources (blob_ handles) are NOT forwarded as pixels — they are ' +
+    "already shared across the whole session, so to hand a blob to the delegate just name its handle " +
+    'in `query` (e.g. "analyse blob_1"); it reaches it with the `data` tool. The sub-agent may hand ' +
+    'images back, loaded into your turn as new img_ handles.',
   parameters: {
     type: 'object',
     properties: {
@@ -54,25 +56,22 @@ export const askAgent: Tool = {
       return { result: { ok: false, error: 'agent and query are required' } };
     }
 
-    // Forward images unless the caller opts out. `include_image` defaults to true so a plain "delegate
-    // this image to X" works; there's nothing to forward when the turn has no image. A subset can be
-    // named by handle via `image_ids`; otherwise all of the turn's images go. Handles are preserved on
-    // the forwarded blocks so the sub-agent references the same img_N. Never a filesystem path.
-    const pool = ctx.attachedImages ?? [];
-    let images: typeof pool | undefined;
-    if (args.include_image === false || pool.length === 0) {
+    // Forward images (pixels) unless the caller opts out — blobs are excluded: they're session-shared,
+    // so the delegate reaches them by handle via the `data` tool (no bytes to move, no re-persist).
+    // `include_image` defaults to true; a subset can be named by handle via `image_ids`. Handles are
+    // preserved on the forwarded blocks so the sub-agent references the same img_N. Never a file path.
+    const pics = (ctx.attachedImages ?? []).filter((i) => (i.kind ?? 'image') === 'image' && i.dataUrl);
+    let images: typeof pics | undefined;
+    if (args.include_image === false || pics.length === 0) {
       images = undefined;
     } else if (Array.isArray(args.image_ids) && args.image_ids.length) {
       const wanted = new Set(args.image_ids.map((v) => String(v)));
-      images = pool.filter((i) => i.id != null && wanted.has(i.id));
-      if (images.length === 0) {
-        const known = pool.map((i) => i.id).filter(Boolean).join(', ') || '(none have handles)';
-        return {
-          result: { ok: false, error: `no image matched image_ids ${JSON.stringify(args.image_ids)} (available: ${known})` },
-        };
-      }
+      const named = pics.filter((i) => i.id != null && wanted.has(i.id));
+      // Named handles that resolve to blobs aren't forwarded as pixels — that's fine, the delegate
+      // still reaches them via `data` in the shared session. Only send anything if images matched.
+      images = named.length ? named : undefined;
     } else {
-      images = pool;
+      images = pics;
     }
     log.info(
       { from: ctx.agentName, to: target, forwarding: images?.length ?? 0 },
@@ -81,12 +80,15 @@ export const askAgent: Tool = {
 
     try {
       const { text, images: returned } = await ctx.invokeSubAgent(target, query, images);
-      // Resources the sub-agent handed back join this turn's pool (via ToolResult.images → the runner
-      // registers them), so the caller can see, analyse, or re-forward them — the return path mirrors
-      // the forward path. Strip the child's handle (`id`) only: it's meaningful just in the child's
-      // turn, and the caller's pool assigns a fresh, collision-free one. Everything else (kind, mime,
-      // blob storageId, …) is preserved so a forwarded blob stays a blob and needn't be re-stored.
-      const handedBack = returned?.map(({ id: _id, ...rest }) => rest) ?? [];
+      // Images the sub-agent handed back join this turn's pool (via ToolResult.images → the runner
+      // registers them), so the caller can see, analyse, or re-forward them. Only images ride back:
+      // any blob the sub-agent made is already session-shared and reachable by handle, so re-handing
+      // it would just duplicate it under a new handle. Strip the child's handle (`id`) so the caller's
+      // pool assigns a fresh, collision-free one.
+      const handedBack =
+        returned
+          ?.filter((i) => (i.kind ?? 'image') === 'image' && i.dataUrl)
+          .map(({ id: _id, ...rest }) => rest) ?? [];
       return {
         result: {
           ok: true,

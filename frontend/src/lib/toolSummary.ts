@@ -1,7 +1,9 @@
 import {
   BookUser,
   Brain,
+  BookOpen,
   CalendarClock,
+  Database,
   Eye,
   FileDiff,
   FilePen,
@@ -200,6 +202,25 @@ export function describeTool(
     case 'annuaire': {
       const v = str(args.agent);
       return { Icon: BookUser, value: v, title: v };
+    }
+    case 'guide': {
+      const topic = str(args.topic);
+      return { Icon: BookOpen, value: topic || 'index', title: topic || 'guide index' };
+    }
+    case 'data': {
+      const act = str(args.action);
+      const handle = str(args.handle);
+      const path = str(args.path);
+      let value = act;
+      if (act === 'save') value = `${handle} → ${shortenPath(path)}`.trim();
+      else if (act === 'store') value = path ? shortenPath(path) : 'store';
+      const count = n(r.count);
+      return {
+        Icon: Database,
+        value,
+        title: path || handle || act,
+        hint: done && act === 'list' && count != null ? `${count} item${count === 1 ? '' : 's'}` : str(r.handle) || undefined,
+      };
     }
     case 'set_agent_parameter': {
       const key = str(args.key ?? args.name);

@@ -121,11 +121,14 @@ export class AgentExecutor {
    */
   run(
     command: string,
-    opts: { timeoutMs: number; onOutput?: (chunk: string) => void },
+    opts: { timeoutMs: number; onOutput?: (chunk: string) => void; stdin?: string },
   ): Promise<ExecResult> {
     return dockerService.exec(this.container, ['bash', '-lc', wrapWithSession(command)], {
       timeoutMs: opts.timeoutMs,
       onOutput: opts.onOutput,
+      // Large payloads (e.g. writing a fetched blob to a file) arrive on stdin, not as an argv
+      // string — an arg that big overflows ARG_MAX (`E2BIG`).
+      stdin: opts.stdin,
     });
   }
 

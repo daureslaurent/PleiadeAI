@@ -15,6 +15,8 @@ import { bash } from './core/bash';
 import { scheduleTask } from './core/scheduleTask';
 import { visualScreenshot, visualAct, visualClick, visualWindows } from './core/visual';
 import { analyzeImage } from './core/analyzeImage';
+import { data } from './core/data';
+import { guide } from './core/guide';
 import { read } from './core/fs/read';
 import { write } from './core/fs/write';
 import { edit } from './core/fs/edit';
@@ -52,6 +54,10 @@ const CORE_TOOLS: Record<string, Tool> = {
   [visualClick.name]: visualClick,
   [visualWindows.name]: visualWindows,
   [analyzeImage.name]: analyzeImage,
+  // Session resource pool (list/save/store) — auto-granted to every agent (see AgentRunner).
+  [data.name]: data,
+  // Man-style tool/workflow guides — auto-granted to every agent (see AgentRunner).
+  [guide.name]: guide,
   // OpenCode-compatible file tools (opt-in per agent via tools_allowed).
   [read.name]: read,
   [write.name]: write,

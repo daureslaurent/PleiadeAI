@@ -17,6 +17,8 @@ import { resolveTools, VISUAL_TOOL_NAMES } from '../tools/registry';
 import { annuaire } from '../tools/core/annuaire';
 import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
+import { data } from '../tools/core/data';
+import { guide } from '../tools/core/guide';
 import { read } from '../tools/core/fs/read';
 import { askParent } from '../tools/core/askParent';
 import { askUser } from '../tools/core/askUser';
@@ -198,11 +200,15 @@ export class AgentRunner {
       ? [...agent.tools_allowed, ...visualTools, ...imageTools]
       : [...agent.tools_allowed, annuaire.name, askAgent.name, ...visualTools, ...imageTools];
     // Every agent can reach the operator via `ask_user`; only a delegated run (has a caller) gets
-    // `ask_parent` to bounce a question back up. The global kill-switch in resolveTools still wins.
+    // `ask_parent` to bounce a question back up. Every agent also gets `data` so it can see, save,
+    // and store the session's shared resource pool — that's how a delegate reaches a blob/image its
+    // caller handed it by handle. The global kill-switch in resolveTools still wins.
     const effectiveTools = [
       ...new Set([
         ...orchestrationTools,
         askUser.name,
+        data.name,
+        guide.name,
         ...(input.caller ? [askParent.name] : []),
       ]),
     ];
@@ -698,6 +704,11 @@ export class AgentRunner {
       emitVisualAct: (payload) =>
         eventBus.emit('tool:visual_act', { ctx, callId: call.id, ...payload }),
       attachedImages: delegation.pool.all(),
+      availableTools: [...toolMap.values()].map((t) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      })),
       exec,
       isolationError,
     };
@@ -770,9 +781,10 @@ export class AgentRunner {
           .map((b) => `${b.id} (${b.mime ?? 'binary'}, ${formatBytes(b.size ?? 0)})`)
           .join(', ');
         parts.push(
-          `${blobs.length} binary resource${blobs.length > 1 ? 's' : ''} saved as ${detail} — not ` +
-            `in your context; save one to a file with \`write\` (from_handle) or forward with ` +
-            `\`ask_agent\` (image_ids).`,
+          `${blobs.length} binary resource${blobs.length > 1 ? 's' : ''} saved as ${detail} — not in ` +
+            `your context. Use the \`data\` tool: \`data\` (save) writes it to a file, and it persists ` +
+            `for the whole session, so to hand it to another agent just name the handle when you ` +
+            `\`ask_agent\` (they read it with \`data\`).`,
         );
       }
       const note = `[${parts.join(' ')} Do not pass a file path.]`;

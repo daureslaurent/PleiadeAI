@@ -35,15 +35,21 @@ export function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Run a shell command in the agent's environment (container when isolated, else backend). */
+/**
+ * Run a shell command in the agent's environment (container when isolated, else backend). Pass
+ * `stdin` to stream a large payload into the command instead of embedding it in the argv — an argv
+ * string over ~2 MB overflows the kernel's `ARG_MAX` (`spawn E2BIG`), which is exactly what a
+ * base64-in-argument write of a multi-megabyte blob hit.
+ */
 export async function runInEnv(
   ctx: ToolContext,
   command: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  stdin?: string,
 ): Promise<EnvExecResult> {
   if (ctx.isolationError) throw new IsolationBlockedError(ctx.isolationError);
 
-  if (ctx.exec) return ctx.exec.run(command, { timeoutMs });
+  if (ctx.exec) return ctx.exec.run(command, { timeoutMs, stdin });
 
   return new Promise<EnvExecResult>((resolve) => {
     // `-c` (not `-lc`): a login shell would source profiles whose stdout could corrupt the
@@ -66,6 +72,12 @@ export async function runInEnv(
       clearTimeout(timer);
       resolve({ exitCode: timedOut ? 124 : (code ?? -1), stdout, stderr, timedOut });
     });
+    if (stdin !== undefined) {
+      child.stdin.on('error', () => {
+        /* command may exit before draining stdin (e.g. bad path) — swallow EPIPE. */
+      });
+      child.stdin.end(stdin);
+    }
   });
 }
 
@@ -85,11 +97,15 @@ export async function readFileBytes(ctx: ToolContext, path: string): Promise<Buf
   return Buffer.from(r.stdout.replace(/\s+/g, ''), 'base64');
 }
 
-/** Write raw bytes to a file in the environment (creating parent dirs), via base64. */
+/**
+ * Write raw bytes to a file in the environment (creating parent dirs), via base64 on **stdin** so
+ * arbitrarily large payloads work — embedding the base64 in the argv overflows `ARG_MAX` (`E2BIG`)
+ * for anything past a couple of megabytes (e.g. a fetched PDF blob).
+ */
 export async function writeFileBytes(ctx: ToolContext, path: string, content: Buffer): Promise<void> {
   const b64 = content.toString('base64');
-  const cmd = `mkdir -p ${shq(dirName(path))} && printf %s ${shq(b64)} | base64 -d > ${shq(path)}`;
-  const r = await runInEnv(ctx, cmd);
+  const cmd = `mkdir -p ${shq(dirName(path))} && base64 -d > ${shq(path)}`;
+  const r = await runInEnv(ctx, cmd, DEFAULT_TIMEOUT_MS, b64);
   if (r.exitCode !== 0) {
     throw new FileOpError(r.stderr.trim() || `cannot write file: ${path}`);
   }
