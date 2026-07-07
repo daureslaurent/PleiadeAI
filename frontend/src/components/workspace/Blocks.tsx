@@ -31,7 +31,15 @@ export function Blocks({
   return (
     <>
       {blocks.map((b, i) => {
-        if (b.kind === 'text') return <Markdown key={i}>{b.text}</Markdown>;
+        if (b.kind === 'text') {
+          // Streaming caret on the trailing live prose block, so the reader sees where text lands.
+          const isTail = live && i === blocks.length - 1;
+          return (
+            <div key={i} className={isTail ? 'stream-caret' : undefined}>
+              <Markdown>{b.text}</Markdown>
+            </div>
+          );
+        }
         if (b.kind === 'reasoning') {
           if (!b.text.trim() || (isSub && !showSubThinking)) return null;
           // Auto-expanded only while it's the frame's live trailing block (i.e. actively thinking);
@@ -55,7 +63,12 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? active;
   return (
-    <div className="my-1.5 overflow-hidden rounded-lg border border-reasoning/20 bg-reasoning/5">
+    <div
+      className={[
+        'my-1.5 overflow-hidden rounded-xl border border-reasoning/20 bg-reasoning/[0.06] backdrop-blur-sm transition-shadow',
+        active ? 'shadow-[0_0_16px_rgba(168,85,247,0.15)]' : '',
+      ].join(' ')}
+    >
       <button
         onClick={() => setOverride(!open)}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-reasoning/10"
@@ -66,7 +79,7 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
           style={{ transform: open ? 'rotate(90deg)' : undefined }}
         />
         <Brain size={12} className="shrink-0 text-reasoning" />
-        <span className="text-[11px] font-medium text-reasoning">
+        <span className={`text-[11px] font-medium text-reasoning ${active ? 'text-shimmer' : ''}`}>
           {active ? 'Thinking…' : 'Thought process'}
         </span>
         {active && <Loader2 size={11} className="ml-auto shrink-0 animate-spin text-reasoning/70" />}
@@ -116,7 +129,7 @@ export function ThinkingRow({ label, color }: { label: string; color?: string })
       style={color ? { color } : undefined}
     >
       <Loader2 size={12} className="shrink-0 animate-spin" />
-      <span className={color ? 'opacity-90' : 'text-slate-400'}>{label}</span>
+      <span className={`text-shimmer ${color ? 'opacity-90' : 'text-slate-400'}`}>{label}</span>
     </div>
   );
 }
@@ -149,8 +162,15 @@ function SubAgentBubble({ block }: { block: AgentBlock }) {
 
   return (
     <div
-      className="my-2 overflow-hidden rounded-xl border"
-      style={{ borderColor: color.border, background: color.soft }}
+      className={[
+        'my-2 animate-fade-up overflow-hidden rounded-xl border backdrop-blur-sm transition-shadow',
+        running ? 'animate-glow-pulse' : '',
+      ].join(' ')}
+      style={{
+        borderColor: color.border,
+        background: color.soft,
+        ['--glow' as string]: `${color.accent}2e`,
+      }}
     >
       <button
         onClick={() => setOverride(!open)}

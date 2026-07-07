@@ -175,7 +175,7 @@ export function AgentWorkspace() {
   const workingSessionSet = new Set(workingSessions);
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="space-bg flex h-full min-h-0">
       <WorkspaceNav
         collapsed={navCollapsed}
         onToggleCollapse={() => setNavCollapsed((c) => !c)}

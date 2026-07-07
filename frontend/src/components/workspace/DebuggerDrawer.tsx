@@ -19,12 +19,12 @@ function TraceCard({ entry }: { entry: TraceEntry }) {
   const meta = entry.status === 'error' ? KIND_META.alert : KIND_META[entry.kind];
   const Icon = meta.icon;
   return (
-    <div className={`rounded-lg bg-panel px-3 py-2 ring-1 ${meta.ring}`}>
+    <div className={`animate-fade-up rounded-xl bg-black/25 px-3 py-2 backdrop-blur-sm ring-1 ${meta.ring}`}>
       <div className="flex items-center gap-2">
         <Icon size={13} className={`shrink-0 ${meta.tint}`} />
         <span className={`min-w-0 flex-1 truncate font-mono text-xs ${meta.tint}`}>{entry.label}</span>
         {typeof entry.depth === 'number' && (
-          <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] text-slate-500">
+          <span className="shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-slate-500">
             depth {entry.depth}
           </span>
         )}
@@ -62,8 +62,8 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
   const empty = !trace.length && !liveReasoning;
 
   return (
-    <aside className="flex w-96 shrink-0 flex-col border-l border-border bg-surface">
-      <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+    <aside className="glass flex w-96 shrink-0 flex-col border-l">
+      <div className="flex items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
         <TabButton icon={Bug} label="Trace" active={tab === 'trace'} onClick={() => setTab('trace')}>
           {streaming && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />}
         </TabButton>
@@ -75,7 +75,7 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
         />
         <button
           onClick={onClose}
-          className="ml-auto rounded p-1 text-slate-500 hover:bg-panel hover:text-slate-200"
+          className="ml-auto rounded p-1 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
         >
           <X size={15} />
         </button>
@@ -91,7 +91,7 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
 
         {/* Live reasoning for the in-flight turn (persisted into the trace once the turn ends). */}
         {liveReasoning && (
-          <div className="rounded-lg bg-panel px-3 py-2 ring-1 ring-purple-500/20">
+          <div className="animate-fade-up rounded-xl bg-black/25 px-3 py-2 backdrop-blur-sm ring-1 ring-purple-500/20">
             <div className="flex items-center gap-2">
               <Brain size={13} className="text-reasoning" />
               <span className="font-mono text-xs text-reasoning">&lt;think&gt;</span>
@@ -133,7 +133,7 @@ function TabButton({
       onClick={onClick}
       className={[
         'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
-        active ? 'bg-reasoning/15 text-reasoning' : 'text-slate-400 hover:bg-panel hover:text-slate-200',
+        active ? 'bg-reasoning/15 text-reasoning' : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
       ].join(' ')}
     >
       <Icon size={14} /> {label}

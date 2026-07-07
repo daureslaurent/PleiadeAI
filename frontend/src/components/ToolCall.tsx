@@ -24,7 +24,7 @@ function VisualActBlock({ block }: { block: ToolBlock }) {
   const isDrag = v?.x2 != null && v?.y2 != null;
 
   return (
-    <div className="my-2 overflow-hidden rounded-md border border-border bg-surface text-xs">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
       <div className="flex items-center gap-2 px-3 py-1.5">
         <MousePointerClick size={13} className="shrink-0 text-accent" />
         <span className="font-medium text-slate-200">{block.tool}</span>
@@ -37,7 +37,7 @@ function VisualActBlock({ block }: { block: ToolBlock }) {
         </span>
       </div>
 
-      <div className="space-y-2 border-t border-border p-3">
+      <div className="space-y-2 border-t border-white/[0.06] p-3">
         {v?.image ? (
           <button onClick={() => setZoom((z) => !z)} className="block" title="Click to zoom">
             <span className="relative inline-block">
@@ -122,7 +122,7 @@ function BashBlock({ block }: { block: ToolBlock }) {
       : undefined;
 
   return (
-    <div className="my-2 overflow-hidden rounded-md border border-border bg-[#0b0e13] font-mono text-xs">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-black/40 font-mono text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/5"
@@ -143,7 +143,7 @@ function BashBlock({ block }: { block: ToolBlock }) {
         </span>
       </button>
       {(open || block.status === 'running') && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-border px-3 py-2 text-slate-300">
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-white/[0.06] px-3 py-2 text-slate-300">
           {block.output || (block.status === 'running' ? '…' : '(no output)')}
         </pre>
       )}
@@ -161,7 +161,7 @@ function VisionBlock({ block }: { block: ToolBlock }) {
   const question = String(block.args?.question ?? v?.question ?? '').trim();
 
   return (
-    <div className="my-2 overflow-hidden rounded-md border border-border bg-surface text-xs">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
       <div className="flex items-center gap-2 px-3 py-1.5">
         <Eye size={13} className="shrink-0 text-accent" />
         <span className="font-medium text-slate-200">{block.tool}</span>
@@ -176,7 +176,7 @@ function VisionBlock({ block }: { block: ToolBlock }) {
         </span>
       </div>
 
-      <div className="space-y-2 border-t border-border p-3">
+      <div className="space-y-2 border-t border-white/[0.06] p-3">
         {question && (
           <div className="text-slate-300">
             <span className="text-slate-500">Q: </span>
@@ -227,7 +227,7 @@ function VisionBlock({ block }: { block: ToolBlock }) {
 function GenericToolBlock({ block }: { block: ToolBlock }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="my-2 overflow-hidden rounded-md border border-border bg-surface text-xs">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/5"
@@ -243,7 +243,7 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
         </span>
       </button>
       {block.images && block.images.length > 0 && (
-        <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
+        <div className="flex flex-wrap gap-2 border-t border-white/[0.06] px-3 py-2">
           {block.images.map((img, i) => (
             <a
               key={img.id ?? i}
@@ -268,7 +268,7 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
         </div>
       )}
       {open && (
-        <div className="space-y-2 border-t border-border px-3 py-2 font-mono">
+        <div className="space-y-2 border-t border-white/[0.06] px-3 py-2 font-mono">
           <div>
             <div className="mb-0.5 text-[10px] uppercase text-slate-500">args</div>
             <pre className="whitespace-pre-wrap text-slate-300">

@@ -13,11 +13,112 @@ body {
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Themed scrollbars (spec §1): slim accent thumb on a surface track so scroll
-   affordances match the dark UI instead of the browser default. */
+/* ---------------------------------------------------------------------------
+ * Deep-space workspace theme.
+ * `.space-bg` paints the Pleiades backdrop: a deep gradient with two faint
+ * nebula glows (accent blue / reasoning purple) and two CSS-only star layers
+ * (radial-gradient specks; no images, no canvas). Panels above it use the
+ * `.glass*` utilities: translucent fills + backdrop blur + hairline borders.
+ * ------------------------------------------------------------------------- */
+
+.space-bg {
+  position: relative;
+  isolation: isolate; /* keep the fixed star layers behind this stacking context only */
+  background:
+    radial-gradient(ellipse 80% 55% at 22% -10%, rgba(59, 130, 246, 0.13), transparent 60%),
+    radial-gradient(ellipse 65% 45% at 85% 110%, rgba(168, 85, 247, 0.1), transparent 60%),
+    linear-gradient(165deg, #0b0f16 0%, #0a0d13 45%, #0d0f1a 100%);
+}
+
+/* Two star layers, offset and sized differently, counter-phased twinkle. */
+.space-bg::before,
+.space-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-repeat: repeat;
+}
+.space-bg::before {
+  background-image:
+    radial-gradient(1px 1px at 22px 34px, rgba(255, 255, 255, 0.55), transparent),
+    radial-gradient(1px 1px at 120px 90px, rgba(219, 234, 254, 0.4), transparent),
+    radial-gradient(1.5px 1.5px at 210px 150px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 300px 60px, rgba(191, 219, 254, 0.35), transparent);
+  background-size: 340px 220px;
+  animation: twinkle 5s ease-in-out infinite;
+}
+.space-bg::after {
+  background-image:
+    radial-gradient(1px 1px at 60px 170px, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(1.5px 1.5px at 180px 40px, rgba(224, 231, 255, 0.45), transparent),
+    radial-gradient(1px 1px at 260px 200px, rgba(255, 255, 255, 0.3), transparent);
+  background-size: 420px 260px;
+  animation: twinkle 7s ease-in-out infinite;
+  animation-delay: -2.5s;
+}
+
+/* Frosted panels. `glass` for chrome (header/sidebars), `glass-card` for
+   floating elements (composer, prompts) with a deeper shadow. */
+.glass {
+  background: rgba(22, 27, 34, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+.glass-card {
+  background: rgba(17, 22, 30, 0.6);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Shimmering "live" text (thinking labels): a sheen sweeping across the glyphs. */
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    currentColor 40%,
+    rgba(255, 255, 255, 0.95) 50%,
+    currentColor 60%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 2.2s linear infinite;
+}
+
+/* Streaming caret appended to live prose: rides inline at the end of the last
+   rendered element (falls back to the wrapper itself when it has none). */
+.stream-caret > *:last-child::after,
+.stream-caret:empty::after {
+  content: '▍';
+  margin-left: 1px;
+  color: theme('colors.accent');
+  animation: blink 1s step-end infinite;
+}
+
+/* Respect reduced motion: freeze decorative animation everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  .space-bg::before,
+  .space-bg::after,
+  .text-shimmer,
+  .stream-caret > *:last-child::after,
+  .stream-caret:empty::after,
+  [class*='animate-'] {
+    animation: none !important;
+  }
+}
+
+/* Themed scrollbars (spec §1): slim, subtle thumb that brightens on hover so
+   the affordance recedes behind the glass panels instead of striping them. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: theme('colors.accent') theme('colors.surface');
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -26,18 +127,18 @@ body {
 }
 
 *::-webkit-scrollbar-track {
-  background: theme('colors.surface');
+  background: transparent;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: theme('colors.accent');
+  background: rgba(148, 163, 184, 0.25);
   border-radius: 9999px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #60a5fa;
+  background: rgba(148, 163, 184, 0.45);
 }
 
 *::-webkit-scrollbar-corner {
-  background: theme('colors.surface');
+  background: transparent;
 }

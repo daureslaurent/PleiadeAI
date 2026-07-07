@@ -90,11 +90,11 @@ export function WorkspaceNav({
 
   if (collapsed) {
     return (
-      <div className="flex shrink-0 flex-col items-center border-r border-border bg-surface py-3">
+      <div className="glass flex shrink-0 flex-col items-center border-r py-3">
         <button
           onClick={onToggleCollapse}
           title="Show workspace"
-          className="rounded-md p-1.5 text-slate-500 hover:bg-panel hover:text-slate-200"
+          className="rounded-md p-1.5 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
         >
           <PanelLeftOpen size={16} />
         </button>
@@ -113,7 +113,7 @@ export function WorkspaceNav({
         {/* Agent row */}
         <button
           onClick={() => onToggleAgent(agent)}
-          className="group flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left hover:bg-panel"
+          className="group flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left hover:bg-white/[0.05]"
         >
           {open ? (
             <ChevronDown size={14} className="shrink-0 text-slate-500" />
@@ -173,7 +173,7 @@ export function WorkspaceNav({
                   onClick={() => onSelectSession(agent, sn)}
                   className={[
                     'group flex cursor-pointer items-start gap-1.5 rounded-md px-2 py-1.5 transition-colors',
-                    active ? 'bg-accent/15' : 'hover:bg-panel',
+                    active ? 'bg-accent/15 shadow-[inset_2px_0_0_0_rgba(59,130,246,0.7)]' : 'hover:bg-white/[0.05]',
                   ].join(' ')}
                 >
                   <MessageSquare
@@ -243,7 +243,7 @@ export function WorkspaceNav({
     <div className="mb-1">
       <button
         onClick={onToggleSection}
-        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-panel/50"
+        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-white/[0.05]/50"
       >
         {sectionOpen ? (
           <ChevronDown size={13} className="shrink-0 text-slate-600" />
@@ -261,9 +261,9 @@ export function WorkspaceNav({
   );
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-surface">
+    <aside className="glass flex w-64 shrink-0 flex-col border-r">
       {/* Group header */}
-      <div className="flex items-center pr-1.5 hover:bg-panel/50">
+      <div className="flex items-center pr-1.5 hover:bg-white/[0.05]/50">
         <button
           onClick={onToggleGroup}
           className="flex flex-1 items-center gap-2 px-3 py-3 text-left"
@@ -282,7 +282,7 @@ export function WorkspaceNav({
         <button
           onClick={onToggleCollapse}
           title="Hide workspace"
-          className="rounded-md p-1.5 text-slate-500 hover:bg-panel hover:text-slate-200"
+          className="rounded-md p-1.5 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
         >
           <PanelLeftClose size={16} />
         </button>

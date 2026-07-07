@@ -7,55 +7,47 @@ import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
 import type { Agent } from '../../lib/api';
 
-function Avatar({ role, agentName }: { role: Turn['role']; agentName: string }) {
-  if (role === 'user') {
-    return (
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-panel text-xs font-semibold text-slate-300">
-        You
-      </span>
-    );
-  }
-  // The directly-addressed agent wears its own identity color + icon, matching nested sub-agent bubbles.
-  const color = agentColor(agentName);
-  const Icon = iconFor(agentIcon(agentName));
-  return (
-    <span
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold text-slate-950"
-      style={{ background: color.accent }}
-    >
-      {Icon ? <Icon size={17} /> : agentInitial(agentName)}
-    </span>
-  );
-}
-
-interface MessageRowProps {
+/**
+ * Hybrid message layout: the user speaks in a compact right-aligned gradient bubble; the agent
+ * answers full-width, document-style (avatar + name header, then an open content column) so
+ * tool cards, sub-agent bubbles, and code get the whole line to breathe.
+ */
+function MessageRow({
+  role,
+  agentName,
+  children,
+}: {
   role: Turn['role'];
   agentName: string;
   children: React.ReactNode;
-}
-function MessageRow({ role, agentName, children }: MessageRowProps) {
-  const isUser = role === 'user';
-  const color = agentColor(agentName);
-  return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
-      <Avatar role={role} agentName={agentName} />
-      <div className={`flex min-w-0 flex-1 flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-        <div
-          className="mb-1 px-1 text-[11px] font-medium"
-          style={isUser ? undefined : { color: color.accent }}
-        >
-          {isUser ? 'You' : agentName}
-        </div>
-        <div
-          className={[
-            'w-full min-w-0 overflow-hidden break-words rounded-2xl px-4 py-2.5 text-sm',
-            isUser
-              ? 'rounded-tr-sm bg-accent/15 text-slate-100'
-              : 'rounded-tl-sm bg-surface text-slate-100 ring-1 ring-border',
-          ].join(' ')}
-        >
+}) {
+  if (role === 'user') {
+    return (
+      <div className="flex animate-fade-up justify-end pl-10">
+        <div className="min-w-0 max-w-[78%] overflow-hidden break-words rounded-2xl rounded-br-md bg-gradient-to-br from-accent/90 via-accent/75 to-indigo-500/80 px-4 py-2.5 text-sm text-white shadow-[0_4px_20px_rgba(59,130,246,0.25)]">
           {children}
         </div>
+      </div>
+    );
+  }
+  // Agent: full-width document flow, its identity color threading avatar → name → glow.
+  const color = agentColor(agentName);
+  const Icon = iconFor(agentIcon(agentName));
+  return (
+    <div className="animate-fade-up">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-slate-950 shadow-[0_0_12px_var(--glow)]"
+          style={{ background: color.accent, ['--glow' as string]: `${color.accent}55` }}
+        >
+          {Icon ? <Icon size={15} /> : agentInitial(agentName)}
+        </span>
+        <span className="text-xs font-semibold tracking-wide" style={{ color: color.accent }}>
+          {agentName}
+        </span>
+      </div>
+      <div className="min-w-0 overflow-hidden break-words pl-9 text-sm text-slate-100">
+        {children}
       </div>
     </div>
   );
@@ -135,20 +127,20 @@ function ContextMeter({ total, live }: { total: ContextUsage | null; live: Conte
 
   return (
     <div
-      className="flex items-center gap-2 rounded-md border border-border bg-panel px-2.5 py-1.5"
+      className="glass flex items-center gap-2 rounded-full border px-3 py-1.5"
       title={`Session context: ${shownTokens.toLocaleString()}${
         contextWindow > 0 ? ` of ${contextWindow.toLocaleString()} tokens (${Math.round(shownPct)}%)` : ' tokens'
       }${liveActive ? ` — live this turn (last total ${totalTokens.toLocaleString()})` : ''}`}
     >
-      <Gauge size={13} className={`shrink-0 ${liveActive ? 'text-amber-500' : 'text-slate-500'}`} />
-      <div className="relative hidden h-1.5 w-16 overflow-hidden rounded-full bg-surface sm:block">
+      <Gauge size={13} className={`shrink-0 ${liveActive ? 'text-amber-400' : 'text-slate-500'}`} />
+      <div className="relative hidden h-1.5 w-16 overflow-hidden rounded-full bg-white/[0.06] sm:block">
         <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${shownPct}%` }} />
         {/* Ghost tick at the settled total, shown only while a live reading is overlaying it. */}
         {liveActive && contextWindow > 0 && (
           <div className="absolute top-0 h-full w-px bg-slate-400/70" style={{ left: `${totalPct}%` }} />
         )}
       </div>
-      <span className={`font-mono text-[11px] ${liveActive ? 'text-amber-500' : 'text-slate-400'}`}>{label}</span>
+      <span className={`font-mono text-[11px] ${liveActive ? 'text-amber-400' : 'text-slate-400'}`}>{label}</span>
     </div>
   );
 }
@@ -178,33 +170,38 @@ function AskUserPrompt({
   }
 
   return (
-    <div className="border-t border-accent/40 bg-accent/5 p-3">
-      <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-medium" style={{ color: agentColor(agent).accent }}>
-        <MessageCircleQuestion size={13} /> {agent} is asking you
-      </div>
-      <p className="mb-2 whitespace-pre-wrap px-1 text-sm text-slate-100">{question}</p>
-      <div className="flex items-end gap-2 rounded-xl border border-accent/50 bg-panel px-3 py-2 focus-within:border-accent">
-        <textarea
-          ref={ref}
-          rows={1}
-          className="max-h-40 flex-1 resize-none bg-transparent py-1 text-sm text-slate-100 outline-none placeholder:text-slate-600"
-          placeholder="Type your answer…"
-          value={reply}
-          onChange={(e) => setReply(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <button
-          onClick={submit}
-          disabled={!reply.trim()}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <SendHorizontal size={16} />
-        </button>
+    <div className="px-4 pt-3">
+      <div
+        className="glass-card mx-auto max-w-3xl animate-fade-up rounded-2xl border p-3 animate-glow-pulse"
+        style={{ ['--glow' as string]: `${agentColor(agent).accent}30` }}
+      >
+        <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-medium" style={{ color: agentColor(agent).accent }}>
+          <MessageCircleQuestion size={13} /> {agent} is asking you
+        </div>
+        <p className="mb-2 whitespace-pre-wrap px-1 text-sm text-slate-100">{question}</p>
+        <div className="flex items-end gap-2 rounded-xl border border-accent/40 bg-black/20 px-3 py-2 transition-colors focus-within:border-accent">
+          <textarea
+            ref={ref}
+            rows={1}
+            className="max-h-40 flex-1 resize-none bg-transparent py-1 text-sm text-slate-100 outline-none placeholder:text-slate-600"
+            placeholder="Type your answer…"
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <button
+            onClick={submit}
+            disabled={!reply.trim()}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-white transition-all hover:bg-accent/90 hover:shadow-[0_0_14px_rgba(59,130,246,0.5)] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <SendHorizontal size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -295,21 +292,32 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
   }
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-panel">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border bg-surface px-4 py-2.5">
+    <section className="flex min-w-0 flex-1 flex-col">
+      {/* Header — frosted glass floating over the starfield */}
+      <div className="glass z-10 flex items-center gap-2 border-b px-4 py-2.5">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-slate-100">{agent?.name ?? 'Workspace'}</div>
+          <div className="truncate text-sm font-semibold tracking-wide text-slate-100">
+            {agent?.name ?? 'Workspace'}
+          </div>
           {streaming ? (
             <div className="flex items-center gap-1.5 text-[11px]">
               <span
-                className={`h-1.5 w-1.5 animate-pulse rounded-full ${activeAgent ? '' : 'bg-emerald-400'}`}
-                style={activeAgent ? { background: agentColor(activeAgent).accent } : undefined}
+                className={`h-1.5 w-1.5 animate-pulse rounded-full ${activeAgent ? '' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'}`}
+                style={
+                  activeAgent
+                    ? {
+                        background: agentColor(activeAgent).accent,
+                        boxShadow: `0 0 8px ${agentColor(activeAgent).accent}`,
+                      }
+                    : undefined
+                }
               />
               {activeAgent ? (
-                <span style={{ color: agentColor(activeAgent).accent }}>{activeAgent} working…</span>
+                <span className="text-shimmer" style={{ color: agentColor(activeAgent).accent }}>
+                  {activeAgent} working…
+                </span>
               ) : (
-                <span className="text-emerald-400">thinking…</span>
+                <span className="text-shimmer text-emerald-400">thinking…</span>
               )}
             </div>
           ) : (
@@ -328,7 +336,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
             onClick={onOpenVisual}
             title="Open the agent's live desktop (Visual)"
             className={[
-              'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200',
+              'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200',
               !(hasSession && (contextUsage || liveContext)) ? 'ml-auto' : '',
             ].join(' ')}
           >
@@ -338,11 +346,11 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
         <button
           onClick={onToggleDebugger}
           className={[
-            'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors',
+            'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs transition-colors',
             !(hasSession && (contextUsage || liveContext)) && !agent?.visual ? 'ml-auto' : '',
             debuggerOpen
-              ? 'bg-reasoning/15 text-reasoning'
-              : 'text-slate-400 hover:bg-panel hover:text-slate-200',
+              ? 'bg-reasoning/15 text-reasoning shadow-[0_0_12px_rgba(168,85,247,0.2)]'
+              : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
           ].join(' ')}
         >
           <Bug size={14} /> Debugger
@@ -352,15 +360,18 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
       {/* Isolation warning: stopped / unbuilt container for the active agent (best-effort, self-hiding) */}
       <ContainerBanner agent={agent} />
 
-      {/* Messages */}
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-6">
+      {/* Messages — a centered reading column floating over the starfield */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
         {!hasSession ? (
           <div className="flex h-full flex-col items-center justify-center text-center text-slate-500">
-            <MessagesSquare size={40} className="mb-3 text-slate-700" />
+            <div className="relative mb-4">
+              <div className="absolute inset-0 rounded-full bg-accent/20 blur-2xl" />
+              <MessagesSquare size={40} className="relative text-slate-600" />
+            </div>
             <p className="text-sm">Pick a session or start a new one to begin chatting.</p>
           </div>
         ) : (
-          <>
+          <div className="mx-auto max-w-3xl space-y-6">
             {turns.map((t, i) => (
               <MessageRow key={i} role={t.role} agentName={agentName}>
                 {t.role === 'user' ? (
@@ -401,7 +412,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
               </MessageRow>
             )}
             <div ref={bottomRef} />
-          </>
+          </div>
         )}
       </div>
 
@@ -410,12 +421,14 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
         <AskUserPrompt agent={pendingAsk.agent} question={pendingAsk.question} onAnswer={answerAsk} />
       )}
 
-      {/* Composer */}
-      <div className="border-t border-border bg-surface p-3">
+      {/* Composer — a floating glass card, not a full-bleed bar */}
+      <div className="px-4 pb-4 pt-3">
         <div
           className={[
-            'rounded-xl border bg-panel px-3 py-2 transition-colors',
-            dragOver ? 'border-accent bg-accent/5' : 'border-border focus-within:border-accent/60',
+            'glass-card mx-auto max-w-3xl rounded-2xl border px-3 py-2 transition-all duration-300',
+            dragOver
+              ? 'border-accent shadow-[0_0_24px_rgba(59,130,246,0.35)]'
+              : 'focus-within:border-accent/50 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.18)]',
           ].join(' ')}
           onDragOver={(e) => {
             if (!hasSession) return;
@@ -453,7 +466,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
               onClick={() => fileInputRef.current?.click()}
               disabled={!hasSession}
               title="Attach image"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ImagePlus size={17} />
             </button>
@@ -496,7 +509,8 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
               <button
                 onClick={stop}
                 title="Stop"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500 text-white transition-colors hover:bg-red-500/90"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500 text-white transition-all animate-glow-pulse hover:bg-red-500/90"
+                style={{ ['--glow' as string]: 'rgba(239,68,68,0.4)' }}
               >
                 <Square size={14} className="fill-current" />
               </button>
@@ -504,7 +518,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
               <button
                 onClick={submit}
                 disabled={!hasSession || (!input.trim() && attachments.length === 0)}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-accent via-indigo-500 to-reasoning bg-[length:200%_200%] text-white transition-all animate-gradient-x hover:shadow-[0_0_16px_rgba(99,102,241,0.5)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none"
               >
                 <SendHorizontal size={16} />
               </button>
@@ -514,7 +528,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
           {/* Continue controls: nudge a stalled agent onward. Manual button + auto-continue toggle;
               the pencil edits the (persisted) message. Only shown when idle with history. */}
           {canContinue && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-white/[0.06] pt-2">
               <button
                 onClick={continueNow}
                 title="Send the continue message to resume the agent"
@@ -522,7 +536,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
                   'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
                   lastTurnTruncated
                     ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+                    : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
                 ].join(' ')}
               >
                 <Play size={13} /> Continue
@@ -535,7 +549,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
                   'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
                   autoContinue
                     ? 'bg-accent/15 text-accent hover:bg-accent/25'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+                    : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
                 ].join(' ')}
               >
                 <Repeat size={13} /> Auto{autoContinue ? ' on' : ''}
@@ -543,7 +557,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
               <button
                 onClick={() => setEditingContinue((o) => !o)}
                 title="Edit the continue message"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
               >
                 <Pencil size={13} />
               </button>
@@ -561,7 +575,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
               onChange={(e) => setContinuePhrase(e.target.value)}
               rows={2}
               placeholder={DEFAULT_CONTINUE}
-              className="mt-2 w-full resize-none rounded-md border border-border bg-panel px-3 py-2 text-xs text-slate-200 outline-none focus:border-accent/60"
+              className="mt-2 w-full resize-none rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200 outline-none focus:border-accent/60"
             />
           )}
         </div>
