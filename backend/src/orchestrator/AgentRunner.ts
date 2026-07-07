@@ -17,11 +17,13 @@ import { resolveTools, VISUAL_TOOL_NAMES } from '../tools/registry';
 import { annuaire } from '../tools/core/annuaire';
 import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
+import { read } from '../tools/core/fs/read';
 import { askParent } from '../tools/core/askParent';
 import { askUser } from '../tools/core/askUser';
 import { askUserBroker } from '../transport/ws/AskUserBroker';
 import type { Tool, ToolContext } from '../tools/types';
 import { hopGuard } from './HopGuard';
+import { TurnImagePool } from './TurnImagePool';
 import {
   agentContainerManager,
   type AgentExecutor,
@@ -128,6 +130,11 @@ export class AgentRunner {
     // attachments if present, else the session fallback. Raw pixels still only enter a multimodal
     // model's context for THIS turn's attachments (see userMessage below) — old images aren't re-fed.
     const attachedImages = currentImages.length ? currentImages : sessionImages;
+    // The turn's live image pool: seeded with the attachments/forwards above (handles preserved when a
+    // parent forwarded them), then grown by any image a tool/skill acquires this turn. Shared by
+    // reference across every tool call so an image read in one call is reachable — by handle — in a
+    // later one (analyze_image / ask_agent).
+    const imagePool = new TurnImagePool(attachedImages, 'attachment');
 
     // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides
     // whether we auto-grant the visual-desktop tools below, and the profile drives container boot.
@@ -136,10 +143,12 @@ export class AgentRunner {
     // A visual image auto-grants the visual-desktop control tools (like the delegation tools below),
     // so the operator needn't list them in `tools_allowed`. The global kill-switch still applies.
     const visualTools = image?.visual ? [...VISUAL_TOOL_NAMES] : [];
-    // When image(s) are in scope for this turn (attached now, or carried over from earlier in the
-    // session), auto-grant `analyze_image` so a (possibly text-only) agent can read them via the
-    // Vision endpoint. Only present when there's an image to act on.
-    const imageTools = attachedImages.length ? [analyzeImage.name] : [];
+    // Auto-grant `analyze_image` so a (possibly text-only) agent can read an image via the Vision
+    // endpoint — either because an image is already in scope this turn (attached now / carried over),
+    // or because the agent can `read` one into the turn's image pool mid-run. Handles let it then
+    // reference that image by id without ever passing a path.
+    const canReadImages = agent.tools_allowed.includes(read.name);
+    const imageTools = attachedImages.length || canReadImages ? [analyzeImage.name] : [];
 
     // Top-level agents orchestrate, so they always get the delegation tools even if the operator
     // didn't tick them in `tools_allowed` (a subagent honours its explicit list as before). The
@@ -380,7 +389,8 @@ export class AgentRunner {
           callerHistory,
           caller: input.caller,
           signal,
-          images: attachedImages,
+          pool: imagePool,
+          supportsVision: inference.supportsVision,
         });
         // executeToolCall already appended the tool message (and any following image message) to
         // `messages` in the correct order; here we only cache its content for the duplicate short-circuit.
@@ -502,7 +512,10 @@ export class AgentRunner {
       callerHistory: ChatMessage[];
       caller?: RunInput['caller'];
       signal?: AbortSignal;
-      images?: ImageBlock[];
+      /** The turn's live image pool, shared across every tool call (grown as tools acquire images). */
+      pool: TurnImagePool;
+      /** Whether the agent's model can see raw pixels — gates folding tool images into its context. */
+      supportsVision: boolean;
     },
   ): Promise<ChatMessage> {
     let args: Record<string, unknown> = {};
@@ -565,7 +578,7 @@ export class AgentRunner {
         eventBus.emit('tool:vision', { ctx, callId: call.id, ...payload }),
       emitVisualAct: (payload) =>
         eventBus.emit('tool:visual_act', { ctx, callId: call.id, ...payload }),
-      attachedImages: delegation.images,
+      attachedImages: delegation.pool.all(),
       exec,
       isolationError,
     };
@@ -576,7 +589,15 @@ export class AgentRunner {
     try {
       const res = await tool.execute(args, toolCtx);
       payload = res.result;
-      images = res.images;
+      // Any image a tool/skill acquired joins the turn's pool and gets a stable handle, so a later
+      // tool call (analyze_image / ask_agent) can reach it by id. Stamp the assigned handles onto the
+      // tool result too, so the model learns them directly from the result it reads.
+      if (res.images?.length) {
+        images = delegation.pool.addMany(res.images, 'tool');
+        if (payload && typeof payload === 'object') {
+          (payload as Record<string, unknown>).image_ids = images.map((i) => i.id);
+        }
+      }
     } catch (err) {
       status = 'error';
       payload = { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -605,7 +626,15 @@ export class AgentRunner {
     };
     messages.push(toolMsg);
     if (images?.length) {
-      messages.push(buildUserMessage('', images));
+      // Announce the handles so the agent can act on the image(s) by id (never a path). A multimodal
+      // agent also gets the raw pixels here; a text-only agent gets only the note (raw pixels would
+      // choke its endpoint) and reaches the image through `analyze_image`.
+      const ids = images.map((i) => i.id).filter(Boolean);
+      const note =
+        `[${images.length} image${images.length > 1 ? 's' : ''} loaded into this turn as ` +
+        `${ids.join(', ')}. Analyse ${images.length > 1 ? 'one' : 'it'} with \`analyze_image\` ` +
+        `(image_id) or forward to another agent with \`ask_agent\` (image_ids). Do not pass a file path.]`;
+      messages.push(buildUserMessage(note, delegation.supportsVision ? images : undefined));
     }
     return toolMsg;
   }

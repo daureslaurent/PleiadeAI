@@ -90,7 +90,7 @@ export function attachBridge(io: Server): void {
     });
   });
 
-  eventBus.on('tool:execution_complete', ({ ctx, callId, tool, status, result }) => {
+  eventBus.on('tool:execution_complete', ({ ctx, callId, tool, status, result, images }) => {
     io.to(ctx.sessionId).emit('tool_end', {
       type: 'tool_end',
       agent: ctx.agentName,
@@ -98,6 +98,9 @@ export function attachBridge(io: Server): void {
       tool,
       status,
       result,
+      // Thumbnails of any image the tool acquired (e.g. a picture read into the turn), so the operator
+      // sees what the agent pulled in. Handles ride along so the UI can label them (img_1, …).
+      images: images?.map((i) => ({ id: i.id, dataUrl: i.dataUrl })),
     });
   });
 

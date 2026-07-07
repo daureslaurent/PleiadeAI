@@ -33,6 +33,7 @@ export type Block =
       output: string;
       status: 'running' | 'success' | 'error';
       result?: unknown;
+      images?: { id?: string; dataUrl: string }[];
     }
   | {
       kind: 'agent';
@@ -67,6 +68,7 @@ type LiveItem =
       output: string;
       status: 'running' | 'success' | 'error';
       result?: unknown;
+      images?: { id?: string; dataUrl: string }[];
     }
   | { kind: 'agent'; frameId: string; refFrameId: string };
 
@@ -112,6 +114,7 @@ type SnapshotItem =
       output: string;
       status: 'running' | 'success' | 'error';
       result?: unknown;
+      images?: { id?: string; dataUrl: string }[];
     }
   | { kind: 'agent'; id: string; frameId: string; refFrameId: string };
 
@@ -257,6 +260,9 @@ export class TurnRecorder {
         it.status = p.status;
         it.result = p.result;
         it.output = it.output || resultToOutput(p.result);
+        if (p.images?.length) {
+          it.images = p.images.map((img) => ({ id: img.id, dataUrl: img.dataUrl }));
+        }
       }
     }
     this.trace.push({
@@ -328,6 +334,7 @@ export class TurnRecorder {
           output: it.output,
           status: it.status,
           result: it.result,
+          images: it.images,
         });
       } else {
         const f = this.frames.get(it.refFrameId);
@@ -371,6 +378,7 @@ export class TurnRecorder {
           output: it.output,
           status: it.status,
           result: it.result,
+          images: it.images,
         };
       return { kind: 'agent', id, frameId: it.frameId, refFrameId: it.refFrameId };
     });

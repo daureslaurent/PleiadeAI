@@ -8,9 +8,49 @@ import { circuitBreaker } from '../../core/circuit-breaker/CircuitBreaker';
 import { eventBus } from '../../core/event-bus/EventBus';
 import { skillRepository } from '../../domain/skills/skill.repository';
 import type { SkillDoc } from '../../domain/skills/skill.model';
+import type { ImageBlock } from '../../core/event-bus/events.types';
 import type { ToolContext, ToolResult } from '../types';
 
 const log = createLogger('skill-sandbox');
+
+/** A base64 image data URL, e.g. `data:image/png;base64,...`. */
+const IMAGE_DATA_URL = /^data:image\/[a-z0-9.+-]+;base64,/i;
+
+/**
+ * Let a skill hand an image to the agent the same way `read` does: if its result carries an
+ * `image` (data URL string) or `images` (array of data URL strings / `{dataUrl}` blocks), lift
+ * those out as `ToolResult.images` — so they join the turn's image pool (addressable by handle) and
+ * reach a multimodal agent's context — and strip them from the textual result so a big base64 blob
+ * never bloats the model's context. Returns the cleaned result + the extracted images.
+ */
+function extractSkillImages(result: unknown): { result: unknown; images?: ImageBlock[] } {
+  if (!result || typeof result !== 'object') return { result };
+  const rec = result as Record<string, unknown>;
+  const blocks: ImageBlock[] = [];
+  const toBlock = (v: unknown): ImageBlock | null => {
+    if (typeof v === 'string' && IMAGE_DATA_URL.test(v)) return { dataUrl: v };
+    if (v && typeof v === 'object' && typeof (v as { dataUrl?: unknown }).dataUrl === 'string') {
+      const url = (v as { dataUrl: string }).dataUrl;
+      if (IMAGE_DATA_URL.test(url)) return { dataUrl: url };
+    }
+    return null;
+  };
+
+  if ('image' in rec) {
+    const b = toBlock(rec.image);
+    if (b) blocks.push(b);
+  }
+  if (Array.isArray(rec.images)) {
+    for (const item of rec.images) {
+      const b = toBlock(item);
+      if (b) blocks.push(b);
+    }
+  }
+  if (blocks.length === 0) return { result };
+
+  const { image: _image, images: _images, ...rest } = rec;
+  return { result: { ...rest, image_count: blocks.length }, images: blocks };
+}
 
 /** Result contract shared by the TS worker and the Python runner. */
 interface SandboxOutcome {
@@ -76,7 +116,9 @@ class SkillRunner {
 
       circuitBreaker.recordSuccess(skill.name);
       log.info({ skill: skill.name, durationMs }, 'sandbox exit ok');
-      return { result: outcome.result };
+      // A skill may hand back an image (data URL) via `image` / `images`; lift it into the turn's
+      // image pool so the agent can analyse or forward it by handle, like a picture read from disk.
+      return extractSkillImages(outcome.result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error({ skill: skill.name, err: message }, 'sandbox failure');

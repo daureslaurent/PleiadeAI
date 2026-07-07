@@ -46,6 +46,8 @@ export interface ToolEndEvent {
   tool: string;
   status: 'success' | 'error';
   result: unknown;
+  /** Images the tool acquired into the turn (e.g. a picture read via `read`), keyed by handle. */
+  images?: { id?: string; dataUrl: string }[];
 }
 
 export interface SystemAlertEvent {

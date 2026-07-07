@@ -65,6 +65,8 @@ export type Block =
       output: string;
       status: 'running' | 'success' | 'error';
       result?: unknown;
+      /** Images the tool read/acquired into the turn (e.g. a picture read via `read`), keyed by handle. */
+      images?: { id?: string; dataUrl: string }[];
       /** Vision analysis attached to a `visual_screenshot` call: screenshot thumbnail + the model's answer. */
       vision?: VisionInfo;
       /** Action marker attached to a `visual_act` call: screenshot + where the action landed. */
@@ -108,6 +110,7 @@ type LiveItem =
       output: string;
       status: 'running' | 'success' | 'error';
       result?: unknown;
+      images?: { id?: string; dataUrl: string }[];
       vision?: VisionInfo;
       visualAct?: VisualActInfo;
     }
@@ -172,6 +175,7 @@ export function buildBlocks(
         output: it.output,
         status: it.status,
         result: it.result,
+        images: it.images,
         vision: it.vision,
         visualAct: it.visualAct,
       });
@@ -440,7 +444,13 @@ export const useStream = create<StreamState>((set, get) => ({
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
-            ? { ...it, status: e.status, result: e.result, output: it.output || resultToOutput(e.result) }
+            ? {
+                ...it,
+                status: e.status,
+                result: e.result,
+                images: e.images,
+                output: it.output || resultToOutput(e.result),
+              }
             : it,
         ),
         trace: [

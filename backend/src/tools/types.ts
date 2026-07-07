@@ -78,9 +78,12 @@ export interface ToolContext {
     snap?: { text: string; x: number; y: number } | null;
   }) => void;
   /**
-   * Images the user attached to this turn (data URLs). Available to `analyze_image` (to describe them
-   * via the Vision endpoint) and forwardable to a subagent via `ask_agent`. A multimodal agent also
-   * receives them directly in its context; a text-only agent only reaches them through these tools.
+   * The turn's live image pool (data URLs, each with a stable `id` handle): the user/parent
+   * attachments plus any images tools/skills have acquired so far this turn (e.g. a picture read via
+   * `read`). Available to `analyze_image` (describe one by `image_id`) and forwardable to a subagent
+   * via `ask_agent` (by `image_ids`, or all of them). A multimodal agent also receives images
+   * directly in its context; a text-only agent only reaches them through these tools — always by
+   * handle, never by filesystem path.
    */
   attachedImages?: ImageBlock[];
 }

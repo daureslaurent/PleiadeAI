@@ -15,9 +15,10 @@ const log = createLogger('tool:analyze_image');
 export const analyzeImage: Tool = {
   name: 'analyze_image',
   description:
-    'Analyse an image the user attached to this message. Pass `question` to ask about something ' +
-    'specific ("what does this error say?", "describe the chart"); omit for a general description. ' +
-    'Use `index` (0-based) to pick which attachment when several were sent. Returns a text answer.',
+    'Analyse an image available in this turn (attached by the user, or read/acquired by a tool). Pass ' +
+    '`question` to ask about something specific ("what does this error say?", "describe the chart"); ' +
+    'omit for a general description. Pick which image by its `image_id` handle (e.g. "img_1", shown ' +
+    'when it was loaded) — or, for a user attachment, by 0-based `index`. Returns a text answer.',
   parameters: {
     type: 'object',
     properties: {
@@ -25,9 +26,13 @@ export const analyzeImage: Tool = {
         type: 'string',
         description: 'What to ask about the image. Omit for a general description + text transcription.',
       },
+      image_id: {
+        type: 'string',
+        description: 'Handle of the image to analyse (e.g. "img_1"). Preferred over `index`.',
+      },
       index: {
         type: 'integer',
-        description: 'Which attached image to analyse (0 = first). Default 0.',
+        description: 'Which image to analyse by position (0 = first). Used only when `image_id` is omitted.',
       },
     },
     additionalProperties: false,
@@ -36,25 +41,38 @@ export const analyzeImage: Tool = {
   async execute(args, ctx) {
     const images = ctx.attachedImages ?? [];
     if (images.length === 0) {
-      return { result: { ok: false, error: 'no image is attached to this message' } };
+      return { result: { ok: false, error: 'no image is available in this turn' } };
     }
-    const index = Math.trunc(Number(args.index) || 0);
-    const img = images[index];
-    if (!img) {
-      return {
-        result: { ok: false, error: `index out of range (0..${images.length - 1})` },
-      };
+
+    const imageId = args.image_id != null ? String(args.image_id).trim() : '';
+    let img;
+    let ref: string | number;
+    if (imageId) {
+      img = images.find((i) => i.id === imageId);
+      ref = imageId;
+      if (!img) {
+        const known = images.map((i) => i.id).filter(Boolean).join(', ') || '(none have handles)';
+        return { result: { ok: false, error: `no image with id "${imageId}" (available: ${known})` } };
+      }
+    } else {
+      const index = Math.trunc(Number(args.index) || 0);
+      img = images[index];
+      ref = index;
+      if (!img) {
+        return { result: { ok: false, error: `index out of range (0..${images.length - 1})` } };
+      }
     }
+
     const question = String(args.question ?? '');
     const { analysis, model } = await analyzeImageWithVision(img.dataUrl, question);
 
     ctx.emitVision?.({ image: img.dataUrl, question, answer: analysis, model });
-    log.info({ agent: ctx.agentName, index, model: model || null }, 'analyze_image');
+    log.info({ agent: ctx.agentName, ref, model: model || null }, 'analyze_image');
 
     return {
       result: {
         ok: true,
-        index,
+        image_id: img.id ?? null,
         image_count: images.length,
         analysis,
         ...(model ? { vision_model: model } : {}),

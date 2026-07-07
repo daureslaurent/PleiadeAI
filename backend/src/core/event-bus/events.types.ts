@@ -27,6 +27,15 @@ export interface EventContext {
 export interface ImageBlock {
   /** Base64 data URL, e.g. `data:image/png;base64,...` — llama.cpp multimodal input. */
   dataUrl: string;
+  /**
+   * Stable per-turn handle (e.g. `img_1`). Agents reference an image by this id — to analyse it
+   * (`analyze_image`) or forward it to a sub-agent (`ask_agent`) — never by filesystem path (paths
+   * don't survive a cross-agent hop). Assigned by `TurnImagePool`; preserved across a hop so parent
+   * and child speak the same handle.
+   */
+  id?: string;
+  /** How the image entered the turn: a user/parent attachment, or acquired by a tool/skill. */
+  source?: 'attachment' | 'tool';
 }
 
 export interface UserMessagePayload {

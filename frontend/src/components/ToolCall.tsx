@@ -242,6 +242,31 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
           <StatusIcon status={block.status} />
         </span>
       </button>
+      {block.images && block.images.length > 0 && (
+        <div className="flex flex-wrap gap-2 border-t border-border px-3 py-2">
+          {block.images.map((img, i) => (
+            <a
+              key={img.id ?? i}
+              href={img.dataUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="group relative block"
+              title={img.id ? `${img.id} — click to open` : 'click to open'}
+            >
+              <img
+                src={img.dataUrl}
+                alt={img.id ?? `image ${i}`}
+                className="h-16 w-16 rounded border border-border object-cover"
+              />
+              {img.id && (
+                <span className="absolute bottom-0 left-0 right-0 rounded-b bg-black/60 px-1 py-px text-center text-[9px] font-mono text-slate-200">
+                  {img.id}
+                </span>
+              )}
+            </a>
+          ))}
+        </div>
+      )}
       {open && (
         <div className="space-y-2 border-t border-border px-3 py-2 font-mono">
           <div>

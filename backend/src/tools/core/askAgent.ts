@@ -22,7 +22,13 @@ export const askAgent: Tool = {
       include_image: {
         type: 'boolean',
         description:
-          "Forward the image(s) the user attached to this message to the sub-agent (e.g. hand a screenshot to a vision specialist). Defaults to true when an image is attached; ignored otherwise.",
+          "Forward the image(s) available this turn (attached, or read/acquired by a tool) to the sub-agent — e.g. hand a screenshot to a vision specialist. Defaults to true when any image is present; set false to forward none. The image travels as data, never a file path.",
+      },
+      image_ids: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Forward only these image handles (e.g. ["img_1"]). Omit to forward all images in this turn (subject to include_image).',
       },
     },
     required: ['agent', 'query'],
@@ -45,10 +51,26 @@ export const askAgent: Tool = {
       return { result: { ok: false, error: 'agent and query are required' } };
     }
 
-    // Forward attached images unless the caller opts out. `include_image` defaults to true so a plain
-    // "delegate this image to X" works; there's nothing to forward when no image is attached.
-    const forward = args.include_image === false ? false : true;
-    const images = forward ? ctx.attachedImages : undefined;
+    // Forward images unless the caller opts out. `include_image` defaults to true so a plain "delegate
+    // this image to X" works; there's nothing to forward when the turn has no image. A subset can be
+    // named by handle via `image_ids`; otherwise all of the turn's images go. Handles are preserved on
+    // the forwarded blocks so the sub-agent references the same img_N. Never a filesystem path.
+    const pool = ctx.attachedImages ?? [];
+    let images: typeof pool | undefined;
+    if (args.include_image === false || pool.length === 0) {
+      images = undefined;
+    } else if (Array.isArray(args.image_ids) && args.image_ids.length) {
+      const wanted = new Set(args.image_ids.map((v) => String(v)));
+      images = pool.filter((i) => i.id != null && wanted.has(i.id));
+      if (images.length === 0) {
+        const known = pool.map((i) => i.id).filter(Boolean).join(', ') || '(none have handles)';
+        return {
+          result: { ok: false, error: `no image matched image_ids ${JSON.stringify(args.image_ids)} (available: ${known})` },
+        };
+      }
+    } else {
+      images = pool;
+    }
     log.info(
       { from: ctx.agentName, to: target, forwarding: images?.length ?? 0 },
       'ask_agent delegating',
