@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { ChevronRight, Eye, Loader2, Magnet, MousePointerClick, TerminalSquare, Wrench, Check, X } from 'lucide-react';
+import { ChevronRight, Eye, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
+import { describeTool, visualActDetail } from '../lib/toolSummary';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
 
@@ -21,6 +22,7 @@ function VisualActBlock({ block }: { block: ToolBlock }) {
   const [zoom, setZoom] = useState(false);
   const v = block.visualAct;
   const action = String(v?.action ?? block.args?.action ?? 'act');
+  const detail = visualActDetail(block.args ?? {});
   const isDrag = v?.x2 != null && v?.y2 != null;
 
   return (
@@ -31,6 +33,11 @@ function VisualActBlock({ block }: { block: ToolBlock }) {
         <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
           {action}
         </span>
+        {detail && (
+          <span className="truncate rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent">
+            {detail}
+          </span>
+        )}
         {v?.snap && <OcrChip snap={v.snap} />}
         <span className="ml-auto">
           <StatusIcon status={block.status} />
@@ -223,9 +230,10 @@ function VisionBlock({ block }: { block: ToolBlock }) {
   );
 }
 
-/** Compact card for non-terminal tools: name + status, expandable args/result. */
+/** Compact card for non-terminal tools: icon + name + at-a-glance action summary, expandable args/result. */
 function GenericToolBlock({ block }: { block: ToolBlock }) {
   const [open, setOpen] = useState(false);
+  const { Icon, value, title, hint } = describeTool(block.tool, block.args ?? {}, block.result, block.status);
   return (
     <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
       <button
@@ -236,9 +244,18 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
           size={13}
           className={`shrink-0 text-slate-500 transition-transform ${open ? 'rotate-90' : ''}`}
         />
-        <Wrench size={13} className="shrink-0 text-accent" />
-        <span className="font-medium text-slate-200">{block.tool}</span>
-        <span className="ml-auto">
+        <Icon size={13} className="shrink-0 text-accent" />
+        <span className="shrink-0 font-medium text-slate-200">{block.tool}</span>
+        {value && (
+          <span
+            title={title ?? value}
+            className="min-w-0 truncate rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+          >
+            {value}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {hint && <span className="text-[10px] text-slate-500">{hint}</span>}
           <StatusIcon status={block.status} />
         </span>
       </button>
