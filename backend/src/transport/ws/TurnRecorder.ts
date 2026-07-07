@@ -260,8 +260,9 @@ export class TurnRecorder {
         it.status = p.status;
         it.result = p.result;
         it.output = it.output || resultToOutput(p.result);
-        if (p.images?.length) {
-          it.images = p.images.map((img) => ({ id: img.id, dataUrl: img.dataUrl }));
+        const pics = p.images?.filter((img) => img.kind !== 'blob' && img.dataUrl);
+        if (pics?.length) {
+          it.images = pics.map((img) => ({ id: img.id, dataUrl: img.dataUrl! }));
         }
       }
     }

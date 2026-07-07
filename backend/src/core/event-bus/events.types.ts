@@ -24,18 +24,38 @@ export interface EventContext {
 // Payloads
 // ---------------------------------------------------------------------------
 
+/**
+ * A resource an agent can reference by handle — historically only images, now generalized to also
+ * carry opaque binary **blobs** (a fetched PDF, a downloaded archive). Images (`kind: 'image'`) carry
+ * a `dataUrl` and can be folded into a multimodal model's context; blobs (`kind: 'blob'`) never enter
+ * context — they hold only metadata + a handle, and their bytes live in the persisted resource store
+ * (GridFS). The interface name stays `ImageBlock` for backward compatibility across the codebase.
+ */
 export interface ImageBlock {
-  /** Base64 data URL, e.g. `data:image/png;base64,...` — llama.cpp multimodal input. */
-  dataUrl: string;
   /**
-   * Stable per-turn handle (e.g. `img_1`). Agents reference an image by this id — to analyse it
-   * (`analyze_image`) or forward it to a sub-agent (`ask_agent`) — never by filesystem path (paths
-   * don't survive a cross-agent hop). Assigned by `TurnImagePool`; preserved across a hop so parent
-   * and child speak the same handle.
+   * Base64 data URL, e.g. `data:image/png;base64,...` — llama.cpp multimodal input. Present for
+   * images; omitted for blobs (their bytes are reached by handle via the resource store, never inlined).
+   */
+  dataUrl?: string;
+  /**
+   * Stable handle (e.g. `img_1`, `blob_1`). Agents reference a resource by this id — to analyse an
+   * image (`analyze_image`), forward it (`ask_agent`), or write a blob to a file (`write from_handle`)
+   * — never by filesystem path (paths don't survive a cross-agent hop). Assigned by the resource pool;
+   * preserved across a hop so parent and child speak the same handle.
    */
   id?: string;
-  /** How the image entered the turn: a user/parent attachment, or acquired by a tool/skill. */
+  /** How the resource entered the turn: a user/parent attachment, or acquired by a tool/skill. */
   source?: 'attachment' | 'tool';
+  /** `'image'` (multimodal, has `dataUrl`) or `'blob'` (opaque bytes, reference-only). Default `'image'`. */
+  kind?: 'image' | 'blob';
+  /** MIME type, e.g. `application/pdf`. Mainly for blobs; images infer it from `dataUrl`. */
+  mime?: string;
+  /** Byte size of the resource, when known (blobs). */
+  size?: number;
+  /** Suggested filename for a blob (from the URL / Content-Disposition), used on download. */
+  filename?: string;
+  /** GridFS id of the persisted bytes, once stored. Lets a later turn/agent re-read by handle. */
+  storageId?: string;
 }
 
 export interface UserMessagePayload {

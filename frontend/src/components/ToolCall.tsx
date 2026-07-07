@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Eye, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Eye, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
 import { describeTool, visualActDetail } from '../lib/toolSummary';
 
@@ -234,6 +234,16 @@ function VisionBlock({ block }: { block: ToolBlock }) {
 function GenericToolBlock({ block }: { block: ToolBlock }) {
   const [open, setOpen] = useState(false);
   const { Icon, value, title, hint } = describeTool(block.tool, block.args ?? {}, block.result, block.status);
+  // A tool that had to shrink its output (e.g. webfetch truncating a long page, or storing a binary
+  // body as a blob instead of inlining it) flags the result — surface an amber warning so the operator
+  // knows the agent saw a reduced payload without having to expand the card.
+  const r = block.result as { reduced?: unknown; binary?: unknown } | undefined;
+  const warn =
+    !!r && typeof r === 'object' && (Boolean(r.reduced) || Boolean(r.binary))
+      ? Boolean(r.binary)
+        ? 'Binary response stored as a blob — not shown inline'
+        : 'Response truncated to fit the token budget'
+      : null;
   return (
     <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
       <button
@@ -256,6 +266,11 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
         )}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {hint && <span className="text-[10px] text-slate-500">{hint}</span>}
+          {warn && (
+            <span title={warn} className="flex items-center">
+              <AlertTriangle size={13} className="text-amber-400" />
+            </span>
+          )}
           <StatusIcon status={block.status} />
         </span>
       </button>

@@ -33,8 +33,30 @@ import {
 import { isolationRepository } from '../domain/isolations/isolation.repository';
 import { imageRepository } from '../domain/images/image.repository';
 import { sessionRepository } from '../domain/sessions/session.repository';
+import { resourceRepository } from '../domain/resources/resource.repository';
 
 const log = createLogger('agent-runner');
+
+/** Decode a `data:<mime>;base64,<payload>` URL to raw bytes (for persisting a tool-acquired image). */
+function dataUrlToBuffer(dataUrl: string): Buffer {
+  const comma = dataUrl.indexOf(',');
+  const payload = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  return Buffer.from(payload, 'base64');
+}
+
+/** Pull the MIME type out of a data URL, defaulting to PNG when absent/opaque. */
+function dataUrlMime(dataUrl: string): string {
+  const m = /^data:([^;,]+)[;,]/.exec(dataUrl);
+  return m?.[1] || 'image/png';
+}
+
+/** Compact human byte size for the tool-result handle note (e.g. `2.4 MB`). */
+function formatBytes(b: number): string {
+  if (!Number.isFinite(b) || b <= 0) return '0 B';
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 /**
  * Default cap on tool round-trips within a single turn, guarding against tool loops. An agent can
@@ -141,11 +163,19 @@ export class AgentRunner {
     // attachments if present, else the session fallback. Raw pixels still only enter a multimodal
     // model's context for THIS turn's attachments (see userMessage below) — old images aren't re-fed.
     const attachedImages = currentImages.length ? currentImages : sessionImages;
-    // The turn's live image pool: seeded with the attachments/forwards above (handles preserved when a
-    // parent forwarded them), then grown by any image a tool/skill acquires this turn. Shared by
-    // reference across every tool call so an image read in one call is reachable — by handle — in a
-    // later one (analyze_image / ask_agent).
-    const imagePool = new TurnImagePool(attachedImages, 'attachment');
+    // Persisted resources acquired earlier in this session (tool-read images, fetched blobs). Seeded
+    // as metadata-only handles (no bytes) so a `blob_N`/`img_N` from an earlier turn stays referenceable
+    // — writable to a file (`write from_handle`), forwardable, listable in the Data tab. Their bytes are
+    // re-read from the resource store on demand, never re-fed into context. Only the top-level run seeds
+    // history; a sub-agent works on exactly what its parent forwarded (same session, same handles).
+    const priorResources =
+      input.depth === 0 && !input.caller ? await this.priorResourceBlocks(input.sessionId) : [];
+    // The turn's live resource pool: seeded with prior handles (so counters continue the session
+    // sequence and old handles resolve), then this turn's attachments/forwards, then grown by any
+    // resource a tool/skill acquires. Shared by reference across every tool call so a resource acquired
+    // in one call is reachable — by handle — in a later one (analyze_image / ask_agent / write).
+    const imagePool = new TurnImagePool(priorResources, 'tool');
+    imagePool.addMany(attachedImages, 'attachment');
 
     // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides
     // whether we auto-grant the visual-desktop tools below, and the profile drives container boot.
@@ -377,7 +407,7 @@ export class AgentRunner {
       }
 
       for (const call of toolCalls) {
-        const cacheKey = `${call.name} ${call.argsJson}`;
+        const cacheKey = `${call.name}${call.argsJson}`;
         const cached = toolResultCache.get(cacheKey);
         if (cached !== undefined) {
           log.warn(
@@ -480,6 +510,79 @@ export class AgentRunner {
       log.warn({ err: err instanceof Error ? err.message : String(err), sessionId }, 'failed to load session images');
     }
     return [];
+  }
+
+  /**
+   * Load the session's persisted resources as metadata-only pool blocks (no bytes) so their handles
+   * seed the turn's pool and stay referenceable across turns. Bytes are re-read on demand from the
+   * resource store (`write from_handle`, the Data-tab download route). Best-effort.
+   */
+  private async priorResourceBlocks(sessionId: string): Promise<ImageBlock[]> {
+    try {
+      const rows = await resourceRepository.listBySession(sessionId);
+      return rows.map((r) => ({
+        id: r.handle,
+        kind: r.kind,
+        mime: r.mime,
+        size: r.size,
+        filename: r.filename || undefined,
+        storageId: String(r.gridfs_id),
+        source: 'tool' as const,
+      }));
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err), sessionId },
+        'failed to load session resources',
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Register resources a tool acquired into the pool and persist any that aren't already stored.
+   * A resource with a `storageId` is already persisted (a blob from its producing tool, or one
+   * forwarded across a hop) — just adopt it. A fresh image (carrying `dataUrl` pixels) is stored to
+   * the resource store under its assigned handle so it survives the turn and shows in the Data tab.
+   */
+  private async persistAndPool(
+    ctx: EventContext,
+    pool: TurnImagePool,
+    acquired: ImageBlock[],
+  ): Promise<ImageBlock[]> {
+    const out: ImageBlock[] = [];
+    for (const r of acquired) {
+      const kind = r.kind ?? 'image';
+      if (r.storageId) {
+        out.push(pool.add(r, 'tool'));
+        continue;
+      }
+      const stamped = pool.add({ ...r, kind }, 'tool');
+      if (kind === 'image' && r.dataUrl) {
+        try {
+          const bytes = dataUrlToBuffer(r.dataUrl);
+          const mime = dataUrlMime(r.dataUrl);
+          const stored = await resourceRepository.store({
+            sessionId: ctx.sessionId,
+            agentId: ctx.agentId,
+            bytes,
+            kind: 'image',
+            mime,
+            source: 'tool',
+            handle: stamped.id,
+          });
+          stamped.storageId = String(stored.gridfs_id);
+          stamped.mime = mime;
+          stamped.size = bytes.length;
+        } catch (err) {
+          log.warn(
+            { err: err instanceof Error ? err.message : String(err), handle: stamped.id },
+            'failed to persist tool image resource',
+          );
+        }
+      }
+      out.push(stamped);
+    }
+    return out;
   }
 
   /** One streamed inference pass; forwards reasoning-tagged chunks to the bus. */
@@ -605,13 +708,19 @@ export class AgentRunner {
     try {
       const res = await tool.execute(args, toolCtx);
       payload = res.result;
-      // Any image a tool/skill acquired joins the turn's pool and gets a stable handle, so a later
-      // tool call (analyze_image / ask_agent) can reach it by id. Stamp the assigned handles onto the
-      // tool result too, so the model learns them directly from the result it reads.
-      if (res.images?.length) {
-        images = delegation.pool.addMany(res.images, 'tool');
+      // Any resource a tool/skill acquired joins the turn's pool with a stable handle, so a later
+      // tool call (analyze_image / ask_agent / write) can reach it by id. Images are persisted to the
+      // resource store here (blobs arrive already persisted by their producing tool). Stamp the handles
+      // onto the tool result so the model learns them directly from what it reads.
+      const acquired = [...(res.images ?? []), ...(res.resources ?? [])];
+      if (acquired.length) {
+        images = await this.persistAndPool(ctx, delegation.pool, acquired);
         if (payload && typeof payload === 'object') {
-          (payload as Record<string, unknown>).image_ids = images.map((i) => i.id);
+          const p = payload as Record<string, unknown>;
+          const imgIds = images.filter((i) => (i.kind ?? 'image') === 'image').map((i) => i.id);
+          const blobIds = images.filter((i) => i.kind === 'blob').map((i) => i.id);
+          if (imgIds.length) p.image_ids = imgIds;
+          if (blobIds.length) p.resource_ids = blobIds;
         }
       }
     } catch (err) {
@@ -642,15 +751,32 @@ export class AgentRunner {
     };
     messages.push(toolMsg);
     if (images?.length) {
-      // Announce the handles so the agent can act on the image(s) by id (never a path). A multimodal
-      // agent also gets the raw pixels here; a text-only agent gets only the note (raw pixels would
-      // choke its endpoint) and reaches the image through `analyze_image`.
-      const ids = images.map((i) => i.id).filter(Boolean);
-      const note =
-        `[${images.length} image${images.length > 1 ? 's' : ''} loaded into this turn as ` +
-        `${ids.join(', ')}. Analyse ${images.length > 1 ? 'one' : 'it'} with \`analyze_image\` ` +
-        `(image_id) or forward to another agent with \`ask_agent\` (image_ids). Do not pass a file path.]`;
-      messages.push(buildUserMessage(note, delegation.supportsVision ? images : undefined));
+      // Announce the handles so the agent acts on resources by id (never a path). A multimodal agent
+      // also gets image pixels folded in here; a text-only agent gets only the note (raw pixels would
+      // choke its endpoint) and reaches an image via `analyze_image`. Blobs never enter context — the
+      // note tells the agent it can save one to a file (`write` from_handle) or forward it.
+      const pics = images.filter((i) => (i.kind ?? 'image') === 'image');
+      const blobs = images.filter((i) => i.kind === 'blob');
+      const parts: string[] = [];
+      if (pics.length) {
+        const ids = pics.map((i) => i.id).filter(Boolean).join(', ');
+        parts.push(
+          `${pics.length} image${pics.length > 1 ? 's' : ''} loaded as ${ids} — analyse with ` +
+            `\`analyze_image\` (image_id) or forward with \`ask_agent\` (image_ids).`,
+        );
+      }
+      if (blobs.length) {
+        const detail = blobs
+          .map((b) => `${b.id} (${b.mime ?? 'binary'}, ${formatBytes(b.size ?? 0)})`)
+          .join(', ');
+        parts.push(
+          `${blobs.length} binary resource${blobs.length > 1 ? 's' : ''} saved as ${detail} — not ` +
+            `in your context; save one to a file with \`write\` (from_handle) or forward with ` +
+            `\`ask_agent\` (image_ids).`,
+        );
+      }
+      const note = `[${parts.join(' ')} Do not pass a file path.]`;
+      messages.push(buildUserMessage(note, delegation.supportsVision ? pics : undefined));
     }
     return toolMsg;
   }

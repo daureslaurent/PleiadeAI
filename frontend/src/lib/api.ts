@@ -593,6 +593,49 @@ export const sessionsApi = {
     api.post<StoredMessage>(`/sessions/${id}/messages`, body).then((r) => r.data),
 };
 
+/** A persisted session resource (image or binary blob) shown in the workspace Data tab. */
+export interface SessionResource {
+  handle: string;
+  kind: 'image' | 'blob';
+  mime: string;
+  size: number;
+  filename?: string;
+  source: 'attachment' | 'tool' | 'fetch';
+  agentId: string;
+  createdAt: string;
+}
+
+async function fetchResourceBlob(sessionId: string, handle: string): Promise<Blob> {
+  const token = localStorage.getItem('pleiade_token');
+  const res = await fetch(
+    `${API_BASE}/api/resources/${encodeURIComponent(sessionId)}/${encodeURIComponent(handle)}/content`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+  );
+  if (!res.ok) throw new Error(`resource fetch failed (${res.status})`);
+  return res.blob();
+}
+
+export const resourcesApi = {
+  list: (sessionId: string) =>
+    api.get<SessionResource[]>('/resources', { params: { sessionId } }).then((r) => r.data),
+  /** Fetch a resource's bytes as an object URL (for image thumbnails). Caller revokes it. */
+  async objectUrl(sessionId: string, handle: string): Promise<string> {
+    return URL.createObjectURL(await fetchResourceBlob(sessionId, handle));
+  },
+  /** Fetch + trigger a browser download of a resource (blobs). */
+  async download(sessionId: string, handle: string, filename?: string): Promise<void> {
+    const blob = await fetchResourceBlob(sessionId, handle);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || handle;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+};
+
 export type NewSkill = Omit<Skill, '_id' | 'disabled_reason'> & {
   parameters_schema?: unknown;
 };

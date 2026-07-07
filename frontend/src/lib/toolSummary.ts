@@ -180,7 +180,14 @@ export function describeTool(
       } catch {
         /* keep raw */
       }
-      return { Icon: Globe, value: truncate(host, 44), title: url };
+      const hint = done
+        ? r.binary
+          ? str(r.resource_id) || 'binary'
+          : r.reduced
+            ? 'reduced'
+            : undefined
+        : undefined;
+      return { Icon: Globe, value: truncate(host, 44), title: url, hint };
     }
     case 'remember': {
       const content = str(args.content);

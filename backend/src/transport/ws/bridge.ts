@@ -99,8 +99,11 @@ export function attachBridge(io: Server): void {
       status,
       result,
       // Thumbnails of any image the tool acquired (e.g. a picture read into the turn), so the operator
-      // sees what the agent pulled in. Handles ride along so the UI can label them (img_1, …).
-      images: images?.map((i) => ({ id: i.id, dataUrl: i.dataUrl })),
+      // sees what the agent pulled in. Handles ride along so the UI can label them (img_1, …). Blob
+      // resources (no pixels) are excluded here — they surface in the Data tab, not as chat thumbnails.
+      images: images
+        ?.filter((i) => i.kind !== 'blob' && i.dataUrl)
+        .map((i) => ({ id: i.id, dataUrl: i.dataUrl })),
     });
   });
 

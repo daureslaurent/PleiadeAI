@@ -81,12 +81,12 @@ export const askAgent: Tool = {
 
     try {
       const { text, images: returned } = await ctx.invokeSubAgent(target, query, images);
-      // Images the sub-agent handed back join this turn's pool (via ToolResult.images → the runner
+      // Resources the sub-agent handed back join this turn's pool (via ToolResult.images → the runner
       // registers them), so the caller can see, analyse, or re-forward them — the return path mirrors
-      // the forward path. Strip the child's handles: they're only meaningful in the child's turn, and
-      // the caller's pool assigns fresh, collision-free ones (preserving them could clobber a handle
-      // the caller already uses).
-      const handedBack = returned?.map((i) => ({ dataUrl: i.dataUrl })) ?? [];
+      // the forward path. Strip the child's handle (`id`) only: it's meaningful just in the child's
+      // turn, and the caller's pool assigns a fresh, collision-free one. Everything else (kind, mime,
+      // blob storageId, …) is preserved so a forwarded blob stays a blob and needn't be re-stored.
+      const handedBack = returned?.map(({ id: _id, ...rest }) => rest) ?? [];
       return {
         result: {
           ok: true,

@@ -22,17 +22,45 @@ import { settingsService } from '../../domain/settings/settings.service';
 import { agentRepository } from '../../domain/agents/agent.repository';
 import { isolationRepository } from '../../domain/isolations/isolation.repository';
 import { imageRepository } from '../../domain/images/image.repository';
+import { toolConfigService } from '../../domain/tools/tool-config.service';
 import { resolveForEndpoint } from '../../inference/inference-resolver';
 import { annotateIfDegenerate, visionSamplingOpts } from '../../inference/vision-analyze';
 import { llamaClient } from '../../inference/LlamaClient';
 import type { ChatMessage } from '../../domain/agents/jit-builder';
-import type { Tool, ToolContext } from '../types';
+import type { Tool, ToolConfigField, ToolContext } from '../types';
 
 const log = createLogger('tool:visual');
 
 const TIMEOUT_MS = 30_000;
 /** Where the driver commands find the X display + a (cookie-less) Xauthority the boot script writes. */
 const DISPLAY_ENV = `export DISPLAY=${VISUAL_DISPLAY} XAUTHORITY=${VISUAL_DIR}/Xauthority`;
+
+/** Operator-tunable options for the visual tools, surfaced on the Tools page under `visual_screenshot`. */
+const VISUAL_CONFIG_SCHEMA: ToolConfigField[] = [
+  {
+    key: 'capture_delay_ms',
+    label: 'Delay before capture (ms)',
+    type: 'number',
+    default: 500,
+    hint: 'Wait this long before grabbing the screen, so menus/animations settle. Applies to all screen captures (visual_screenshot, visual_click, visual_act). 0 = no delay.',
+  },
+];
+
+/**
+ * Bash snippet that pauses right before `scrot`, per the operator-configured capture delay. Shared by
+ * every live capture path so the wait is consistent across visual_screenshot / visual_click /
+ * visual_act. Returns `[]` (no-op) when the delay is unset or non-positive.
+ */
+async function captureDelaySnippet(): Promise<string[]> {
+  try {
+    const { config } = await toolConfigService.resolve('visual_screenshot', VISUAL_CONFIG_SCHEMA);
+    const ms = Number(config.capture_delay_ms);
+    if (!Number.isFinite(ms) || ms <= 0) return [];
+    return [`sleep ${(ms / 1000).toFixed(3)}`];
+  } catch {
+    return [];
+  }
+}
 /** Screenshots land here inside the container workspace so the operator can also inspect them. */
 const SHOT_DIR = '/workspace/.visual';
 
@@ -66,6 +94,7 @@ async function captureCleanThumb(
     `raw="${SHOT_DIR}/act-$ts.png"`,
     `thumb="${SHOT_DIR}/act-$ts.thumb.jpg"`,
     DISPLAY_ENV,
+    ...(await captureDelaySnippet()),
     'scrot -o "$raw"',
     `size=$(python3 - "$raw" "$thumb" <<'PLEIADE_THUMB_PY'`,
     'import sys',
@@ -327,7 +356,7 @@ async function captureScreen(exec: AgentExecutor, grid: boolean, sourcePath?: st
     `cthumb="${SHOT_DIR}/shot-$ts.clean.jpg"`,
     `draw="${grid ? '1' : '0'}"`,
     DISPLAY_ENV,
-    ...(sourcePath ? [] : ['scrot -o "$raw"']),
+    ...(sourcePath ? [] : [...(await captureDelaySnippet()), 'scrot -o "$raw"']),
     `size=$(python3 - "$raw" "$out" "$thumb" "$draw" "$cthumb" <<'PLEIADE_GRID_PY'`,
     'import sys',
     'from PIL import Image, ImageDraw',
@@ -667,6 +696,7 @@ export const visualScreenshot: Tool = {
     },
     additionalProperties: false,
   },
+  configSchema: VISUAL_CONFIG_SCHEMA,
 
   async execute(args, ctx) {
     const question = String(args.question ?? '');

@@ -39,7 +39,8 @@ export const analyzeImage: Tool = {
   },
 
   async execute(args, ctx) {
-    const images = ctx.attachedImages ?? [];
+    // Only actual images are analysable — blob resources (kind 'blob') carry no pixels.
+    const images = (ctx.attachedImages ?? []).filter((i) => i.kind !== 'blob' && i.dataUrl);
     if (images.length === 0) {
       return { result: { ok: false, error: 'no image is available in this turn' } };
     }
@@ -64,9 +65,10 @@ export const analyzeImage: Tool = {
     }
 
     const question = String(args.question ?? '');
-    const { analysis, model } = await analyzeImageWithVision(img.dataUrl, question);
+    const dataUrl = img.dataUrl!; // guaranteed by the kind/dataUrl filter above
+    const { analysis, model } = await analyzeImageWithVision(dataUrl, question);
 
-    ctx.emitVision?.({ image: img.dataUrl, question, answer: analysis, model });
+    ctx.emitVision?.({ image: dataUrl, question, answer: analysis, model });
     log.info({ agent: ctx.agentName, ref, model: model || null }, 'analyze_image');
 
     return {

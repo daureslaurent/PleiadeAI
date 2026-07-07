@@ -99,6 +99,13 @@ export interface ToolResult {
   result: unknown;
   /** Base64 images the tool produced, appended to context by the JIT builder. */
   images?: ImageBlock[];
+  /**
+   * Opaque binary blob resources the tool produced (e.g. `webfetch` on a PDF). Unlike `images`, blobs
+   * never enter the model's context — the runner persists them and hands the agent a `blob_N` handle
+   * to save (`write` from_handle) or forward. A blob block should carry `kind: 'blob'` and, when the
+   * producing tool already persisted the bytes, a `storageId` (so the runner won't re-store them).
+   */
+  resources?: ImageBlock[];
 }
 
 /**

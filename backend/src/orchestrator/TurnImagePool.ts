@@ -13,26 +13,33 @@ export type ImageSource = NonNullable<ImageBlock['source']>;
  */
 export class TurnImagePool {
   private items: ImageBlock[] = [];
-  private counter = 0;
+  private imgCounter = 0;
+  private blobCounter = 0;
 
   constructor(seed: ImageBlock[] = [], source: ImageSource = 'attachment') {
     for (const block of seed) this.add(block, source);
   }
 
   /**
-   * Register an image, returning it stamped with a handle. An image that already carries a numbered
-   * handle (forwarded across a hop) keeps it — and nudges the counter past it so fresh handles don't
-   * collide. Re-registering the same handle replaces the existing entry rather than duplicating it.
+   * Register a resource, returning it stamped with a handle. Images get `img_N`, blobs get `blob_N`;
+   * the two namespaces have independent counters. A resource that already carries a numbered handle
+   * (forwarded across a hop, or seeded from the session's persisted store) keeps it — and nudges the
+   * matching counter past it so fresh handles don't collide. Re-registering the same handle replaces
+   * the existing entry rather than duplicating it.
    */
   add(block: ImageBlock, source: ImageSource): ImageBlock {
+    const kind = block.kind ?? 'image';
     let id = block.id;
     if (id) {
-      const m = /^img_(\d+)$/.exec(id);
-      if (m) this.counter = Math.max(this.counter, Number(m[1]));
+      const m = /^(img|blob)_(\d+)$/.exec(id);
+      if (m) {
+        if (m[1] === 'img') this.imgCounter = Math.max(this.imgCounter, Number(m[2]));
+        else this.blobCounter = Math.max(this.blobCounter, Number(m[2]));
+      }
     } else {
-      id = `img_${++this.counter}`;
+      id = kind === 'blob' ? `blob_${++this.blobCounter}` : `img_${++this.imgCounter}`;
     }
-    const stamped: ImageBlock = { ...block, id, source: block.source ?? source };
+    const stamped: ImageBlock = { ...block, id, kind, source: block.source ?? source };
     const existing = this.items.findIndex((i) => i.id === id);
     if (existing >= 0) {
       this.items[existing] = stamped;

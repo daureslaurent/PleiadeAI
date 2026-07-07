@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bug, X, Play, Square, CornerDownRight, Brain, TriangleAlert, Box } from 'lucide-react';
+import { Bug, X, Play, Square, CornerDownRight, Brain, TriangleAlert, Box, Database } from 'lucide-react';
 import { useStream, type TraceEntry } from '../../store/stream';
 import type { Agent } from '../../lib/api';
 import { IsolationPanel } from './IsolationPanel';
+import { DataPanel } from './DataPanel';
 
 const KIND_META: Record<
   TraceEntry['kind'],
@@ -43,12 +44,13 @@ interface Props {
   agent: Agent | null;
 }
 
-type Tab = 'trace' | 'isolation';
+type Tab = 'trace' | 'isolation' | 'data';
 
 /**
- * Right drawer with two tabs: **Trace** (the live + persisted execution trace for the active
- * session — tool calls, cross-agent hops, `<think>` reasoning, alerts) and **Isolation** (the
- * active agent's container: live usage + a `/workspace` file explorer).
+ * Right drawer with three tabs: **Trace** (the live + persisted execution trace for the active
+ * session — tool calls, cross-agent hops, `<think>` reasoning, alerts), **Isolation** (the active
+ * agent's container: live usage + a `/workspace` file explorer), and **Data** (the session's
+ * persisted resources — tool-read images and fetched binary blobs, by handle).
  */
 export function DebuggerDrawer({ onClose, agent }: Props) {
   const { trace, liveReasoning, streaming } = useStream();
@@ -73,6 +75,7 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
           active={tab === 'isolation'}
           onClick={() => setTab('isolation')}
         />
+        <TabButton icon={Database} label="Data" active={tab === 'data'} onClick={() => setTab('data')} />
         <button
           onClick={onClose}
           className="ml-auto rounded p-1 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
@@ -83,6 +86,8 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
 
       {tab === 'isolation' ? (
         <IsolationPanel agent={agent} />
+      ) : tab === 'data' ? (
+        <DataPanel />
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         {trace.map((e, i) => (

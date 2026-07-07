@@ -165,13 +165,16 @@ export function buildMemoryMessage(
  * `take_screenshot` skill result the agent should analyse automatically — spec §1).
  */
 export function buildUserMessage(text: string, images: ImageBlock[] = []): ChatMessage {
-  if (images.length === 0) {
+  // Only actual images with pixels can be folded into multimodal content — blob resources (kind
+  // 'blob') carry no dataUrl and must never enter context; they're reached by handle instead.
+  const pictures = images.filter((img) => img.kind !== 'blob' && img.dataUrl);
+  if (pictures.length === 0) {
     return { role: 'user', content: text };
   }
   const parts: ContentPart[] = [];
   if (text) parts.push({ type: 'text', text });
-  for (const img of images) {
-    parts.push({ type: 'image_url', image_url: { url: img.dataUrl } });
+  for (const img of pictures) {
+    parts.push({ type: 'image_url', image_url: { url: img.dataUrl! } });
   }
   return { role: 'user', content: parts };
 }
