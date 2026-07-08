@@ -13,6 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ARG AXOLOTL_REF=v0.6.0
 ARG LLAMACPP_REF=b4519
 ARG TORCH_VERSION=2.4.1
+ARG FLASH_ATTN_VERSION=2.6.3
 
 # --- System deps: Python 3.10, build toolchain, cmake (llama.cpp), git, curl ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,9 +28,15 @@ RUN pip install --upgrade pip packaging wheel \
     && pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cu121
 
 # --- Axolotl from source (pinned) + training deps (deepspeed, flash-attn, bitsandbytes) ---
+# flash-attn imports torch inside its setup.py, so it CANNOT build under pip's default
+# build isolation (the extra `.[flash-attn]` fails with "No module named 'torch'").
+# Install it separately with --no-build-isolation so it sees the torch layer above;
+# `ninja` (python pkg) is required for its parallel CUDA build.
 RUN git clone --depth 1 --branch "${AXOLOTL_REF}" https://github.com/axolotl-ai-cloud/axolotl /opt/axolotl \
     && cd /opt/axolotl \
-    && pip install -e '.[deepspeed,flash-attn]' \
+    && pip install ninja \
+    && pip install -e '.[deepspeed]' \
+    && pip install "flash-attn==${FLASH_ATTN_VERSION}" --no-build-isolation \
     && pip install "gguf>=0.10.0" sentencepiece protobuf
 
 # --- llama.cpp (pinned): convert_hf_to_gguf.py + llama-quantize for GGUF export ---
