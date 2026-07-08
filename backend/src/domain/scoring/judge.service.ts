@@ -51,7 +51,7 @@ export const judgeService = {
     ];
     try {
       // Temperature 0 for reproducible scores. Tagged `source: 'judge'` so these calls are captured
-      // but never re-scored (listTurnIds only groups `chat-turn`).
+      // but never re-scored (listRunIds only groups `chat-turn`; judge calls carry no run_id).
       const raw = await runWithCaptureContext({ source: 'judge' }, () =>
         llamaClient.complete(target, messages, { temperature: 0, maxTokens }),
       );

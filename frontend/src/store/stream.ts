@@ -90,6 +90,10 @@ export type Block =
       promptTokens?: number;
       /** Model context window, so the bubble can show usage as a fraction. */
       contextWindow?: number;
+      /** This sub-agent run's id — the scored unit; lets its own quality score attach to this bubble. */
+      runId?: string;
+      /** The Conversation Quality score for this sub-agent run, once the scorer has judged it. */
+      score?: TurnScore;
       children: Block[];
     };
 
@@ -131,6 +135,8 @@ interface LiveFrame {
   /** Prompt tokens the run reported (context_usage), attributed to this frame's bubble. */
   promptTokens?: number;
   contextWindow?: number;
+  /** The sub-agent run's id (from the `agent_hop` event) — the scored unit for this bubble. */
+  runId?: string;
 }
 
 /**
@@ -193,11 +199,35 @@ export function buildBlocks(
         durationMs: f.durationMs,
         promptTokens: f.promptTokens,
         contextWindow: f.contextWindow,
+        runId: f.runId,
         children: buildBlocks(it.refFrameId, items, frames),
       });
     }
   }
   return out;
+}
+
+/**
+ * Attach `score` to the sub-agent bubble whose run is `runId`, walking the nested `agent` block tree.
+ * Returns a new tree only if a match was found (else the same reference, so callers can no-op). Used
+ * to land a delegated sub-agent's Conversation Quality score on its own bubble, live and on backfill.
+ */
+function attachScoreToBubble(blocks: Block[], runId: string, score: TurnScore): { blocks: Block[]; changed: boolean } {
+  let changed = false;
+  const next = blocks.map((b) => {
+    if (b.kind !== 'agent') return b;
+    if (b.runId === runId) {
+      changed = true;
+      return { ...b, score };
+    }
+    const inner = attachScoreToBubble(b.children, runId, score);
+    if (inner.changed) {
+      changed = true;
+      return { ...b, children: inner.blocks };
+    }
+    return b;
+  });
+  return changed ? { blocks: next, changed } : { blocks, changed };
 }
 
 /** A Conversation Quality score attached to an assistant turn (from the scorer). */
@@ -212,9 +242,11 @@ export type Turn =
   | {
       role: 'assistant';
       blocks: Block[];
-      /** The backend turn id (present once a turn completes) — links this turn to its quality score. */
+      /** The backend turn id (present once a turn completes) — groups this turn's parent + sub-agent runs. */
       turnId?: string;
-      /** The Conversation Quality score, once the scorer has judged this turn. */
+      /** The depth-0 agent-run id — the scored unit this top-level turn's quality score keys on. */
+      runId?: string;
+      /** The Conversation Quality score for the top-level run, once the scorer has judged it. */
       score?: TurnScore;
     };
 
@@ -498,6 +530,7 @@ export const useStream = create<StreamState>((set, get) => ({
               query: e.query,
               status: 'running',
               startedAt: Date.now(),
+              runId: e.childRunId,
             },
           },
           liveItems: [
@@ -633,14 +666,17 @@ export const useStream = create<StreamState>((set, get) => ({
         persisted,
         blocks: serverBlocks,
         turnId,
+        runId,
       }: {
         sessionId: string;
         answer: string;
         persisted?: boolean;
         /** Rich blocks the backend assembled when it persisted the turn itself (client was gone). */
         blocks?: Block[];
-        /** Backend turn id — tag the saved turn so its quality score attaches on refresh. */
+        /** Backend turn id — groups this turn's parent + sub-agent runs. */
         turnId?: string;
+        /** Depth-0 agent-run id — tag the saved turn so its quality score attaches on refresh. */
+        runId?: string;
       }) => {
       const s = get();
       const directAgent = s.sessionAgent[sessionId];
@@ -679,7 +715,7 @@ export const useStream = create<StreamState>((set, get) => ({
         set({
           ...shared,
           streaming: false,
-          turns: hasContent ? [...s.turns, { role: 'assistant', blocks, turnId }] : s.turns,
+          turns: hasContent ? [...s.turns, { role: 'assistant', blocks, turnId, runId }] : s.turns,
           liveItems: [],
           liveFrames: {},
           frameStack: ['root'],
@@ -703,6 +739,7 @@ export const useStream = create<StreamState>((set, get) => ({
               context_tokens: s.contextUsage?.promptTokens,
               context_window: s.contextUsage?.contextWindow,
               turn_id: turnId,
+              run_id: runId,
             })
             .catch(() => {});
         }
@@ -716,16 +753,29 @@ export const useStream = create<StreamState>((set, get) => ({
       }
     });
 
-    // Conversation Quality Scorer: attach a live score to the matching turn (by turn id) in the
-    // on-screen session. Turns from other sessions are updated on their next hydrate.
+    // Conversation Quality Scorer: attach a live score to the matching agent-run (by run id) in the
+    // on-screen session. The depth-0 run lands on the top-level turn; a sub-agent run lands on its own
+    // nested bubble (found by walking the block tree). Other sessions are updated on their next hydrate.
     socket.on('turn_scored', (e: TurnScoredEvent) => {
       set((s) => {
         if (e.sessionId && e.sessionId !== s.activeSessionId) return s;
+        const score: TurnScore = { score: e.score, tag: e.tag, explanation: e.explanation };
         let changed = false;
         const turns = s.turns.map((t) => {
-          if (t.role === 'assistant' && t.turnId === e.turnId) {
+          if (t.role !== 'assistant') return t;
+          // Depth-0 run → the top-level turn's own badge.
+          if (t.runId === e.runId) {
             changed = true;
-            return { ...t, score: { score: e.score, tag: e.tag, explanation: e.explanation } };
+            return { ...t, score };
+          }
+          // Otherwise it may be a sub-agent run nested in this turn's blocks (scope by turnId to avoid
+          // walking unrelated turns).
+          if (t.turnId && t.turnId === e.turnId) {
+            const res = attachScoreToBubble(t.blocks, e.runId, score);
+            if (res.changed) {
+              changed = true;
+              return { ...t, blocks: res.blocks };
+            }
           }
           return t;
         });
@@ -750,22 +800,35 @@ export const useStream = create<StreamState>((set, get) => ({
             role: 'assistant',
             blocks: (m.blocks as Block[] | undefined) ?? [{ kind: 'text', text: m.text }],
             turnId: m.turn_id,
+            runId: m.run_id,
           },
     );
     const trace: TraceEntry[] = messages.flatMap((m) => (m.trace as TraceEntry[] | undefined) ?? []);
 
-    // Backfill quality scores for this session's turns (survives refresh): fetch the session's scores
-    // and attach each to its turn by id. Fire-and-forget so hydrate stays synchronous.
+    // Backfill quality scores for this session's runs (survives refresh): fetch the session's scores
+    // (one per agent-run) and attach each by run id — the depth-0 run to its top-level turn, each
+    // sub-agent run to its nested bubble. Fire-and-forget so hydrate stays synchronous.
     void scoringApi
       .list({ sessionId, limit: 500 })
       .then((scores) => {
         if (get().activeSessionId !== sessionId || scores.length === 0) return;
-        const byTurn = new Map(scores.map((sc) => [sc.turnId, sc]));
+        const byRun = new Map(scores.map((sc) => [sc.runId, sc]));
         set((s) => ({
           turns: s.turns.map((t) => {
-            if (t.role !== 'assistant' || !t.turnId) return t;
-            const sc = byTurn.get(t.turnId);
-            return sc ? { ...t, score: { score: sc.score, tag: sc.tag, explanation: sc.explanation } } : t;
+            if (t.role !== 'assistant') return t;
+            let turn = t;
+            // Top-level (depth-0) run → the turn's own badge.
+            const own = t.runId ? byRun.get(t.runId) : undefined;
+            if (own) turn = { ...turn, score: { score: own.score, tag: own.tag, explanation: own.explanation } };
+            // Sub-agent runs → nested bubbles. Attach every score whose bubble lives in this turn.
+            let blocks = turn.blocks;
+            for (const sc of scores) {
+              if (sc.runId === t.runId) continue;
+              const res = attachScoreToBubble(blocks, sc.runId, { score: sc.score, tag: sc.tag, explanation: sc.explanation });
+              if (res.changed) blocks = res.blocks;
+            }
+            if (blocks !== turn.blocks) turn = { ...turn, blocks };
+            return turn;
           }),
         }));
       })

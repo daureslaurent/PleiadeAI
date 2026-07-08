@@ -3,7 +3,7 @@ import { scoringService } from '../../../domain/scoring/scoring.service';
 import { exportService } from '../../../domain/scoring/export.service';
 import { conversationScoreRepository } from '../../../domain/scoring/conversation-score.repository';
 import { llamaLogRepository } from '../../../domain/llama-logs/llama-log.repository';
-import { assembleTurn } from '../../../domain/scoring/turn-assembler';
+import { assembleRun } from '../../../domain/scoring/turn-assembler';
 import type { ConversationScoreDoc } from '../../../domain/scoring/conversation-score.model';
 
 /** Conversation Quality Scorer — scores, batch scoring, per-turn inspection, and JSONL export. */
@@ -24,26 +24,26 @@ scoringRouter.get('/scores', async (req, res) => {
   res.json(rows.map(shapeScore));
 });
 
-/** One turn's score plus its assembled transcript + signals (for inspecting a ruling). */
-scoringRouter.get('/turn/:turnId', async (req, res) => {
-  const { turnId } = req.params;
+/** One run's score plus its assembled transcript + signals (for inspecting a ruling). */
+scoringRouter.get('/run/:runId', async (req, res) => {
+  const { runId } = req.params;
   const [score, records] = await Promise.all([
-    conversationScoreRepository.get(turnId),
-    llamaLogRepository.listByTurn(turnId),
+    conversationScoreRepository.get(runId),
+    llamaLogRepository.listByRun(runId),
   ]);
-  const turn = assembleTurn(records);
-  if (!turn) {
-    res.status(404).json({ error: 'no records for turn' });
+  const run = assembleRun(records);
+  if (!run) {
+    res.status(404).json({ error: 'no records for run' });
     return;
   }
-  res.json({ score: score ? shapeScore(score) : null, turn });
+  res.json({ score: score ? shapeScore(score) : null, run });
 });
 
-/** Score one turn now (manual). */
-scoringRouter.post('/turn/:turnId', async (req, res) => {
-  const scored = await scoringService.scoreTurn(req.params.turnId, 'manual');
+/** Score one run now (manual). */
+scoringRouter.post('/run/:runId', async (req, res) => {
+  const scored = await scoringService.scoreRun(req.params.runId, 'manual');
   if (!scored) {
-    res.status(422).json({ error: 'could not score turn (no records or judge failed)' });
+    res.status(422).json({ error: 'could not score run (no records or judge failed)' });
     return;
   }
   res.json(shapeScore(scored));
@@ -83,7 +83,10 @@ scoringRouter.get('/export/download', async (_req, res) => {
 
 function shapeScore(doc: ConversationScoreDoc) {
   return {
-    turnId: doc.turn_id,
+    runId: doc.run_id,
+    turnId: doc.turn_id ?? null,
+    agentName: doc.agent_name ?? null,
+    depth: doc.depth ?? null,
     sessionId: doc.session_id ?? null,
     score: doc.score,
     tag: doc.tag,

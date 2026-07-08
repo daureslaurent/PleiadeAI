@@ -86,14 +86,19 @@ function toolNamesFrom(tools: unknown): string[] {
 }
 
 /**
- * Build the {@link TurnLog} from a turn's archive records (already sorted oldest-first). Returns null
- * if there are no records. Robust to malformed args (they surface as a `malformedArgs` signal).
+ * Build the {@link TurnLog} from ONE agent-run's archive records (already sorted oldest-first).
+ * Returns null if there are no records. Robust to malformed args (surfaced as a `malformedArgs`
+ * signal). The run is the scored unit: for a delegated sub-agent these records are only that
+ * sub-agent's own calls, so it is judged on its own conversation.
  */
-export function assembleTurn(records: LlamaLogDoc[]): TurnLog | null {
+export function assembleRun(records: LlamaLogDoc[]): TurnLog | null {
   if (records.length === 0) return null;
   const first = records[0]!;
+  const runId = String(first.run_id ?? '');
   const turnId = String(first.turn_id ?? '');
   const sessionId = first.session_id ?? null;
+  const agentName = first.agent_name ?? null;
+  const depth = first.depth ?? null;
 
   // Tool catalog: union of tool names offered across every call this turn.
   const catalog = new Set<string>();
@@ -157,9 +162,8 @@ export function assembleTurn(records: LlamaLogDoc[]): TurnLog | null {
   const sawToolError = [...resultsById.values()].some((r) => r.isError);
   const recoveredAfterError = detectRecovery(steps);
 
-  // Iteration cap: the depth-0 agent made at least the max number of tool-bearing rounds.
-  const depth0Calls = records.filter((r) => (r.depth ?? 0) === 0).length;
-  const hitIterationCap = depth0Calls >= DEFAULT_MAX_TOOL_ITERATIONS;
+  // Iteration cap: this run made at least the max number of tool-bearing rounds (a possible loop).
+  const hitIterationCap = records.length >= DEFAULT_MAX_TOOL_ITERATIONS;
 
   const anyToolCall = steps.some((s) => s.toolCalls.length > 0);
   const last = records[records.length - 1]!;
@@ -179,7 +183,7 @@ export function assembleTurn(records: LlamaLogDoc[]): TurnLog | null {
     answeredWithoutToolCall,
   };
 
-  return { turnId, sessionId, toolCatalog: [...catalog], userRequest, steps, finalAnswer, signals };
+  return { runId, turnId, agentName, depth, sessionId, toolCatalog: [...catalog], userRequest, steps, finalAnswer, signals };
 }
 
 /** A tool errored on some call, and a later call to the SAME tool came back without an error. */

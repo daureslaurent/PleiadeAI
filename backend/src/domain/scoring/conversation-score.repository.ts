@@ -1,20 +1,26 @@
 import { ConversationScoreModel, type ConversationScoreDoc } from './conversation-score.model';
 import type { JudgeVerdict } from './scoring.types';
 
-/** Persistence for Conversation Quality Scorer verdicts (one per turn, upserted on re-score). */
+/** Persistence for Conversation Quality Scorer verdicts (one per agent-run, upserted on re-score). */
 export const conversationScoreRepository = {
-  /** Insert or overwrite the score for a turn. */
+  /** Insert or overwrite the score for an agent-run. */
   async upsert(input: {
+    runId: string;
     turnId: string;
+    agentName: string | null;
+    depth: number | null;
     sessionId: string | null;
     verdict: JudgeVerdict;
     judgeModel: string;
     origin: 'auto' | 'batch' | 'manual';
   }): Promise<ConversationScoreDoc> {
     const doc = await ConversationScoreModel.findOneAndUpdate(
-      { turn_id: input.turnId },
+      { run_id: input.runId },
       {
         $set: {
+          turn_id: input.turnId,
+          agent_name: input.agentName,
+          depth: input.depth,
           session_id: input.sessionId,
           score: input.verdict.score,
           tag: input.verdict.tag,
@@ -23,21 +29,21 @@ export const conversationScoreRepository = {
           origin: input.origin,
           updated_at: new Date(),
         },
-        $setOnInsert: { turn_id: input.turnId, created_at: new Date() },
+        $setOnInsert: { run_id: input.runId, created_at: new Date() },
       },
       { new: true, upsert: true },
     ).exec();
     return doc;
   },
 
-  get(turnId: string): Promise<ConversationScoreDoc | null> {
-    return ConversationScoreModel.findOne({ turn_id: turnId }).exec();
+  get(runId: string): Promise<ConversationScoreDoc | null> {
+    return ConversationScoreModel.findOne({ run_id: runId }).exec();
   },
 
-  /** turn_ids that already have a score — used to skip them in "unscored only" batch runs. */
-  async scoredTurnIds(): Promise<Set<string>> {
-    const rows = await ConversationScoreModel.find({}, { turn_id: 1 }).lean().exec();
-    return new Set(rows.map((r) => String(r.turn_id)));
+  /** run_ids that already have a score — used to skip them in "unscored only" batch runs. */
+  async scoredRunIds(): Promise<Set<string>> {
+    const rows = await ConversationScoreModel.find({}, { run_id: 1 }).lean().exec();
+    return new Set(rows.map((r) => String(r.run_id)));
   },
 
   /** List scores, newest first, optionally filtered by session / tag / min score (UI + triage). */

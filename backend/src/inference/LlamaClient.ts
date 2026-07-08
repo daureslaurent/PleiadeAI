@@ -146,6 +146,7 @@ class CallCapture {
         ctx: cc && cc.sessionId ? { sessionId: cc.sessionId, agentId: cc.agentId ?? '', agentName: cc.agentName ?? '', depth: cc.depth ?? 0 } : undefined,
         id: this.id,
         turnId: cc?.turnId,
+        runId: cc?.runId,
         source: this.source,
         model: this.model,
         endpoint: this.endpoint,

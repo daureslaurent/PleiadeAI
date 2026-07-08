@@ -15,20 +15,20 @@ export interface ExportResult {
 }
 
 /**
- * Dump the archive to a JSONL file for an EXTERNAL judge/SFT pipeline — one line per turn:
- * `{ turn_id, session_id, messages, tools }`, where `messages` is the turn's full reconstructed
- * OpenAI-format conversation (the accumulated depth-0 context plus the final assistant output) and
- * `tools` is the tool catalog offered that turn. This is a raw, unfiltered dump ("export all"); the
- * external script does its own judging/filtering.
+ * Dump the archive to a JSONL file for an EXTERNAL judge/SFT pipeline — one line per **agent-run**:
+ * `{ turn_id, run_id, agent, depth, session_id, messages, tools }`, where `messages` is that run's
+ * full reconstructed OpenAI-format conversation and `tools` is the tool catalog offered to it. The
+ * top-level agent and each delegated sub-agent are separate lines, so sub-agent training data is
+ * captured too. Raw, unfiltered ("export all"); the external script does its own judging/filtering.
  */
 export const exportService = {
-  /** Build the JSONL body (one turn per line) + the turn count. Shared by file-write and download. */
+  /** Build the JSONL body (one agent-run per line) + the line count. Shared by file-write & download. */
   async buildJsonl(): Promise<{ body: string; turns: number }> {
-    const turnIds = await llamaLogRepository.listTurnIds();
+    const runs = await llamaLogRepository.listRunIds();
     const lines: string[] = [];
-    for (const turnId of turnIds) {
-      const records = await llamaLogRepository.listByTurn(turnId);
-      const example = turnToExample(turnId, records);
+    for (const { runId } of runs) {
+      const records = await llamaLogRepository.listByRun(runId);
+      const example = runToExample(runId, records);
       if (example) lines.push(JSON.stringify(example));
     }
     return { body: lines.join('\n') + (lines.length ? '\n' : ''), turns: lines.length };
@@ -54,17 +54,21 @@ export const exportService = {
 
 type Msg = Record<string, unknown> & { role?: string };
 
-/** Reconstruct one turn as an OpenAI training example: full messages + the tools offered. */
-function turnToExample(
-  turnId: string,
-  records: LlamaLogDoc[],
-): { turn_id: string; session_id: string | null; messages: Msg[]; tools: unknown[] } | null {
+interface RunExample {
+  turn_id: string | null;
+  run_id: string;
+  agent: string | null;
+  depth: number | null;
+  session_id: string | null;
+  messages: Msg[];
+  tools: unknown[];
+}
+
+/** Reconstruct one agent-run as an OpenAI training example: full messages + the tools offered. */
+function runToExample(runId: string, records: LlamaLogDoc[]): RunExample | null {
   if (records.length === 0) return null;
-  // Prefer the depth-0 thread (the user-facing conversation); its final record holds the fullest
-  // accumulated context. Sub-agent hops live in their own records and are out of scope for one line.
-  const depth0 = records.filter((r) => (r.depth ?? 0) === 0);
-  const chain = depth0.length ? depth0 : records;
-  const last = chain[chain.length - 1]!;
+  // A run's records are all the same agent, oldest→newest; the final one holds the fullest context.
+  const last = records[records.length - 1]!;
 
   const req = last.request as { messages?: Msg[]; tools?: unknown[] };
   const messages: Msg[] = Array.isArray(req.messages) ? [...req.messages] : [];
@@ -85,5 +89,13 @@ function turnToExample(
   }
   messages.push(assistant);
 
-  return { turn_id: turnId, session_id: last.session_id ?? null, messages, tools: req.tools ?? [] };
+  return {
+    turn_id: last.turn_id ?? null,
+    run_id: runId,
+    agent: last.agent_name ?? null,
+    depth: last.depth ?? null,
+    session_id: last.session_id ?? null,
+    messages,
+    tools: req.tools ?? [],
+  };
 }

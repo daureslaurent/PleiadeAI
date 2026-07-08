@@ -23,8 +23,10 @@ const LlamaLogSchema = new Schema(
     model: { type: String, required: true, index: true },
     /** Linkage (null for side tasks that run outside a live session). */
     session_id: { type: String, default: null, index: true },
-    /** Groups all calls of one user turn (incl. sub-agent hops) — the Conversation Quality Scorer's unit. */
+    /** Groups all calls of one user turn (incl. sub-agent hops). */
     turn_id: { type: String, default: null, index: true },
+    /** The single agent-run this call belongs to — the Conversation Quality Scorer's scored unit. */
+    run_id: { type: String, default: null, index: true },
     agent_id: { type: String, default: null },
     agent_name: { type: String, default: null },
     depth: { type: Number, default: null },

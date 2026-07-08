@@ -45,6 +45,8 @@ export type Block =
       durationMs?: number;
       promptTokens?: number;
       contextWindow?: number;
+      /** The sub-agent run's id — carried so its Conversation Quality score attaches to this bubble. */
+      runId?: string;
       children: Block[];
     };
 
@@ -82,6 +84,8 @@ interface Frame {
   durationMs?: number;
   promptTokens?: number;
   contextWindow?: number;
+  /** The sub-agent run's id (from `agent:ask_agent`) — the scored unit for this frame's bubble. */
+  runId?: string;
 }
 
 /** Pull a human-readable output string out of a tool result (mirrors the frontend helper). */
@@ -141,6 +145,7 @@ export interface TurnSnapshot {
       durationMs?: number;
       promptTokens?: number;
       contextWindow?: number;
+      runId?: string;
     }
   >;
   frameStack: string[];
@@ -285,6 +290,7 @@ export class TurnRecorder {
       query: p.query,
       status: 'running',
       startedAt: Date.now(),
+      runId: p.childRunId,
     });
     this.items.push({ kind: 'agent', frameId: parent, refFrameId: frameId });
     this.frameStack.push(frameId);
@@ -350,6 +356,7 @@ export class TurnRecorder {
           durationMs: f.durationMs,
           promptTokens: f.promptTokens,
           contextWindow: f.contextWindow,
+          runId: f.runId,
           children: this.buildBlocks(it.refFrameId),
         });
       }

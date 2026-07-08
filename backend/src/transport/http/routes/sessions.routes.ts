@@ -49,7 +49,7 @@ sessionsRouter.get('/:id/messages', async (req, res) => {
 });
 
 sessionsRouter.post('/:id/messages', async (req, res) => {
-  const { role, text, images, blocks, reasoning, trace, context_tokens, context_window, turn_id } = req.body ?? {};
+  const { role, text, images, blocks, reasoning, trace, context_tokens, context_window, turn_id, run_id } = req.body ?? {};
   if (role !== 'user' && role !== 'assistant') {
     res.status(400).json({ error: 'role must be user|assistant' });
     return;
@@ -64,6 +64,7 @@ sessionsRouter.post('/:id/messages', async (req, res) => {
     context_tokens: context_tokens !== undefined ? Number(context_tokens) : undefined,
     context_window: context_window !== undefined ? Number(context_window) : undefined,
     turn_id: typeof turn_id === 'string' ? turn_id : undefined,
+    run_id: typeof run_id === 'string' ? run_id : undefined,
   });
   res.status(201).json(msg);
 });

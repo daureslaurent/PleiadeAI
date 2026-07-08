@@ -2,7 +2,7 @@ import { createLogger } from '../../config/logger';
 import { eventBus } from '../../core/event-bus/EventBus';
 import { settingsService } from '../settings/settings.service';
 import { llamaLogRepository } from '../llama-logs/llama-log.repository';
-import { assembleTurn } from './turn-assembler';
+import { assembleRun } from './turn-assembler';
 import { judgeService } from './judge.service';
 import { conversationScoreRepository } from './conversation-score.repository';
 import type { ConversationScoreDoc } from './conversation-score.model';
@@ -10,11 +10,11 @@ import type { ConversationScoreDoc } from './conversation-score.model';
 const log = createLogger('scoring-service');
 
 export interface BatchOptions {
-  /** `unscored` skips turns that already have a score; `rescore` overwrites every turn. */
+  /** `unscored` skips runs that already have a score; `rescore` overwrites every run. */
   mode: 'unscored' | 'rescore';
-  /** How many turns to judge at once (1 = sequential). Clamped to [1, 16]. */
+  /** How many runs to judge at once (1 = sequential). Clamped to [1, 16]. */
   concurrency: number;
-  /** Cap on turns processed this run (safety valve for a huge archive). */
+  /** Cap on runs processed this run (safety valve for a huge archive). */
   limit?: number;
 }
 
@@ -27,30 +27,37 @@ export interface BatchResult {
 
 export const scoringService = {
   /**
-   * Score one turn end-to-end: load its archive records, assemble the transcript + signals, run the
-   * judge, and upsert the verdict. Returns the persisted score, or null if the turn couldn't be
-   * assembled or the judge failed.
+   * Score one agent-run end-to-end: load its archive records, assemble the transcript + signals, run
+   * the judge, and upsert the verdict. Returns the persisted score, or null if the run couldn't be
+   * assembled or the judge failed. The scored unit is the agent-run, so a delegated sub-agent is
+   * judged on its own conversation rather than folded into the parent's score.
    */
-  async scoreTurn(turnId: string, origin: 'auto' | 'batch' | 'manual'): Promise<ConversationScoreDoc | null> {
-    const records = await llamaLogRepository.listByTurn(turnId);
-    const turn = assembleTurn(records);
-    if (!turn) {
-      log.debug({ turnId }, 'no archive records for turn — nothing to score');
+  async scoreRun(runId: string, origin: 'auto' | 'batch' | 'manual'): Promise<ConversationScoreDoc | null> {
+    const records = await llamaLogRepository.listByRun(runId);
+    const run = assembleRun(records);
+    if (!run) {
+      log.debug({ runId }, 'no archive records for run — nothing to score');
       return null;
     }
-    const judged = await judgeService.judge(turn);
+    const judged = await judgeService.judge(run);
     if (!judged) return null;
     const saved = await conversationScoreRepository.upsert({
-      turnId,
-      sessionId: turn.sessionId,
+      runId,
+      turnId: run.turnId,
+      agentName: run.agentName,
+      depth: run.depth,
+      sessionId: run.sessionId,
       verdict: judged.verdict,
       judgeModel: judged.judgeModel,
       origin,
     });
-    // Notify the turn's chat (live badge) + the LLM Debug feed.
+    // Notify the turn's chat (live badge on the matching bubble) + the LLM Debug feed.
     eventBus.emit('scoring:turn_scored', {
-      sessionId: turn.sessionId,
-      turnId,
+      sessionId: run.sessionId,
+      runId,
+      turnId: run.turnId,
+      agentName: run.agentName,
+      depth: run.depth,
       score: judged.verdict.score,
       tag: judged.verdict.tag,
       explanation: judged.verdict.explanation,
@@ -59,16 +66,17 @@ export const scoringService = {
   },
 
   /**
-   * Auto-score hook: fire-and-forget scoring of a just-completed turn, gated on the `scoring_enabled`
-   * setting. Never throws — scoring must not affect the chat path. Called from AgentRunner after a
-   * top-level (depth-0) run finishes.
+   * Auto-score hook: when a user-facing turn completes, score EVERY agent-run in it — the top-level
+   * agent and each delegated sub-agent — gated on `scoring_enabled`, fire-and-forget. Never throws
+   * (scoring must not affect the chat path). Called from AgentRunner after the depth-0 run finishes.
    */
-  autoScore(turnId: string): void {
+  autoScoreTurn(turnId: string): void {
     void (async () => {
       try {
         const settings = await settingsService.get();
         if (!settings.scoring_enabled) return;
-        await this.scoreTurn(turnId, 'auto');
+        const runIds = await llamaLogRepository.listRunIdsForTurn(turnId);
+        for (const runId of runIds) await this.scoreRun(runId, 'auto');
       } catch (err) {
         log.warn({ turnId, err: err instanceof Error ? err.message : String(err) }, 'auto-score failed');
       }
@@ -76,34 +84,35 @@ export const scoringService = {
   },
 
   /**
-   * Batch-score turns. Enumerates archive turns (newest first), optionally skips already-scored ones,
-   * and judges them with bounded concurrency (1 = sequential, N = parallel). Idempotent in `unscored`
-   * mode.
+   * Batch-score agent-runs. Enumerates archive runs (newest first), optionally skips already-scored
+   * ones, and judges them with bounded concurrency (1 = sequential, N = parallel). Idempotent in
+   * `unscored` mode.
    */
   async scoreAll(opts: BatchOptions): Promise<BatchResult> {
     const concurrency = Math.max(1, Math.min(16, Math.trunc(opts.concurrency) || 1));
-    const allTurnIds = await llamaLogRepository.listTurnIds(opts.limit ?? 5000);
-    const alreadyScored = opts.mode === 'unscored' ? await conversationScoreRepository.scoredTurnIds() : new Set<string>();
-    const queue = allTurnIds.filter((id) => !alreadyScored.has(id));
+    const allRuns = await llamaLogRepository.listRunIds(opts.limit ?? 20000);
+    const allRunIds = allRuns.map((r) => r.runId);
+    const alreadyScored = opts.mode === 'unscored' ? await conversationScoreRepository.scoredRunIds() : new Set<string>();
+    const queue = allRunIds.filter((id) => !alreadyScored.has(id));
 
     const result: BatchResult = {
-      total: allTurnIds.length,
+      total: allRunIds.length,
       scored: 0,
-      skipped: allTurnIds.length - queue.length,
+      skipped: allRunIds.length - queue.length,
       failed: 0,
     };
 
     let cursor = 0;
     const worker = async (): Promise<void> => {
       while (cursor < queue.length) {
-        const turnId = queue[cursor++]!;
+        const runId = queue[cursor++]!;
         try {
-          const scored = await this.scoreTurn(turnId, 'batch');
+          const scored = await this.scoreRun(runId, 'batch');
           if (scored) result.scored++;
           else result.failed++;
         } catch (err) {
           result.failed++;
-          log.warn({ turnId, err: err instanceof Error ? err.message : String(err) }, 'batch score failed');
+          log.warn({ runId, err: err instanceof Error ? err.message : String(err) }, 'batch score failed');
         }
       }
     };

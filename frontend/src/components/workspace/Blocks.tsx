@@ -5,6 +5,7 @@ import { Markdown } from '../Markdown';
 import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
 import { usePrefs } from '../../store/prefs';
+import { ScoreBadge } from '../ScoreBadge';
 import type { Block } from '../../store/stream';
 
 type AgentBlock = Extract<Block, { kind: 'agent' }>;
@@ -203,6 +204,8 @@ function SubAgentBubble({ block }: { block: AgentBlock }) {
           {block.query}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]">
+          {/* This sub-agent run's own Conversation Quality score, once the scorer has judged it. */}
+          {block.score && <ScoreBadge score={block.score} size="xs" />}
           {block.promptTokens !== undefined && (
             <span
               className="flex items-center gap-1 text-slate-500"

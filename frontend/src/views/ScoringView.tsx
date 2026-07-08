@@ -86,7 +86,7 @@ export function ScoringView() {
         ) : (
           <div className="space-y-2">
             {scores.map((s) => (
-              <ScoreRow key={s.turnId} score={s} />
+              <ScoreRow key={s.runId} score={s} />
             ))}
           </div>
         )}
@@ -227,7 +227,15 @@ function ScoreRow({ score }: { score: ConversationScore }) {
     <div className="rounded-xl border border-white/[0.06] bg-black/25 px-3 py-2.5 backdrop-blur-sm">
       <div className="flex items-center gap-2.5">
         <ScoreBadge score={score} size="sm" />
-        <span className="font-mono text-[11px] text-slate-500">{score.turnId.slice(0, 8)}</span>
+        <span className="font-mono text-[11px] text-slate-500">{score.runId.slice(0, 8)}</span>
+        {score.agentName && (
+          <span className="text-[11px] text-slate-400">{score.agentName}</span>
+        )}
+        {score.depth != null && score.depth > 0 && (
+          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-slate-400">
+            sub-agent
+          </span>
+        )}
         <span className="text-[10px] uppercase tracking-wider text-slate-600">{score.origin}</span>
         <span className="ml-auto font-mono text-[10px] text-slate-600">{score.judgeModel}</span>
       </div>

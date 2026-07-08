@@ -102,6 +102,8 @@ export interface AskAgentPayload {
   /** Depth of the *invoked* agent (parent depth + 1). Guarded against MAX_AGENT_HOPS. */
   depth: number;
   query: string;
+  /** The invoked sub-agent's run id — so the UI can tag its bubble and attach its own score. */
+  childRunId: string;
 }
 
 export interface AskAgentDonePayload {
@@ -247,8 +249,10 @@ export interface LlamaCallDeltaPayload {
 export interface LlamaCallEndPayload {
   ctx?: EventContext;
   id: string;
-  /** Groups every call of one user turn (incl. sub-agent hops) for the Conversation Quality Scorer. */
+  /** Groups every call of one user turn (incl. sub-agent hops). */
   turnId?: string;
+  /** The agent-run this call belongs to — the Conversation Quality Scorer's scored unit. */
+  runId?: string;
   source: LlamaCallSource;
   model: string;
   endpoint: string;
@@ -267,13 +271,18 @@ export interface LlamaCallEndPayload {
 }
 
 /**
- * A turn was scored by the Conversation Quality Scorer. Bridged to the turn's session room so the
- * chat can attach a live score badge to the matching turn. `sessionId` may be null for side turns
- * (none currently) — the bridge only forwards when it's present.
+ * An agent-run was scored by the Conversation Quality Scorer. Bridged to the turn's session room so
+ * the chat can attach a live badge to the matching bubble (top-level turn or a sub-agent bubble, by
+ * `runId`). `sessionId` may be null for side turns — the bridge forwards to the room only when present.
  */
 export interface TurnScoredPayload {
   sessionId: string | null;
+  /** The scored agent-run (the badge target). */
+  runId: string;
+  /** The user turn this run belongs to (groups parent + sub-agent runs). */
   turnId: string;
+  agentName: string | null;
+  depth: number | null;
   score: number;
   tag: 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
   explanation: string;

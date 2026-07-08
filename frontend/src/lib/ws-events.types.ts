@@ -15,6 +15,8 @@ export interface AgentHopEvent {
   to: string;
   depth: number;
   query: string;
+  /** The invoked sub-agent's run id — tags its bubble so its own quality score can attach. */
+  childRunId: string;
 }
 
 export interface AgentHopDoneEvent {
@@ -170,11 +172,18 @@ export interface LlamaCallEndEvent {
   usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
 }
 
-/** A turn was scored by the Conversation Quality Scorer (live badge on the chat + LLM Debug). */
+/**
+ * An agent-run was scored by the Conversation Quality Scorer (live badge on the chat + LLM Debug).
+ * `runId` is the badge target — the top-level turn or a specific sub-agent bubble; `turnId` groups
+ * the runs of one user turn.
+ */
 export interface TurnScoredEvent {
   type: 'turn_scored';
   sessionId: string | null;
+  runId: string;
   turnId: string;
+  agentName: string | null;
+  depth: number | null;
   score: number;
   tag: 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
   explanation: string;

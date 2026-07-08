@@ -35,12 +35,19 @@ export interface TurnStep {
 }
 
 /**
- * The assembled input the judge scores: one turn, flattened from its archive records. `toolCatalog`
- * is the set of tool names actually offered to the model (from the request `tools[]`), so the judge
- * can detect a hallucinated tool. `userRequest` is the first user message that opened the turn.
+ * The assembled input the judge scores: one agent-run, flattened from its archive records.
+ * `toolCatalog` is the set of tool names actually offered to the model (from the request `tools[]`),
+ * so the judge can detect a hallucinated tool. `userRequest` is the message that opened this run (the
+ * user's message for the top-level agent, or the delegated task for a sub-agent).
  */
 export interface TurnLog {
+  /** The scored agent-run. */
+  runId: string;
+  /** The user turn this run belongs to (groups parent + sub-agent runs). */
   turnId: string;
+  agentName: string | null;
+  /** Hop depth: 0 = the user-facing agent, >0 = a delegated sub-agent. */
+  depth: number | null;
   sessionId: string | null;
   /** Tool names offered to the model this turn (union across calls). Hallucination = a call outside this. */
   toolCatalog: string[];
@@ -82,9 +89,12 @@ export interface JudgeVerdict {
   explanation: string;
 }
 
-/** A persisted score for one turn. */
+/** A persisted score for one agent-run. */
 export interface ConversationScore extends JudgeVerdict {
+  runId: string;
   turnId: string;
+  agentName: string | null;
+  depth: number | null;
   sessionId: string | null;
   /** The judge model + endpoint that produced this ruling (for auditing / re-scoring decisions). */
   judgeModel: string;

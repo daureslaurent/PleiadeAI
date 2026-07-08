@@ -105,10 +105,15 @@ export interface RunInput {
   depth: number;
   /**
    * Groups every llama call of this user turn — set once for the depth-0 run and propagated to every
-   * sub-agent hop so the whole turn (including delegations) shares one id the scorer can group by.
+   * sub-agent hop so the whole turn (including delegations) shares one grouping id.
    * Generated in `run()` when absent (the top-level entry).
    */
   turnId?: string;
+  /**
+   * This agent-run's id (the scored unit). `hop` mints a fresh one per sub-agent invocation and passes
+   * it here; the depth-0 entry leaves it unset and `run()` generates it.
+   */
+  runId?: string;
   userText: string;
   images?: ImageBlock[];
   /** Prior turns in this session (excludes the new user message). */
@@ -136,8 +141,10 @@ export interface RunInput {
 export interface RunResult {
   text: string;
   images: ImageBlock[];
-  /** The id grouping this turn's llama calls — surfaced so the caller can persist it + link scores. */
+  /** The id grouping this turn's llama calls — surfaced so the caller can persist it + correlate runs. */
   turnId: string;
+  /** This agent-run's id (the scored unit) — the depth-0 run id links the top-level turn's score. */
+  runId: string;
 }
 
 /**
@@ -161,10 +168,13 @@ export class AgentRunner {
       depth: input.depth,
     };
 
-    // One id for the whole user turn: minted by the depth-0 entry, then propagated to every sub-agent
-    // hop (see `hop`) so all of a turn's llama calls — delegations included — carry the same `turnId`.
-    // The Conversation Quality Scorer groups the archive by this.
+    // Two ids for the Conversation Quality Scorer:
+    //  • `turnId` groups the whole user turn — minted by the depth-0 entry, propagated to every hop.
+    //  • `runId` identifies THIS agent-run — the scored unit. Minted fresh per run (depth 0 and each
+    //    sub-agent hop, via `input.runId` set by `hop`), so a delegated sub-agent is scored on its own
+    //    conversation instead of being folded into the parent's score.
     const turnId = input.turnId ?? randomUUID();
+    const runId = input.runId ?? randomUUID();
 
     // Resolve the images this turn can work with. Attachments live only for the turn they're sent on
     // (history is text-only), so a follow-up like "forward the last image to X" would otherwise have
@@ -343,6 +353,7 @@ export class AgentRunner {
         toolSchemas,
         ctx,
         turnId,
+        runId,
         inference,
         fallbacks,
         signal,
@@ -513,16 +524,17 @@ export class AgentRunner {
     // caller ignores them (the images already rendered in this agent's own turn).
     const handBack = imagePool.all().filter((i) => i.source === 'tool');
 
-    // Conversation Quality Scorer: once the user-facing turn has fully settled, auto-score it (gated
-    // on the `scoring_enabled` setting, fire-and-forget). Only the depth-0 run scores — a sub-agent
-    // hop's calls belong to the same turn_id and are folded into that single score. Deferred slightly
-    // so the fire-and-forget capture writes land in the archive before the scorer reads them back.
+    // Conversation Quality Scorer: once the user-facing turn has fully settled, auto-score every
+    // agent-run in it — the top-level agent AND each delegated sub-agent get their own score (gated on
+    // `scoring_enabled`, fire-and-forget). Only the depth-0 run triggers the fan-out; sub-agent runs
+    // completed earlier and their records are already in the archive. Deferred slightly so the
+    // depth-0 run's own fire-and-forget capture writes land before the scorer reads them back.
     if (ctx.depth === 0) {
       const tid = turnId;
-      setTimeout(() => scoringService.autoScore(tid), 1500);
+      setTimeout(() => scoringService.autoScoreTurn(tid), 1500);
     }
 
-    return { text: finalText, images: handBack, turnId };
+    return { text: finalText, images: handBack, turnId, runId };
   }
 
   /**
@@ -625,13 +637,14 @@ export class AgentRunner {
     toolSchemas: ToolSchema[],
     ctx: EventContext,
     turnId: string,
+    runId: string,
     inference: ResolvedInference,
     fallbacks: ResolvedInference[],
     signal?: AbortSignal,
   ): ReturnType<typeof llamaClient.streamChat> {
     const parser = new ReasoningParser();
     const result = await runWithCaptureContext(
-      { source: 'chat-turn', sessionId: ctx.sessionId, agentId: ctx.agentId, agentName: ctx.agentName, depth: ctx.depth, turnId },
+      { source: 'chat-turn', sessionId: ctx.sessionId, agentId: ctx.agentId, agentName: ctx.agentName, depth: ctx.depth, turnId, runId },
       () =>
         llamaClient.streamChat(
           messages,
@@ -894,18 +907,23 @@ export class AgentRunner {
       { from: fromCtx.agentName, to: targetAgentName, depth: childDepth },
       'ask_agent hop',
     );
+    // Mint the sub-agent's run id here so it can ride the ask_agent event (the UI tags the bubble
+    // with it) AND be handed to the child run below — both must agree so the bubble's live score lands.
+    const childRunId = randomUUID();
     eventBus.emit('agent:ask_agent', {
       ctx: fromCtx,
       from: fromCtx.agentName,
       to: targetAgentName,
       depth: childDepth,
       query,
+      childRunId,
     });
     try {
       const answer = await this.run({
         agentName: targetAgentName,
         sessionId: fromCtx.sessionId,
         depth: childDepth,
+        runId: childRunId,
         ...run,
       });
       eventBus.emit('agent:ask_agent_done', {

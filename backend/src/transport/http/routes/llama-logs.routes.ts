@@ -15,6 +15,7 @@ function toListRecord(doc: LlamaLogDoc) {
   return {
     id: d.call_id,
     turnId: d.turn_id ?? null,
+    runId: d.run_id ?? null,
     source: d.source,
     endpoint: d.endpoint,
     model: d.model,

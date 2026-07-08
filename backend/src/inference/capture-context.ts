@@ -23,10 +23,16 @@ export interface CaptureContext {
   depth?: number;
   /**
    * Groups every llama call of one user turn — including calls made by sub-agents this turn delegated
-   * to. `sessionId` spans a whole conversation; `turnId` is the finer unit the Conversation Quality
-   * Scorer evaluates. Absent for side tasks (title/identity) that aren't part of a scored turn.
+   * to. `sessionId` spans a whole conversation; `turnId` groups one user turn. Absent for side tasks
+   * (title/identity) that aren't part of a scored turn.
    */
   turnId?: string;
+  /**
+   * The single agent-run this call belongs to — the SCORED unit. The top-level agent and each
+   * `ask_agent` sub-agent each get their own `runId` (all sharing the turn's `turnId`), so a delegated
+   * sub-agent is scored on its own conversation rather than folded into the parent's score.
+   */
+  runId?: string;
   source: LlamaCallSource;
 }
 

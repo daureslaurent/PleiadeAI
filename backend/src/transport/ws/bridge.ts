@@ -26,6 +26,7 @@ export function attachBridge(io: Server): void {
       to: payload.to,
       depth: payload.depth,
       query: payload.query,
+      childRunId: payload.childRunId,
     });
   });
 
@@ -182,10 +183,11 @@ export function attachBridge(io: Server): void {
     });
   });
 
-  // Conversation Quality Scorer → the turn's chat, so a live score badge appears on the turn. Also
-  // broadcast to the llama-log room so the LLM Debug page can update its per-record badges live.
-  eventBus.on('scoring:turn_scored', ({ sessionId, turnId, score, tag, explanation }) => {
-    const wire = { type: 'turn_scored', sessionId, turnId, score, tag, explanation };
+  // Conversation Quality Scorer → the turn's chat, so a live badge appears on the scored bubble
+  // (top-level turn or a sub-agent bubble, matched by runId). Also broadcast to the llama-log room so
+  // the LLM Debug page can update its per-record badges live.
+  eventBus.on('scoring:turn_scored', ({ sessionId, runId, turnId, agentName, depth, score, tag, explanation }) => {
+    const wire = { type: 'turn_scored', sessionId, runId, turnId, agentName, depth, score, tag, explanation };
     if (sessionId) io.to(sessionId).emit('turn_scored', wire);
     io.to('llama-log').emit('turn_scored', wire);
   });

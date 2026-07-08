@@ -55,9 +55,9 @@ export function LLMDebugView() {
     [live],
   );
 
-  // Optional filter: show only records whose turn was scored with the chosen tag.
+  // Optional filter: show only records whose run was scored with the chosen tag.
   const shownRecords = useMemo(
-    () => (tagFilter ? records.filter((r) => r.turnId && scores[r.turnId]?.tag === tagFilter) : records),
+    () => (tagFilter ? records.filter((r) => r.runId && scores[r.runId]?.tag === tagFilter) : records),
     [records, scores, tagFilter],
   );
 
@@ -112,7 +112,7 @@ export function LLMDebugView() {
             )}
 
             {shownRecords.map((rec) => (
-              <RecordCard key={rec.id + rec.createdAt} rec={rec} score={rec.turnId ? scores[rec.turnId] : undefined} />
+              <RecordCard key={rec.id + rec.createdAt} rec={rec} score={rec.runId ? scores[rec.runId] : undefined} />
             ))}
           </div>
         )}

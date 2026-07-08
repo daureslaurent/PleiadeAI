@@ -28,7 +28,7 @@ export interface LiveCall {
   startedAt: number;
 }
 
-/** A turn's quality score, keyed by turnId, for the per-record badge. */
+/** An agent-run's quality score, keyed by runId, for the per-record badge. */
 export interface DebugScore {
   score: number;
   tag: 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
@@ -38,7 +38,7 @@ export interface DebugScore {
 interface LlamaDebugState {
   records: LlamaCallRecord[];
   live: Record<string, LiveCall>;
-  /** turnId → quality score, so each record shows its turn's badge. */
+  /** runId → quality score, so each record shows its own run's badge. */
   scores: Record<string, DebugScore>;
   /** How many records to list; ≤50 hits the fast capped buffer, larger pages the archive. */
   limit: number;
@@ -102,10 +102,10 @@ export const useLlamaDebug = create<LlamaDebugState>((set, get) => ({
       void get().hydrate();
     });
 
-    // A turn was scored — attach it so records of that turn show the badge live.
+    // A run was scored — attach it so records of that run show the badge live.
     socket.on('turn_scored', (e: TurnScoredEvent) => {
       set((s) => ({
-        scores: { ...s.scores, [e.turnId]: { score: e.score, tag: e.tag, explanation: e.explanation } },
+        scores: { ...s.scores, [e.runId]: { score: e.score, tag: e.tag, explanation: e.explanation } },
       }));
     });
 
@@ -115,10 +115,10 @@ export const useLlamaDebug = create<LlamaDebugState>((set, get) => ({
   hydrate: async () => {
     try {
       const records = await llmDebugApi.list(get().limit);
-      // Fetch scores for the turns present in these records so each shows its badge.
+      // Fetch scores for the runs present in these records so each shows its badge.
       const scoreList = await scoringApi.list({ limit: 300 }).catch(() => []);
       const scores: Record<string, DebugScore> = {};
-      for (const sc of scoreList) scores[sc.turnId] = { score: sc.score, tag: sc.tag, explanation: sc.explanation };
+      for (const sc of scoreList) scores[sc.runId] = { score: sc.score, tag: sc.tag, explanation: sc.explanation };
       set({ records, scores, loading: false, error: false });
     } catch {
       set({ loading: false, error: true });

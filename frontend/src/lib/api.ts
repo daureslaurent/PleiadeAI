@@ -567,8 +567,10 @@ export interface StoredMessage {
   context_tokens?: number;
   /** Assistant only: model context window at the time of this turn. */
   context_window?: number;
-  /** Assistant only: the turn id grouping this turn's llama calls, so its score can be linked. */
+  /** Assistant only: the turn id grouping this turn's llama calls (parent + sub-agent runs). */
   turn_id?: string;
+  /** Assistant only: the depth-0 agent-run id, so the top-level turn's quality score links. */
+  run_id?: string;
   created_at: string;
 }
 
@@ -582,6 +584,7 @@ export interface NewMessage {
   context_tokens?: number;
   context_window?: number;
   turn_id?: string;
+  run_id?: string;
 }
 
 export const sessionsApi = {
@@ -957,8 +960,10 @@ export interface LlamaResponseCapture {
 /** One persisted llama call, as listed on the LLM Debug page. */
 export interface LlamaCallRecord {
   id: string;
-  /** Turn grouping id (null for side-task calls); links a record to its Conversation Quality score. */
+  /** Turn grouping id (null for side-task calls) — groups a turn's parent + sub-agent runs. */
   turnId: string | null;
+  /** Agent-run id (null for side-task calls) — links a record to its Conversation Quality score. */
+  runId: string | null;
   source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge';
   endpoint: string;
   model: string;
@@ -998,7 +1003,14 @@ export const llmDebugApi = {
 export type ScoreTag = 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
 
 export interface ConversationScore {
-  turnId: string;
+  /** The scored agent-run (the score's key). */
+  runId: string;
+  /** The user turn this run belongs to (groups parent + sub-agent runs). */
+  turnId: string | null;
+  /** The agent that produced this run. */
+  agentName: string | null;
+  /** Hop depth: 0 = user-facing agent, >0 = delegated sub-agent. */
+  depth: number | null;
   sessionId: string | null;
   score: number;
   tag: ScoreTag;
@@ -1025,8 +1037,8 @@ export const scoringApi = {
   summary: () => api.get<ScoringSummary>('/scoring/summary').then((r) => r.data),
   list: (opts: { sessionId?: string; tag?: string; minScore?: number; limit?: number } = {}) =>
     api.get<ConversationScore[]>('/scoring/scores', { params: opts }).then((r) => r.data),
-  scoreTurn: (turnId: string) =>
-    api.post<ConversationScore>(`/scoring/turn/${turnId}`).then((r) => r.data),
+  scoreRun: (runId: string) =>
+    api.post<ConversationScore>(`/scoring/run/${runId}`).then((r) => r.data),
   scoreAll: (body: { mode: 'unscored' | 'rescore'; concurrency: number; limit?: number }) =>
     api.post<BatchScoreResult>('/scoring/score-all', body).then((r) => r.data),
   export: () => api.post<{ path: string; turns: number; bytes: number }>('/scoring/export').then((r) => r.data),

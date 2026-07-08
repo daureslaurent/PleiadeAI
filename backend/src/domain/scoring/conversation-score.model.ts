@@ -1,12 +1,18 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 
 /**
- * `conversation_scores` — one Conversation Quality Scorer verdict per turn (keyed by `turn_id`).
- * Re-scoring a turn upserts on `turn_id`. Feeds SFT-dataset triage: filter by `tag` / `score`.
+ * `conversation_scores` — one Conversation Quality Scorer verdict per **agent-run** (keyed by
+ * `run_id`). The top-level agent and each delegated sub-agent each get their own row; `turn_id`
+ * groups the runs of one user turn. Re-scoring a run upserts on `run_id`. Feeds SFT-dataset triage:
+ * filter by `tag` / `score`.
  */
 const ConversationScoreSchema = new Schema(
   {
-    turn_id: { type: String, required: true, unique: true, index: true },
+    run_id: { type: String, required: true, unique: true, index: true },
+    turn_id: { type: String, default: null, index: true },
+    agent_name: { type: String, default: null },
+    /** Hop depth: 0 = user-facing agent, >0 = delegated sub-agent. */
+    depth: { type: Number, default: null },
     session_id: { type: String, default: null, index: true },
     score: { type: Number, required: true, min: 0, max: 100, index: true },
     tag: {

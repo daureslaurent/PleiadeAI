@@ -25,6 +25,7 @@ function toRecord(p: LlamaCallEndPayload) {
     model: p.model,
     session_id: p.ctx?.sessionId ?? null,
     turn_id: p.turnId ?? null,
+    run_id: p.runId ?? null,
     agent_id: p.ctx?.agentId ?? null,
     agent_name: p.ctx?.agentName ?? null,
     depth: p.ctx?.depth ?? null,
@@ -68,24 +69,39 @@ export const llamaLogRepository = {
     return LlamaCallArchiveModel.findOne({ call_id: callId }).exec();
   },
 
-  /** All archive records of one turn, oldest first — the input to the Conversation Quality Scorer. */
+  /** All archive records of one turn (parent + sub-agent runs), oldest first. */
   listByTurn(turnId: string): Promise<LlamaLogDoc[]> {
     return LlamaCallArchiveModel.find({ turn_id: turnId }).sort({ created_at: 1 }).exec();
   },
 
+  /** All archive records of one agent-run, oldest first — the input the scorer judges. */
+  listByRun(runId: string): Promise<LlamaLogDoc[]> {
+    return LlamaCallArchiveModel.find({ run_id: runId }).sort({ created_at: 1 }).exec();
+  },
+
   /**
-   * Distinct `turn_id`s present in the archive (only scoreable `chat-turn` calls), newest turn first.
-   * Backs the "score all" batch and JSONL export. Side-task calls (title/identity/vision) carry no
-   * turn_id and are excluded.
+   * Distinct agent-run ids present in the archive (only scoreable `chat-turn` calls), newest first.
+   * Backs the "score all" batch and JSONL export. Side-task calls (title/identity/vision/judge) carry
+   * no run_id and are excluded. Each returned row carries its `turnId` for grouping.
    */
-  async listTurnIds(limit = 5000): Promise<string[]> {
-    const rows = await LlamaCallArchiveModel.aggregate<{ _id: string; last: Date }>([
-      { $match: { turn_id: { $ne: null }, source: 'chat-turn' } },
-      { $group: { _id: '$turn_id', last: { $max: '$created_at' } } },
+  async listRunIds(limit = 20000): Promise<{ runId: string; turnId: string | null }[]> {
+    const rows = await LlamaCallArchiveModel.aggregate<{ _id: string; turnId: string | null; last: Date }>([
+      { $match: { run_id: { $ne: null }, source: 'chat-turn' } },
+      { $group: { _id: '$run_id', turnId: { $first: '$turn_id' }, last: { $max: '$created_at' } } },
       { $sort: { last: -1 } },
       { $limit: limit },
     ]).exec();
-    return rows.map((r) => r._id);
+    return rows.map((r) => ({ runId: r._id, turnId: r.turnId ?? null }));
+  },
+
+  /** The agent-run ids belonging to one user turn (for the auto-score fan-out). */
+  async listRunIdsForTurn(turnId: string): Promise<string[]> {
+    const rows = await LlamaCallArchiveModel.distinct('run_id', {
+      turn_id: turnId,
+      run_id: { $ne: null },
+      source: 'chat-turn',
+    }).exec();
+    return rows.filter((r): r is string => typeof r === 'string');
   },
 
   /** Wipe the durable archive (guarded behind a UI confirm). The capped debug buffer is untouched. */
