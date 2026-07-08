@@ -1,5 +1,39 @@
+import { createLogger } from '../../config/logger';
 import { ConversationScoreModel, type ConversationScoreDoc } from './conversation-score.model';
 import type { JudgeVerdict } from './scoring.types';
+
+const log = createLogger('conversation-score-repository');
+
+/**
+ * Reconcile `conversation_scores` indexes to the per-run model at boot, independent of migration
+ * state. The scorer's unit became the agent-run (keyed by `run_id`), but the original schema keyed
+ * it per-turn with a UNIQUE `turn_id` index (migration `…130000`). Migration `…140000` drops that
+ * and makes `run_id` unique — but migrations aren't applied automatically on deploy, so a prod DB
+ * left at `…130000` still carries the unique `turn_id` index. The effect is silent and severe: the
+ * FIRST run of a turn saves, and every sibling `ask_agent` sub-agent run then fails to insert with a
+ * duplicate-key error (same `turn_id`) and is dropped by the fire-and-forget scorer — so a delegated
+ * turn ends up with exactly one score and all its sub-agents unscored.
+ *
+ * This applies the same index change idempotently on every boot (a no-op once correct), so the fix
+ * lands without relying on `migrate-mongo up` having been run.
+ */
+export async function reconcileScoringIndexes(): Promise<void> {
+  const coll = ConversationScoreModel.collection;
+  try {
+    const existing = await coll.indexes();
+    const staleTurnUnique = existing.find((i) => i.name === 'turn_id_1' && i.unique === true);
+    if (staleTurnUnique) {
+      log.warn('dropping stale UNIQUE index conversation_scores.turn_id_1 — sub-agent runs share a turn_id and were failing to score');
+      await coll.dropIndex('turn_id_1');
+    }
+    // The scored unit is the agent-run: run_id is the unique key, turn_id only groups.
+    await coll.createIndex({ run_id: 1 }, { unique: true });
+    await coll.createIndex({ turn_id: 1 });
+  } catch (err) {
+    // Never block boot on index maintenance — worst case the scorer keeps its current behaviour.
+    log.error({ err: err instanceof Error ? err.message : String(err) }, 'scoring index reconciliation failed');
+  }
+}
 
 /** Persistence for Conversation Quality Scorer verdicts (one per agent-run, upserted on re-score). */
 export const conversationScoreRepository = {

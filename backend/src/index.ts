@@ -22,6 +22,7 @@ import { llmRouter } from './transport/http/routes/llm.routes';
 import { llamaLogsRouter } from './transport/http/routes/llama-logs.routes';
 import { registerLlamaLogSubscriber } from './domain/llama-logs/llama-log.service';
 import { scoringRouter } from './transport/http/routes/scoring.routes';
+import { reconcileScoringIndexes } from './domain/scoring/conversation-score.repository';
 import { finetuneServersRouter } from './transport/http/routes/finetune-servers.routes';
 import { finetuneJobsRouter } from './transport/http/routes/finetune-jobs.routes';
 import { startFinetunePoller } from './finetune/poller';
@@ -43,6 +44,10 @@ import { telegramBot } from './telegram/TelegramBot';
  */
 async function main(): Promise<void> {
   await connectMongo();
+
+  // Bring the scoring collection's indexes in line with the per-run model even if the deploy skipped
+  // `migrate-mongo up`: a leftover UNIQUE turn_id index silently drops every sub-agent run's score.
+  await reconcileScoringIndexes();
 
   // Persist every captured llama call (LLM Debug page) into Mongo. Registered once, best-effort.
   registerLlamaLogSubscriber();
