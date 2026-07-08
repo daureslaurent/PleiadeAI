@@ -12,6 +12,7 @@ import {
   agentIdFromContainerName,
 } from '../../../isolation/names';
 import { encryptSecret } from '../../../isolation/ssh.service';
+import { generateSshKeyPair } from '../../../isolation/ssh-keygen';
 import { parseWireguardConf } from '../../../isolation/vpn.service';
 import { createLogger } from '../../../config/logger';
 
@@ -327,6 +328,9 @@ isolationsRouter.patch('/:id', async (req, res) => {
   if (typeof body.ssh_private_key === 'string') {
     const trimmed = body.ssh_private_key.trim();
     patch.ssh_private_key_enc = trimmed ? encryptSecret(trimmed) : null;
+    // A hand-pasted key has an unknown algorithm — reset the type to '' (→ id_ed25519 filename, the
+    // documented manual convention) so a leftover 'rsa' from a prior generate doesn't misname it.
+    patch.ssh_key_type = '';
     sshChanged = true;
   }
 
@@ -384,6 +388,35 @@ isolationsRouter.patch('/:id', async (req, res) => {
   }
 
   res.json(await isolationRepository.update(id, patch));
+});
+
+/**
+ * Generate a fresh outbound SSH keypair server-side and store it on the profile. The private key is
+ * created, encrypted at rest, and injected into agent containers — it is NEVER returned to the
+ * client. Only the public key (an `authorized_keys` line) comes back, to paste onto the remote host.
+ * Overwrites any existing key (the caller confirms first), so assigned containers are recreated to
+ * pick up the new key on next use.
+ */
+isolationsRouter.post('/:id/ssh/generate', async (req, res) => {
+  const iso = await isolationRepository.findById(req.params.id);
+  if (!iso) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  const id = String(iso._id);
+  const type = req.body?.type === 'rsa' ? 'rsa' : 'ed25519';
+  const key = await generateSshKeyPair(type, `pleiade-${iso.name}`);
+  await isolationRepository.update(id, {
+    ssh_private_key_enc: encryptSecret(key.privateKey),
+    ssh_public_key: key.publicKey,
+    ssh_key_type: key.keyType,
+  });
+  // New key → recreate assigned containers so it installs on next run (matches the PATCH SSH path).
+  for (const agentId of await idsOf(id)) {
+    await agentContainerManager.removeAgentContainer(agentId).catch(() => undefined);
+  }
+  log.info({ id, keyType: key.keyType }, 'generated ssh key for isolation profile');
+  res.json({ ssh_public_key: key.publicKey, ssh_key_type: key.keyType });
 });
 
 /**

@@ -125,6 +125,9 @@ export interface ImageStatusDetail {
 }
 
 /** A shared Docker isolation profile (mirrors backend `isolation.model`). */
+/** Outbound SSH client key algorithm the profile's generator can produce. */
+export type SshKeyType = 'ed25519' | 'rsa';
+
 export interface Isolation {
   _id: string;
   name: string;
@@ -138,6 +141,8 @@ export interface Isolation {
   /** Public key + known_hosts are returned as-is (not secret); the private key never is. */
   ssh_public_key: string;
   ssh_known_hosts: string;
+  /** Algorithm of the stored key ('' = legacy/unknown → treated as ed25519). */
+  ssh_key_type: SshKeyType | '';
   // VPN (gluetun / WireGuard) config, used when `network === 'vpn'`, is supplied as an uploaded
   // WireGuard `.conf` (write-only, see IsolationPatch). It is secret and never returned.
 }
@@ -522,6 +527,16 @@ export const isolationsApi = {
   create: (body: NewIsolation) => api.post<Isolation>('/isolations', body).then((r) => r.data),
   update: (id: string, patch: IsolationPatch) =>
     api.patch<Isolation>(`/isolations/${id}`, patch).then((r) => r.data),
+  /**
+   * Generate a fresh outbound SSH keypair server-side. The private key is stored encrypted and
+   * injected into containers — only the public key (an `authorized_keys` line) is returned.
+   */
+  generateSsh: (id: string, type: SshKeyType) =>
+    api
+      .post<{ ssh_public_key: string; ssh_key_type: SshKeyType }>(`/isolations/${id}/ssh/generate`, {
+        type,
+      })
+      .then((r) => r.data),
   remove: (id: string) => api.delete(`/isolations/${id}`).then((r) => r.data),
 
   /** Every pleiade-managed container across all profiles, with orphan classification. */

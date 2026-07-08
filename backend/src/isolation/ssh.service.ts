@@ -32,6 +32,8 @@ export interface SshMaterial {
   privateKey?: string;
   publicKey?: string;
   knownHosts?: string;
+  /** Algorithm of the stored key; picks the container filename ('' → ed25519). */
+  keyType?: 'ed25519' | 'rsa' | '';
 }
 
 /**
@@ -45,6 +47,7 @@ export async function sshMaterialForIsolation(isoId: string): Promise<SshMateria
   const material: SshMaterial = {
     publicKey: iso.ssh_public_key || undefined,
     knownHosts: iso.ssh_known_hosts || undefined,
+    keyType: (iso.ssh_key_type as SshMaterial['keyType']) || undefined,
   };
   if (iso.ssh_private_key_enc) {
     try {

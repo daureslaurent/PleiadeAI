@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   Box,
+  Check,
+  Copy,
   Cpu,
   Globe,
   HardDrive,
@@ -25,6 +27,7 @@ import {
   type IsolationInstance,
   type IsolationVolume,
   type ManagedContainer,
+  type SshKeyType,
 } from '../lib/api';
 import { MasterDetail, ListRow, ListDivider } from '../components/MasterDetail';
 import {
@@ -58,6 +61,8 @@ interface Draft {
   idle_timeout_ms: number;
   ssh_public_key: string;
   ssh_known_hosts: string;
+  /** Algorithm of the stored key ('' = legacy/unknown → ed25519). Drives the injected filename hint. */
+  ssh_key_type: SshKeyType | '';
   /** Write-only: typed here to set/replace the key; never loaded back from the server. */
   ssh_private_key: string;
   /** Write-only WireGuard `.conf` contents (uploaded file); never loaded back from the server. */
@@ -76,6 +81,7 @@ const blank = (): Draft => ({
   idle_timeout_ms: 1_800_000,
   ssh_public_key: '',
   ssh_known_hosts: '',
+  ssh_key_type: '',
   ssh_private_key: '',
   vpn_conf: '',
   sudo_password: '',
@@ -92,6 +98,7 @@ const toDraft = (i: Isolation): Draft => ({
   idle_timeout_ms: i.idle_timeout_ms,
   ssh_public_key: i.ssh_public_key ?? '',
   ssh_known_hosts: i.ssh_known_hosts ?? '',
+  ssh_key_type: i.ssh_key_type ?? '',
   ssh_private_key: '',
   vpn_conf: '',
   sudo_password: '',
@@ -108,6 +115,10 @@ export function IsolationsView() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<IsolationStatus | null>(null);
   const [saving, setSaving] = useState(false);
+  // Server-side SSH keypair generation: chosen algorithm, in-flight flag, and copy-to-clipboard feedback.
+  const [genType, setGenType] = useState<SshKeyType>('ed25519');
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [pubKeyCopied, setPubKeyCopied] = useState(false);
   const confirm = useConfirm();
 
   // Global managed-container overview (all profiles): shown in the detail pane instead of an editor.
@@ -235,9 +246,46 @@ export function IsolationsView() {
   async function clearSshKey() {
     if (!draft?._id) return;
     if (!(await confirm({ title: 'Remove the SSH private key from this profile?', danger: true, confirmLabel: 'Remove' }))) return;
-    await isolationsApi.update(draft._id, { ssh_private_key: '' });
-    setDraft({ ...draft, ssh_private_key: '' });
+    await isolationsApi.update(draft._id, { ssh_private_key: '', ssh_public_key: '' });
+    setDraft({ ...draft, ssh_private_key: '', ssh_public_key: '', ssh_key_type: '' });
     await loadStatus(draft._id);
+  }
+
+  /**
+   * Generate a fresh keypair server-side. The private key is stored encrypted + injected into
+   * containers and never leaves the backend; only the public key comes back to display. Replacing an
+   * existing key invalidates the old public key on remote hosts, so confirm first.
+   */
+  async function generateSshKey() {
+    if (!draft?._id) return;
+    if (
+      status?.ssh_key_set &&
+      !(await confirm({
+        title: 'Replace the existing SSH key?',
+        body: 'The current public key stops working — you must add the NEW public key to your remote servers’ authorized_keys.',
+        danger: true,
+        confirmLabel: 'Generate new key',
+      }))
+    )
+      return;
+    setGeneratingKey(true);
+    try {
+      const r = await isolationsApi.generateSsh(draft._id, genType);
+      // Clear any half-typed manual key so Save doesn't overwrite the freshly generated one.
+      setDraft({ ...draft, ssh_public_key: r.ssh_public_key, ssh_key_type: r.ssh_key_type, ssh_private_key: '' });
+      await loadStatus(draft._id);
+    } catch (e) {
+      alert(`Key generation failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setGeneratingKey(false);
+    }
+  }
+
+  async function copyPublicKey() {
+    if (!draft?.ssh_public_key) return;
+    await navigator.clipboard.writeText(draft.ssh_public_key);
+    setPubKeyCopied(true);
+    setTimeout(() => setPubKeyCopied(false), 1500);
   }
 
   async function clearVpnConf() {
@@ -532,41 +580,109 @@ export function IsolationsView() {
           >
             <div className="space-y-2.5">
               <Hint>
-                Injected into each agent container at <code>~/.ssh/id_ed25519</code> (chmod 600) so the
-                agent can <code>git clone</code> / <code>ssh</code> out. Encrypted at rest; never shown
-                again after saving.
+                Injected into each agent container at{' '}
+                <code>~/.ssh/{draft.ssh_key_type === 'rsa' ? 'id_rsa' : 'id_ed25519'}</code> (chmod
+                600) so the container can <code>ssh</code> / <code>git clone</code> out to a remote
+                server. The private key is encrypted at rest and never leaves the backend.
               </Hint>
-              <Textarea
-                value={draft.ssh_private_key}
-                onChange={(e) => setDraft({ ...draft, ssh_private_key: e.target.value })}
-                rows={4}
-                placeholder={
-                  status?.ssh_key_set
-                    ? '•••••••• key set — paste a new private key to replace it'
-                    : '-----BEGIN OPENSSH PRIVATE KEY-----\n…'
-                }
-              />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Public key (optional)">
-                  <Textarea
-                    value={draft.ssh_public_key}
-                    onChange={(e) => setDraft({ ...draft, ssh_public_key: e.target.value })}
-                    rows={3}
-                    placeholder="ssh-ed25519 AAAA… (→ id_ed25519.pub)"
-                  />
-                </Field>
-                <Field label="known_hosts (optional)">
-                  <Textarea
-                    value={draft.ssh_known_hosts}
-                    onChange={(e) => setDraft({ ...draft, ssh_known_hosts: e.target.value })}
-                    rows={3}
-                    placeholder="github.com ssh-ed25519 AAAA…"
-                  />
-                </Field>
+
+              {/* Generate a keypair server-side (private key stays hidden; public key is shown to copy). */}
+              <div className="rounded-lg bg-white/[0.03] p-3 ring-1 ring-white/[0.06]">
+                <div className="flex flex-wrap items-end gap-2">
+                  <Field label="Generate a new keypair">
+                    <Select
+                      value={genType}
+                      onChange={(e) => setGenType(e.target.value as SshKeyType)}
+                      disabled={isNew || generatingKey}
+                      className="w-40"
+                    >
+                      <option value="ed25519">ed25519 (recommended)</option>
+                      <option value="rsa">RSA 4096</option>
+                    </Select>
+                  </Field>
+                  <Button
+                    variant="primary"
+                    icon={<KeyRound size={13} />}
+                    onClick={generateSshKey}
+                    loading={generatingKey}
+                    disabled={!!isNew}
+                  >
+                    {status?.ssh_key_set ? 'Regenerate' : 'Generate'}
+                  </Button>
+                </div>
+                {isNew ? (
+                  <Hint>Save the profile first, then generate its key.</Hint>
+                ) : (
+                  <Hint>
+                    The private key is generated on the server and never shown. Copy the public key
+                    below into your remote host&apos;s <code>~/.ssh/authorized_keys</code>.
+                  </Hint>
+                )}
+                {draft.ssh_public_key ? (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-slate-400">
+                        Public key ({draft.ssh_key_type || 'ed25519'})
+                      </span>
+                      <button
+                        onClick={copyPublicKey}
+                        className="flex items-center gap-1 text-[11px] text-slate-300 hover:text-white"
+                      >
+                        {pubKeyCopied ? <Check size={12} /> : <Copy size={12} />}
+                        {pubKeyCopied ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    <code className="block max-h-24 overflow-auto break-all rounded-md bg-black/30 p-2 text-[11px] text-slate-300">
+                      {draft.ssh_public_key}
+                    </code>
+                  </div>
+                ) : null}
               </div>
+
+              {/* Manual entry: paste an existing private key instead of generating one. */}
+              <details className="group">
+                <summary className="cursor-pointer text-[11px] uppercase tracking-wider text-slate-500 hover:text-slate-300">
+                  or paste an existing key
+                </summary>
+                <div className="mt-2 space-y-2.5">
+                  <Textarea
+                    value={draft.ssh_private_key}
+                    onChange={(e) => setDraft({ ...draft, ssh_private_key: e.target.value })}
+                    rows={4}
+                    placeholder={
+                      status?.ssh_key_set
+                        ? '•••••••• key set — paste a new private key to replace it'
+                        : '-----BEGIN OPENSSH PRIVATE KEY-----\n…'
+                    }
+                  />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Public key (optional)">
+                      <Textarea
+                        value={draft.ssh_public_key}
+                        onChange={(e) => setDraft({ ...draft, ssh_public_key: e.target.value })}
+                        rows={3}
+                        placeholder="ssh-ed25519 AAAA… (→ id_ed25519.pub)"
+                      />
+                    </Field>
+                    <Field label="known_hosts (optional)">
+                      <Textarea
+                        value={draft.ssh_known_hosts}
+                        onChange={(e) => setDraft({ ...draft, ssh_known_hosts: e.target.value })}
+                        rows={3}
+                        placeholder="github.com ssh-ed25519 AAAA…"
+                      />
+                    </Field>
+                  </div>
+                  <Hint>
+                    A pasted key is stored under <code>id_ed25519</code>. Changes here apply after{' '}
+                    <span className="text-slate-400">Save</span>.
+                  </Hint>
+                </div>
+              </details>
+
               <Hint>
-                SSH changes apply after <span className="text-slate-400">Save</span> and take effect on
-                each agent&apos;s next container start.
+                SSH changes take effect on each agent&apos;s next container start (assigned containers
+                are recreated automatically).
               </Hint>
             </div>
           </Section>

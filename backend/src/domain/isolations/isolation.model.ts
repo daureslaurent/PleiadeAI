@@ -54,6 +54,10 @@ const IsolationSchema = new Schema(
     ssh_private_key_enc: { type: String, default: null, select: false },
     ssh_public_key: { type: String, default: '' },
     ssh_known_hosts: { type: String, default: '' },
+    // Algorithm of the stored key, so the container injects it under the filename `ssh` expects by
+    // default (`id_ed25519` / `id_rsa`). '' = legacy/unknown (pasted before this field existed) →
+    // treated as ed25519. Set when a key is generated server-side (see ssh-keygen + the generate route).
+    ssh_key_type: { type: String, enum: ['ed25519', 'rsa', ''], default: '' },
 
     // Optional remote `sudo` password, injected into each agent container at create time as a
     // mode-600 file (+ a SUDO_ASKPASS helper) so the agent can escalate with `sudo` on a remote host

@@ -469,11 +469,14 @@ class AgentContainerManager {
         { stdin: content },
       );
 
+    // Use the filename `ssh` tries by default for the key's algorithm so no `-i`/IdentityFile config
+    // is needed inside the container ('' legacy → ed25519).
+    const base = ssh.keyType === 'rsa' ? 'id_rsa' : 'id_ed25519';
     try {
-      await write('id_ed25519', ensureTrailingNewline(ssh.privateKey), '600');
-      if (ssh.publicKey) await write('id_ed25519.pub', ensureTrailingNewline(ssh.publicKey), '644');
+      await write(base, ensureTrailingNewline(ssh.privateKey), '600');
+      if (ssh.publicKey) await write(`${base}.pub`, ensureTrailingNewline(ssh.publicKey), '644');
       if (ssh.knownHosts) await write('known_hosts', ensureTrailingNewline(ssh.knownHosts), '644');
-      log.info({ container, isoId }, 'installed ssh key into container');
+      log.info({ container, isoId, keyType: base }, 'installed ssh key into container');
     } catch (err) {
       log.warn({ container, isoId, err: String(err) }, 'ssh key install failed');
     }
