@@ -1271,3 +1271,29 @@ export const apiKeysApi = {
   revoke: (id: string) => api.post<ApiKey>(`/api-keys/${id}/revoke`).then((r) => r.data),
   remove: (id: string) => api.delete(`/api-keys/${id}`).then((r) => r.data),
 };
+
+/**
+ * Operator data reset (Settings → danger zone). Counts are grouped by category so the confirm
+ * dialog can spell out exactly what will be deleted; `clear` empties the selected categories.
+ * Agents, isolations, images and Qdrant memory are never in scope here.
+ */
+export type ResetCategory = 'conversations' | 'scores' | 'logs' | 'activity';
+
+export type DataCounts = Record<ResetCategory, Record<string, number>>;
+
+export interface ClearSummary {
+  ok: boolean;
+  deleted: Record<string, number>;
+  total: number;
+}
+
+export const maintenanceApi = {
+  counts: () => api.get<DataCounts>('/maintenance/data-counts').then((r) => r.data),
+  /** A restorable dump of the selected categories, for the "download a backup first" option. */
+  exportBlob: (categories: ResetCategory[]) =>
+    api
+      .get('/maintenance/export', { params: { categories: categories.join(',') }, responseType: 'blob' })
+      .then((r) => r.data as Blob),
+  clear: (categories: ResetCategory[]) =>
+    api.post<ClearSummary>('/maintenance/clear', { categories, confirm: 'CLEAR' }).then((r) => r.data),
+};

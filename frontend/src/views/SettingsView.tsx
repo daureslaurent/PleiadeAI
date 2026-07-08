@@ -7,6 +7,7 @@ import {
   Copy,
   DatabaseBackup,
   Download,
+  Eraser,
   KeyRound,
   Loader2,
   Gauge,
@@ -15,6 +16,7 @@ import {
   RefreshCw,
   RefreshCcwDot,
   Server,
+  ShieldAlert,
   SlidersHorizontal,
   Sparkles,
   Star,
@@ -26,16 +28,20 @@ import {
   apiKeysApi,
   endpointsApi,
   finetuneServersApi,
+  maintenanceApi,
   settingsApi,
   transferApi,
   type Agent,
   type ApiKey,
+  type ClearSummary,
+  type DataCounts,
   type Endpoint,
   type EndpointPatch,
   type FinetuneServer,
   type FinetuneServerPatch,
   type ImportSummary,
   type InferenceSettings,
+  type ResetCategory,
 } from '../lib/api';
 import { usePrefs } from '../store/prefs';
 import { UpdatePanel } from '../components/UpdatePanel';
@@ -397,6 +403,22 @@ export function SettingsView() {
         >
           <BackupTransfer />
         </Section>
+
+        {/* Danger Zone — irreversible operational-data reset. Keeps agents/isolations/images/memory. */}
+        <section className="rounded-lg border border-red-900/60 bg-surface">
+          <div className="flex items-center gap-3 border-b border-red-900/60 px-5 py-3">
+            <ShieldAlert size={16} className="text-red-400" />
+            <div>
+              <div className="text-sm font-semibold text-slate-100">Danger Zone</div>
+              <div className="text-xs text-slate-500">
+                Clear operational data. Agents, isolations, images and memory are kept.
+              </div>
+            </div>
+          </div>
+          <div className="p-5">
+            <ClearDataPanel />
+          </div>
+        </section>
 
         {/* Sticky save bar */}
         <div className="flex items-center justify-end gap-3">
@@ -840,6 +862,177 @@ function ApiKeysManager() {
         >
           <Plus size={13} /> Create API key
         </button>
+      )}
+    </div>
+  );
+}
+
+/** Human labels for the raw collection keys returned by GET /maintenance/data-counts. */
+const CLEAR_LABELS: Record<string, string> = {
+  sessions: 'Sessions',
+  messages: 'Messages',
+  scores: 'Scores',
+  llama_calls_debug: 'Inference logs (recent)',
+  llama_calls_archive: 'Inference logs (archive)',
+  notifications: 'Notifications',
+  autonomy_run_results: 'Autonomy run history',
+  finetune_jobs: 'Fine-tune job history',
+};
+
+const CLEAR_CATEGORIES: ResetCategory[] = ['conversations', 'scores', 'logs', 'activity'];
+
+function flattenCounts(counts: DataCounts): { key: string; label: string; count: number }[] {
+  const rows: { key: string; label: string; count: number }[] = [];
+  for (const category of CLEAR_CATEGORIES) {
+    for (const [key, count] of Object.entries(counts[category] ?? {})) {
+      rows.push({ key, label: CLEAR_LABELS[key] ?? key, count });
+    }
+  }
+  return rows;
+}
+
+/**
+ * "Clear all data" — wipes conversations, scores, inference logs and activity records, keeping the
+ * fleet (agents/isolations/images) and memory. Guarded by a type-CLEAR modal that first shows the
+ * exact row counts, with an opt-in JSON backup downloaded before the wipe.
+ */
+function ClearDataPanel() {
+  const [counts, setCounts] = useState<DataCounts | null>(null);
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [backup, setBackup] = useState(true);
+  const [busy, setBusy] = useState<null | 'backup' | 'clear'>(null);
+  const [result, setResult] = useState<ClearSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = () => maintenanceApi.counts().then(setCounts).catch(() => setError('Failed to load data counts.'));
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  const rows = counts ? flattenCounts(counts) : [];
+  const total = rows.reduce((n, r) => n + r.count, 0);
+
+  function close() {
+    setOpen(false);
+    setConfirmText('');
+    setError(null);
+  }
+
+  async function doClear() {
+    if (confirmText !== 'CLEAR') return;
+    setError(null);
+    try {
+      if (backup) {
+        setBusy('backup');
+        const blob = await maintenanceApi.exportBlob(CLEAR_CATEGORIES);
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        downloadBlob(blob, `pleiade-data-backup-${stamp}.json`);
+      }
+      setBusy('clear');
+      const summary = await maintenanceApi.clear(CLEAR_CATEGORIES);
+      setResult(summary);
+      close();
+      await reload();
+    } catch {
+      setError('Clear failed — see server logs.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs text-slate-500">
+          Deletes all conversations, scores, inference logs and activity records
+          {total > 0 && <span className="text-slate-400"> ({total.toLocaleString()} rows)</span>}. This cannot be undone.
+        </div>
+        <button
+          onClick={() => {
+            setResult(null);
+            setOpen(true);
+          }}
+          className="flex shrink-0 items-center gap-2 rounded-md border border-red-900 bg-red-950/30 px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-950/60"
+        >
+          <Eraser size={15} /> Clear all data
+        </button>
+      </div>
+
+      {result && (
+        <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+          <Check size={14} /> Cleared {result.total.toLocaleString()} rows.
+        </div>
+      )}
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={close}>
+          <div
+            className="w-full max-w-md space-y-4 rounded-lg border border-red-900/60 bg-surface p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 text-red-400">
+              <ShieldAlert size={18} />
+              <h3 className="text-sm font-semibold text-slate-100">Clear all data?</h3>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              This permanently deletes the following. Agents, isolations, images and memory are kept.
+            </p>
+
+            <div className="max-h-52 overflow-auto rounded-md border border-border bg-panel">
+              {rows.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-slate-500">Nothing to clear.</div>
+              ) : (
+                rows.map((r) => (
+                  <div key={r.key} className="flex justify-between px-3 py-1.5 text-xs">
+                    <span className="text-slate-300">{r.label}</span>
+                    <span className="font-mono text-slate-400">{r.count.toLocaleString()}</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-slate-300">
+              <input type="checkbox" checked={backup} onChange={(e) => setBackup(e.target.checked)} className="accent-accent" />
+              Download a JSON backup first
+            </label>
+
+            <div>
+              <div className="mb-1 text-xs text-slate-400">
+                Type <span className="font-mono font-semibold text-red-300">CLEAR</span> to confirm
+              </div>
+              <input
+                autoFocus
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void doClear()}
+                placeholder="CLEAR"
+                className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-red-500"
+              />
+            </div>
+
+            {error && <p className="text-xs text-red-400">{error}</p>}
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={close}
+                disabled={busy !== null}
+                className="rounded-md border border-border px-3 py-2 text-sm text-slate-300 hover:text-white disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void doClear()}
+                disabled={confirmText !== 'CLEAR' || busy !== null}
+                className="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
+              >
+                {busy && <Loader2 size={15} className="animate-spin" />}
+                {busy === 'backup' ? 'Backing up…' : busy === 'clear' ? 'Clearing…' : 'Clear data'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

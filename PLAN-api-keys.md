@@ -75,6 +75,11 @@ without `--force`, target vetted *before* credentials are sent to it.
 
 Not cloned: endpoints (inference credentials), images, skills, settings, api_keys, Qdrant vectors.
 
+The clone posts the whole instance in one body, so `express.json` was raised 25mb → 128mb
+(`index.ts`); a real instance's messages (base64 images) + inference logs exceed 25mb. `insert()`
+warns on any row shortfall — `insertMany` silently drops docs failing schema validation without
+throwing, so a count check is the only reliable way to surface source data-quality loss.
+
 ## Verification
 
 `npm run typecheck` in `backend/` and `frontend/`, then against a running stack: mint a key in the

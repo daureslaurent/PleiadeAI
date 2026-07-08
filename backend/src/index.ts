@@ -32,6 +32,7 @@ import { imagesRouter } from './transport/http/routes/images.routes';
 import { resourcesRouter } from './transport/http/routes/resources.routes';
 import { transferRouter } from './transport/http/routes/transfer.routes';
 import { hostRouter } from './transport/http/routes/host.routes';
+import { maintenanceRouter } from './transport/http/routes/maintenance.routes';
 import { scheduleUpdateCheck } from './host';
 import { settingsService } from './domain/settings/settings.service';
 import { telegramBot } from './telegram/TelegramBot';
@@ -57,7 +58,9 @@ async function main(): Promise<void> {
   const app = express();
   // Browser calls the API cross-origin (frontend :3000 → backend :4000); allow it.
   app.use(cors());
-  app.use(express.json({ limit: '25mb' })); // headroom for Base64 image payloads
+  // Headroom for Base64 image payloads (chat turns) and, larger still, the whole-instance clone
+  // import bundle (`/api/transfer/import/clone`), which carries every message + inference log at once.
+  app.use(express.json({ limit: '128mb' }));
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -84,6 +87,7 @@ async function main(): Promise<void> {
   app.use('/api/resources', requireAuth, resourcesRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
   app.use('/api/host', requireAuth, hostRouter);
+  app.use('/api/maintenance', requireAuth, maintenanceRouter);
 
   const httpServer = http.createServer(app);
   attachSocket(httpServer);

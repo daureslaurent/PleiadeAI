@@ -178,14 +178,20 @@ async function insert(
   warnings: string[],
 ): Promise<number> {
   if (docs.length === 0) return 0;
+  let inserted: number;
   try {
     const written = await Model.insertMany(docs, { ordered: false, timestamps: false });
-    return written.length;
+    inserted = written.length;
   } catch (err) {
     const insertedDocs = (err as { insertedDocs?: unknown[] }).insertedDocs ?? [];
-    const failed = docs.length - insertedDocs.length;
-    warnings.push(`${label}: ${failed} of ${docs.length} rows rejected (${(err as Error).message.slice(0, 160)})`);
-    log.error({ err, label, failed }, 'clone insert partially failed');
-    return insertedDocs.length;
+    inserted = insertedDocs.length;
+    log.error({ err, label }, 'clone insert threw');
   }
+  // Warn on ANY shortfall, not just thrown errors: `insertMany` silently drops docs that fail schema
+  // validation (e.g. a source row missing a `required` field) without throwing, so a count check is
+  // the only reliable way to surface silent data loss to the operator.
+  if (inserted < docs.length) {
+    warnings.push(`${label}: ${docs.length - inserted} of ${docs.length} source rows dropped (malformed or duplicate)`);
+  }
+  return inserted;
 }
