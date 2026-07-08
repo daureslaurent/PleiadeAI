@@ -1,0 +1,32 @@
+{
+  "name": "pleiade-finetune",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PleiadeAI headless dual-GPU fine-tuning microservice (Axolotl QLoRA + GGUF export)",
+  "type": "commonjs",
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.21.1",
+    "multer": "^2.0.0",
+    "pino": "^9.5.0",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.9.0",
+    "pino-pretty": "^13.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

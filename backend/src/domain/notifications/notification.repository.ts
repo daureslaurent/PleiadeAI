@@ -2,8 +2,9 @@ import { Types } from 'mongoose';
 import { NotificationModel, type NotificationDoc } from './notification.model';
 
 export const notificationRepository = {
+  /** `agent_id` may be null for system-level notifications not owned by any agent. */
   create(input: {
-    agent_id: string | Types.ObjectId;
+    agent_id?: string | Types.ObjectId | null;
     title: string;
     content: string;
   }): Promise<NotificationDoc> {

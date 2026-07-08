@@ -14,6 +14,35 @@ scoringRouter.get('/summary', async (_req, res) => {
   res.json(await conversationScoreRepository.summary());
 });
 
+/**
+ * Training-dataset composition, for the Fine-Tuning page's chart + "how many examples will train"
+ * preview. `total_examples` counts every exportable agent-run (scored or not); `scored` is the
+ * quality distribution of the judged subset; `filtered_count` is how many pass the supplied filter.
+ * Optional `?minScore=` and `?tags=Perfect,Patched`.
+ */
+scoringRouter.get('/dataset-stats', async (req, res) => {
+  const minScore = req.query.minScore != null ? Number(req.query.minScore) : undefined;
+  const tags =
+    typeof req.query.tags === 'string' && req.query.tags.trim()
+      ? req.query.tags.split(',').map((t) => t.trim()).filter(Boolean)
+      : undefined;
+  const filter = { minScore: Number.isFinite(minScore) ? minScore : undefined, tags };
+
+  const [runs, scored, filteredCount] = await Promise.all([
+    // Cheap: count run ids rather than reassembling every example (buildJsonl is expensive).
+    llamaLogRepository.listRunIds(),
+    conversationScoreRepository.summary(),
+    conversationScoreRepository.countEligible(filter),
+  ]);
+
+  res.json({
+    total_examples: runs.length,
+    scored,
+    filtered_count: filteredCount,
+    filter: { minScore: filter.minScore ?? null, tags: tags ?? null },
+  });
+});
+
 /** List persisted scores, newest first; optional `?sessionId=`, `?tag=`, `?minScore=` filters. */
 scoringRouter.get('/scores', async (req, res) => {
   const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;

@@ -189,6 +189,24 @@ export interface TurnScoredEvent {
   explanation: string;
 }
 
+/**
+ * A tracked fine-tune job advanced on its remote server (emitted by the backend poller to the
+ * `finetune` room). `newMetrics` carries only the datapoints observed since the last tick — the
+ * client appends them to the job's loss curve rather than replacing it.
+ */
+export interface FinetuneJobUpdateEvent {
+  type: 'finetune_job_update';
+  /** The `finetune_jobs` document id (the UI's key), not the remote job id. */
+  jobId: string;
+  serverId: string;
+  runName: string;
+  status: 'queued' | 'preparing' | 'training' | 'exporting' | 'done' | 'failed';
+  progress: number;
+  newMetrics: { step: number; loss: number; epoch?: number; lr?: number; at: string }[];
+  ggufFilename?: string;
+  error?: string;
+}
+
 export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
@@ -204,4 +222,5 @@ export type WsEvent =
   | LlamaCallStartEvent
   | LlamaCallDeltaEvent
   | LlamaCallEndEvent
-  | TurnScoredEvent;
+  | TurnScoredEvent
+  | FinetuneJobUpdateEvent;

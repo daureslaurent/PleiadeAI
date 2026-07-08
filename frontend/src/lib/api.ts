@@ -1046,6 +1046,16 @@ export const scoringApi = {
   /** Fetch the JSONL export as an authenticated blob (also writes the server-side file). */
   downloadBlob: () =>
     api.get('/scoring/export/download', { responseType: 'blob' }).then((r) => r.data as Blob),
+  /**
+   * Training-dataset composition for the Fine-Tuning page: total exportable examples, the quality
+   * distribution of the judged subset, and how many pass the supplied filter.
+   */
+  datasetStats: (opts: { minScore?: number; tags?: string[] } = {}) =>
+    api
+      .get<DatasetStats>('/scoring/dataset-stats', {
+        params: { minScore: opts.minScore, tags: opts.tags?.join(',') || undefined },
+      })
+      .then((r) => r.data),
 };
 
 export const endpointsApi = {
@@ -1056,4 +1066,182 @@ export const endpointsApi = {
   discover: (id: string) => api.post<Endpoint>(`/endpoints/${id}/discover`).then((r) => r.data),
   setDefault: (id: string) => api.post<Endpoint>(`/endpoints/${id}/default`).then((r) => r.data),
   remove: (id: string) => api.delete(`/endpoints/${id}`).then((r) => r.data),
+};
+
+// ---------------------------------------------------------------------------
+// Fine-tuning: remote training servers + tracked jobs
+// ---------------------------------------------------------------------------
+
+/** A remote fine-tune server. The bearer token never leaves the backend (`has_api_key` only). */
+export interface FinetuneServer {
+  _id: string;
+  name: string;
+  base_url: string;
+  enabled: boolean;
+  has_api_key: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NewFinetuneServer {
+  name: string;
+  base_url: string;
+  api_key?: string;
+  enabled?: boolean;
+}
+export type FinetuneServerPatch = Partial<NewFinetuneServer>;
+
+export type Feasibility = 'ok' | 'tight' | 'no';
+export type TrainStrategy = 'deepspeed_zero2' | 'fsdp_qlora';
+
+/** One row of a server's per-model-size feasibility table (`GET /hardware`). */
+export interface FeasibilityEntry {
+  size_b: number;
+  feasibility: Feasibility;
+  strategy: TrainStrategy | null;
+  max_sequence_len: number | null;
+  note: string;
+}
+
+export interface HardwareReport {
+  hardware: {
+    gpus: { index: number; name: string; vram_total_mb: number; vram_free_mb: number }[];
+    gpu_count: number;
+    min_gpu_vram_mb: number | null;
+    total_gpu_vram_mb: number;
+    cpu: { model: string; cores: number };
+    ram: { total_mb: number; free_mb: number };
+    detected_at: string;
+    note?: string;
+  };
+  sizes: FeasibilityEntry[];
+}
+
+/** Live utilization sample (`GET /usage`). `gpus: []` + `note` when nvidia-smi is unavailable. */
+export interface UsageReport {
+  gpus: {
+    index: number;
+    name: string;
+    util_pct: number;
+    vram_used_mb: number;
+    vram_total_mb: number;
+    temp_c: number | null;
+    power_w: number | null;
+  }[];
+  cpu: { cores: number; load_avg: [number, number, number]; load_pct: number };
+  ram: { used_mb: number; total_mb: number };
+  at: string;
+  note?: string;
+}
+
+/** The server's hardware-fitted plan for a run — its *recommendation*, shown before/after start. */
+export interface TrainingPlan {
+  size_b: number;
+  size_source: string;
+  strategy: TrainStrategy;
+  sequence_len: number;
+  micro_batch_size: number;
+  gradient_accumulation_steps: number;
+  feasibility: Feasibility;
+  est_per_gpu_vram_gb: number;
+  usable_per_gpu_vram_gb: number;
+  adjustments: string[];
+  warnings: string[];
+}
+
+export interface TrainMetric {
+  step: number;
+  loss: number;
+  epoch?: number | null;
+  lr?: number | null;
+  at: string;
+}
+
+export type FinetuneJobStatus =
+  | 'queued'
+  | 'preparing'
+  | 'training'
+  | 'exporting'
+  | 'done'
+  | 'failed';
+
+export interface FinetuneJob {
+  _id: string;
+  server_id: string;
+  remote_job_id: string;
+  run_name: string;
+  base_model: string;
+  size_b: number | null;
+  strategy: string;
+  plan: TrainingPlan | null;
+  dataset_source: 'scored' | 'manual';
+  dataset_stats: Record<string, unknown> | null;
+  status: FinetuneJobStatus;
+  progress: number;
+  metrics: TrainMetric[];
+  log_tail: string[];
+  gguf_filename: string;
+  error: string;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Training-data composition for the Fine-Tuning chart. */
+export interface DatasetStats {
+  total_examples: number;
+  scored: ScoringSummary;
+  filtered_count: number;
+  filter: { minScore: number | null; tags: string[] | null };
+}
+
+export interface StartTrainBody {
+  run_name: string;
+  base_model: string;
+  target_size_b?: number;
+  on_infeasible?: 'auto_adjust' | 'warn_proceed';
+  hyperparams?: Record<string, number | string>;
+  dataset:
+    | { source: 'scored'; filter?: { minScore?: number; tags?: string[] } }
+    | { source: 'manual'; dataset_id: string };
+}
+
+export const finetuneServersApi = {
+  list: () => api.get<FinetuneServer[]>('/finetune-servers').then((r) => r.data),
+  create: (body: NewFinetuneServer) =>
+    api.post<FinetuneServer>('/finetune-servers', body).then((r) => r.data),
+  update: (id: string, patch: FinetuneServerPatch) =>
+    api.patch<FinetuneServer>(`/finetune-servers/${id}`, patch).then((r) => r.data),
+  remove: (id: string) => api.delete(`/finetune-servers/${id}`).then((r) => r.data),
+
+  hardware: (id: string) =>
+    api.get<HardwareReport>(`/finetune-servers/${id}/hardware`).then((r) => r.data),
+  usage: (id: string) => api.get<UsageReport>(`/finetune-servers/${id}/usage`).then((r) => r.data),
+
+  /** Forward a manually-picked .jsonl to the server; returns its `dataset_id`. */
+  upload: (id: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post<{ dataset_id: string; line_count: number }>(`/finetune-servers/${id}/upload`, form)
+      .then((r) => r.data);
+  },
+
+  train: (id: string, body: StartTrainBody) =>
+    api
+      .post<{ job_id: string; remote_job_id: string; plan: TrainingPlan }>(
+        `/finetune-servers/${id}/train`,
+        body,
+      )
+      .then((r) => r.data),
+};
+
+export const finetuneJobsApi = {
+  list: (limit?: number) =>
+    api.get<FinetuneJob[]>('/finetune-jobs', { params: { limit } }).then((r) => r.data),
+  get: (id: string) => api.get<FinetuneJob>(`/finetune-jobs/${id}`).then((r) => r.data),
+  remove: (id: string) => api.delete(`/finetune-jobs/${id}`).then((r) => r.data),
+  /** Stream the produced GGUF through the backend as an authenticated blob. */
+  downloadModelBlob: (id: string) =>
+    api.get(`/finetune-jobs/${id}/model`, { responseType: 'blob' }).then((r) => r.data as Blob),
 };

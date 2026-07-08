@@ -1,0 +1,41 @@
+# Standalone compose for the fine-tune box (dual NVIDIA GPUs, 32GB total VRAM).
+# Run from the finetune/ directory:  docker compose up --build
+services:
+  finetune:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pleiade-finetune
+    container_name: pleiade-finetune
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${FINETUNE_PORT:-8088}:8088"
+    # DeepSpeed / dataloader workers need generous shared memory.
+    shm_size: "16gb"
+    environment:
+      # Make all GPUs visible inside the container.
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # Legacy runtime hook (Docker with nvidia-container-runtime configured as default or named).
+    runtime: nvidia
+    # Modern compose GPU reservation (Docker Compose v2 + nvidia toolkit).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      # Uploaded JSONL datasets.
+      - ./workspace/data:/workspace/data
+      # Produced GGUF artifacts.
+      - ./workspace/models:/workspace/models
+      # Per-run configs, checkpoints, merged models, logs.
+      - ./workspace/runs:/workspace/runs
+      # Persist HuggingFace base-model downloads across runs/rebuilds.
+      - hf-cache:/root/.cache/huggingface
+
+volumes:
+  hf-cache:

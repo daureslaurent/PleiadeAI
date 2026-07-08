@@ -288,6 +288,23 @@ export interface TurnScoredPayload {
   explanation: string;
 }
 
+/**
+ * A tracked fine-tune job changed on its remote server. Emitted by `finetune/poller.ts` each time
+ * it observes new status/progress/metrics, so the Fine-Tuning page's loss curve updates live.
+ */
+export interface FinetuneJobUpdatePayload {
+  /** The `finetune_jobs` document id (the UI's key), not the remote job id. */
+  jobId: string;
+  serverId: string;
+  runName: string;
+  status: 'queued' | 'preparing' | 'training' | 'exporting' | 'done' | 'failed';
+  progress: number;
+  /** Only the datapoints observed since the previous tick — the client appends them. */
+  newMetrics: { step: number; loss: number; epoch?: number; lr?: number; at: string }[];
+  ggufFilename?: string;
+  error?: string;
+}
+
 export type AlertLevel = 'info' | 'warn' | 'error';
 
 export interface SystemAlertPayload {
@@ -319,6 +336,7 @@ export interface EventMap {
   'llama:call_delta': LlamaCallDeltaPayload;
   'llama:call_end': LlamaCallEndPayload;
   'scoring:turn_scored': TurnScoredPayload;
+  'finetune:job_update': FinetuneJobUpdatePayload;
 }
 
 export type EventName = keyof EventMap;

@@ -191,4 +191,20 @@ export function attachBridge(io: Server): void {
     if (sessionId) io.to(sessionId).emit('turn_scored', wire);
     io.to('llama-log').emit('turn_scored', wire);
   });
+
+  // Fine-tune job progress → the `finetune` room the Fine-Tuning page joins via `finetune:subscribe`.
+  // Only the newly-observed metric datapoints ride the wire; the client appends them to its curve.
+  eventBus.on('finetune:job_update', (p) => {
+    io.to('finetune').emit('finetune_job_update', {
+      type: 'finetune_job_update',
+      jobId: p.jobId,
+      serverId: p.serverId,
+      runName: p.runName,
+      status: p.status,
+      progress: p.progress,
+      newMetrics: p.newMetrics,
+      ggufFilename: p.ggufFilename,
+      error: p.error,
+    });
+  });
 }

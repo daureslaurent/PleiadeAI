@@ -13,6 +13,7 @@ import {
   RefreshCcwDot,
   Server,
   SlidersHorizontal,
+  Sparkles,
   Star,
   Trash2,
   Upload,
@@ -20,11 +21,14 @@ import {
 import {
   agentsApi,
   endpointsApi,
+  finetuneServersApi,
   settingsApi,
   transferApi,
   type Agent,
   type Endpoint,
   type EndpointPatch,
+  type FinetuneServer,
+  type FinetuneServerPatch,
   type ImportSummary,
   type InferenceSettings,
 } from '../lib/api';
@@ -35,6 +39,7 @@ import { UpdatePanel } from '../components/UpdatePanel';
 export function SettingsView() {
   const [form, setForm] = useState<InferenceSettings | null>(null);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
+  const [finetuneServers, setFinetuneServers] = useState<FinetuneServer[]>([]);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const showSubagentThinking = usePrefs((s) => s.showSubagentThinking);
   const setShowSubagentThinking = usePrefs((s) => s.setShowSubagentThinking);
@@ -43,9 +48,14 @@ export function SettingsView() {
     return endpointsApi.list().then(setEndpoints);
   }
 
+  function loadFinetuneServers() {
+    return finetuneServersApi.list().then(setFinetuneServers);
+  }
+
   useEffect(() => {
     settingsApi.get().then(setForm);
     void loadEndpoints();
+    void loadFinetuneServers();
   }, []);
 
   function set<K extends keyof InferenceSettings>(key: K, value: InferenceSettings[K]) {
@@ -98,6 +108,15 @@ export function SettingsView() {
             );
           })()}
           <EndpointsManager endpoints={endpoints} reload={loadEndpoints} globalAuto={form.context_window_auto} />
+        </Section>
+
+        {/* Fine-tune servers — remote GPU boxes running the headless training service */}
+        <Section
+          icon={Sparkles}
+          title="Fine-tune Servers"
+          subtitle="Remote GPU training servers driven from the Fine-Tuning page"
+        >
+          <FinetuneServersManager servers={finetuneServers} reload={loadFinetuneServers} />
         </Section>
 
         {/* Embeddings — separate CPU llama.cpp server backing Qdrant vector memory */}
@@ -855,6 +874,161 @@ function ContextWindowControl({
  * the fleet default, delete. Edits to an existing endpoint's fields save on blur; discovery and
  * default/delete apply immediately. `reload` re-pulls the list after every mutation.
  */
+/**
+ * CRUD for remote fine-tune servers. Mirrors `EndpointsManager` (edit-on-blur, confirm-to-delete),
+ * with one difference: the API key is write-only. The backend stores it encrypted and never returns
+ * it, so we render a password field that stays blank and only patches when the operator types a new
+ * value (an explicit empty string clears the stored credential server-side).
+ */
+function FinetuneServersManager({
+  servers,
+  reload,
+}: {
+  servers: FinetuneServer[];
+  reload: () => Promise<void>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  async function create() {
+    if (!name.trim() || !url.trim()) return;
+    setError(null);
+    try {
+      await finetuneServersApi.create({ name: name.trim(), base_url: url.trim(), api_key: apiKey || undefined });
+      setName('');
+      setUrl('');
+      setApiKey('');
+      setAdding(false);
+      await reload();
+    } catch {
+      setError('Could not add the server — is the name already taken?');
+    }
+  }
+
+  async function patch(id: string, p: FinetuneServerPatch) {
+    await finetuneServersApi.update(id, p);
+    await reload();
+  }
+
+  async function remove(s: FinetuneServer) {
+    if (!confirm(`Delete fine-tune server "${s.name}"? Tracked jobs keep their history.`)) return;
+    await finetuneServersApi.remove(s._id);
+    await reload();
+  }
+
+  return (
+    <div className="space-y-3">
+      {servers.map((s) => (
+        <div key={s._id} className="space-y-2 rounded-md border border-border bg-panel p-3">
+          <div className="flex items-center gap-2">
+            <input
+              defaultValue={s.name}
+              onBlur={(ev) => ev.target.value !== s.name && void patch(s._id, { name: ev.target.value })}
+              className="flex-1 rounded-md border border-border bg-surface px-2 py-1.5 text-sm font-medium outline-none focus:border-accent"
+            />
+            <button
+              onClick={() => void patch(s._id, { enabled: !s.enabled })}
+              title={s.enabled ? 'Disable (hide from Fine-Tuning page)' : 'Enable'}
+              className={[
+                'rounded border px-2 py-0.5 text-[10px] uppercase tracking-wide',
+                s.enabled
+                  ? 'border-emerald-900 text-emerald-400'
+                  : 'border-border text-slate-500 hover:text-slate-300',
+              ].join(' ')}
+            >
+              {s.enabled ? 'enabled' : 'disabled'}
+            </button>
+            <button
+              onClick={() => void remove(s)}
+              title="Delete server"
+              className="rounded p-1.5 text-slate-500 transition-colors hover:text-red-400"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              defaultValue={s.base_url}
+              onBlur={(ev) => ev.target.value !== s.base_url && void patch(s._id, { base_url: ev.target.value })}
+              placeholder="http://192.168.1.30:8088"
+              className="rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs outline-none focus:border-accent"
+            />
+            <input
+              type="password"
+              defaultValue=""
+              placeholder={s.has_api_key ? '•••••••• (set — type to replace)' : 'API key (optional)'}
+              onBlur={(ev) => {
+                if (ev.target.value) {
+                  void patch(s._id, { api_key: ev.target.value });
+                  ev.target.value = '';
+                }
+              }}
+              className="rounded-md border border-border bg-surface px-2 py-1.5 text-xs outline-none focus:border-accent"
+            />
+          </div>
+        </div>
+      ))}
+
+      {servers.length === 0 && !adding && (
+        <p className="text-xs text-slate-500">
+          No fine-tune servers yet. Add the base URL of a running fine-tune service.
+        </p>
+      )}
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      {adding ? (
+        <div className="space-y-2 rounded-md border border-border bg-panel p-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name (e.g. rig-01)"
+            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
+          />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="http://192.168.1.30:8088"
+            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs outline-none focus:border-accent"
+          />
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="API key (optional)"
+            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-xs outline-none focus:border-accent"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => void create()}
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent/90"
+            >
+              Add server
+            </button>
+            <button
+              onClick={() => setAdding(false)}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-slate-400 transition-colors hover:text-slate-200"
+        >
+          <Plus size={13} /> Add fine-tune server
+        </button>
+      )}
+    </div>
+  );
+}
+
 function EndpointsManager({
   endpoints,
   reload,

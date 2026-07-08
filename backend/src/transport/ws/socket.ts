@@ -265,6 +265,11 @@ export function attachSocket(httpServer: HttpServer): Server {
     socket.on('llama:subscribe', () => socket.join('llama-log'));
     socket.on('llama:unsubscribe', () => socket.leave('llama-log'));
 
+    // Fine-Tuning page (in)subscription — joins/leaves the global `finetune` room the bridge
+    // streams tracked-job progress + loss metrics to. Not tied to any chat session.
+    socket.on('finetune:subscribe', () => socket.join('finetune'));
+    socket.on('finetune:unsubscribe', () => socket.leave('finetune'));
+
     socket.on('disconnect', () => {
       // A disconnect (notably a browser refresh) must NOT kill the run — it keeps streaming to the
       // session room and, if the client is gone at completion, its turn is persisted server-side.

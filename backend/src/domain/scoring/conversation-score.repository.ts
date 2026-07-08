@@ -69,6 +69,27 @@ export const conversationScoreRepository = {
       .exec();
   },
 
+  /**
+   * run_ids whose verdict passes a quality filter — the eligible training set for a fine-tune.
+   * With no constraints this returns every *scored* run (note: still a subset of all runs, since
+   * unscored runs have no verdict to judge them by).
+   */
+  async eligibleRunIds(filter: { minScore?: number; tags?: string[] } = {}): Promise<Set<string>> {
+    const q: Record<string, unknown> = {};
+    if (typeof filter.minScore === 'number') q.score = { $gte: filter.minScore };
+    if (filter.tags?.length) q.tag = { $in: filter.tags };
+    const rows = await ConversationScoreModel.find(q, { run_id: 1 }).lean().exec();
+    return new Set(rows.map((r) => String(r.run_id)));
+  },
+
+  /** How many scored runs pass a quality filter (the "how many examples will train" preview). */
+  async countEligible(filter: { minScore?: number; tags?: string[] } = {}): Promise<number> {
+    const q: Record<string, unknown> = {};
+    if (typeof filter.minScore === 'number') q.score = { $gte: filter.minScore };
+    if (filter.tags?.length) q.tag = { $in: filter.tags };
+    return ConversationScoreModel.countDocuments(q).exec();
+  },
+
   /** Aggregate counts + average per tag, for a dataset-health summary. */
   async summary(): Promise<{ total: number; avgScore: number; byTag: Record<string, number> }> {
     const rows = await ConversationScoreModel.aggregate<{ _id: string; n: number; avg: number }>([

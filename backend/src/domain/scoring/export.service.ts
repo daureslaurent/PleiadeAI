@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createLogger } from '../../config/logger';
 import { llamaLogRepository, type LlamaLogDoc } from '../llama-logs/llama-log.repository';
+import { conversationScoreRepository } from './conversation-score.repository';
 
 const log = createLogger('export-service');
 
@@ -15,6 +16,20 @@ export interface ExportResult {
 }
 
 /**
+ * Optional quality gate applied to the export. When set, only agent-runs whose judge verdict
+ * passes are emitted — this is what turns the raw archive into a curated SFT training set.
+ */
+export interface ExportFilter {
+  minScore?: number;
+  tags?: string[];
+}
+
+/** True when the filter actually constrains anything (an empty object means "export all"). */
+function isActive(filter?: ExportFilter): filter is ExportFilter {
+  return !!filter && (typeof filter.minScore === 'number' || !!filter.tags?.length);
+}
+
+/**
  * Dump the archive to a JSONL file for an EXTERNAL judge/SFT pipeline — one line per **agent-run**:
  * `{ turn_id, run_id, agent, depth, session_id, messages, tools }`, where `messages` is that run's
  * full reconstructed OpenAI-format conversation and `tools` is the tool catalog offered to it. The
@@ -22,11 +37,20 @@ export interface ExportResult {
  * captured too. Raw, unfiltered ("export all"); the external script does its own judging/filtering.
  */
 export const exportService = {
-  /** Build the JSONL body (one agent-run per line) + the line count. Shared by file-write & download. */
-  async buildJsonl(): Promise<{ body: string; turns: number }> {
+  /**
+   * Build the JSONL body (one agent-run per line) + the line count. Shared by file-write & download.
+   *
+   * With no `filter` this is the original raw "export all". With a filter, only runs whose judge
+   * verdict passes (min score / tag allowlist) are emitted — the curated training set a fine-tune
+   * should actually learn from. Unscored runs are excluded whenever a filter is active, since there
+   * is no verdict to judge them by.
+   */
+  async buildJsonl(filter?: ExportFilter): Promise<{ body: string; turns: number }> {
+    const eligible = isActive(filter) ? await conversationScoreRepository.eligibleRunIds(filter) : null;
     const runs = await llamaLogRepository.listRunIds();
     const lines: string[] = [];
     for (const { runId } of runs) {
+      if (eligible && !eligible.has(runId)) continue;
       const records = await llamaLogRepository.listByRun(runId);
       const example = runToExample(runId, records);
       if (example) lines.push(JSON.stringify(example));

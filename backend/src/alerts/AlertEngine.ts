@@ -14,8 +14,9 @@ const log = createLogger('alert-engine');
  * durable Mongo record, and vice-versa.
  */
 export const alertEngine = {
+  /** `agentId` is optional: system-level alerts (e.g. a remote fine-tune finishing) own no agent. */
   async dispatch(input: {
-    agentId: string | Types.ObjectId;
+    agentId?: string | Types.ObjectId | null;
     title: string;
     content: string;
   }): Promise<void> {

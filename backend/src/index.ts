@@ -21,6 +21,9 @@ import { llmRouter } from './transport/http/routes/llm.routes';
 import { llamaLogsRouter } from './transport/http/routes/llama-logs.routes';
 import { registerLlamaLogSubscriber } from './domain/llama-logs/llama-log.service';
 import { scoringRouter } from './transport/http/routes/scoring.routes';
+import { finetuneServersRouter } from './transport/http/routes/finetune-servers.routes';
+import { finetuneJobsRouter } from './transport/http/routes/finetune-jobs.routes';
+import { startFinetunePoller } from './finetune/poller';
 import { endpointService } from './domain/endpoints/endpoint.service';
 import { toolsRouter } from './transport/http/routes/tools.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
@@ -46,6 +49,10 @@ async function main(): Promise<void> {
   // background. Best-effort: never blocks or fails boot if the fallback container isn't up yet.
   endpointService.ensureLocalFallback().catch((err) => rootLogger.error({ err }, 'ensureLocalFallback failed'));
 
+  // Poll remote fine-tune servers for tracked-job progress (loss curve + terminal alerts).
+  // Idle when nothing is training: only non-terminal jobs are fetched.
+  startFinetunePoller();
+
   const app = express();
   // Browser calls the API cross-origin (frontend :3000 → backend :4000); allow it.
   app.use(cors());
@@ -66,6 +73,8 @@ async function main(): Promise<void> {
   app.use('/api/llm', requireAuth, llmRouter);
   app.use('/api/llama-logs', requireAuth, llamaLogsRouter);
   app.use('/api/scoring', requireAuth, scoringRouter);
+  app.use('/api/finetune-servers', requireAuth, finetuneServersRouter);
+  app.use('/api/finetune-jobs', requireAuth, finetuneJobsRouter);
   app.use('/api/tools', requireAuth, toolsRouter);
   app.use('/api/isolations', requireAuth, isolationsRouter);
   app.use('/api/images', requireAuth, imagesRouter);

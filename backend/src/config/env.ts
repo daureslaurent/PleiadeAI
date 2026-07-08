@@ -72,6 +72,9 @@ const EnvSchema = z.object({
   // healthcheck before throwing IsolationNotReadyError (kill-switch: no traffic leaks meanwhile).
   GLUETUN_IMAGE: z.string().default('qmcgaw/gluetun:latest'),
   AGENT_VPN_HEALTH_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  // How often the backend polls remote fine-tune servers for tracked-job progress (loss curve +
+  // status). Only non-terminal jobs are polled, so this is idle when nothing is training.
+  FINETUNE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
   // Secret used to encrypt isolation SSH private keys at rest (AES-256-GCM). Falls back to
   // JWT_SECRET when unset; set a dedicated value in production so rotating one doesn't affect both.
   ISOLATION_ENC_KEY: z.string().optional(),
