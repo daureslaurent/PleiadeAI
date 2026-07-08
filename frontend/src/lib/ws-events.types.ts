@@ -170,6 +170,16 @@ export interface LlamaCallEndEvent {
   usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
 }
 
+/** A turn was scored by the Conversation Quality Scorer (live badge on the chat + LLM Debug). */
+export interface TurnScoredEvent {
+  type: 'turn_scored';
+  sessionId: string | null;
+  turnId: string;
+  score: number;
+  tag: 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
+  explanation: string;
+}
+
 export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
@@ -184,4 +194,5 @@ export type WsEvent =
   | ContextUsageEvent
   | LlamaCallStartEvent
   | LlamaCallDeltaEvent
-  | LlamaCallEndEvent;
+  | LlamaCallEndEvent
+  | TurnScoredEvent;

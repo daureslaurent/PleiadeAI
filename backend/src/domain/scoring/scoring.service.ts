@@ -1,4 +1,5 @@
 import { createLogger } from '../../config/logger';
+import { eventBus } from '../../core/event-bus/EventBus';
 import { settingsService } from '../settings/settings.service';
 import { llamaLogRepository } from '../llama-logs/llama-log.repository';
 import { assembleTurn } from './turn-assembler';
@@ -39,13 +40,22 @@ export const scoringService = {
     }
     const judged = await judgeService.judge(turn);
     if (!judged) return null;
-    return conversationScoreRepository.upsert({
+    const saved = await conversationScoreRepository.upsert({
       turnId,
       sessionId: turn.sessionId,
       verdict: judged.verdict,
       judgeModel: judged.judgeModel,
       origin,
     });
+    // Notify the turn's chat (live badge) + the LLM Debug feed.
+    eventBus.emit('scoring:turn_scored', {
+      sessionId: turn.sessionId,
+      turnId,
+      score: judged.verdict.score,
+      tag: judged.verdict.tag,
+      explanation: judged.verdict.explanation,
+    });
+    return saved;
   },
 
   /**

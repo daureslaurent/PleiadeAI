@@ -14,6 +14,7 @@ function toListRecord(doc: LlamaLogDoc) {
   const d = doc.toObject();
   return {
     id: d.call_id,
+    turnId: d.turn_id ?? null,
     source: d.source,
     endpoint: d.endpoint,
     model: d.model,

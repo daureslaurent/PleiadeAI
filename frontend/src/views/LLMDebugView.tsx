@@ -14,9 +14,11 @@ import {
   llmDebugApi,
   type LlamaCallRecord,
   type LlamaLogStats,
+  type ScoreTag,
 } from '../lib/api';
-import { useLlamaDebug, type LiveCall } from '../store/llamaDebug';
+import { useLlamaDebug, type LiveCall, type DebugScore } from '../store/llamaDebug';
 import { agentColor } from '../lib/agentColor';
+import { ScoreBadge } from '../components/ScoreBadge';
 
 /**
  * LLM Debug page — the last N raw HTTP calls to the inference server, each with its full request and
@@ -25,8 +27,9 @@ import { agentColor } from '../lib/agentColor';
  * capture tiers and a guarded archive purge.
  */
 export function LLMDebugView() {
-  const { records, live, limit, loading, error, wire, hydrate, setLimit } = useLlamaDebug();
+  const { records, live, scores, limit, loading, error, wire, hydrate, setLimit } = useLlamaDebug();
   const [stats, setStats] = useState<LlamaLogStats | null>(null);
+  const [tagFilter, setTagFilter] = useState<ScoreTag | ''>('');
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -52,6 +55,12 @@ export function LLMDebugView() {
     [live],
   );
 
+  // Optional filter: show only records whose turn was scored with the chosen tag.
+  const shownRecords = useMemo(
+    () => (tagFilter ? records.filter((r) => r.turnId && scores[r.turnId]?.tag === tagFilter) : records),
+    [records, scores, tagFilter],
+  );
+
   const onPurge = async () => {
     if (!window.confirm('Purge the entire archive? This permanently deletes all stored calls (including future fine-tuning data). The capped debug view is unaffected.')) return;
     await llmDebugApi.purgeArchive();
@@ -71,6 +80,19 @@ export function LLMDebugView() {
           onPurge={onPurge}
         />
 
+        {/* Score tag filter — narrows the list to records whose turn earned a given ruling. */}
+        <div className="flex items-center gap-1.5">
+          <span className="mr-1 text-[11px] uppercase tracking-wider text-slate-500">Score</span>
+          <TagChip active={tagFilter === ''} onClick={() => setTagFilter('')}>
+            All
+          </TagChip>
+          {(['Perfect', 'Patched', 'Recovered', 'Rejected'] as ScoreTag[]).map((t) => (
+            <TagChip key={t} active={tagFilter === t} onClick={() => setTagFilter(t)}>
+              {t}
+            </TagChip>
+          ))}
+        </div>
+
         {loading && records.length === 0 ? (
           <div className="flex h-40 items-center justify-center text-slate-500">
             <Loader2 className="animate-spin" />
@@ -81,14 +103,16 @@ export function LLMDebugView() {
               <LiveCard key={call.id} call={call} />
             ))}
 
-            {records.length === 0 && liveCalls.length === 0 && (
+            {shownRecords.length === 0 && liveCalls.length === 0 && (
               <div className="glass-card rounded-2xl border border-white/[0.06] p-8 text-center text-sm text-slate-500">
-                No calls captured yet. Send a message in the Workspace and they'll appear here.
+                {tagFilter
+                  ? `No ${tagFilter} turns in the current records.`
+                  : "No calls captured yet. Send a message in the Workspace and they'll appear here."}
               </div>
             )}
 
-            {records.map((rec) => (
-              <RecordCard key={rec.id + rec.createdAt} rec={rec} />
+            {shownRecords.map((rec) => (
+              <RecordCard key={rec.id + rec.createdAt} rec={rec} score={rec.turnId ? scores[rec.turnId] : undefined} />
             ))}
           </div>
         )}
@@ -259,7 +283,7 @@ function LiveCard({ call }: { call: LiveCall }) {
 // Persisted record card (collapsible)
 // ---------------------------------------------------------------------------
 
-function RecordCard({ rec }: { rec: LlamaCallRecord }) {
+function RecordCard({ rec, score }: { rec: LlamaCallRecord; score?: DebugScore }) {
   const [open, setOpen] = useState(false);
   const [rawChunks, setRawChunks] = useState<string[] | null>(null);
   const [loadingRaw, setLoadingRaw] = useState(false);
@@ -302,6 +326,7 @@ function RecordCard({ rec }: { rec: LlamaCallRecord }) {
         </span>
         <span className="truncate font-mono text-[11px] text-slate-500">{rec.model}</span>
         <span className="ml-auto flex shrink-0 items-center gap-3 text-[11px] text-slate-500">
+          {score && <ScoreBadge score={score} size="xs" />}
           {rec.usage && (
             <span className="font-mono" title="prompt / completion tokens">
               {rec.usage.promptTokens}↑ {rec.usage.completionTokens}↓
@@ -412,7 +437,21 @@ const SOURCE_STYLE: Record<string, string> = {
   'title-gen': 'border-white/[0.08] bg-white/[0.04] text-slate-400',
   identity: 'border-reasoning/25 bg-reasoning/10 text-reasoning',
   vision: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-400',
+  judge: 'border-amber-400/25 bg-amber-400/10 text-amber-400',
 };
+
+function TagChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+        active ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-slate-400 hover:bg-white/[0.05]'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 function SourceTag({ source }: { source: string }) {
   return (

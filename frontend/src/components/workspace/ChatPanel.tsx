@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, ImagePlus, X, Play, Repeat, Pencil } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
-import { useStream, buildBlocks, type ContextUsage, type Turn } from '../../store/stream';
+import { useStream, buildBlocks, type ContextUsage, type Turn, type TurnScore } from '../../store/stream';
 import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
+import { ScoreBadge } from '../ScoreBadge';
 import type { Agent } from '../../lib/api';
 
 /**
@@ -15,10 +16,13 @@ import type { Agent } from '../../lib/api';
 function MessageRow({
   role,
   agentName,
+  score,
   children,
 }: {
   role: Turn['role'];
   agentName: string;
+  /** Conversation Quality score for an assistant turn (renders a tiny badge next to the name). */
+  score?: TurnScore;
   children: React.ReactNode;
 }) {
   if (role === 'user') {
@@ -45,6 +49,7 @@ function MessageRow({
         <span className="text-xs font-semibold tracking-wide" style={{ color: color.accent }}>
           {agentName}
         </span>
+        {score && <ScoreBadge score={score} size="xs" />}
       </div>
       <div className="min-w-0 overflow-hidden break-words pl-9 text-sm text-slate-100">
         {children}
@@ -373,7 +378,12 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
         ) : (
           <div className="mx-auto max-w-3xl space-y-6">
             {turns.map((t, i) => (
-              <MessageRow key={i} role={t.role} agentName={agentName}>
+              <MessageRow
+                key={i}
+                role={t.role}
+                agentName={agentName}
+                score={t.role === 'assistant' ? t.score : undefined}
+              >
                 {t.role === 'user' ? (
                   <div className="space-y-1.5">
                     {t.images && t.images.length > 0 && (

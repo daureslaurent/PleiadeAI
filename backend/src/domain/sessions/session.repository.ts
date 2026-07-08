@@ -70,6 +70,7 @@ export const sessionRepository = {
       trace?: unknown;
       context_tokens?: number;
       context_window?: number;
+      turn_id?: string;
     },
   ): Promise<MessageDoc> {
     const msg = await MessageModel.create({ session_id: sessionId, ...input });

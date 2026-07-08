@@ -93,7 +93,7 @@ export function attachSocket(httpServer: HttpServer): Server {
 
       sessionLock.acquireUserSession(lockKey);
       try {
-        const { text: answer } = await agentRunner.run({
+        const { text: answer, turnId } = await agentRunner.run({
           agentName: input.agentName,
           sessionId,
           depth: 0,
@@ -104,8 +104,9 @@ export function attachSocket(httpServer: HttpServer): Server {
         });
         if (socket.connected) {
           // Normal case: the originating client is still here — it renders the streamed turn and
-          // persists it (with the rich inline blocks) via the REST API, as before.
-          socket.emit('chat:done', { sessionId, answer });
+          // persists it (with the rich inline blocks) via the REST API, as before. `turnId` lets the
+          // client tag the saved message so its quality score can attach to this turn on refresh.
+          socket.emit('chat:done', { sessionId, answer, turnId });
         } else {
           // The client left mid-run (e.g. a browser refresh). Persist the *rich* turn ourselves —
           // reconstructed from the same event stream — so tool calls and sub-agent hops survive, not
@@ -123,6 +124,7 @@ export function attachSocket(httpServer: HttpServer): Server {
                 trace: turn.trace,
                 context_tokens: turn.contextTokens,
                 context_window: turn.contextWindow,
+                turn_id: turnId,
               })
               .catch((e) => log.error({ err: String(e) }, 'server-side persist failed'));
           }
@@ -131,6 +133,7 @@ export function attachSocket(httpServer: HttpServer): Server {
             answer,
             persisted: true,
             blocks: turn.blocks,
+            turnId,
           });
         }
 

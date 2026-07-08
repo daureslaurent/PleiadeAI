@@ -40,9 +40,10 @@ export const conversationScoreRepository = {
     return new Set(rows.map((r) => String(r.turn_id)));
   },
 
-  /** List scores, newest first, optionally filtered by tag / min score (for the UI + triage). */
-  list(opts: { tag?: string; minScore?: number; limit?: number } = {}): Promise<ConversationScoreDoc[]> {
+  /** List scores, newest first, optionally filtered by session / tag / min score (UI + triage). */
+  list(opts: { sessionId?: string; tag?: string; minScore?: number; limit?: number } = {}): Promise<ConversationScoreDoc[]> {
     const filter: Record<string, unknown> = {};
+    if (opts.sessionId) filter.session_id = opts.sessionId;
     if (opts.tag) filter.tag = opts.tag;
     if (typeof opts.minScore === 'number') filter.score = { $gte: opts.minScore };
     return ConversationScoreModel.find(filter)

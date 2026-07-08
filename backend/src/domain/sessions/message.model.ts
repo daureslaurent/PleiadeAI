@@ -11,6 +11,8 @@ const MessageSchema = new Schema(
     session_id: { type: Schema.Types.ObjectId, ref: 'Session', required: true, index: true },
     role: { type: String, enum: ['user', 'assistant'], required: true },
     text: { type: String, default: '' },
+    /** Assistant only: the turn id grouping this turn's llama calls, so the UI can link its score. */
+    turn_id: { type: String, default: undefined, index: true },
     /** User only: data-URL images attached to the message, so a reload re-shows the thumbnails. */
     images: { type: [String], default: undefined },
     /** Assistant only: ordered prose/tool blocks exactly as rendered. */

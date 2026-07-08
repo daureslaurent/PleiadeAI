@@ -567,6 +567,8 @@ export interface StoredMessage {
   context_tokens?: number;
   /** Assistant only: model context window at the time of this turn. */
   context_window?: number;
+  /** Assistant only: the turn id grouping this turn's llama calls, so its score can be linked. */
+  turn_id?: string;
   created_at: string;
 }
 
@@ -579,6 +581,7 @@ export interface NewMessage {
   trace?: unknown[];
   context_tokens?: number;
   context_window?: number;
+  turn_id?: string;
 }
 
 export const sessionsApi = {
@@ -758,6 +761,14 @@ export interface InferenceSettings {
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */
   update_check_interval_hours: number;
+  /** Conversation Quality Scorer: auto-score each turn on completion. */
+  scoring_enabled: boolean;
+  /** Judge endpoint ('' → reuse the responding agent's own endpoint). */
+  scoring_endpoint_id: string;
+  /** Model on `scoring_endpoint_id` for judging ('' → that endpoint's default). */
+  scoring_model: string;
+  /** Token budget for the judge reply. */
+  scoring_max_tokens: number;
 }
 
 export const settingsApi = {
@@ -946,7 +957,9 @@ export interface LlamaResponseCapture {
 /** One persisted llama call, as listed on the LLM Debug page. */
 export interface LlamaCallRecord {
   id: string;
-  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision';
+  /** Turn grouping id (null for side-task calls); links a record to its Conversation Quality score. */
+  turnId: string | null;
+  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge';
   endpoint: string;
   model: string;
   sessionId: string | null;
@@ -978,6 +991,48 @@ export const llmDebugApi = {
   get: (id: string) => api.get<LlamaCallRecord>(`/llama-logs/${id}`).then((r) => r.data),
   stats: () => api.get<LlamaLogStats>('/llama-logs/stats').then((r) => r.data),
   purgeArchive: () => api.delete<{ deleted: number }>('/llama-logs/archive').then((r) => r.data),
+};
+
+// ── Conversation Quality Scorer ────────────────────────────────────────────
+
+export type ScoreTag = 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
+
+export interface ConversationScore {
+  turnId: string;
+  sessionId: string | null;
+  score: number;
+  tag: ScoreTag;
+  explanation: string;
+  judgeModel: string;
+  origin: 'auto' | 'batch' | 'manual';
+  createdAt: string;
+}
+
+export interface ScoringSummary {
+  total: number;
+  avgScore: number;
+  byTag: Record<string, number>;
+}
+
+export interface BatchScoreResult {
+  total: number;
+  scored: number;
+  skipped: number;
+  failed: number;
+}
+
+export const scoringApi = {
+  summary: () => api.get<ScoringSummary>('/scoring/summary').then((r) => r.data),
+  list: (opts: { sessionId?: string; tag?: string; minScore?: number; limit?: number } = {}) =>
+    api.get<ConversationScore[]>('/scoring/scores', { params: opts }).then((r) => r.data),
+  scoreTurn: (turnId: string) =>
+    api.post<ConversationScore>(`/scoring/turn/${turnId}`).then((r) => r.data),
+  scoreAll: (body: { mode: 'unscored' | 'rescore'; concurrency: number; limit?: number }) =>
+    api.post<BatchScoreResult>('/scoring/score-all', body).then((r) => r.data),
+  export: () => api.post<{ path: string; turns: number; bytes: number }>('/scoring/export').then((r) => r.data),
+  /** Fetch the JSONL export as an authenticated blob (also writes the server-side file). */
+  downloadBlob: () =>
+    api.get('/scoring/export/download', { responseType: 'blob' }).then((r) => r.data as Blob),
 };
 
 export const endpointsApi = {

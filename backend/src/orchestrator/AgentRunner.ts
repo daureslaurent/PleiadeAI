@@ -136,6 +136,8 @@ export interface RunInput {
 export interface RunResult {
   text: string;
   images: ImageBlock[];
+  /** The id grouping this turn's llama calls — surfaced so the caller can persist it + link scores. */
+  turnId: string;
 }
 
 /**
@@ -520,7 +522,7 @@ export class AgentRunner {
       setTimeout(() => scoringService.autoScore(tid), 1500);
     }
 
-    return { text: finalText, images: handBack };
+    return { text: finalText, images: handBack, turnId };
   }
 
   /**

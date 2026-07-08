@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { getSocket } from '../lib/socket';
-import { sessionsApi, type StoredMessage } from '../lib/api';
+import { sessionsApi, scoringApi, type StoredMessage } from '../lib/api';
 import { useAuth } from './auth';
 import type {
   AgentHopEvent,
@@ -13,6 +13,7 @@ import type {
   ToolOutputEvent,
   ToolStartEvent,
   TruncatedEvent,
+  TurnScoredEvent,
   VisionEvent,
   VisualActEvent,
 } from '../lib/ws-events.types';
@@ -199,9 +200,23 @@ export function buildBlocks(
   return out;
 }
 
+/** A Conversation Quality score attached to an assistant turn (from the scorer). */
+export interface TurnScore {
+  score: number;
+  tag: 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
+  explanation: string;
+}
+
 export type Turn =
   | { role: 'user'; blocks: [{ kind: 'text'; text: string }]; images?: string[] }
-  | { role: 'assistant'; blocks: Block[] };
+  | {
+      role: 'assistant';
+      blocks: Block[];
+      /** The backend turn id (present once a turn completes) — links this turn to its quality score. */
+      turnId?: string;
+      /** The Conversation Quality score, once the scorer has judged this turn. */
+      score?: TurnScore;
+    };
 
 /** Raw trace entries for the debugger drawer (kept alongside the inline blocks). */
 export interface TraceEntry {
@@ -617,12 +632,15 @@ export const useStream = create<StreamState>((set, get) => ({
         answer,
         persisted,
         blocks: serverBlocks,
+        turnId,
       }: {
         sessionId: string;
         answer: string;
         persisted?: boolean;
         /** Rich blocks the backend assembled when it persisted the turn itself (client was gone). */
         blocks?: Block[];
+        /** Backend turn id — tag the saved turn so its quality score attaches on refresh. */
+        turnId?: string;
       }) => {
       const s = get();
       const directAgent = s.sessionAgent[sessionId];
@@ -661,7 +679,7 @@ export const useStream = create<StreamState>((set, get) => ({
         set({
           ...shared,
           streaming: false,
-          turns: hasContent ? [...s.turns, { role: 'assistant', blocks }] : s.turns,
+          turns: hasContent ? [...s.turns, { role: 'assistant', blocks, turnId }] : s.turns,
           liveItems: [],
           liveFrames: {},
           frameStack: ['root'],
@@ -684,6 +702,7 @@ export const useStream = create<StreamState>((set, get) => ({
               trace: trace.slice(s.turnTraceStart),
               context_tokens: s.contextUsage?.promptTokens,
               context_window: s.contextUsage?.contextWindow,
+              turn_id: turnId,
             })
             .catch(() => {});
         }
@@ -695,6 +714,23 @@ export const useStream = create<StreamState>((set, get) => ({
             .catch(() => {});
         }
       }
+    });
+
+    // Conversation Quality Scorer: attach a live score to the matching turn (by turn id) in the
+    // on-screen session. Turns from other sessions are updated on their next hydrate.
+    socket.on('turn_scored', (e: TurnScoredEvent) => {
+      set((s) => {
+        if (e.sessionId && e.sessionId !== s.activeSessionId) return s;
+        let changed = false;
+        const turns = s.turns.map((t) => {
+          if (t.role === 'assistant' && t.turnId === e.turnId) {
+            changed = true;
+            return { ...t, score: { score: e.score, tag: e.tag, explanation: e.explanation } };
+          }
+          return t;
+        });
+        return changed ? { turns } : s;
+      });
     });
 
     set({ wired: true });
@@ -710,9 +746,30 @@ export const useStream = create<StreamState>((set, get) => ({
     const turns: Turn[] = messages.map((m) =>
       m.role === 'user'
         ? { role: 'user', blocks: [{ kind: 'text', text: m.text }], images: m.images?.length ? m.images : undefined }
-        : { role: 'assistant', blocks: (m.blocks as Block[] | undefined) ?? [{ kind: 'text', text: m.text }] },
+        : {
+            role: 'assistant',
+            blocks: (m.blocks as Block[] | undefined) ?? [{ kind: 'text', text: m.text }],
+            turnId: m.turn_id,
+          },
     );
     const trace: TraceEntry[] = messages.flatMap((m) => (m.trace as TraceEntry[] | undefined) ?? []);
+
+    // Backfill quality scores for this session's turns (survives refresh): fetch the session's scores
+    // and attach each to its turn by id. Fire-and-forget so hydrate stays synchronous.
+    void scoringApi
+      .list({ sessionId, limit: 500 })
+      .then((scores) => {
+        if (get().activeSessionId !== sessionId || scores.length === 0) return;
+        const byTurn = new Map(scores.map((sc) => [sc.turnId, sc]));
+        set((s) => ({
+          turns: s.turns.map((t) => {
+            if (t.role !== 'assistant' || !t.turnId) return t;
+            const sc = byTurn.get(t.turnId);
+            return sc ? { ...t, score: { score: sc.score, tag: sc.tag, explanation: sc.explanation } } : t;
+          }),
+        }));
+      })
+      .catch(() => {});
     // Restore the context meter from the most recent assistant turn that recorded it.
     const lastCtx = [...messages]
       .reverse()

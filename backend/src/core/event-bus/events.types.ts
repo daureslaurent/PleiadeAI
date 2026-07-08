@@ -266,6 +266,19 @@ export interface LlamaCallEndPayload {
   error?: string;
 }
 
+/**
+ * A turn was scored by the Conversation Quality Scorer. Bridged to the turn's session room so the
+ * chat can attach a live score badge to the matching turn. `sessionId` may be null for side turns
+ * (none currently) — the bridge only forwards when it's present.
+ */
+export interface TurnScoredPayload {
+  sessionId: string | null;
+  turnId: string;
+  score: number;
+  tag: 'Perfect' | 'Patched' | 'Recovered' | 'Rejected';
+  explanation: string;
+}
+
 export type AlertLevel = 'info' | 'warn' | 'error';
 
 export interface SystemAlertPayload {
@@ -296,6 +309,7 @@ export interface EventMap {
   'llama:call_start': LlamaCallStartPayload;
   'llama:call_delta': LlamaCallDeltaPayload;
   'llama:call_end': LlamaCallEndPayload;
+  'scoring:turn_scored': TurnScoredPayload;
 }
 
 export type EventName = keyof EventMap;

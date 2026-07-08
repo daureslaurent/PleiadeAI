@@ -22,23 +22,33 @@ export interface ExportResult {
  * external script does its own judging/filtering.
  */
 export const exportService = {
-  async exportAll(): Promise<ExportResult> {
+  /** Build the JSONL body (one turn per line) + the turn count. Shared by file-write and download. */
+  async buildJsonl(): Promise<{ body: string; turns: number }> {
     const turnIds = await llamaLogRepository.listTurnIds();
-    await mkdir(EXPORT_DIR, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filePath = path.join(EXPORT_DIR, `sft-export-${stamp}.jsonl`);
-
     const lines: string[] = [];
     for (const turnId of turnIds) {
       const records = await llamaLogRepository.listByTurn(turnId);
       const example = turnToExample(turnId, records);
       if (example) lines.push(JSON.stringify(example));
     }
-    const body = lines.join('\n') + (lines.length ? '\n' : '');
+    return { body: lines.join('\n') + (lines.length ? '\n' : ''), turns: lines.length };
+  },
+
+  /** Persist a prebuilt JSONL body to a timestamped file under {@link EXPORT_DIR}. */
+  async writeFile(body: string, turns: number): Promise<ExportResult> {
+    await mkdir(EXPORT_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filePath = path.join(EXPORT_DIR, `sft-export-${stamp}.jsonl`);
     await writeFile(filePath, body, 'utf8');
     const bytes = Buffer.byteLength(body, 'utf8');
-    log.info({ filePath, turns: lines.length, bytes }, 'JSONL export written');
-    return { path: filePath, turns: lines.length, bytes };
+    log.info({ filePath, turns, bytes }, 'JSONL export written');
+    return { path: filePath, turns, bytes };
+  },
+
+  /** Build the JSONL dump and write it to a server file; return its path/size. */
+  async exportAll(): Promise<ExportResult> {
+    const { body, turns } = await this.buildJsonl();
+    return this.writeFile(body, turns);
   },
 };
 

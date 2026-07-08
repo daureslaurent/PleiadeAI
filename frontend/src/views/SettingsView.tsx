@@ -6,6 +6,7 @@ import {
   DatabaseBackup,
   Download,
   Loader2,
+  Gauge,
   MonitorCog,
   Plus,
   RefreshCw,
@@ -253,6 +254,67 @@ export function SettingsView() {
               <NullableNumber label="frequency_penalty" value={form.vision_frequency_penalty} step={0.1} onChange={(v) => set('vision_frequency_penalty', v)} />
               <NullableNumber label="presence_penalty" value={form.vision_presence_penalty} step={0.1} onChange={(v) => set('vision_presence_penalty', v)} />
             </div>
+          </Field>
+        </Section>
+
+        {/* Conversation Quality Scorer — LLM-as-judge that rates each turn for the SFT dataset. */}
+        <Section
+          icon={Gauge}
+          title="Conversation Quality Scorer"
+          subtitle="Score each completed turn 0–100 + tag (Perfect/Patched/Recovered/Rejected) for the fine-tuning dataset. Manage scores on the Scoring page."
+        >
+          <Toggle
+            label="Auto-score turns"
+            hint="When on, every completed turn is scored automatically by the judge. Off → score only from the Scoring page (manual / batch)."
+            checked={form.scoring_enabled}
+            onChange={(v) => set('scoring_enabled', v)}
+          />
+          <Field
+            label="Judge model"
+            hint="The LLM-as-judge that rates turns. “Agent's own model” reuses the default endpoint; for reliable scores prefer a specific, capable endpoint (judged at temperature 0)."
+          >
+            <div className="flex gap-2">
+              <select
+                value={form.scoring_endpoint_id}
+                onChange={(e) => {
+                  set('scoring_endpoint_id', e.target.value);
+                  set('scoring_model', '');
+                }}
+                className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+              >
+                <option value="">Agent's own model</option>
+                {endpoints.map((e) => (
+                  <option key={e._id} value={e._id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+              {form.scoring_endpoint_id && (
+                <select
+                  value={form.scoring_model}
+                  onChange={(e) => set('scoring_model', e.target.value)}
+                  className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+                >
+                  <option value="">Endpoint default</option>
+                  {(endpoints.find((e) => e._id === form.scoring_endpoint_id)?.models ?? []).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </Field>
+          <Field
+            label="Judge max tokens"
+            hint="Token budget for the judge's reply. Reasoning judges spend tokens on a <think> block before the JSON verdict, so keep this ≥512."
+          >
+            <NumberInput
+              value={form.scoring_max_tokens}
+              min={64}
+              step={1}
+              onChange={(v) => set('scoring_max_tokens', v)}
+            />
           </Field>
         </Section>
 
