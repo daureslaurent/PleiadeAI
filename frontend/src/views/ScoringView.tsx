@@ -227,7 +227,7 @@ function ScoreRow({ score }: { score: ConversationScore }) {
     <div className="rounded-xl border border-white/[0.06] bg-black/25 px-3 py-2.5 backdrop-blur-sm">
       <div className="flex items-center gap-2.5">
         <ScoreBadge score={score} size="sm" />
-        <span className="font-mono text-[11px] text-slate-500">{score.runId.slice(0, 8)}</span>
+        <span className="font-mono text-[11px] text-slate-500">{(score.runId ?? '').slice(0, 8) || '—'}</span>
         {score.agentName && (
           <span className="text-[11px] text-slate-400">{score.agentName}</span>
         )}
