@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Box, Cpu, NotebookPen, Save, Sparkles, Trash2, Loader2 } from 'lucide-react';
-import { agentsApi, skillsApi, toolsApi, type Agent, type Skill, type ToolInfo } from '../lib/api';
+import { agentsApi, settingsApi, skillsApi, toolsApi, type Agent, type Skill, type ToolInfo } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
 import { AgentIsolationSelect } from './AgentIsolationSelect';
 import { AgentModelSelect } from './AgentModelSelect';
@@ -77,6 +77,8 @@ export function AgentsView() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [coreTools, setCoreTools] = useState<ToolInfo[]>([]);
+  // Global fleet default for the tool-round ceiling, shown as the placeholder when an agent inherits.
+  const [globalMaxToolIters, setGlobalMaxToolIters] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
@@ -96,11 +98,17 @@ export function AgentsView() {
   );
 
   async function refresh() {
-    const [a, s, t] = await Promise.all([agentsApi.list(), skillsApi.list(), toolsApi.list()]);
+    const [a, s, t, settings] = await Promise.all([
+      agentsApi.list(),
+      skillsApi.list(),
+      toolsApi.list(),
+      settingsApi.get(),
+    ]);
     registerAgentIdentities(a);
     setAgents(a);
     setSkills(s);
     setCoreTools(t);
+    setGlobalMaxToolIters(settings.max_tool_iterations);
     return a;
   }
 
@@ -384,7 +392,7 @@ export function AgentsView() {
               const n = parseInt(e.target.value, 10);
               setDraft({ ...draft, max_tool_iterations: Number.isFinite(n) && n > 0 ? n : null });
             }}
-            placeholder="default (20)"
+            placeholder={globalMaxToolIters != null ? `Global: ${globalMaxToolIters}` : 'global default'}
             className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
           />
           <p className="-mt-1 mb-1 text-xs text-slate-500">

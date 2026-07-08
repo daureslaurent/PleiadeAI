@@ -61,6 +61,9 @@ async function main(): Promise<void> {
   startFinetunePoller();
 
   const app = express();
+  // Don't advertise Express in the `X-Powered-By` header (Caddy also strips it at the edge). Removes a
+  // free software-fingerprint that eases targeted CVE lookups.
+  app.disable('x-powered-by');
   // Browser calls the API cross-origin (frontend :3000 → backend :4000); allow it.
   app.use(cors());
   // Headroom for Base64 image payloads (chat turns) and, larger still, the whole-instance clone

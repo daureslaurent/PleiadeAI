@@ -60,6 +60,9 @@ const SettingsSchema = new Schema(
     scoring_endpoint_id: { type: String, default: '' },
     scoring_model: { type: String, default: '' },
     scoring_max_tokens: { type: Number, default: 1024 },
+    // Fleet default for the per-turn tool-round ceiling. An agent may override it with its own
+    // `max_tool_iterations`; when the agent leaves that blank this value applies. Guards tool loops.
+    max_tool_iterations: { type: Number, default: 50 },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

@@ -11,7 +11,6 @@
 # TLS: plain HTTP for now (auto_https off). To switch to HTTPS later: point a domain's A record at
 # this host, replace the `:80` site label below with `yourdomain.com`, remove the `auto_https off`
 # line, publish 443 in docker-compose, and Caddy will auto-provision + renew Let's Encrypt certs.
-
 {
 	auto_https off
 	admin off
@@ -19,6 +18,34 @@
 
 :80 {
 	encode gzip
+
+	# Security headers on every response, and stripping of software-version disclosure. Applied at the
+	# edge so it covers both the proxied nginx SPA and the backend. See the security notes below.
+	header {
+		# Force HTTPS once TLS is enabled. NOTE: browsers ignore HSTS received over plain HTTP, so this
+		# is a no-op until the `:80` site is switched to HTTPS (see the TLS comment above). `preload` is
+		# a hard-to-reverse commitment (submit to hstspreload.org only after HTTPS is stable everywhere).
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+		# Lock the SPA down against XSS injection. `script-src 'self'` is safe: the Vite build emits only
+		# external module scripts (no inline scripts). `'unsafe-inline'` is kept for styles only (React /
+		# Tailwind inject inline styles at runtime). `img-src`/`font-src` allow data:/blob: for avatars,
+		# rendered screenshots, and inlined fonts; `connect-src 'self'` covers /api + the same-origin
+		# socket.io websocket; `worker-src blob:` covers library-spawned workers (e.g. noVNC).
+		# NOTE: remote images pasted into chat markdown are blocked — add `https:` to img-src if needed.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+		# Baseline hardening that complements the two headers above.
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# Strip version/software disclosure: upstream nginx `Server: nginx/1.25.5`, Caddy's `Via`, and
+		# Express's `X-Powered-By`. Denies attackers an easy CVE-lookup fingerprint.
+		-Server
+		-Via
+		-X-Powered-By
+	}
 
 	# Backend: REST API, health probe, and socket.io. Caddy upgrades the websocket automatically.
 	@backend path /api/* /socket.io/* /health

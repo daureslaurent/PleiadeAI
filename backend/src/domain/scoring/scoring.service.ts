@@ -34,7 +34,8 @@ export const scoringService = {
    */
   async scoreRun(runId: string, origin: 'auto' | 'batch' | 'manual'): Promise<ConversationScoreDoc | null> {
     const records = await llamaLogRepository.listByRun(runId);
-    const run = assembleRun(records);
+    const settings = await settingsService.get();
+    const run = assembleRun(records, settings.max_tool_iterations);
     if (!run) {
       log.debug({ runId }, 'no archive records for run — nothing to score');
       return null;

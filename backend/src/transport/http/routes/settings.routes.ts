@@ -51,6 +51,9 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.scoring_model === 'string') patch.scoring_model = b.scoring_model;
   if (b.scoring_max_tokens !== undefined)
     patch.scoring_max_tokens = Math.max(64, Number(b.scoring_max_tokens) || 1024);
+  // Per-turn tool-round ceiling; at least 1 round.
+  if (b.max_tool_iterations !== undefined)
+    patch.max_tool_iterations = Math.max(1, Number(b.max_tool_iterations) || 50);
 
   const updated = await settingsService.update(patch);
   // (Re)arm or stop the periodic host update check to match the new settings.

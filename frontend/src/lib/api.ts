@@ -772,6 +772,8 @@ export interface InferenceSettings {
   scoring_model: string;
   /** Token budget for the judge reply. */
   scoring_max_tokens: number;
+  /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
+  max_tool_iterations: number;
 }
 
 export const settingsApi = {

@@ -4,6 +4,7 @@ import { exportService } from '../../../domain/scoring/export.service';
 import { conversationScoreRepository } from '../../../domain/scoring/conversation-score.repository';
 import { llamaLogRepository } from '../../../domain/llama-logs/llama-log.repository';
 import { assembleRun } from '../../../domain/scoring/turn-assembler';
+import { settingsService } from '../../../domain/settings/settings.service';
 import type { ConversationScoreDoc } from '../../../domain/scoring/conversation-score.model';
 
 /** Conversation Quality Scorer — scores, batch scoring, per-turn inspection, and JSONL export. */
@@ -56,11 +57,12 @@ scoringRouter.get('/scores', async (req, res) => {
 /** One run's score plus its assembled transcript + signals (for inspecting a ruling). */
 scoringRouter.get('/run/:runId', async (req, res) => {
   const { runId } = req.params;
-  const [score, records] = await Promise.all([
+  const [score, records, settings] = await Promise.all([
     conversationScoreRepository.get(runId),
     llamaLogRepository.listByRun(runId),
+    settingsService.get(),
   ]);
-  const run = assembleRun(records);
+  const run = assembleRun(records, settings.max_tool_iterations);
   if (!run) {
     res.status(404).json({ error: 'no records for run' });
     return;

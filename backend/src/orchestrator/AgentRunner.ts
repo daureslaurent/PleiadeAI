@@ -64,14 +64,6 @@ function formatBytes(b: number): string {
 }
 
 /**
- * Default cap on tool round-trips within a single turn, guarding against tool loops. An agent can
- * raise it via `max_tool_iterations` (e.g. visual/desktop agents that take many screenshot→act
- * cycles). When the cap is hit the turn ends without a final answer; the UI surfaces a `truncated`
- * signal so the operator (or auto-continue) can nudge the run onward.
- */
-const DEFAULT_MAX_TOOL_ITERATIONS = 20;
-
-/**
  * How many times, per turn, we nudge a model that narrated a tool call as prose (e.g. a bare
  * `[ask_agent]`) back onto the native tool channel before giving up and stripping the leaked text.
  * One retry catches the common transient case without letting a stubborn model burn the iteration cap.
@@ -328,13 +320,13 @@ export class AgentRunner {
     // Latest usage across tool iterations; the final pass reflects the full session context size.
     let lastUsage: TokenUsage | null = null;
 
-    // Per-agent tool-round ceiling (falls back to the global default). The loop breaks cleanly once
-    // the model stops calling tools; if instead it exhausts every round we mark the turn `truncated`
-    // and signal the UI so a "continue" (manual or auto) can pick the run back up.
+    // Per-agent tool-round ceiling (falls back to the global Settings default). The loop breaks
+    // cleanly once the model stops calling tools; if instead it exhausts every round we mark the turn
+    // `truncated` and signal the UI so a "continue" (manual or auto) can pick the run back up.
     const maxIterations =
       typeof agent.max_tool_iterations === 'number' && agent.max_tool_iterations > 0
         ? agent.max_tool_iterations
-        : DEFAULT_MAX_TOOL_ITERATIONS;
+        : inference.maxToolIterations;
     let finishedCleanly = false;
 
     // Results of tool calls already run this turn, keyed by name+args. If the model re-issues an

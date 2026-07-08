@@ -2,13 +2,6 @@ import type { LlamaLogDoc } from '../llama-logs/llama-log.repository';
 import type { TurnLog, TurnStep, TurnSignals } from './scoring.types';
 
 /**
- * Mirrors `DEFAULT_MAX_TOOL_ITERATIONS` in AgentRunner (kept local to avoid importing the orchestrator
- * into a domain module). Only used as a soft "possible infinite loop" hint; per-agent overrides may
- * differ, so the judge treats `hitIterationCap` as evidence, not proof.
- */
-const DEFAULT_MAX_TOOL_ITERATIONS = 20;
-
-/**
  * Reconstruct a scoreable {@link TurnLog} from the raw llama archive records of one turn.
  *
  * Each record is one HTTP call: its `response` holds the assistant output (RAW, pre-repair native
@@ -90,8 +83,12 @@ function toolNamesFrom(tools: unknown): string[] {
  * Returns null if there are no records. Robust to malformed args (surfaced as a `malformedArgs`
  * signal). The run is the scored unit: for a delegated sub-agent these records are only that
  * sub-agent's own calls, so it is judged on its own conversation.
+ *
+ * `maxToolIterations` is the effective per-turn tool-round ceiling (the global Settings default;
+ * per-agent overrides may differ). Only used as a soft "possible infinite loop" hint, so the judge
+ * treats `hitIterationCap` as evidence, not proof.
  */
-export function assembleRun(records: LlamaLogDoc[]): TurnLog | null {
+export function assembleRun(records: LlamaLogDoc[], maxToolIterations: number): TurnLog | null {
   if (records.length === 0) return null;
   const first = records[0]!;
   const runId = String(first.run_id ?? '');
@@ -169,7 +166,7 @@ export function assembleRun(records: LlamaLogDoc[]): TurnLog | null {
   const recoveredAfterError = detectRecovery(steps);
 
   // Iteration cap: this run made at least the max number of tool-bearing rounds (a possible loop).
-  const hitIterationCap = records.length >= DEFAULT_MAX_TOOL_ITERATIONS;
+  const hitIterationCap = records.length >= maxToolIterations;
 
   const anyToolCall = steps.some((s) => s.toolCalls.length > 0);
   const last = records[records.length - 1]!;

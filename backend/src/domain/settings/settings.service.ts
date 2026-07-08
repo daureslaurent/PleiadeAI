@@ -43,6 +43,8 @@ export interface EffectiveSettings {
   scoring_model: string;
   /** Token budget for the judge reply — enough for a reasoning model's `<think>` + the JSON verdict. */
   scoring_max_tokens: number;
+  /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
+  max_tool_iterations: number;
 }
 
 const KEY = 'global';
@@ -86,6 +88,7 @@ export const settingsService = {
       scoring_endpoint_id: doc?.scoring_endpoint_id ?? '',
       scoring_model: doc?.scoring_model ?? '',
       scoring_max_tokens: doc?.scoring_max_tokens ?? 1024,
+      max_tool_iterations: doc?.max_tool_iterations ?? 50,
     };
   },
 

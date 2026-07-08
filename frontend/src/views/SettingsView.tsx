@@ -148,6 +148,12 @@ export function SettingsView() {
           <Field label="Max tokens" hint="Upper bound on generated tokens per turn">
             <NumberInput value={form.max_tokens} min={1} step={1} onChange={(v) => set('max_tokens', v)} />
           </Field>
+          <Field
+            label="Max tool steps per turn"
+            hint="Fleet default for how many tool round-trips an agent may take before a turn is cut off. Each agent can override this on its own page."
+          >
+            <NumberInput value={form.max_tool_iterations} min={1} step={1} onChange={(v) => set('max_tool_iterations', v)} />
+          </Field>
           <Toggle
             label="Auto-detect context window"
             hint="Read each server's real n_ctx (probed at model discovery) for the chat context meter. Endpoints can override this. When off, the number below is used for every endpoint that inherits."

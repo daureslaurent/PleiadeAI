@@ -45,6 +45,8 @@ export interface ResolvedInference {
   topP: number;
   /** Operator-declared: this endpoint's model is multimodal (vision). Advisory only. */
   supportsVision: boolean;
+  /** Fleet default per-turn tool-round ceiling; applies when the agent doesn't override it. */
+  maxToolIterations: number;
 }
 
 /**
@@ -76,6 +78,7 @@ export async function resolveInference(agent: Pick<AgentDoc, 'endpoint_id' | 'mo
     temperature: settings.temperature,
     topP: settings.top_p,
     supportsVision: Boolean(endpoint?.supports_vision),
+    maxToolIterations: settings.max_tool_iterations,
   };
 }
 
@@ -102,6 +105,7 @@ export async function resolveForEndpoint(
     temperature: settings.temperature,
     topP: settings.top_p,
     supportsVision: Boolean(endpoint.supports_vision),
+    maxToolIterations: settings.max_tool_iterations,
   };
 }
 
@@ -132,6 +136,7 @@ export async function resolveFallbacks(excludeUrl?: string): Promise<ResolvedInf
         temperature: settings.temperature,
         topP: settings.top_p,
         supportsVision: Boolean(ep.supports_vision),
+        maxToolIterations: settings.max_tool_iterations,
       };
     });
 }
