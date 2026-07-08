@@ -40,7 +40,13 @@ export const scoringService = {
       return null;
     }
     const judged = await judgeService.judge(run);
-    if (!judged) return null;
+    if (!judged) {
+      log.warn(
+        { runId, turnId: run.turnId, agent: run.agentName, depth: run.depth, origin },
+        'judge produced no verdict — run left unscored',
+      );
+      return null;
+    }
     const saved = await conversationScoreRepository.upsert({
       runId,
       turnId: run.turnId,
@@ -76,7 +82,21 @@ export const scoringService = {
         const settings = await settingsService.get();
         if (!settings.scoring_enabled) return;
         const runIds = await llamaLogRepository.listRunIdsForTurn(turnId);
-        for (const runId of runIds) await this.scoreRun(runId, 'auto');
+        let scored = 0;
+        let failed = 0;
+        for (const runId of runIds) {
+          // Isolate each run: one agent-run that can't be scored must not abort the fan-out and strand
+          // the turn's remaining sub-agent runs unscored.
+          try {
+            if (await this.scoreRun(runId, 'auto')) scored++;
+            else failed++;
+          } catch (err) {
+            failed++;
+            log.warn({ turnId, runId, err: err instanceof Error ? err.message : String(err) }, 'auto-score run failed');
+          }
+        }
+        if (failed) log.warn({ turnId, runs: runIds.length, scored, failed }, 'auto-score turn incomplete');
+        else log.debug({ turnId, scored }, 'auto-score turn complete');
       } catch (err) {
         log.warn({ turnId, err: err instanceof Error ? err.message : String(err) }, 'auto-score failed');
       }

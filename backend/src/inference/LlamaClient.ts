@@ -234,6 +234,21 @@ export class LlamaClient {
       /** OpenAI-style penalties (honored by llama-server) to break repetition loops. */
       frequencyPenalty?: number;
       presencePenalty?: number;
+      /**
+       * Structured-output constraint. llama-server turns a `json_schema` into a GBNF grammar and
+       * constrains sampling of the *content* channel to it. Note this alone does NOT stop a reasoning
+       * model: it moves its deliberation into the unconstrained `reasoning_content` channel and can
+       * still exhaust `max_tokens` before emitting any content — pair it with
+       * `chatTemplateKwargs: { enable_thinking: false }`. Not every OpenAI-ish backend accepts it;
+       * callers should be prepared for the call to fail and retry unconstrained.
+       */
+      responseFormat?: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming['response_format'];
+      /**
+       * llama.cpp-specific chat-template arguments, forwarded verbatim (e.g. `{enable_thinking:false}`
+       * to suppress a reasoning model's thinking channel). Outside the OpenAI schema — an endpoint that
+       * doesn't know it may reject the call, so callers must be able to retry without it.
+       */
+      chatTemplateKwargs?: Record<string, unknown>;
     } = {},
   ): Promise<string> {
     const client = this.clientFor(target.url, target.apiKey);
@@ -252,6 +267,10 @@ export class LlamaClient {
       if (opts.topP != null) body.top_p = opts.topP;
       if (opts.frequencyPenalty != null) body.frequency_penalty = opts.frequencyPenalty;
       if (opts.presencePenalty != null) body.presence_penalty = opts.presencePenalty;
+      if (opts.responseFormat != null) body.response_format = opts.responseFormat;
+      if (opts.chatTemplateKwargs != null) {
+        (body as unknown as Record<string, unknown>).chat_template_kwargs = opts.chatTemplateKwargs;
+      }
       const capture = CallCapture.begin(target, {
         model: target.model,
         messages,

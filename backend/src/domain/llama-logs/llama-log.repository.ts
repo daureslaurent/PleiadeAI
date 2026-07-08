@@ -1,7 +1,15 @@
 import mongoose from 'mongoose';
+import { createLogger } from '../../config/logger';
 import { truncateRequestImages } from '../../inference/truncate-images';
 import { LlamaCallDebugModel, LlamaCallArchiveModel, type LlamaLogDoc } from './llama-log.model';
 import type { LlamaCallEndPayload } from '../../core/event-bus/events.types';
+
+const log = createLogger('llama-log-repository');
+
+/** Readable reason from a rejected settled promise. */
+function reasonOf(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
 
 /** Storage size + document count for one collection. */
 export interface CollectionSize {
@@ -50,8 +58,22 @@ export const llamaLogRepository = {
   async insert(payload: LlamaCallEndPayload): Promise<void> {
     const full = toRecord(payload);
     const debug = { ...full, request: truncateRequestImages(payload.request), tools: full.tools };
-    // Independent writes — a failure in one tier shouldn't lose the other.
-    await Promise.allSettled([LlamaCallArchiveModel.create(full), LlamaCallDebugModel.create(debug)]);
+    // Independent writes — a failure in one tier shouldn't lose the other. But a *silent* archive
+    // failure is invisible data loss: the debug feed still fills up, so the UI looks healthy while the
+    // Conversation Quality Scorer finds no records to judge and every run goes unscored. Log both.
+    const [archive, dbg] = await Promise.allSettled([
+      LlamaCallArchiveModel.create(full),
+      LlamaCallDebugModel.create(debug),
+    ]);
+    if (archive.status === 'rejected') {
+      log.error(
+        { callId: full.call_id, turnId: full.turn_id, runId: full.run_id, err: reasonOf(archive.reason) },
+        'llama archive write failed — this call cannot be scored or exported',
+      );
+    }
+    if (dbg.status === 'rejected') {
+      log.warn({ callId: full.call_id, err: reasonOf(dbg.reason) }, 'llama debug write failed');
+    }
   },
 
   /** Last `limit` calls from the fast capped debug buffer, newest first. */

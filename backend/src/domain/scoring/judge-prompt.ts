@@ -80,6 +80,24 @@ RULES:
 - Output ONLY a single JSON object, no prose, no markdown fences, matching exactly:
 {"score": <int 0-100>, "tag": "Perfect"|"Patched"|"Recovered"|"Rejected", "explanation": "<1-2 sentences citing the evidence>"}`;
 
+/**
+ * Second-pass nudge. A reasoning judge model often deliberates in *untagged* prose (no `<think>`
+ * wrapper) and burns its whole `scoring_max_tokens` budget before emitting the verdict — the call
+ * comes back `finishReason: 'length'` with no JSON in it at all, and the run is silently left
+ * unscored. This happens most on delegated sub-agent runs, whose transcripts ("did this even need a
+ * tool?") invite the longest deliberation, so a multi-sub-agent conversation ends up with a score on
+ * the top-level turn and none on its sub-agent bubbles.
+ *
+ * On a parse failure we hand the model its own (possibly truncated) reasoning back and ask for
+ * nothing but the verdict, with a small token budget it cannot overrun with more prose.
+ */
+export const JUDGE_RETRY_NUDGE =
+  'STOP. Your deliberation above is finished and must not continue. ' +
+  'Reply with ONLY the JSON verdict object — no reasoning, no explanation before it, no markdown fences. ' +
+  'Your entire reply must start with { and end with }. ' +
+  'If your reasoning above was cut off before you reached a conclusion, decide now from the transcript and the rubric.\n' +
+  '{"score": <int 0-100>, "tag": "Perfect"|"Patched"|"Recovered"|"Rejected", "explanation": "<1-2 sentences citing the evidence>"}';
+
 /** Build the user message carrying one turn's transcript + precomputed signals for the judge. */
 export function buildJudgeUserMessage(turn: TurnLog): string {
   const steps = turn.steps
