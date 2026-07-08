@@ -66,7 +66,7 @@ fi
 # start. Warn loudly rather than fail — a CPU-only smoke test may still be wanted.
 if command -v nvidia-smi >/dev/null 2>&1; then
   echo "==> Detected GPUs:"
-  nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader | sed 's/^/    /'
+  nvidia-smi --query-gpu=index,name,memory.total,compute_cap --format=csv,noheader | sed 's/^/    /'
 else
   echo "WARNING: nvidia-smi not found. Training needs the NVIDIA container toolkit;" >&2
   echo "         the service will start but any /train run will fail without GPUs." >&2
@@ -79,6 +79,45 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
   echo "    Edit finetune/.env and set FINETUNE_API_KEY (>= 8 chars) before training." >&2
 fi
+
+# --- GPU build-profile auto-selection -----------------------------------------
+# The base image / torch / flash-attn version must match the GPU architecture
+# (Blackwell sm_120 can't run on the CUDA 12.1 stack). Derive the profile from the
+# detected compute capability and export it as compose build args. An explicit
+# CUDA_IMAGE in .env (uncommented) always wins — we don't override a manual pin.
+select_build_profile() {
+  if grep -qE '^[[:space:]]*CUDA_IMAGE=' .env 2>/dev/null; then
+    echo "==> Build profile: CUDA_IMAGE pinned in .env — auto-detection skipped."
+    return
+  fi
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "==> Build profile: no nvidia-smi — defaulting to Ampere/Turing profile."
+    return
+  fi
+
+  # Highest compute-capability major across all installed GPUs (>=12 == Blackwell).
+  local max_major=0 cap major
+  while read -r cap; do
+    major="${cap%%.*}"
+    [[ "$major" =~ ^[0-9]+$ ]] && (( major > max_major )) && max_major="$major"
+  done < <(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | tr -d ' ')
+
+  if (( max_major >= 12 )); then
+    echo "==> Build profile: Blackwell (compute ${max_major}.x) → CUDA 12.8 / torch 2.7.1 / flash-attn 2.8.3"
+    export CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+    export TORCH_VERSION=2.7.1
+    export TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
+    export FLASH_ATTN_VERSION=2.8.3
+  else
+    local shown="${max_major}.x"; [[ "$max_major" == 0 ]] && shown="unknown"
+    echo "==> Build profile: Ampere/Turing (compute ${shown}) → CUDA 12.1 / torch 2.4.1 / flash-attn 2.6.3"
+    export CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+    export TORCH_VERSION=2.4.1
+    export TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
+    export FLASH_ATTN_VERSION=2.6.3
+  fi
+}
+select_build_profile
 
 # Host-side bind-mount targets (compose maps ./workspace/* into the container).
 # Create them up front so docker doesn't make them root-owned on first mount.

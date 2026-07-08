@@ -2,7 +2,14 @@
 #
 # The `-devel` CUDA image is required: bitsandbytes / flash-attn / DeepSpeed build CUDA
 # extensions against the toolkit headers at install time.
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+#
+# BUILD PROFILES (set via finetune/.env → compose build args). The base image, torch
+# build, and flash-attn version must match the GPU architecture:
+#   • Ampere/Turing (e.g. 3060, 2070S):  CUDA 12.1 / torch 2.4.1 cu121 / flash-attn 2.6.3  (default)
+#   • Blackwell     (e.g. 50-series):    CUDA 12.8 / torch 2.7.1 cu128 / flash-attn 2.8.3
+# Blackwell (sm_120) CANNOT run on the CUDA 12.1 base — it needs the 12.8 toolkit.
+ARG CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+FROM ${CUDA_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -13,6 +20,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ARG AXOLOTL_REF=v0.6.0
 ARG LLAMACPP_REF=b4519
 ARG TORCH_VERSION=2.4.1
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
 ARG FLASH_ATTN_VERSION=2.6.3
 
 # --- System deps: Python 3.10, build toolchain, cmake (llama.cpp), git, curl ---
@@ -23,9 +31,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
-# --- PyTorch (CUDA 12.1 wheels) ---
+# --- PyTorch (CUDA wheels; index + version set per build profile) ---
 RUN pip install --upgrade pip packaging wheel \
-    && pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cu121
+    && pip install "torch==${TORCH_VERSION}" --index-url "${TORCH_INDEX_URL}"
 
 # --- Axolotl from source (pinned) + training deps (deepspeed, bitsandbytes) ---
 # flash-attn is installed separately by install-flash-attn.sh, which prefers a
