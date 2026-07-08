@@ -24,6 +24,7 @@ function toRecord(p: LlamaCallEndPayload) {
     endpoint: p.endpoint,
     model: p.model,
     session_id: p.ctx?.sessionId ?? null,
+    turn_id: p.turnId ?? null,
     agent_id: p.ctx?.agentId ?? null,
     agent_name: p.ctx?.agentName ?? null,
     depth: p.ctx?.depth ?? null,
@@ -65,6 +66,26 @@ export const llamaLogRepository = {
   /** The full archive record (untruncated images + raw chunks) for one call. */
   getArchive(callId: string): Promise<LlamaLogDoc | null> {
     return LlamaCallArchiveModel.findOne({ call_id: callId }).exec();
+  },
+
+  /** All archive records of one turn, oldest first — the input to the Conversation Quality Scorer. */
+  listByTurn(turnId: string): Promise<LlamaLogDoc[]> {
+    return LlamaCallArchiveModel.find({ turn_id: turnId }).sort({ created_at: 1 }).exec();
+  },
+
+  /**
+   * Distinct `turn_id`s present in the archive (only scoreable `chat-turn` calls), newest turn first.
+   * Backs the "score all" batch and JSONL export. Side-task calls (title/identity/vision) carry no
+   * turn_id and are excluded.
+   */
+  async listTurnIds(limit = 5000): Promise<string[]> {
+    const rows = await LlamaCallArchiveModel.aggregate<{ _id: string; last: Date }>([
+      { $match: { turn_id: { $ne: null }, source: 'chat-turn' } },
+      { $group: { _id: '$turn_id', last: { $max: '$created_at' } } },
+      { $sort: { last: -1 } },
+      { $limit: limit },
+    ]).exec();
+    return rows.map((r) => r._id);
   },
 
   /** Wipe the durable archive (guarded behind a UI confirm). The capped debug buffer is untouched. */

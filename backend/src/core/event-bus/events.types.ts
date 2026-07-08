@@ -199,7 +199,7 @@ export interface TurnTruncatedPayload {
  */
 
 /** Where a captured llama call originated — used to filter training noise later. */
-export type LlamaCallSource = 'chat-turn' | 'title-gen' | 'identity' | 'vision';
+export type LlamaCallSource = 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge';
 
 /** Token accounting mirrored from `TokenUsage` (kept structural to avoid an inference→events import). */
 export interface LlamaUsage {
@@ -247,6 +247,8 @@ export interface LlamaCallDeltaPayload {
 export interface LlamaCallEndPayload {
   ctx?: EventContext;
   id: string;
+  /** Groups every call of one user turn (incl. sub-agent hops) for the Conversation Quality Scorer. */
+  turnId?: string;
   source: LlamaCallSource;
   model: string;
   endpoint: string;

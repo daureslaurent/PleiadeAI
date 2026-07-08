@@ -87,13 +87,27 @@ class CallCapture {
   private readonly startedAt = Date.now();
   private firstTokenMs: number | null = null;
   private readonly rawChunks: string[] = [];
+  /**
+   * How many messages were in the request AT SEND TIME. The caller (AgentRunner) reuses and *appends*
+   * to the same `messages` array across a turn's tool loop, and the request is serialized to Mongo
+   * only later — so by then the array holds messages that were NOT part of this call. We slice back to
+   * this count on `end()` so the stored request is a faithful snapshot of what was actually sent.
+   */
+  private readonly sentMessageCount: number;
 
   private constructor(
     private readonly source: LlamaCallSource,
     private readonly endpoint: string,
     private readonly model: string,
     private readonly request: LlamaRequestCapture,
-  ) {}
+  ) {
+    this.sentMessageCount = Array.isArray(request.messages) ? request.messages.length : 0;
+  }
+
+  /** The request as actually sent (messages sliced to their send-time count — see {@link sentMessageCount}). */
+  private snapshotRequest(): LlamaRequestCapture {
+    return { ...this.request, messages: this.request.messages.slice(0, this.sentMessageCount) };
+  }
 
   /** Build a capture for a call and emit `llama:call_start` (with images truncated for the live UI). */
   static begin(target: ResolvedInference, request: LlamaRequestCapture): CallCapture {
@@ -106,7 +120,7 @@ class CallCapture {
         source: cap.source,
         model: cap.model,
         endpoint: cap.endpoint,
-        requestPreview: truncateRequestImages(request),
+        requestPreview: truncateRequestImages(cap.snapshotRequest()),
       }),
     );
     return cap;
@@ -131,6 +145,7 @@ class CallCapture {
       eventBus.emit('llama:call_end', {
         ctx: cc && cc.sessionId ? { sessionId: cc.sessionId, agentId: cc.agentId ?? '', agentName: cc.agentName ?? '', depth: cc.depth ?? 0 } : undefined,
         id: this.id,
+        turnId: cc?.turnId,
         source: this.source,
         model: this.model,
         endpoint: this.endpoint,
@@ -139,7 +154,7 @@ class CallCapture {
         durationMs: Date.now() - this.startedAt,
         firstTokenMs: this.firstTokenMs,
         usage,
-        request: this.request,
+        request: this.snapshotRequest(),
         response,
         rawChunks: this.rawChunks,
         error,

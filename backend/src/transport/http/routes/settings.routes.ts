@@ -45,6 +45,12 @@ settingsRouter.put('/', async (req, res) => {
   // At least hourly; a shorter loop just spams `git fetch` on the host with no benefit.
   if (b.update_check_interval_hours !== undefined)
     patch.update_check_interval_hours = Math.max(1, Number(b.update_check_interval_hours) || 1);
+  // Conversation Quality Scorer.
+  if (b.scoring_enabled !== undefined) patch.scoring_enabled = Boolean(b.scoring_enabled);
+  if (typeof b.scoring_endpoint_id === 'string') patch.scoring_endpoint_id = b.scoring_endpoint_id;
+  if (typeof b.scoring_model === 'string') patch.scoring_model = b.scoring_model;
+  if (b.scoring_max_tokens !== undefined)
+    patch.scoring_max_tokens = Math.max(64, Number(b.scoring_max_tokens) || 1024);
 
   const updated = await settingsService.update(patch);
   // (Re)arm or stop the periodic host update check to match the new settings.

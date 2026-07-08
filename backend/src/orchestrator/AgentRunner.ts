@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createLogger } from '../config/logger';
 import { eventBus } from '../core/event-bus/EventBus';
 import type { EventContext, ImageBlock } from '../core/event-bus/events.types';
@@ -10,6 +11,7 @@ import {
 } from '../domain/agents/jit-builder';
 import { agentMemory } from '../domain/memory/agent-memory.service';
 import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
+import { scoringService } from '../domain/scoring/scoring.service';
 import { resolveInference, resolveFallbacks, type ResolvedInference } from '../inference/inference-resolver';
 import { runWithCaptureContext } from '../inference/capture-context';
 import { ReasoningParser } from './streaming/ReasoningParser';
@@ -101,6 +103,12 @@ export interface RunInput {
   sessionId: string;
   /** Hop depth of this run (0 for the user-facing agent). */
   depth: number;
+  /**
+   * Groups every llama call of this user turn — set once for the depth-0 run and propagated to every
+   * sub-agent hop so the whole turn (including delegations) shares one id the scorer can group by.
+   * Generated in `run()` when absent (the top-level entry).
+   */
+  turnId?: string;
   userText: string;
   images?: ImageBlock[];
   /** Prior turns in this session (excludes the new user message). */
@@ -150,6 +158,11 @@ export class AgentRunner {
       agentName: agent.name,
       depth: input.depth,
     };
+
+    // One id for the whole user turn: minted by the depth-0 entry, then propagated to every sub-agent
+    // hop (see `hop`) so all of a turn's llama calls — delegations included — carry the same `turnId`.
+    // The Conversation Quality Scorer groups the archive by this.
+    const turnId = input.turnId ?? randomUUID();
 
     // Resolve the images this turn can work with. Attachments live only for the turn they're sent on
     // (history is text-only), so a follow-up like "forward the last image to X" would otherwise have
@@ -327,6 +340,7 @@ export class AgentRunner {
         messages,
         toolSchemas,
         ctx,
+        turnId,
         inference,
         fallbacks,
         signal,
@@ -437,6 +451,7 @@ export class AgentRunner {
           callerHistory,
           caller: input.caller,
           signal,
+          turnId,
           pool: imagePool,
           supportsVision: inference.supportsVision,
         });
@@ -495,6 +510,16 @@ export class AgentRunner {
     // caller's). A delegated run's caller folds these into its own turn via `ask_agent`; a top-level
     // caller ignores them (the images already rendered in this agent's own turn).
     const handBack = imagePool.all().filter((i) => i.source === 'tool');
+
+    // Conversation Quality Scorer: once the user-facing turn has fully settled, auto-score it (gated
+    // on the `scoring_enabled` setting, fire-and-forget). Only the depth-0 run scores — a sub-agent
+    // hop's calls belong to the same turn_id and are folded into that single score. Deferred slightly
+    // so the fire-and-forget capture writes land in the archive before the scorer reads them back.
+    if (ctx.depth === 0) {
+      const tid = turnId;
+      setTimeout(() => scoringService.autoScore(tid), 1500);
+    }
+
     return { text: finalText, images: handBack };
   }
 
@@ -597,13 +622,14 @@ export class AgentRunner {
     messages: ChatMessage[],
     toolSchemas: ToolSchema[],
     ctx: EventContext,
+    turnId: string,
     inference: ResolvedInference,
     fallbacks: ResolvedInference[],
     signal?: AbortSignal,
   ): ReturnType<typeof llamaClient.streamChat> {
     const parser = new ReasoningParser();
     const result = await runWithCaptureContext(
-      { source: 'chat-turn', sessionId: ctx.sessionId, agentId: ctx.agentId, agentName: ctx.agentName, depth: ctx.depth },
+      { source: 'chat-turn', sessionId: ctx.sessionId, agentId: ctx.agentId, agentName: ctx.agentName, depth: ctx.depth, turnId },
       () =>
         llamaClient.streamChat(
           messages,
@@ -642,6 +668,8 @@ export class AgentRunner {
       callerHistory: ChatMessage[];
       caller?: RunInput['caller'];
       signal?: AbortSignal;
+      /** The turn's id, propagated into any sub-agent hop this tool call spawns. */
+      turnId: string;
       /** The turn's live image pool, shared across every tool call (grown as tools acquire images). */
       pool: TurnImagePool;
       /** Whether the agent's model can see raw pixels — gates folding tool images into its context. */
@@ -694,11 +722,11 @@ export class AgentRunner {
       agentName: ctx.agentName,
       depth: ctx.depth,
       invokeSubAgent: canSpawn
-        ? this.makeInvoker(ctx, delegation.callerHistory, delegation.signal)
+        ? this.makeInvoker(ctx, delegation.callerHistory, delegation.turnId, delegation.signal)
         : undefined,
       askParent:
         canSpawn && delegation.caller
-          ? this.makeParentAsker(ctx, delegation.caller, delegation.signal)
+          ? this.makeParentAsker(ctx, delegation.caller, delegation.turnId, delegation.signal)
           : undefined,
       askUser: (question) => askUserBroker.ask(ctx, question),
       callId: call.id,
@@ -802,13 +830,19 @@ export class AgentRunner {
    * Build the guarded cross-agent dispatcher passed to `ask_agent`. `callerHistory` is the calling
    * agent's clean conversation, threaded onto the child as `caller` so the child can `ask_parent`.
    */
-  private makeInvoker(parentCtx: EventContext, callerHistory: ChatMessage[], signal?: AbortSignal) {
+  private makeInvoker(
+    parentCtx: EventContext,
+    callerHistory: ChatMessage[],
+    turnId: string,
+    signal?: AbortSignal,
+  ) {
     return (targetAgentName: string, query: string, images?: ImageBlock[]): Promise<RunResult> =>
       this.hop(parentCtx, targetAgentName, query, {
         userText: query,
         images,
         caller: { agentName: parentCtx.agentName, task: query, history: callerHistory },
         signal,
+        turnId,
       });
   }
 
@@ -820,6 +854,7 @@ export class AgentRunner {
   private makeParentAsker(
     childCtx: EventContext,
     caller: NonNullable<RunInput['caller']>,
+    turnId: string,
     signal?: AbortSignal,
   ) {
     return async (question: string): Promise<string> => {
@@ -832,6 +867,7 @@ export class AgentRunner {
         userText: framed,
         history: caller.history,
         signal,
+        turnId,
       });
       return text;
     };
@@ -846,7 +882,7 @@ export class AgentRunner {
     fromCtx: EventContext,
     targetAgentName: string,
     query: string,
-    run: Pick<RunInput, 'userText' | 'history' | 'caller' | 'signal' | 'images'>,
+    run: Pick<RunInput, 'userText' | 'history' | 'caller' | 'signal' | 'images' | 'turnId'>,
   ): Promise<RunResult> {
     const childDepth = fromCtx.depth + 1;
     if (!hopGuard.canHop(childDepth)) {

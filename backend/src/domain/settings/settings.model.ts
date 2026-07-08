@@ -54,6 +54,12 @@ const SettingsSchema = new Schema(
     update_enabled: { type: Boolean, default: false },
     // How often the backend triggers a read-only host update check (git fetch + compare).
     update_check_interval_hours: { type: Number, default: 1 },
+    // Conversation Quality Scorer (LLM-as-judge). Off by default; when on, each completed turn is
+    // scored 0–100 + tagged. Empty `scoring_endpoint_id` → reuse the responding agent's own endpoint.
+    scoring_enabled: { type: Boolean, default: false },
+    scoring_endpoint_id: { type: String, default: '' },
+    scoring_model: { type: String, default: '' },
+    scoring_max_tokens: { type: Number, default: 1024 },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

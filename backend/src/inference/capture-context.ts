@@ -21,6 +21,12 @@ export interface CaptureContext {
   agentName?: string;
   /** Cross-agent hop depth (0 = directly addressed agent). */
   depth?: number;
+  /**
+   * Groups every llama call of one user turn — including calls made by sub-agents this turn delegated
+   * to. `sessionId` spans a whole conversation; `turnId` is the finer unit the Conversation Quality
+   * Scorer evaluates. Absent for side tasks (title/identity) that aren't part of a scored turn.
+   */
+  turnId?: string;
   source: LlamaCallSource;
 }
 
