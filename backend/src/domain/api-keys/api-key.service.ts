@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { createLogger } from '../../config/logger';
 import { apiKeyRepository } from './api-key.repository';
-import type { ApiKeyDoc } from './api-key.model';
+import { API_KEY_SCOPES, type ApiKeyDoc, type ApiKeyScope } from './api-key.model';
 
 const log = createLogger('api-keys');
 
@@ -45,13 +45,23 @@ export interface IssuedApiKey {
 }
 
 export const apiKeyService = {
-  /** Mint a new read-only key. The caller must surface `plaintext` to the operator immediately. */
-  async issue(name: string): Promise<IssuedApiKey> {
+  /** Drop unknown/duplicate scopes; the schema `enum` is the last line of defence, this is the first. */
+  sanitizeScopes(scopes: unknown): ApiKeyScope[] {
+    if (!Array.isArray(scopes)) return [];
+    const allowed = new Set<string>(API_KEY_SCOPES);
+    return [...new Set(scopes.filter((s): s is ApiKeyScope => typeof s === 'string' && allowed.has(s)))];
+  },
+
+  /**
+   * Mint a key. Read-only unless `scopes` grant write capabilities (see {@link API_KEY_SCOPES}).
+   * The caller must surface `plaintext` to the operator immediately — it is not recoverable after.
+   */
+  async issue(name: string, scopes: ApiKeyScope[] = []): Promise<IssuedApiKey> {
     const prefix = crypto.randomBytes(PREFIX_BYTES).toString('hex');
     const secret = crypto.randomBytes(SECRET_BYTES).toString('base64url');
     const plaintext = `${SCHEME}_${prefix}_${secret}`;
-    const doc = await apiKeyRepository.create({ name, prefix, key_hash: hash(plaintext) });
-    log.info({ id: String(doc._id), name, prefix }, 'api key issued');
+    const doc = await apiKeyRepository.create({ name, prefix, key_hash: hash(plaintext), scopes });
+    log.info({ id: String(doc._id), name, prefix, scopes }, 'api key issued');
     return { doc, plaintext };
   },
 

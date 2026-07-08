@@ -390,7 +390,7 @@ export function SettingsView() {
         <Section
           icon={KeyRound}
           title="API Keys"
-          subtitle="Read-only credentials for scripts and external agents. A key can GET any endpoint; it can never write, open a socket, or manage keys."
+          subtitle="Credentials for scripts and external agents (MCP, CLI). A key is read-only by default; grant it scopes (like agents:write) to unlock mutating methods on matching route families. Keys can't open a socket or manage keys."
         >
           <ApiKeysManager />
         </Section>
@@ -707,6 +707,7 @@ function ApiKeysManager() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
+  const [agentsWrite, setAgentsWrite] = useState(false);
   const [issued, setIssued] = useState<{ name: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -721,10 +722,11 @@ function ApiKeysManager() {
     if (!name.trim()) return;
     setError(null);
     try {
-      const key = await apiKeysApi.create(name.trim());
+      const key = await apiKeysApi.create(name.trim(), agentsWrite ? ['agents:write'] : []);
       setIssued({ name: key.name, key: key.key });
       setCopied(false);
       setName('');
+      setAgentsWrite(false);
       setAdding(false);
       await reload();
     } catch {
@@ -794,6 +796,14 @@ function ApiKeysManager() {
                   revoked
                 </span>
               )}
+              {k.scopes?.includes('agents:write') && (
+                <span
+                  title="This key can create, edit and delete agents"
+                  className="shrink-0 rounded border border-amber-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-400"
+                >
+                  agents:write
+                </span>
+              )}
             </div>
             <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-slate-500">
               <span className="font-mono">plk_{k.prefix}…</span>
@@ -836,6 +846,18 @@ function ApiKeysManager() {
             placeholder="Name (e.g. claude-code)"
             className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
           />
+          <label className="flex items-start gap-2 text-xs text-slate-400">
+            <input
+              type="checkbox"
+              checked={agentsWrite}
+              onChange={(e) => setAgentsWrite(e.target.checked)}
+              className="mt-0.5 accent-accent"
+            />
+            <span>
+              Allow this key to <span className="text-slate-200">create, edit and delete agents</span>{' '}
+              (<span className="font-mono">agents:write</span>). Leave off for a read-only key.
+            </span>
+          </label>
           <div className="flex gap-2">
             <button
               onClick={() => void create()}
@@ -848,6 +870,7 @@ function ApiKeysManager() {
               onClick={() => {
                 setAdding(false);
                 setName('');
+                setAgentsWrite(false);
               }}
               className="rounded-md border border-border px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
             >

@@ -11,12 +11,21 @@ const log = createLogger('auth');
 export interface AuthedRequest extends Request {
   /** Present when the caller is the operator holding a session JWT. */
   user?: TokenClaims;
-  /** Present when the caller authenticated with an API key. Implies a read-only request. */
+  /** Present when the caller authenticated with an API key. Read-only unless the key carries a scope. */
   apiKey?: ApiKeyDoc;
 }
 
-/** API keys may only read. Anything that could mutate state is refused before the handler runs. */
+/** Methods every valid API key may use, regardless of scope. */
 const READ_ONLY_METHODS = new Set(['GET', 'HEAD']);
+
+/**
+ * Maps a write scope (see `API_KEY_SCOPES`) to the route family it unlocks. `requireAuth` is mounted
+ * per-router, so at call time `req.baseUrl` is the router's mount path (e.g. `/api/agents`) — a
+ * mutating request is permitted only when the key carries the scope whose prefix matches it.
+ */
+const WRITE_SCOPES: ReadonlyArray<{ scope: string; prefix: string }> = [
+  { scope: 'agents:write', prefix: '/api/agents' },
+];
 
 /**
  * Extract a presented API key. Accepts the canonical `X-API-Key` header, and also
@@ -36,7 +45,8 @@ function extractApiKey(req: Request): string | null {
  * Guard for every REST endpoint (spec §2). Accepts **either**:
  *
  * - a session JWT (`Authorization: Bearer <jwt>`) — full operator privileges; or
- * - an API key (`X-API-Key`) — read-only, and secrets are stripped from the response body.
+ * - an API key (`X-API-Key`) — read-only by default; a scoped key (`API_KEY_SCOPES`) may also write
+ *   the matching route family. Either way, secrets are stripped from the response body.
  *
  * Rejects missing/invalid/expired/revoked credentials with 401 before any handler runs. API keys
  * cannot open a websocket: the WS handshake calls `verifyToken` directly.
@@ -54,8 +64,18 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
       return;
     }
     if (!READ_ONLY_METHODS.has(req.method)) {
-      res.status(403).json({ error: 'api keys are read-only', method: req.method });
-      return;
+      const grant = WRITE_SCOPES.find(
+        (w) => req.baseUrl === w.prefix || req.baseUrl.startsWith(`${w.prefix}/`),
+      );
+      if (!grant || !(doc.scopes ?? []).some((s) => s === grant.scope)) {
+        res.status(403).json({
+          error: grant
+            ? `api key lacks the "${grant.scope}" scope`
+            : 'api keys are read-only here',
+          method: req.method,
+        });
+        return;
+      }
     }
 
     req.apiKey = doc;

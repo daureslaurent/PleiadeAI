@@ -15,6 +15,7 @@ function shape(key: ApiKeyDoc) {
     _id: key._id,
     name: key.name,
     prefix: key.prefix,
+    scopes: key.scopes ?? [],
     last_used_at: key.last_used_at,
     revoked_at: key.revoked_at,
     created_at: (key as unknown as { created_at?: Date }).created_at,
@@ -36,7 +37,8 @@ apiKeysRouter.post('/', async (req, res) => {
     res.status(400).json({ error: 'name is required' });
     return;
   }
-  const { doc, plaintext } = await apiKeyService.issue(name);
+  const scopes = apiKeyService.sanitizeScopes(req.body?.scopes);
+  const { doc, plaintext } = await apiKeyService.issue(name, scopes);
   res.status(201).json({ ...shape(doc), key: plaintext });
 });
 

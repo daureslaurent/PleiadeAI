@@ -16,7 +16,7 @@ export const apiKeyRepository = {
     return ApiKeyModel.findOne({ prefix }).select('+key_hash').exec();
   },
 
-  create(input: { name: string; prefix: string; key_hash: string }): Promise<ApiKeyDoc> {
+  create(input: { name: string; prefix: string; key_hash: string; scopes?: string[] }): Promise<ApiKeyDoc> {
     return ApiKeyModel.create(input);
   },
 

@@ -80,8 +80,10 @@ Key seams:
   Mongo `notifications` doc (UI inbox) and, optionally, a Telegram webhook.
 
 - **Auth (`transport/http/middleware/auth.ts`).** `requireAuth` accepts either the operator's session
-  JWT or a **read-only API key** (`X-API-Key`, or `Authorization: Bearer plk_…`; `domain/api-keys/`).
-  Key-authenticated requests are refused on any non-`GET`/`HEAD` method, are blocked from
+  JWT or an **API key** (`X-API-Key`, or `Authorization: Bearer plk_…`; `domain/api-keys/`). A key is
+  **read-only by default**: non-`GET`/`HEAD` methods are refused unless the key carries a matching
+  write **scope** (`API_KEY_SCOPES` in `api-key.model.ts`; `WRITE_SCOPES` maps each scope to the route
+  family it unlocks — currently `agents:write` → `/api/agents`). Keys are always blocked from
   `/api/api-keys` by `requireOperator`, and have their response bodies scrubbed by `redact.ts` —
   `GET /api/endpoints` and `GET /api/settings` otherwise return inference credentials in plaintext.
   Keys can't open a websocket: the WS handshake calls `verifyToken` directly. `tools/pleiade-mcp/`

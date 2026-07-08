@@ -1250,10 +1250,15 @@ export const finetuneJobsApi = {
  * A read-only API key (Settings → API Keys). The secret itself is never returned by the backend —
  * only `prefix`, the public handle printed in the UI. See `IssuedApiKey` for the one exception.
  */
+/** Write capabilities a key can be granted. A key with no scopes is read-only. */
+export type ApiKeyScope = 'agents:write';
+
 export interface ApiKey {
   _id: string;
   name: string;
   prefix: string;
+  /** Granted write scopes. Empty = read-only. */
+  scopes: ApiKeyScope[];
   last_used_at: string | null;
   revoked_at: string | null;
   created_at?: string;
@@ -1267,7 +1272,8 @@ export interface IssuedApiKey extends ApiKey {
 export const apiKeysApi = {
   list: () => api.get<ApiKey[]>('/api-keys').then((r) => r.data),
   /** Returns the plaintext key exactly once — show it before the component unmounts. */
-  create: (name: string) => api.post<IssuedApiKey>('/api-keys', { name }).then((r) => r.data),
+  create: (name: string, scopes: ApiKeyScope[] = []) =>
+    api.post<IssuedApiKey>('/api-keys', { name, scopes }).then((r) => r.data),
   revoke: (id: string) => api.post<ApiKey>(`/api-keys/${id}/revoke`).then((r) => r.data),
   remove: (id: string) => api.delete(`/api-keys/${id}`).then((r) => r.data),
 };
