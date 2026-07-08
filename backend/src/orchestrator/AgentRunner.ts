@@ -11,6 +11,7 @@ import {
 import { agentMemory } from '../domain/memory/agent-memory.service';
 import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { resolveInference, resolveFallbacks, type ResolvedInference } from '../inference/inference-resolver';
+import { runWithCaptureContext } from '../inference/capture-context';
 import { ReasoningParser } from './streaming/ReasoningParser';
 import { parseFallbackToolCalls, detectNarratedTools } from './streaming/ToolCallFallbackParser';
 import { resolveTools, VISUAL_TOOL_NAMES } from '../tools/registry';
@@ -601,24 +602,28 @@ export class AgentRunner {
     signal?: AbortSignal,
   ): ReturnType<typeof llamaClient.streamChat> {
     const parser = new ReasoningParser();
-    const result = await llamaClient.streamChat(
-      messages,
-      toolSchemas,
-      {
-        onToken: (delta) => {
-          for (const seg of parser.push(delta)) {
-            eventBus.emit('agent:stream_chunk', {
-              ctx,
-              content: seg.content,
-              isReasoning: seg.isReasoning,
-            });
-          }
-        },
-      },
-      signal,
-      undefined,
-      inference,
-      fallbacks,
+    const result = await runWithCaptureContext(
+      { source: 'chat-turn', sessionId: ctx.sessionId, agentId: ctx.agentId, agentName: ctx.agentName, depth: ctx.depth },
+      () =>
+        llamaClient.streamChat(
+          messages,
+          toolSchemas,
+          {
+            onToken: (delta) => {
+              for (const seg of parser.push(delta)) {
+                eventBus.emit('agent:stream_chunk', {
+                  ctx,
+                  content: seg.content,
+                  isReasoning: seg.isReasoning,
+                });
+              }
+            },
+          },
+          signal,
+          undefined,
+          inference,
+          fallbacks,
+        ),
     );
     for (const seg of parser.flush()) {
       eventBus.emit('agent:stream_chunk', { ctx, content: seg.content, isReasoning: seg.isReasoning });

@@ -1,6 +1,7 @@
 import { settingsService, type EffectiveSettings } from '../domain/settings/settings.service';
 import { resolveForEndpoint } from './inference-resolver';
 import { llamaClient } from './LlamaClient';
+import { runWithCaptureContext } from './capture-context';
 import type { ChatMessage } from '../domain/agents/jit-builder';
 
 /**
@@ -85,7 +86,11 @@ export async function analyzeImageWithVision(dataUrl: string, question: string):
     },
   ];
   try {
-    const analysis = (await llamaClient.complete(target, messages, visionSamplingOpts(settings))).trim();
+    const analysis = (
+      await runWithCaptureContext({ source: 'vision' }, () =>
+        llamaClient.complete(target, messages, visionSamplingOpts(settings)),
+      )
+    ).trim();
     return {
       analysis: annotateIfDegenerate(analysis || '(the vision model returned no text)', target.model),
       model: target.model,

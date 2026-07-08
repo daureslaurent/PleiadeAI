@@ -138,6 +138,38 @@ export interface ContextUsageEvent {
   phase: 'live' | 'final';
 }
 
+/**
+ * LLM Debug feed (global `llama-log` room, not session-scoped). One raw HTTP call to the inference
+ * server streams as start → deltas → end. Bodies are deliberately absent — the full record is
+ * fetched over REST once the call ends; these events only drive the live-at-top card.
+ */
+export interface LlamaCallStartEvent {
+  type: 'llama_call_start';
+  id: string;
+  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision';
+  agent: string | null;
+  model: string;
+  endpoint: string;
+  /** Outgoing request with image parts truncated to placeholders. */
+  request: { model: string; messages: unknown[]; tools?: unknown[]; stream: boolean; maxTokens?: number; temperature?: number; topP?: number };
+  at: number;
+}
+
+export interface LlamaCallDeltaEvent {
+  type: 'llama_call_delta';
+  id: string;
+  delta: string;
+  is_reasoning: boolean;
+}
+
+export interface LlamaCallEndEvent {
+  type: 'llama_call_end';
+  id: string;
+  status: 'success' | 'error';
+  duration_ms: number;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
+}
+
 export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
@@ -149,4 +181,7 @@ export type WsEvent =
   | SystemAlertEvent
   | AskUserEvent
   | TruncatedEvent
-  | ContextUsageEvent;
+  | ContextUsageEvent
+  | LlamaCallStartEvent
+  | LlamaCallDeltaEvent
+  | LlamaCallEndEvent;

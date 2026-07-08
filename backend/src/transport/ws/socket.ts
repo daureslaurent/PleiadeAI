@@ -254,6 +254,11 @@ export function attachSocket(httpServer: HttpServer): Server {
       askUserBroker.resolve(requestId, String(answer ?? ''));
     });
 
+    // LLM Debug page (in)subscription — joins/leaves the global `llama-log` room that the bridge
+    // streams raw-call start/delta/end events to. Not tied to any chat session.
+    socket.on('llama:subscribe', () => socket.join('llama-log'));
+    socket.on('llama:unsubscribe', () => socket.leave('llama-log'));
+
     socket.on('disconnect', () => {
       // A disconnect (notably a browser refresh) must NOT kill the run — it keeps streaming to the
       // session room and, if the client is gone at completion, its turn is persisted server-side.

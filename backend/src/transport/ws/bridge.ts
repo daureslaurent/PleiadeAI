@@ -145,4 +145,40 @@ export function attachBridge(io: Server): void {
     const emitter = ctx?.sessionId ? io.to(ctx.sessionId) : io;
     emitter.emit('system_alert', { type: 'system_alert', level, message });
   });
+
+  // LLM Debug feed — a *global* stream (not session-scoped), so it goes to a dedicated `llama-log`
+  // room the debug page joins via `llama:subscribe`. Heavy request/response bodies are deliberately
+  // dropped here (the full record is persisted and fetched over REST); only the truncated request
+  // and streaming deltas ride the socket.
+  eventBus.on('llama:call_start', ({ id, source, model, endpoint, requestPreview, ctx }) => {
+    io.to('llama-log').emit('llama_call_start', {
+      type: 'llama_call_start',
+      id,
+      source,
+      agent: ctx?.agentName ?? null,
+      model,
+      endpoint,
+      request: requestPreview,
+      at: Date.now(),
+    });
+  });
+
+  eventBus.on('llama:call_delta', ({ id, delta, isReasoning }) => {
+    io.to('llama-log').emit('llama_call_delta', {
+      type: 'llama_call_delta',
+      id,
+      delta,
+      is_reasoning: isReasoning,
+    });
+  });
+
+  eventBus.on('llama:call_end', ({ id, status, durationMs, usage }) => {
+    io.to('llama-log').emit('llama_call_end', {
+      type: 'llama_call_end',
+      id,
+      status,
+      duration_ms: durationMs,
+      usage,
+    });
+  });
 }

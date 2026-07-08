@@ -190,6 +190,80 @@ export interface TurnTruncatedPayload {
   ctx: EventContext;
 }
 
+/**
+ * Raw llama-call capture events (the LLM Debug page). Emitted centrally by {@link LlamaClient} for
+ * every HTTP call to the inference server (streamed turns + one-shot completes; not embeddings /
+ * tokenize). `ctx` is optional because side tasks (title generation, embeddings) run outside a live
+ * session — mirrors {@link SystemAlertPayload}. The persistence subscriber consumes the rich
+ * `llama:call_end`; the WS bridge narrows all three to a global `llama-log` feed.
+ */
+
+/** Where a captured llama call originated — used to filter training noise later. */
+export type LlamaCallSource = 'chat-turn' | 'title-gen' | 'identity' | 'vision';
+
+/** Token accounting mirrored from `TokenUsage` (kept structural to avoid an inference→events import). */
+export interface LlamaUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+/** The full outgoing request body as sent to the server (sampling + messages + tool schemas). */
+export interface LlamaRequestCapture {
+  model: string;
+  messages: unknown[];
+  tools?: unknown[];
+  stream: boolean;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
+/** The assembled response for one call (independent of raw streamed chunks). */
+export interface LlamaResponseCapture {
+  text: string;
+  toolCalls: { id: string; name: string; argsJson: string }[];
+  finishReason: string | null;
+}
+
+export interface LlamaCallStartPayload {
+  ctx?: EventContext;
+  /** Correlates start → deltas → end for one call. */
+  id: string;
+  source: LlamaCallSource;
+  model: string;
+  /** Normalized base URL actually used (post-failover). */
+  endpoint: string;
+  /** Outgoing request with image parts truncated to placeholders (live UI only). */
+  requestPreview: LlamaRequestCapture;
+}
+
+export interface LlamaCallDeltaPayload {
+  id: string;
+  delta: string;
+  isReasoning: boolean;
+}
+
+export interface LlamaCallEndPayload {
+  ctx?: EventContext;
+  id: string;
+  source: LlamaCallSource;
+  model: string;
+  endpoint: string;
+  status: 'success' | 'error';
+  startedAt: number;
+  durationMs: number;
+  /** Wall-clock ms from request send to first streamed token (null for non-streaming / no output). */
+  firstTokenMs: number | null;
+  usage: LlamaUsage | null;
+  /** Full request (untruncated images) — the persistence layer truncates for the debug tier. */
+  request: LlamaRequestCapture;
+  response: LlamaResponseCapture;
+  /** Raw text deltas exactly as streamed (empty for non-streaming `complete`). */
+  rawChunks: string[];
+  error?: string;
+}
+
 export type AlertLevel = 'info' | 'warn' | 'error';
 
 export interface SystemAlertPayload {
@@ -217,6 +291,9 @@ export interface EventMap {
   'agent:turn_truncated': TurnTruncatedPayload;
   'agent:ask_user': AskUserPayload;
   'system:alert': SystemAlertPayload;
+  'llama:call_start': LlamaCallStartPayload;
+  'llama:call_delta': LlamaCallDeltaPayload;
+  'llama:call_end': LlamaCallEndPayload;
 }
 
 export type EventName = keyof EventMap;

@@ -1,5 +1,6 @@
 import { createLogger } from '../../config/logger';
 import { llamaClient } from '../../inference/LlamaClient';
+import { runWithCaptureContext } from '../../inference/capture-context';
 import { resolveInference, resolveFallbacks } from '../../inference/inference-resolver';
 import type { ChatMessage } from './jit-builder';
 import type { AgentDoc } from './agent.model';
@@ -58,14 +59,16 @@ export async function suggestAgentIdentity(
     >);
     const fallbacks = await resolveFallbacks(inference.url);
 
-    const { text } = await llamaClient.streamChat(
-      messages,
-      [],
-      { onToken: () => {} },
-      undefined,
-      { maxTokens: 512, temperature: 0.4 },
-      inference,
-      fallbacks,
+    const { text } = await runWithCaptureContext({ source: 'identity' }, () =>
+      llamaClient.streamChat(
+        messages,
+        [],
+        { onToken: () => {} },
+        undefined,
+        { maxTokens: 512, temperature: 0.4 },
+        inference,
+        fallbacks,
+      ),
     );
 
     return parseIdentity(text) ?? fallback;

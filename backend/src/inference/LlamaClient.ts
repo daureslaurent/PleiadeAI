@@ -1,9 +1,19 @@
+import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import { createLogger } from '../config/logger';
 import { settingsService } from '../domain/settings/settings.service';
 import { endpointGate } from './endpoint-gate';
+import { eventBus } from '../core/event-bus/EventBus';
+import { getCaptureContext } from './capture-context';
+import { truncateRequestImages } from './truncate-images';
 import type { ResolvedInference } from './inference-resolver';
 import type { ChatMessage } from '../domain/agents/jit-builder';
+import type {
+  LlamaCallSource,
+  LlamaRequestCapture,
+  LlamaResponseCapture,
+  LlamaUsage,
+} from '../core/event-bus/events.types';
 
 const log = createLogger('llama-client');
 
@@ -61,6 +71,90 @@ function extractText(content: unknown): string {
       .join('');
   }
   return '';
+}
+
+const norm = (url: string): string => url.replace(/\/$/, '');
+
+/**
+ * A capture handle for one HTTP call to the inference server. Emits `llama:call_start` on creation,
+ * `llama:call_delta` per streamed token, and `llama:call_end` on completion — feeding the LLM Debug
+ * page's live view and its Mongo persistence subscriber. Everything here is best-effort: a throw in a
+ * capture path must never affect the inference call, so callers wrap `end()` / `pushChunk()` in the
+ * try/finally of the real request and swallow errors (see `safe`).
+ */
+class CallCapture {
+  readonly id = randomUUID();
+  private readonly startedAt = Date.now();
+  private firstTokenMs: number | null = null;
+  private readonly rawChunks: string[] = [];
+
+  private constructor(
+    private readonly source: LlamaCallSource,
+    private readonly endpoint: string,
+    private readonly model: string,
+    private readonly request: LlamaRequestCapture,
+  ) {}
+
+  /** Build a capture for a call and emit `llama:call_start` (with images truncated for the live UI). */
+  static begin(target: ResolvedInference, request: LlamaRequestCapture): CallCapture {
+    const cc = getCaptureContext();
+    const cap = new CallCapture(cc?.source ?? 'chat-turn', norm(target.url), target.model, request);
+    safe(() =>
+      eventBus.emit('llama:call_start', {
+        ctx: cc && cc.sessionId ? { sessionId: cc.sessionId, agentId: cc.agentId ?? '', agentName: cc.agentName ?? '', depth: cc.depth ?? 0 } : undefined,
+        id: cap.id,
+        source: cap.source,
+        model: cap.model,
+        endpoint: cap.endpoint,
+        requestPreview: truncateRequestImages(request),
+      }),
+    );
+    return cap;
+  }
+
+  /** Record + relay one streamed text delta. */
+  pushChunk(delta: string, isReasoning: boolean): void {
+    if (this.firstTokenMs === null) this.firstTokenMs = Date.now() - this.startedAt;
+    this.rawChunks.push(delta);
+    safe(() => eventBus.emit('llama:call_delta', { id: this.id, delta, isReasoning }));
+  }
+
+  /** Emit `llama:call_end` with the assembled response + usage. */
+  end(
+    response: LlamaResponseCapture,
+    usage: LlamaUsage | null,
+    status: 'success' | 'error',
+    error?: string,
+  ): void {
+    const cc = getCaptureContext();
+    safe(() =>
+      eventBus.emit('llama:call_end', {
+        ctx: cc && cc.sessionId ? { sessionId: cc.sessionId, agentId: cc.agentId ?? '', agentName: cc.agentName ?? '', depth: cc.depth ?? 0 } : undefined,
+        id: this.id,
+        source: this.source,
+        model: this.model,
+        endpoint: this.endpoint,
+        status,
+        startedAt: this.startedAt,
+        durationMs: Date.now() - this.startedAt,
+        firstTokenMs: this.firstTokenMs,
+        usage,
+        request: this.request,
+        response,
+        rawChunks: this.rawChunks,
+        error,
+      }),
+    );
+  }
+}
+
+/** Run a capture side effect, swallowing any error so it can never break the inference call. */
+function safe(fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    log.debug({ err: err instanceof Error ? err.message : String(err) }, 'llama capture emit failed (ignored)');
+  }
 }
 
 export class LlamaClient {
@@ -142,16 +236,29 @@ export class LlamaClient {
       if (opts.topP != null) body.top_p = opts.topP;
       if (opts.frequencyPenalty != null) body.frequency_penalty = opts.frequencyPenalty;
       if (opts.presencePenalty != null) body.presence_penalty = opts.presencePenalty;
-      const res = await client.chat.completions.create(body);
-      gate.success(
-        res.usage
-          ? {
-              promptTokens: res.usage.prompt_tokens,
-              completionTokens: res.usage.completion_tokens,
-              totalTokens: res.usage.total_tokens,
-            }
-          : null,
-      );
+      const capture = CallCapture.begin(target, {
+        model: target.model,
+        messages,
+        stream: false,
+        maxTokens: opts.maxTokens,
+        temperature: opts.temperature,
+        topP: opts.topP,
+      });
+      let res: OpenAI.Chat.ChatCompletion;
+      try {
+        res = await client.chat.completions.create(body);
+      } catch (err) {
+        capture.end({ text: '', toolCalls: [], finishReason: null }, null, 'error', err instanceof Error ? err.message : String(err));
+        throw err;
+      }
+      const capUsage = res.usage
+        ? {
+            promptTokens: res.usage.prompt_tokens,
+            completionTokens: res.usage.completion_tokens,
+            totalTokens: res.usage.total_tokens,
+          }
+        : null;
+      gate.success(capUsage);
       const choice = res.choices[0];
       // Extract the answer robustly: `content` may be a plain string or (rarely) an array of parts;
       // some servers/reasoning models leave `content` empty and put the answer in `reasoning_content`.
@@ -178,6 +285,7 @@ export class LlamaClient {
           'complete(): model returned little/no usable text (vision: suspect mmproj/template)',
         );
       }
+      capture.end({ text, toolCalls: [], finishReason: choice?.finish_reason ?? null }, capUsage, 'success');
       return text;
     } catch (err) {
       gate.fail();
@@ -332,6 +440,31 @@ export class LlamaClient {
     // any in-flight call to this URL to finish before we start. The gate also tallies the metrics
     // the LLM activity page renders. It MUST be released on every exit path (see finally).
     const call = await endpointGate.acquire(target.url, target.model);
+    // Full outgoing request, captured for the LLM Debug page (mirrors the body sent below).
+    const wireTools = tools.length
+      ? tools.map((t) => ({
+          type: 'function' as const,
+          function: { name: t.name, description: t.description, parameters: t.parameters },
+        }))
+      : undefined;
+    const capture = CallCapture.begin(target, {
+      model: target.model,
+      messages,
+      tools: wireTools,
+      stream: true,
+      maxTokens: overrides?.maxTokens ?? target.maxTokens,
+      temperature: overrides?.temperature ?? target.temperature,
+      topP: target.topP,
+    });
+    let text = '';
+    let finishReason: string | null = null;
+    let usage: TokenUsage | null = null;
+    // Tool calls arrive indexed; fragments must be concatenated per index.
+    const partials = new Map<number, { id: string; name: string; args: string }>();
+    const buildToolCalls = (): AssembledToolCall[] =>
+      [...partials.values()]
+        .filter((p) => p.name)
+        .map((p) => ({ id: p.id, name: p.name, argsJson: p.args || '{}' }));
     try {
       const stream = await client.chat.completions.create(
         {
@@ -343,23 +476,12 @@ export class LlamaClient {
           stream: true,
           // Ask the server for a final usage-only chunk so we can report live context size.
           stream_options: { include_usage: true },
-          tools: tools.length
-            ? tools.map((t) => ({
-                type: 'function' as const,
-                function: { name: t.name, description: t.description, parameters: t.parameters },
-              }))
-            : undefined,
+          tools: wireTools,
         },
         // Passing the abort signal lets a user "stop" tear down the in-flight inference request
         // promptly instead of waiting for the model to finish generating.
         { signal },
       );
-
-      let text = '';
-      let finishReason: string | null = null;
-      let usage: TokenUsage | null = null;
-      // Tool calls arrive indexed; fragments must be concatenated per index.
-      const partials = new Map<number, { id: string; name: string; args: string }>();
 
       for await (const chunk of stream) {
         // The usage-only chunk carries no choices; capture and move on.
@@ -378,6 +500,7 @@ export class LlamaClient {
         if (delta?.content) {
           text += delta.content;
           callbacks.onToken(delta.content);
+          capture.pushChunk(delta.content, false);
         }
 
         for (const tc of delta?.tool_calls ?? []) {
@@ -389,18 +512,24 @@ export class LlamaClient {
         }
       }
 
-      const toolCalls: AssembledToolCall[] = [...partials.values()]
-        .filter((p) => p.name)
-        .map((p) => ({ id: p.id, name: p.name, argsJson: p.args || '{}' }));
+      const toolCalls = buildToolCalls();
 
       log.debug(
         { finishReason, toolCalls: toolCalls.length, chars: text.length, promptTokens: usage?.promptTokens },
         'stream complete',
       );
       call.success(usage);
+      capture.end({ text, toolCalls, finishReason }, usage, 'success');
       return { text, toolCalls, finishReason, usage };
     } catch (err) {
       call.fail();
+      // Record whatever streamed before the failure/abort so the LLM Debug page shows the partial call.
+      capture.end(
+        { text, toolCalls: buildToolCalls(), finishReason },
+        usage,
+        'error',
+        err instanceof Error ? err.message : String(err),
+      );
       throw err;
     }
   }

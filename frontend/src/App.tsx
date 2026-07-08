@@ -11,12 +11,15 @@ import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
 import { AutonomyInbox } from './views/AutonomyInbox';
 import { LLMView } from './views/LLMView';
+import { LLMDebugView } from './views/LLMDebugView';
 import { SettingsView } from './views/SettingsView';
 import { VisualDesktopWindow } from './views/VisualDesktopWindow';
 
 function PageHeader() {
   const { pathname } = useLocation();
-  const current = NAV_ITEMS.find((n) => pathname.startsWith(n.to));
+  // Match by path segment (not raw prefix) so sibling routes like `/llm` and `/llm-debug` don't
+  // collide — `/llm-debug` must not resolve to the `/llm` header.
+  const current = NAV_ITEMS.find((n) => pathname === n.to || pathname.startsWith(`${n.to}/`));
   const Icon = current?.icon;
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-6">
@@ -59,6 +62,7 @@ export default function App() {
         <Route path="/memory" element={<MemoryVault />} />
         <Route path="/autonomy" element={<AutonomyInbox />} />
         <Route path="/llm" element={<LLMView />} />
+        <Route path="/llm-debug" element={<LLMDebugView />} />
         <Route path="/settings" element={<SettingsView />} />
         <Route path="*" element={<Navigate to="/workspace" replace />} />
       </Route>

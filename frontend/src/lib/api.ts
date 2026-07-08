@@ -926,6 +926,60 @@ export const llmApi = {
   stats: () => api.get<LlmEndpointStats[]>('/llm/stats').then((r) => r.data),
 };
 
+/** A captured llama request/response as sent by the outgoing OpenAI-compatible body. */
+export interface LlamaRequestCapture {
+  model: string;
+  messages: unknown[];
+  tools?: unknown[] | null;
+  stream: boolean;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+}
+
+export interface LlamaResponseCapture {
+  text: string;
+  toolCalls: { id: string; name: string; argsJson: string }[];
+  finishReason: string | null;
+}
+
+/** One persisted llama call, as listed on the LLM Debug page. */
+export interface LlamaCallRecord {
+  id: string;
+  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision';
+  endpoint: string;
+  model: string;
+  sessionId: string | null;
+  agentId: string | null;
+  agentName: string | null;
+  depth: number | null;
+  status: 'success' | 'error';
+  request: LlamaRequestCapture;
+  response: LlamaResponseCapture;
+  /** Present only on the per-call detail fetch (archive). */
+  rawChunks?: string[];
+  tools: unknown[] | null;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
+  durationMs: number;
+  firstTokenMs: number | null;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface LlamaLogStats {
+  archive: { bytes: number; count: number };
+  debug: { bytes: number; count: number };
+  dbBytes: number;
+}
+
+export const llmDebugApi = {
+  list: (limit: number) =>
+    api.get<LlamaCallRecord[]>('/llama-logs', { params: { limit } }).then((r) => r.data),
+  get: (id: string) => api.get<LlamaCallRecord>(`/llama-logs/${id}`).then((r) => r.data),
+  stats: () => api.get<LlamaLogStats>('/llama-logs/stats').then((r) => r.data),
+  purgeArchive: () => api.delete<{ deleted: number }>('/llama-logs/archive').then((r) => r.data),
+};
+
 export const endpointsApi = {
   list: () => api.get<Endpoint[]>('/endpoints').then((r) => r.data),
   create: (body: NewEndpoint) => api.post<Endpoint>('/endpoints', body).then((r) => r.data),

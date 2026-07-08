@@ -1,5 +1,6 @@
 import { createLogger } from '../../config/logger';
 import { llamaClient } from '../../inference/LlamaClient';
+import { runWithCaptureContext } from '../../inference/capture-context';
 import {
   resolveInference,
   resolveFallbacks,
@@ -114,16 +115,18 @@ export async function generateSessionTitle(
     if (!inference && agent) inference = await resolveInference(agent);
     const fallbacks = await resolveFallbacks(inference?.url);
 
-    const { text } = await llamaClient.streamChat(
-      messages,
-      [],
-      { onToken: () => {} },
-      undefined,
-      // Budget from Settings — must fit a reasoning model's <think> block plus the title. Too small
-      // truncates mid-reasoning, leaving no closing </think> for cleanTitle to strip.
-      { maxTokens: settings.title_max_tokens, temperature: 0.3 },
-      inference ?? undefined,
-      fallbacks,
+    const { text } = await runWithCaptureContext({ source: 'title-gen' }, () =>
+      llamaClient.streamChat(
+        messages,
+        [],
+        { onToken: () => {} },
+        undefined,
+        // Budget from Settings — must fit a reasoning model's <think> block plus the title. Too small
+        // truncates mid-reasoning, leaving no closing </think> for cleanTitle to strip.
+        { maxTokens: settings.title_max_tokens, temperature: 0.3 },
+        inference ?? undefined,
+        fallbacks,
+      ),
     );
     return cleanTitle(text) || null;
   } catch (err) {

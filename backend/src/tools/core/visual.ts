@@ -26,6 +26,7 @@ import { toolConfigService } from '../../domain/tools/tool-config.service';
 import { resolveForEndpoint } from '../../inference/inference-resolver';
 import { annotateIfDegenerate, visionSamplingOpts } from '../../inference/vision-analyze';
 import { llamaClient } from '../../inference/LlamaClient';
+import { runWithCaptureContext } from '../../inference/capture-context';
 import type { ChatMessage } from '../../domain/agents/jit-builder';
 import type { Tool, ToolConfigField, ToolContext } from '../types';
 
@@ -325,7 +326,11 @@ async function runVision(target: VisionTarget, settings: VisionSettings, b64png:
       ],
     },
   ];
-  return (await llamaClient.complete(target, messages, visionSamplingOpts(settings))).trim();
+  return (
+    await runWithCaptureContext({ source: 'vision' }, () =>
+      llamaClient.complete(target, messages, visionSamplingOpts(settings)),
+    )
+  ).trim();
 }
 
 interface Capture {

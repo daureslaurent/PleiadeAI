@@ -18,6 +18,8 @@ import { autonomyRouter } from './transport/http/routes/autonomy.routes';
 import { settingsRouter } from './transport/http/routes/settings.routes';
 import { endpointsRouter } from './transport/http/routes/endpoints.routes';
 import { llmRouter } from './transport/http/routes/llm.routes';
+import { llamaLogsRouter } from './transport/http/routes/llama-logs.routes';
+import { registerLlamaLogSubscriber } from './domain/llama-logs/llama-log.service';
 import { endpointService } from './domain/endpoints/endpoint.service';
 import { toolsRouter } from './transport/http/routes/tools.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
@@ -35,6 +37,9 @@ import { telegramBot } from './telegram/TelegramBot';
  */
 async function main(): Promise<void> {
   await connectMongo();
+
+  // Persist every captured llama call (LLM Debug page) into Mongo. Registered once, best-effort.
+  registerLlamaLogSubscriber();
 
   // Register/refresh the built-in local docker fallback endpoint and discover its model in the
   // background. Best-effort: never blocks or fails boot if the fallback container isn't up yet.
@@ -58,6 +63,7 @@ async function main(): Promise<void> {
   app.use('/api/settings', requireAuth, settingsRouter);
   app.use('/api/endpoints', requireAuth, endpointsRouter);
   app.use('/api/llm', requireAuth, llmRouter);
+  app.use('/api/llama-logs', requireAuth, llamaLogsRouter);
   app.use('/api/tools', requireAuth, toolsRouter);
   app.use('/api/isolations', requireAuth, isolationsRouter);
   app.use('/api/images', requireAuth, imagesRouter);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Cpu, Database, LogOut, MessagesSquare, Package, PanelLeftClose, PanelLeftOpen, Settings2, Terminal, Users, Wrench, Blocks } from 'lucide-react';
+import { Bot, Box, Bug, Cpu, Database, LogOut, MessagesSquare, Package, PanelLeftClose, PanelLeftOpen, Settings2, Terminal, Users, Wrench, Blocks } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { hostApi } from '../lib/api';
@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/memory', label: 'Memory Vault', icon: Database },
   { to: '/autonomy', label: 'Autonomy', icon: Bot },
   { to: '/llm', label: 'LLM', icon: Cpu },
+  { to: '/llm-debug', label: 'LLM Debug', icon: Bug },
   { to: '/settings', label: 'Settings', icon: Settings2 },
 ];
 
