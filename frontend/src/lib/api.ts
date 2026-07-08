@@ -1245,3 +1245,29 @@ export const finetuneJobsApi = {
   downloadModelBlob: (id: string) =>
     api.get(`/finetune-jobs/${id}/model`, { responseType: 'blob' }).then((r) => r.data as Blob),
 };
+
+/**
+ * A read-only API key (Settings → API Keys). The secret itself is never returned by the backend —
+ * only `prefix`, the public handle printed in the UI. See `IssuedApiKey` for the one exception.
+ */
+export interface ApiKey {
+  _id: string;
+  name: string;
+  prefix: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at?: string;
+}
+
+/** The create response, and the only time the plaintext `key` ever exists outside the client. */
+export interface IssuedApiKey extends ApiKey {
+  key: string;
+}
+
+export const apiKeysApi = {
+  list: () => api.get<ApiKey[]>('/api-keys').then((r) => r.data),
+  /** Returns the plaintext key exactly once — show it before the component unmounts. */
+  create: (name: string) => api.post<IssuedApiKey>('/api-keys', { name }).then((r) => r.data),
+  revoke: (id: string) => api.post<ApiKey>(`/api-keys/${id}/revoke`).then((r) => r.data),
+  remove: (id: string) => api.delete(`/api-keys/${id}`).then((r) => r.data),
+};

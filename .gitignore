@@ -65,7 +65,12 @@ jspm_packages/
 .env.test.local
 .env.production.local
 *.env
+# Credentials for the read-only prod tooling (see .env.prod.example). Not matched by the rules above.
+.env.prod
 !.env.example
+
+# Snapshots written by scripts/clone-prod.mjs — real conversation data, never commit them.
+.dumps/
 
 # ==============================================================================
 # Docker & Local Database Volatile Data

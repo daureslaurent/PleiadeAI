@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
+  Ban,
   Brain,
   Check,
+  Copy,
   DatabaseBackup,
   Download,
+  KeyRound,
   Loader2,
   Gauge,
   MonitorCog,
@@ -20,11 +23,13 @@ import {
 } from 'lucide-react';
 import {
   agentsApi,
+  apiKeysApi,
   endpointsApi,
   finetuneServersApi,
   settingsApi,
   transferApi,
   type Agent,
+  type ApiKey,
   type Endpoint,
   type EndpointPatch,
   type FinetuneServer,
@@ -375,6 +380,15 @@ export function SettingsView() {
           </div>
         </Section>
 
+        {/* API Keys — read-only credentials for external consumers (scripts, MCP clients) */}
+        <Section
+          icon={KeyRound}
+          title="API Keys"
+          subtitle="Read-only credentials for scripts and external agents. A key can GET any endpoint; it can never write, open a socket, or manage keys."
+        >
+          <ApiKeysManager />
+        </Section>
+
         {/* Backup & Transfer — export/import agents + isolations; export Qdrant memory (archival) */}
         <Section
           icon={DatabaseBackup}
@@ -637,6 +651,195 @@ function BackupTransfer() {
             </ul>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** "never" / "3m ago" / "2d ago" — coarse enough that we never need to re-render on a timer. */
+function relativeTime(iso: string | null | undefined): string {
+  if (!iso) return 'never';
+  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  const scales: [number, string][] = [
+    [60, 's'],
+    [3600, 'm'],
+    [86_400, 'h'],
+  ];
+  for (const [limit, unit] of scales) {
+    if (seconds < limit) {
+      const value = unit === 's' ? Math.floor(seconds) : Math.floor(seconds / (limit / 60));
+      return `${value}${unit} ago`;
+    }
+  }
+  return `${Math.floor(seconds / 86_400)}d ago`;
+}
+
+/**
+ * Mint / revoke / delete read-only API keys.
+ *
+ * The backend hashes the secret and returns the plaintext exactly once, in the create response — so
+ * `issued` holds it in component state until the operator dismisses the callout, and it can never be
+ * shown again. Revoking keeps the row (a dead key with an audit trail); deleting drops it entirely.
+ */
+function ApiKeysManager() {
+  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [issued, setIssued] = useState<{ name: string; key: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = () => apiKeysApi.list().then(setKeys);
+
+  useEffect(() => {
+    void reload().catch(() => setError('Failed to load API keys.'));
+  }, []);
+
+  async function create() {
+    if (!name.trim()) return;
+    setError(null);
+    try {
+      const key = await apiKeysApi.create(name.trim());
+      setIssued({ name: key.name, key: key.key });
+      setCopied(false);
+      setName('');
+      setAdding(false);
+      await reload();
+    } catch {
+      setError('Could not create the key.');
+    }
+  }
+
+  async function revoke(k: ApiKey) {
+    if (!confirm(`Revoke "${k.name}"? Anything using it stops working immediately.`)) return;
+    await apiKeysApi.revoke(k._id);
+    await reload();
+  }
+
+  async function remove(k: ApiKey) {
+    if (!confirm(`Delete "${k.name}" permanently? This also drops its audit row.`)) return;
+    await apiKeysApi.remove(k._id);
+    await reload();
+  }
+
+  async function copy(value: string) {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Shown once, right after creation. The plaintext is unrecoverable once this is dismissed. */}
+      {issued && (
+        <div className="space-y-2 rounded-md border border-amber-900/60 bg-amber-950/20 p-3">
+          <div className="flex items-start gap-1.5 text-xs text-amber-400">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+            <span>
+              Copy <span className="font-medium">{issued.name}</span> now — this key is hashed at rest
+              and will never be shown again.
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              readOnly
+              value={issued.key}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs text-slate-200 outline-none"
+            />
+            <button
+              onClick={() => void copy(issued.key)}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-panel px-3 py-1.5 text-xs text-slate-200 hover:bg-surface"
+            >
+              {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <button onClick={() => setIssued(null)} className="text-xs text-slate-400 hover:text-slate-200">
+            I've saved it — dismiss
+          </button>
+        </div>
+      )}
+
+      {keys.map((k) => (
+        <div key={k._id} className="flex items-center gap-3 rounded-md border border-border bg-panel p-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className={`truncate text-sm font-medium ${k.revoked_at ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                {k.name}
+              </span>
+              {k.revoked_at && (
+                <span className="shrink-0 rounded border border-red-900 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-red-400">
+                  revoked
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-slate-500">
+              <span className="font-mono">plk_{k.prefix}…</span>
+              <span>last used {relativeTime(k.last_used_at)}</span>
+              <span>created {relativeTime(k.created_at)}</span>
+            </div>
+          </div>
+          {!k.revoked_at && (
+            <button
+              onClick={() => void revoke(k)}
+              title="Revoke — the key stops working, the audit row stays"
+              className="shrink-0 rounded p-1.5 text-slate-500 transition-colors hover:text-amber-400"
+            >
+              <Ban size={14} />
+            </button>
+          )}
+          <button
+            onClick={() => void remove(k)}
+            title="Delete permanently"
+            className="shrink-0 rounded p-1.5 text-slate-500 transition-colors hover:text-red-400"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ))}
+
+      {keys.length === 0 && !adding && (
+        <p className="text-xs text-slate-500">No API keys yet. Create one to let a script or agent read this instance.</p>
+      )}
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      {adding ? (
+        <div className="space-y-2 rounded-md border border-dashed border-border bg-panel p-3">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void create()}
+            placeholder="Name (e.g. claude-code)"
+            className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => void create()}
+              disabled={!name.trim()}
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              Create key
+            </button>
+            <button
+              onClick={() => {
+                setAdding(false);
+                setName('');
+              }}
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-slate-400 transition-colors hover:text-slate-200"
+        >
+          <Plus size={13} /> Create API key
+        </button>
       )}
     </div>
   );

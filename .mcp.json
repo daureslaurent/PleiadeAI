@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pleiade": {
+      "command": "node",
+      "args": ["tools/pleiade-mcp/index.mjs"]
+    }
+  }
+}

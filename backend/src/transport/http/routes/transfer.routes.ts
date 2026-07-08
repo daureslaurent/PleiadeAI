@@ -3,6 +3,7 @@ import { agentRepository } from '../../../domain/agents/agent.repository';
 import { isolationRepository } from '../../../domain/isolations/isolation.repository';
 import { endpointRepository } from '../../../domain/endpoints/endpoint.repository';
 import { qdrantService } from '../../../domain/memory/qdrant.service';
+import { cloneService, CLONE_TYPE, DEFAULT_LOG_LIMIT } from '../../../domain/transfer/clone.service';
 import type { AgentDoc } from '../../../domain/agents/agent.model';
 import type { IsolationDoc } from '../../../domain/isolations/isolation.model';
 import { createLogger } from '../../../config/logger';
@@ -76,13 +77,23 @@ async function selectAgents(body: { agentIds?: string[]; all?: boolean }): Promi
 }
 
 /**
+ * Same selection, from a query string, for the GET twins of the export routes.
+ * `?all=true` or `?agentIds=a,b,c`. The GET forms exist so a **read-only API key** can drive an
+ * export (keys are refused on any non-GET method — see `middleware/auth.ts`).
+ */
+function selectAgentsFromQuery(query: Record<string, unknown>): Promise<AgentDoc[]> {
+  const all = query.all === 'true' || query.all === '1';
+  const raw = typeof query.agentIds === 'string' ? query.agentIds : '';
+  const agentIds = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return selectAgents({ all, agentIds });
+}
+
+/**
  * Export the config bundle for the selected agents. Referenced isolations and endpoints are
  * resolved and inlined (isolations fully, endpoints by name only — endpoints often hold API keys
  * and aren't part of this feature's scope).
  */
-transferRouter.post('/export/config', async (req, res) => {
-  const agents = await selectAgents(req.body ?? {});
-
+async function buildConfigBundle(agents: AgentDoc[]) {
   // Gather the distinct isolations these agents reference so import can recreate + relink them.
   const isoIds = [...new Set(agents.map((a) => a.isolation_id).filter(Boolean).map(String))];
   const isolationDocs = (await Promise.all(isoIds.map((id) => isolationRepository.findById(id)))).filter(
@@ -94,7 +105,7 @@ transferRouter.post('/export/config', async (req, res) => {
   const endpoints = await endpointRepository.list();
   const endpointNameById = new Map(endpoints.map((e) => [String(e._id), e.name]));
 
-  const bundle = {
+  return {
     type: CONFIG_TYPE,
     version: FORMAT_VERSION,
     exported_at: new Date().toISOString(),
@@ -116,15 +127,9 @@ transferRouter.post('/export/config', async (req, res) => {
       icon: a.icon ?? '',
     })),
   };
+}
 
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', `attachment; filename="pleiade-config-${Date.now()}.json"`);
-  res.send(JSON.stringify(bundle, null, 2));
-});
-
-/** Export a Qdrant memory dump (vectors + payloads) for the selected agents' namespaces. */
-transferRouter.post('/export/memory', async (req, res) => {
-  const agents = await selectAgents(req.body ?? {});
+async function buildMemoryBundle(agents: AgentDoc[]) {
   const namespaces = [];
   for (const a of agents) {
     const dump = await qdrantService.exportNamespace(a.qdrant_namespace);
@@ -135,17 +140,69 @@ transferRouter.post('/export/memory', async (req, res) => {
       points: dump.points,
     });
   }
+  return { type: MEMORY_TYPE, version: FORMAT_VERSION, exported_at: new Date().toISOString(), namespaces };
+}
 
-  const bundle = {
-    type: MEMORY_TYPE,
-    version: FORMAT_VERSION,
-    exported_at: new Date().toISOString(),
-    namespaces,
-  };
-
+function sendDownload(res: Parameters<Parameters<typeof transferRouter.get>[1]>[1], name: string, bundle: unknown, pretty = false) {
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', `attachment; filename="pleiade-memory-${Date.now()}.json"`);
-  res.send(JSON.stringify(bundle));
+  res.setHeader('Content-Disposition', `attachment; filename="pleiade-${name}-${Date.now()}.json"`);
+  res.send(JSON.stringify(bundle, null, pretty ? 2 : undefined));
+}
+
+transferRouter.post('/export/config', async (req, res) => {
+  sendDownload(res, 'config', await buildConfigBundle(await selectAgents(req.body ?? {})), true);
+});
+
+/** Export a Qdrant memory dump (vectors + payloads) for the selected agents' namespaces. */
+transferRouter.post('/export/memory', async (req, res) => {
+  sendDownload(res, 'memory', await buildMemoryBundle(await selectAgents(req.body ?? {})));
+});
+
+// --- GET twins of the exports, so a read-only API key can drive a backup (see middleware/auth.ts).
+// `?all=true` or `?agentIds=a,b`. Note that a key-authenticated response is additionally passed
+// through `redact.ts`, which blanks any property whose *name* looks like a secret.
+
+transferRouter.get('/export/config', async (req, res) => {
+  sendDownload(res, 'config', await buildConfigBundle(await selectAgentsFromQuery(req.query)), true);
+});
+
+transferRouter.get('/export/memory', async (req, res) => {
+  sendDownload(res, 'memory', await buildMemoryBundle(await selectAgentsFromQuery(req.query)));
+});
+
+/**
+ * Full-fidelity mirror of this instance (agents, isolations, sessions, messages, scores, inference
+ * logs) with `_id`s preserved. Feeds `POST /import/clone` on a *different* instance. `?logs=N` caps
+ * the inference-log archive (default 200 — the archive is unbounded).
+ */
+transferRouter.get('/export/clone', async (req, res) => {
+  const raw = Number(req.query.logs);
+  const logLimit = Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 0), 10_000) : DEFAULT_LOG_LIMIT;
+  sendDownload(res, 'clone', await cloneService.exportClone(logLimit));
+});
+
+/**
+ * **Destructive.** Replaces this instance's agents, isolations, sessions, messages, scores and
+ * inference logs with the bundle's. Requires `{ confirm: 'REPLACE' }` in the body so it can never be
+ * triggered by an accidental POST. API keys can't reach this at all (they're GET-only).
+ */
+transferRouter.post('/import/clone', async (req, res) => {
+  const bundle = req.body ?? {};
+  if (bundle.confirm !== 'REPLACE') {
+    res.status(400).json({ error: "refusing to wipe: pass { confirm: 'REPLACE' }" });
+    return;
+  }
+  if (bundle.type !== CLONE_TYPE) {
+    res.status(400).json({ error: `not a ${CLONE_TYPE} file` });
+    return;
+  }
+  try {
+    const summary = await cloneService.importClone(bundle);
+    res.json({ ok: true, ...summary });
+  } catch (err) {
+    log.error({ err }, 'clone import failed');
+    res.status(500).json({ error: 'clone import failed', detail: (err as Error).message });
+  }
 });
 
 /**

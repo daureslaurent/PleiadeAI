@@ -7,8 +7,9 @@ import { connectMongo, disconnectMongo } from './db/mongoose';
 import { setupAgenda } from './autonomy/agenda.setup';
 import { attachSocket } from './transport/ws/socket';
 import { attachVisualProxy } from './transport/ws/visual-proxy';
-import { requireAuth } from './transport/http/middleware/auth';
+import { requireAuth, requireOperator } from './transport/http/middleware/auth';
 import { authRouter } from './transport/http/routes/auth.routes';
+import { apiKeysRouter } from './transport/http/routes/api-keys.routes';
 import { agentsRouter } from './transport/http/routes/agents.routes';
 import { sessionsRouter } from './transport/http/routes/sessions.routes';
 import { skillsRouter } from './transport/http/routes/skills.routes';
@@ -60,8 +61,10 @@ async function main(): Promise<void> {
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
-  // Public auth, then everything else behind the JWT guard.
+  // Public auth, then everything else behind the auth guard (session JWT, or a read-only API key).
   app.use('/api/auth', authRouter);
+  // Key management is operator-only: a leaked API key must not be able to mint or revoke keys.
+  app.use('/api/api-keys', requireAuth, requireOperator, apiKeysRouter);
   app.use('/api/agents', requireAuth, agentsRouter);
   app.use('/api/sessions', requireAuth, sessionsRouter);
   app.use('/api/skills', requireAuth, skillsRouter);

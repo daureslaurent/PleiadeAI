@@ -79,6 +79,14 @@ Key seams:
   chat priority over a cron job hitting the same agent. Completed headless tasks fan out to both a
   Mongo `notifications` doc (UI inbox) and, optionally, a Telegram webhook.
 
+- **Auth (`transport/http/middleware/auth.ts`).** `requireAuth` accepts either the operator's session
+  JWT or a **read-only API key** (`X-API-Key`, or `Authorization: Bearer plk_…`; `domain/api-keys/`).
+  Key-authenticated requests are refused on any non-`GET`/`HEAD` method, are blocked from
+  `/api/api-keys` by `requireOperator`, and have their response bodies scrubbed by `redact.ts` —
+  `GET /api/endpoints` and `GET /api/settings` otherwise return inference credentials in plaintext.
+  Keys can't open a websocket: the WS handshake calls `verifyToken` directly. `tools/pleiade-mcp/`
+  consumes this surface (MCP server + `scripts/prod.mjs` CLI).
+
 Layout: `domain/<entity>/` holds each entity's Mongoose model + repository/service; HTTP routes are
 in `transport/http/routes/` (all behind `requireAuth` except `/api/auth`); the socket layer is in
 `transport/ws/`. Frontend: `views/` are top-level routed pages (one per Sidebar nav item),
