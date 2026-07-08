@@ -104,9 +104,15 @@ export function assembleRun(records: LlamaLogDoc[]): TurnLog | null {
   const catalog = new Set<string>();
   for (const rec of records) for (const n of toolNamesFrom((rec.request as { tools?: unknown }).tools)) catalog.add(n);
 
-  // The opening user instruction: first user-role message of the first record.
+  // The instruction that opened THIS run: the LAST user-role message of the first record. A run's
+  // first inference call carries the whole prior conversation (system + history) with the current
+  // request appended last, so the *first* user message is the oldest turn in the session — for a
+  // multi-turn top-level agent that is a stale greeting, not what this turn asked. Taking the last
+  // user message yields the current request for the top-level agent and the delegated task for a
+  // sub-agent (whose first call has only [system, user task]).
   const firstMsgs = ((first.request as { messages?: Msg[] }).messages ?? []) as Msg[];
-  const userRequest = textOf(firstMsgs.find((m) => m.role === 'user')?.content ?? '');
+  const lastUserMsg = [...firstMsgs].reverse().find((m) => m.role === 'user');
+  const userRequest = textOf(lastUserMsg?.content ?? '');
 
   // Every tool result across the turn, keyed by tool_call_id.
   const resultsById = new Map<string, { name: string | null; content: string; isError: boolean }>();
