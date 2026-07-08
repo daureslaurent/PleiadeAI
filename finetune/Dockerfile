@@ -5,8 +5,11 @@
 #
 # BUILD PROFILES (set via finetune/.env → compose build args). The base image, torch
 # build, and flash-attn version must match the GPU architecture:
-#   • Ampere/Turing (e.g. 3060, 2070S):  CUDA 12.1 / torch 2.4.1 cu121 / flash-attn 2.6.3  (default)
-#   • Blackwell     (e.g. 50-series):    CUDA 12.8 / torch 2.7.1 cu128 / flash-attn 2.8.3
+# torch/flash-attn are pinned to what the axolotl release actually installs — axolotl
+# 0.6.0 hard-requires torch 2.5.1, so we install that up front (no mid-build upgrade)
+# and use a flash-attn that ships torch-2.5 prebuilt wheels (2.6.3 does NOT).
+#   • Ampere/Turing (e.g. 3060, 2070S):  CUDA 12.1 / torch 2.5.1 cu121 / flash-attn 2.7.4.post1 (default)
+#   • Blackwell     (e.g. 50-series):    CUDA 12.8 / torch 2.7.1 cu128 / flash-attn 2.8.3 (needs newer AXOLOTL_REF)
 # Blackwell (sm_120) CANNOT run on the CUDA 12.1 base — it needs the 12.8 toolkit.
 ARG CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 FROM ${CUDA_IMAGE}
@@ -19,9 +22,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Pin the Axolotl and llama.cpp revisions — do NOT track a moving branch (see plan Risk #1).
 ARG AXOLOTL_REF=v0.6.0
 ARG LLAMACPP_REF=b4519
-ARG TORCH_VERSION=2.4.1
+ARG TORCH_VERSION=2.5.1
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
-ARG FLASH_ATTN_VERSION=2.6.3
+ARG FLASH_ATTN_VERSION=2.7.4.post1
 
 # --- System deps: Python 3.10, build toolchain, cmake (llama.cpp), git, curl ---
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -10,9 +10,10 @@ services:
       # the CUDA 12.8 / torch 2.7.1 / flash-attn 2.8.3 values.
       args:
         CUDA_IMAGE: ${CUDA_IMAGE:-nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04}
-        TORCH_VERSION: ${TORCH_VERSION:-2.4.1}
+        TORCH_VERSION: ${TORCH_VERSION:-2.5.1}
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}
-        FLASH_ATTN_VERSION: ${FLASH_ATTN_VERSION:-2.6.3}
+        FLASH_ATTN_VERSION: ${FLASH_ATTN_VERSION:-2.7.4.post1}
+        AXOLOTL_REF: ${AXOLOTL_REF:-v0.6.0}
     image: pleiade-finetune
     container_name: pleiade-finetune
     restart: unless-stopped

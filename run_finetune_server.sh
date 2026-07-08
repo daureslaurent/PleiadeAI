@@ -108,13 +108,17 @@ select_build_profile() {
     export TORCH_VERSION=2.7.1
     export TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128
     export FLASH_ATTN_VERSION=2.8.3
+    # axolotl 0.6.0 pins torch 2.5.1 (incompatible with Blackwell); a newer tag is
+    # required for torch 2.7. Override here once verified on the Blackwell box.
+    export AXOLOTL_REF="${AXOLOTL_REF:-v0.8.0}"
   else
     local shown="${max_major}.x"; [[ "$max_major" == 0 ]] && shown="unknown"
-    echo "==> Build profile: Ampere/Turing (compute ${shown}) → CUDA 12.1 / torch 2.4.1 / flash-attn 2.6.3"
+    echo "==> Build profile: Ampere/Turing (compute ${shown}) → CUDA 12.1 / torch 2.5.1 / flash-attn 2.7.4.post1"
     export CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
-    export TORCH_VERSION=2.4.1
+    export TORCH_VERSION=2.5.1
     export TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
-    export FLASH_ATTN_VERSION=2.6.3
+    export FLASH_ATTN_VERSION=2.7.4.post1
+    export AXOLOTL_REF="${AXOLOTL_REF:-v0.6.0}"
   fi
 }
 select_build_profile
