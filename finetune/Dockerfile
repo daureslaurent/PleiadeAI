@@ -27,16 +27,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --upgrade pip packaging wheel \
     && pip install "torch==${TORCH_VERSION}" --index-url https://download.pytorch.org/whl/cu121
 
-# --- Axolotl from source (pinned) + training deps (deepspeed, flash-attn, bitsandbytes) ---
-# flash-attn imports torch inside its setup.py, so it CANNOT build under pip's default
-# build isolation (the extra `.[flash-attn]` fails with "No module named 'torch'").
-# Install it separately with --no-build-isolation so it sees the torch layer above;
-# `ninja` (python pkg) is required for its parallel CUDA build.
-RUN git clone --depth 1 --branch "${AXOLOTL_REF}" https://github.com/axolotl-ai-cloud/axolotl /opt/axolotl \
+# --- Axolotl from source (pinned) + training deps (deepspeed, bitsandbytes) ---
+# flash-attn is installed separately by install-flash-attn.sh, which prefers a
+# prebuilt wheel over a 30-45 min source compile. It's kept out of the axolotl
+# extras because `.[flash-attn]` builds under pip isolation (no torch visible ->
+# "No module named 'torch'") and always compiles from source.
+COPY scripts/install-flash-attn.sh /opt/install-flash-attn.sh
+RUN chmod +x /opt/install-flash-attn.sh \
+    && git clone --depth 1 --branch "${AXOLOTL_REF}" https://github.com/axolotl-ai-cloud/axolotl /opt/axolotl \
     && cd /opt/axolotl \
-    && pip install ninja \
     && pip install -e '.[deepspeed]' \
-    && pip install "flash-attn==${FLASH_ATTN_VERSION}" --no-build-isolation \
+    && FLASH_ATTN_VERSION="${FLASH_ATTN_VERSION}" /opt/install-flash-attn.sh \
     && pip install "gguf>=0.10.0" sentencepiece protobuf
 
 # --- llama.cpp (pinned): convert_hf_to_gguf.py + llama-quantize for GGUF export ---
