@@ -1,6 +1,16 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Check, Loader2, Wrench } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, Check, Wrench } from 'lucide-react';
 import { toolsApi, type ToolConfigField, type ToolInfo } from '../lib/api';
+import {
+  Button,
+  Callout,
+  Field,
+  GlassCard,
+  Input,
+  Select,
+  Spinner,
+  Toggle,
+} from '../components/ui';
 
 type Values = Record<string, string | number | boolean>;
 
@@ -10,22 +20,34 @@ type Values = Record<string, string | number | boolean>;
  */
 export function ToolsView() {
   const [tools, setTools] = useState<ToolInfo[] | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    toolsApi.list().then(setTools);
+    let alive = true;
+    toolsApi
+      .list()
+      .then((t) => alive && setTools(t))
+      .catch(() => alive && setError(true));
+    return () => {
+      alive = false;
+    };
   }, []);
 
   function replace(updated: ToolInfo) {
     setTools((ts) => (ts ? ts.map((t) => (t.name === updated.name ? updated : t)) : ts));
   }
 
-  if (!tools) {
+  if (error) {
     return (
-      <div className="flex h-full items-center justify-center text-slate-500">
-        <Loader2 className="animate-spin" />
+      <div className="mx-auto max-w-2xl p-6">
+        <Callout tone="error" icon={<AlertTriangle size={14} />}>
+          Failed to load tools. The backend may be down — reload once it&apos;s back.
+        </Callout>
       </div>
     );
   }
+
+  if (!tools) return <Spinner />;
 
   return (
     <div className="h-full overflow-auto">
@@ -41,7 +63,7 @@ export function ToolsView() {
 function ToolCard({ tool, onSaved }: { tool: ToolInfo; onSaved: (t: ToolInfo) => void }) {
   const [enabled, setEnabled] = useState(tool.enabled);
   const [values, setValues] = useState<Values>(tool.config);
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   function set(key: string, value: string | number | boolean) {
     setValues((v) => ({ ...v, [key]: value }));
@@ -50,19 +72,23 @@ function ToolCard({ tool, onSaved }: { tool: ToolInfo; onSaved: (t: ToolInfo) =>
 
   async function save() {
     setStatus('saving');
-    const updated = await toolsApi.update(tool.name, { enabled, config: values });
-    setValues(updated.config);
-    setEnabled(updated.enabled);
-    onSaved(updated);
-    setStatus('saved');
+    try {
+      const updated = await toolsApi.update(tool.name, { enabled, config: values });
+      setValues(updated.config);
+      setEnabled(updated.enabled);
+      onSaved(updated);
+      setStatus('saved');
+    } catch {
+      setStatus('error');
+    }
   }
 
   const hasOptions = tool.configSchema.length > 0;
 
   return (
-    <section className="rounded-lg border border-border bg-surface">
-      <div className="flex items-center gap-3 border-b border-border px-5 py-3">
-        <Wrench size={16} className="text-accent" />
+    <GlassCard className={`transition-opacity ${enabled ? '' : 'opacity-60'}`}>
+      <div className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5">
+        <Wrench size={16} className={enabled ? 'text-accent' : 'text-slate-600'} />
         <div className="min-w-0 flex-1">
           <div className="font-mono text-sm font-semibold text-slate-100">{tool.name}</div>
           <div className="truncate text-xs text-slate-500">{tool.description}</div>
@@ -80,18 +106,22 @@ function ToolCard({ tool, onSaved }: { tool: ToolInfo; onSaved: (t: ToolInfo) =>
         <div className="space-y-4 p-5">
           {tool.configSchema.map((field) => (
             <Field key={field.key} label={field.label} hint={field.hint}>
-              <ConfigInput field={field} value={values[field.key]} onChange={(v) => set(field.key, v)} />
+              <ConfigInput
+                field={field}
+                value={values[field.key]}
+                onChange={(v) => set(field.key, v)}
+              />
             </Field>
           ))}
           <SaveBar status={status} onSave={save} />
         </div>
       ) : (
-        <div className="flex items-center justify-between px-5 py-3">
+        <div className="flex items-center justify-between gap-3 px-5 py-3.5">
           <span className="text-xs text-slate-500">No options — enable/disable only.</span>
           <SaveBar status={status} onSave={save} />
         </div>
       )}
-    </section>
+    </GlassCard>
   );
 }
 
@@ -104,44 +134,42 @@ function ConfigInput({
   value: string | number | boolean | undefined;
   onChange: (v: string | number | boolean) => void;
 }) {
-  const base =
-    'w-full rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent';
-
   if (field.type === 'boolean') {
     return <Toggle checked={Boolean(value)} onChange={onChange} />;
   }
   if (field.type === 'select') {
     return (
-      <select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)} className={base}>
+      <Select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)}>
         {(field.options ?? []).map((opt) => (
           <option key={opt} value={opt}>
             {opt}
           </option>
         ))}
-      </select>
+      </Select>
     );
   }
   if (field.type === 'number') {
     return (
-      <input
-        type="number"
-        value={Number(value ?? 0)}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className={base}
-      />
+      <Input type="number" value={Number(value ?? 0)} onChange={(e) => onChange(Number(e.target.value))} />
     );
   }
   return (
-    <input
+    <Input
       type={field.type === 'password' ? 'password' : 'text'}
+      autoComplete={field.type === 'password' ? 'new-password' : undefined}
       value={String(value ?? '')}
       onChange={(e) => onChange(e.target.value)}
-      className={base}
     />
   );
 }
 
-function SaveBar({ status, onSave }: { status: 'idle' | 'saving' | 'saved'; onSave: () => void }) {
+function SaveBar({
+  status,
+  onSave,
+}: {
+  status: 'idle' | 'saving' | 'saved' | 'error';
+  onSave: () => void;
+}) {
   return (
     <div className="flex items-center justify-end gap-3">
       {status === 'saved' && (
@@ -149,43 +177,14 @@ function SaveBar({ status, onSave }: { status: 'idle' | 'saving' | 'saved'; onSa
           <Check size={14} /> Saved
         </span>
       )}
-      <button
-        onClick={onSave}
-        disabled={status === 'saving'}
-        className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
-        {status === 'saving' && <Loader2 size={15} className="animate-spin" />}
+      {status === 'error' && (
+        <span className="flex items-center gap-1 text-xs text-red-400">
+          <AlertTriangle size={14} /> Save failed
+        </span>
+      )}
+      <Button variant="primary" onClick={onSave} loading={status === 'saving'}>
         Save
-      </button>
+      </Button>
     </div>
-  );
-}
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-panel border border-border'
-      }`}
-      aria-pressed={checked}
-    >
-      <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0.5'
-        }`}
-      />
-    </button>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <div className="mb-1 text-sm text-slate-300">{label}</div>
-      {children}
-      {hint && <div className="mt-1 text-xs text-slate-500">{hint}</div>}
-    </label>
   );
 }

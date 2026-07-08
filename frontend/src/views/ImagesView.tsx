@@ -1,16 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import {
   AlertTriangle,
   Boxes,
   Crosshair,
   Hammer,
+  HardDrive,
   Layers,
   Monitor,
   Package,
   Plus,
   RefreshCw,
   Save,
+  Terminal,
   Trash2,
   Users,
   X,
@@ -20,11 +22,29 @@ import {
   type BuildArg,
   type BuildJob,
   type Image,
-  type ImageStatus,
   type ImageStatusDetail,
   type VisualCalibration,
 } from '../lib/api';
-import { MasterDetail, ListRow } from '../components/MasterDetail';
+import { MasterDetail, ListRow, ListDivider } from '../components/MasterDetail';
+import {
+  Button,
+  Callout,
+  Checkbox,
+  Dot,
+  EmptyState,
+  Field,
+  GlassCard,
+  Hint,
+  Input,
+  RowGroup,
+  Section,
+  Select,
+  StatusBadge,
+  Toggle,
+  toneOf,
+  useConfirm,
+} from '../components/ui';
+import { MONACO_OPTIONS, PLEIADE_THEME, registerPleiadeTheme } from '../lib/monacoTheme';
 
 interface Draft {
   _id?: string;
@@ -125,6 +145,7 @@ export function ImagesView() {
   const [logs, setLogs] = useState('');
   const [saving, setSaving] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
+  const confirm = useConfirm();
   // The image whose build stream we're currently attached to — guards stale async log callbacks
   // from a previous selection writing into the newly-selected image's console.
   const streamIdRef = useRef<string | null>(null);
@@ -271,7 +292,12 @@ export function ImagesView() {
       );
       return;
     }
-    if (!confirm('Delete this image (removes its built docker layers)? This cannot be undone.')) return;
+    const ok = await confirm({
+      title: `Delete image “${draft.name}”?`,
+      body: 'This removes its built docker layers. This cannot be undone.',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await imagesApi.remove(draft._id);
       setDraft(null);
@@ -292,168 +318,185 @@ export function ImagesView() {
       list={
         <>
           <ListRow active={showBuilds} onClick={openBuilds}>
-            <Layers size={15} /> Builds
+            <Layers size={15} className="shrink-0" />
+            <span className="flex-1 truncate">Builds</span>
             {activeBuilds > 0 && (
-              <span className="ml-auto rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400">
+              <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400">
                 {activeBuilds} active
               </span>
             )}
           </ListRow>
-          <div className="my-1 border-t border-border" />
-          {items.map((i) => (
-            <ListRow key={i._id} active={!showBuilds && draft?._id === i._id} onClick={() => select(i)}>
-              <Package size={15} /> {i.name}
-              <ImageDot status={i.build_job?.status === 'running' ? 'building' : i.image_status} />
-            </ListRow>
-          ))}
+          <ListDivider />
+          {items.map((i) => {
+            const s = i.build_job?.status === 'running' ? 'building' : i.image_status;
+            return (
+              <ListRow key={i._id} active={!showBuilds && draft?._id === i._id} onClick={() => select(i)}>
+                <Package size={15} className="shrink-0" />
+                <span className="flex-1 truncate">{i.name}</span>
+                <Dot tone={toneOf(s)} title={`image: ${s}`} pulse={s === 'building'} />
+              </ListRow>
+            );
+          })}
         </>
       }
     >
       {showBuilds ? (
         <BuildsPanel builds={builds} items={items} onRefresh={loadBuilds} onSelect={select} />
       ) : !draft ? (
-        <Empty />
+        <EmptyState icon={<Package size={28} />}>Select an image or create a new one.</EmptyState>
       ) : (
-        <div className="mx-auto max-w-3xl space-y-5 p-6">
-          <div className="flex items-center gap-3">
-            <input
+        <div className="mx-auto max-w-3xl space-y-4 p-6">
+          {/* Action row — the only place the loud accent lives on this page. */}
+          <div className="flex items-center gap-2">
+            <Input
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               placeholder="image_name (e.g. python-dev)"
-              className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+              className="flex-1 font-mono"
             />
             {!isNew && (
-              <button
-                onClick={remove}
-                className="flex items-center gap-1 rounded-md border border-red-900 px-3 py-2 text-xs text-red-400 hover:bg-red-950"
-              >
-                <Trash2 size={14} /> Delete
-              </button>
+              <Button variant="danger" icon={<Trash2 size={13} />} onClick={remove}>
+                Delete
+              </Button>
             )}
-            <button
-              onClick={save}
-              disabled={saving}
-              className="flex items-center gap-1 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              <Save size={15} /> Save
-            </button>
+            <Button variant="primary" icon={<Save size={13} />} onClick={save} loading={saving}>
+              Save
+            </Button>
           </div>
 
-          <Label>Description</Label>
-          <input
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-            placeholder="What this image provides"
-            className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
-          />
-
-          {status && status.warnings.length > 0 && (
-            <div className="flex flex-col gap-1 rounded border border-amber-900 bg-amber-950/40 p-2 text-xs text-amber-300">
-              {status.warnings.map((w) => (
-                <span key={w} className="flex items-start gap-1.5">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {w}
-                </span>
-              ))}
+          <Section
+            title="Image"
+            icon={<Package size={13} />}
+            right={status && <StatusBadge tone={toneOf(status.image_status)}>image: {status.image_status}</StatusBadge>}
+          >
+            <div className="space-y-3">
+              <Field label="Description">
+                <Input
+                  value={draft.description}
+                  onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                  placeholder="What this image provides"
+                />
+              </Field>
+              {status && status.warnings.length > 0 && (
+                <Callout tone="warn" icon={<AlertTriangle size={13} />}>
+                  <div className="flex flex-col gap-1">
+                    {status.warnings.map((w) => (
+                      <span key={w}>{w}</span>
+                    ))}
+                  </div>
+                </Callout>
+              )}
             </div>
-          )}
+          </Section>
 
-          <VisualToggle
-            visual={draft.visual}
-            onToggle={(on) =>
-              setDraft({
-                ...draft,
-                visual: on,
-                dockerfile: on
-                  ? withVisualLayer(draft.dockerfile)
-                  : withoutVisualLayer(draft.dockerfile),
-              })
-            }
-          />
+          <Section title="Visual desktop" icon={<Monitor size={13} />}>
+            <div className="space-y-4">
+              <VisualToggle
+                visual={draft.visual}
+                onToggle={(on) =>
+                  setDraft({
+                    ...draft,
+                    visual: on,
+                    dockerfile: on
+                      ? withVisualLayer(draft.dockerfile)
+                      : withoutVisualLayer(draft.dockerfile),
+                  })
+                }
+              />
 
-          {draft.visual && (
-            <ResolutionSelect
-              width={draft.visual_width}
-              height={draft.visual_height}
-              onChange={(w, h) => setDraft({ ...draft, visual_width: w, visual_height: h })}
-            />
-          )}
+              {draft.visual && (
+                <ResolutionSelect
+                  width={draft.visual_width}
+                  height={draft.visual_height}
+                  onChange={(w, h) => setDraft({ ...draft, visual_width: w, visual_height: h })}
+                />
+              )}
 
-          {draft.visual && !isNew && (
-            <CalibrationRow
-              imageId={draft._id!}
-              calibration={items.find((i) => i._id === draft._id)?.visual_calibration ?? null}
-              onCleared={refresh}
-            />
-          )}
+              {draft.visual && !isNew && (
+                <CalibrationRow
+                  imageId={draft._id!}
+                  calibration={items.find((i) => i._id === draft._id)?.visual_calibration ?? null}
+                  onCleared={refresh}
+                />
+              )}
+            </div>
+          </Section>
 
-          <div className="flex items-center justify-between">
-            <Label>Dockerfile</Label>
-            {status && <StatusBadge status={status.image_status} />}
-          </div>
-          <div className="overflow-hidden rounded border border-border">
-            <Editor
-              height="300px"
-              defaultLanguage="dockerfile"
-              theme="vs-dark"
-              value={draft.dockerfile}
-              onChange={(v) => setDraft({ ...draft, dockerfile: v ?? '' })}
-              options={{ minimap: { enabled: false }, fontSize: 12, scrollBeyondLastLine: false }}
-            />
-          </div>
+          <Section title="Dockerfile" icon={<Layers size={13} />}>
+            <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-black/25 py-1">
+              <Editor
+                height="300px"
+                defaultLanguage="dockerfile"
+                theme={PLEIADE_THEME}
+                beforeMount={registerPleiadeTheme}
+                value={draft.dockerfile}
+                onChange={(v) => setDraft({ ...draft, dockerfile: v ?? '' })}
+                options={MONACO_OPTIONS}
+              />
+            </div>
+          </Section>
 
-          <BuildOptions draft={draft} setDraft={setDraft} />
+          <Section title="Build options" icon={<Boxes size={13} />}>
+            <BuildOptions draft={draft} setDraft={setDraft} />
+          </Section>
 
-          {isNew ? (
-            <p className="text-xs text-slate-500">Save the image before building it.</p>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  onClick={build}
-                  disabled={building}
-                  className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                >
-                  <Hammer size={13} /> {building ? 'Building…' : 'Build image'}
-                </button>
-                {status && (
-                  <>
-                    <span className="flex items-center gap-1 text-xs text-slate-500">
-                      <Users size={13} /> used by {status.referenced_by.length} profile(s)
-                    </span>
-                    {status.image_size != null && (
-                      <span className="text-xs text-slate-500">size {fmtBytes(status.image_size)}</span>
-                    )}
-                    {status.image_built_at && (
-                      <span className="text-xs text-slate-500">
-                        built {new Date(status.image_built_at).toLocaleString()}
+          <Section title="Build" icon={<Hammer size={13} />}>
+            {isNew ? (
+              <Hint>Save the image before building it.</Hint>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="accentSoft"
+                    icon={<Hammer size={13} />}
+                    onClick={build}
+                    disabled={building}
+                  >
+                    {building ? 'Building…' : 'Build image'}
+                  </Button>
+                  {status && (
+                    <>
+                      <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <Users size={12} /> used by {status.referenced_by.length} profile(s)
                       </span>
-                    )}
-                  </>
+                      {status.image_size != null && (
+                        <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                          <HardDrive size={12} /> {fmtBytes(status.image_size)}
+                        </span>
+                      )}
+                      {status.image_built_at && (
+                        <span className="text-[11px] text-slate-500">
+                          built {new Date(status.image_built_at).toLocaleString()}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+                <Hint>
+                  Builds run in the background, one at a time. You can leave this page — the log
+                  reattaches when you return. On success, containers of agents whose profile uses this
+                  image are recreated on their next run.
+                </Hint>
+                {status?.last_build_error && !building && (
+                  <Callout tone="error" icon={<AlertTriangle size={13} />}>
+                    {status.last_build_error}
+                  </Callout>
                 )}
               </div>
-              <p className="text-[11px] text-slate-500">
-                Builds run in the background, one at a time. You can leave this page — the log
-                reattaches when you return. On success, containers of agents whose profile uses this
-                image are recreated on their next run.
-              </p>
-              {status?.last_build_error && !building && (
-                <div className="flex items-start gap-1.5 rounded border border-red-900 bg-red-950/40 p-2 text-xs text-red-300">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {status.last_build_error}
-                </div>
-              )}
-            </>
-          )}
+            )}
+          </Section>
 
-          {/* Build console */}
-          <div className="space-y-1.5">
-            <Label>Build console</Label>
+          {/* Build console — the bash-terminal exception (DIRECT_ART §7): near-black terminal glass. */}
+          <Section title="Build console" icon={<Terminal size={13} />}>
             <pre
               ref={logRef}
-              className="h-72 overflow-auto rounded border border-border bg-black/70 p-3 font-mono text-[11px] leading-relaxed text-slate-300"
+              className="h-72 overflow-auto rounded-xl border border-white/[0.06] bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-slate-300"
             >
-              {logs || <span className="text-slate-600">No build output yet. Click “Build image”.</span>}
+              {logs || (
+                <span className="text-slate-600">No build output yet. Click “Build image”.</span>
+              )}
             </pre>
-          </div>
+          </Section>
         </div>
       )}
     </MasterDetail>
@@ -464,11 +507,6 @@ function isBuildingStatus(status: ImageStatusDetail | null): boolean {
   return status?.image_status === 'building' || status?.image_status === 'queued';
 }
 
-/**
- * "Visual desktop" toggle. Turning it on injects the visual layer into the Dockerfile up front (the
- * operator keeps full control to edit it after) and flags the image so agents on a profile using it
- * are auto-granted the visual_screenshot / visual_act tools. Turning it off strips the layer again.
- */
 /** Common visual desktop resolutions offered in the selector (Xvfb screen size, 24-bit depth). */
 const RESOLUTION_PRESETS: Array<[number, number]> = [
   [700, 700],
@@ -503,16 +541,18 @@ function ResolutionSelect({
       ? ([width, height] as [number, number])
       : null;
   return (
-    <div className="flex flex-col gap-1">
-      <Label>Desktop resolution</Label>
-      <select
+    <Field
+      label="Desktop resolution"
+      hint="The Xvfb/VNC screen size. Applies on the next desktop start — stop the agent’s container to apply now. Changing it clears any click calibration. No rebuild needed."
+    >
+      <Select
         value={current}
         onChange={(e) => {
           if (e.target.value === 'default') return onChange(null, null);
           const [w, h] = e.target.value.split('x').map(Number);
           onChange(w!, h!);
         }}
-        className="w-fit rounded border border-border bg-surface px-2 py-1.5 text-xs text-slate-200"
+        className="w-fit py-1.5 text-xs"
       >
         <option value="default">Default (1280×800)</option>
         {custom && (
@@ -525,12 +565,8 @@ function ResolutionSelect({
             {w}×{h}
           </option>
         ))}
-      </select>
-      <p className="text-[11px] text-slate-500">
-        The Xvfb/VNC screen size. Applies on the next desktop start — stop the agent’s container to apply
-        now. Changing it clears any click calibration. No rebuild needed.
-      </p>
-    </div>
+      </Select>
+    </Field>
   );
 }
 
@@ -559,58 +595,51 @@ function CalibrationRow({
     }
   };
   return (
-    <div className="flex items-start gap-2 rounded border border-border bg-surface/40 p-2 text-xs">
+    <div className="flex items-start gap-2.5 rounded-xl border border-white/[0.06] bg-black/25 p-3 text-xs">
       <Crosshair size={14} className="mt-0.5 shrink-0 text-accent" />
       {calibration ? (
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <div className="text-slate-300">
             Click calibration active — mean error{' '}
             <span className="text-slate-400">{calibration.error_before.toFixed(1)}px</span> →{' '}
             <span className="text-emerald-400">{calibration.error_after.toFixed(1)}px</span> over{' '}
             {calibration.samples} points.
           </div>
-          <div className="mt-0.5 text-[11px] text-slate-500">
+          <div className="mt-1 font-mono text-[10px] text-slate-500">
             {calibration.width}×{calibration.height} · {calibration.vision_model} ·{' '}
             {new Date(calibration.measured_at).toLocaleString()}
           </div>
         </div>
       ) : (
-        <div className="flex-1 text-slate-400">
-          No click calibration. Open an agent’s desktop (this image) and click <b>Calibrate</b> to correct
-          where clicks land.
+        <div className="min-w-0 flex-1 text-slate-400">
+          No click calibration. Open an agent’s desktop (this image) and click <b>Calibrate</b> to
+          correct where clicks land.
         </div>
       )}
       {calibration && (
-        <button
-          onClick={clear}
-          disabled={clearing}
-          className="shrink-0 rounded px-2 py-1 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
-        >
-          {clearing ? 'Clearing…' : 'Clear'}
-        </button>
+        <Button variant="ghost" onClick={clear} loading={clearing} className="px-2 py-1">
+          Clear
+        </Button>
       )}
     </div>
   );
 }
 
+/**
+ * "Visual desktop" toggle. Turning it on injects the visual layer into the Dockerfile up front (the
+ * operator keeps full control to edit it after) and flags the image so agents on a profile using it
+ * are auto-granted the visual_screenshot / visual_act tools. Turning it off strips the layer again.
+ */
 function VisualToggle({ visual, onToggle }: { visual: boolean; onToggle: (on: boolean) => void }) {
   return (
     <div
-      className={`flex items-start gap-3 rounded-md border p-3 ${
-        visual ? 'border-accent/60 bg-accent/5' : 'border-border bg-surface/40'
+      className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+        visual ? 'border-accent/40 bg-accent/[0.07]' : 'border-white/[0.06] bg-black/25'
       }`}
     >
       <Monitor size={16} className={`mt-0.5 shrink-0 ${visual ? 'text-accent' : 'text-slate-500'}`} />
       <div className="min-w-0 flex-1">
-        <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-200">
-          <input
-            type="checkbox"
-            checked={visual}
-            onChange={(e) => onToggle(e.target.checked)}
-            className="accent-accent"
-          />
-          Visual desktop
-        </label>
+        <div className="text-sm font-medium text-slate-200">Visual desktop</div>
         <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
           Adds a headless X desktop (Xvfb + VNC) so agents can see and drive a GUI. Injects the visual
           layer into the Dockerfile below (editable) and auto-grants{' '}
@@ -618,18 +647,13 @@ function VisualToggle({ visual, onToggle }: { visual: boolean; onToggle: (on: bo
           <span className="font-mono text-slate-400">visual_act</span> to agents using this image.
         </p>
       </div>
+      <Toggle checked={visual} onChange={onToggle} />
     </div>
   );
 }
 
 /** Build args (key/value) + `--no-cache` / `--pull` toggles. */
-function BuildOptions({
-  draft,
-  setDraft,
-}: {
-  draft: Draft;
-  setDraft: (d: Draft) => void;
-}) {
+function BuildOptions({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => void }) {
   const setArg = (idx: number, patch: Partial<BuildArg>) =>
     setDraft({
       ...draft,
@@ -637,31 +661,31 @@ function BuildOptions({
     });
 
   return (
-    <div className="space-y-3 rounded-md border border-border bg-surface/40 p-3">
-      <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
-        <Boxes size={13} /> Build options
-      </span>
-
+    <div className="space-y-4">
       <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-wide text-slate-500">Build args (--build-arg)</div>
+        <div className="text-[10px] uppercase tracking-wider text-slate-500">
+          Build args (--build-arg)
+        </div>
         {draft.build_args.map((a, i) => (
           <div key={i} className="flex items-center gap-2">
-            <input
+            <Input
               value={a.key}
               onChange={(e) => setArg(i, { key: e.target.value })}
               placeholder="KEY"
-              className="w-40 rounded border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
+              className="w-40 py-1.5 font-mono text-[11px]"
             />
             <span className="text-slate-600">=</span>
-            <input
+            <Input
               value={a.value}
               onChange={(e) => setArg(i, { value: e.target.value })}
               placeholder="value"
-              className="flex-1 rounded border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
+              className="flex-1 py-1.5 font-mono text-[11px]"
             />
             <button
-              onClick={() => setDraft({ ...draft, build_args: draft.build_args.filter((_, j) => j !== i) })}
-              className="rounded border border-border p-1 text-slate-500 hover:border-red-900 hover:text-red-400"
+              onClick={() =>
+                setDraft({ ...draft, build_args: draft.build_args.filter((_, j) => j !== i) })
+              }
+              className="shrink-0 rounded-md p-1.5 text-slate-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
               title="Remove"
             >
               <X size={13} />
@@ -669,47 +693,39 @@ function BuildOptions({
           </div>
         ))}
         <button
-          onClick={() => setDraft({ ...draft, build_args: [...draft.build_args, { key: '', value: '' }] })}
-          className="flex items-center gap-1 rounded border border-dashed border-border px-2 py-1 text-[11px] text-slate-400 hover:border-accent hover:text-accent"
+          onClick={() =>
+            setDraft({ ...draft, build_args: [...draft.build_args, { key: '', value: '' }] })
+          }
+          className="flex items-center gap-1 rounded-lg border border-dashed border-white/[0.12] px-2.5 py-1.5 text-[11px] text-slate-400 transition-colors hover:border-accent/50 hover:text-accent"
         >
           <Plus size={12} /> Add build arg
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-5 text-xs text-slate-300">
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={draft.no_cache}
-            onChange={(e) => setDraft({ ...draft, no_cache: e.target.checked })}
-            className="accent-accent"
-          />
+      <div className="flex flex-wrap items-center gap-5">
+        <Checkbox checked={draft.no_cache} onChange={(v) => setDraft({ ...draft, no_cache: v })}>
           <span className="font-mono">--no-cache</span>
           <span className="text-slate-500">(ignore layer cache)</span>
-        </label>
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={draft.pull}
-            onChange={(e) => setDraft({ ...draft, pull: e.target.checked })}
-            className="accent-accent"
-          />
+        </Checkbox>
+        <Checkbox checked={draft.pull} onChange={(v) => setDraft({ ...draft, pull: v })}>
           <span className="font-mono">--pull</span>
           <span className="text-slate-500">(always re-fetch base image)</span>
-        </label>
+        </Checkbox>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-slate-300">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-slate-400">Build timeout</span>
-        <input
+        <Input
           type="number"
           min={1}
           value={draft.build_timeout_min}
           onChange={(e) => setDraft({ ...draft, build_timeout_min: e.target.value })}
           placeholder="default"
-          className="w-24 rounded border border-border bg-surface px-2 py-1 outline-none focus:border-accent"
+          className="w-24 py-1.5"
         />
-        <span className="text-slate-500">minutes — leave blank for the server default. Raise it for slow builds.</span>
+        <span className="text-[11px] text-slate-500">
+          minutes — leave blank for the server default. Raise it for slow builds.
+        </span>
       </div>
     </div>
   );
@@ -734,49 +750,52 @@ function BuildsPanel({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-6">
-      <div className="flex items-center gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <Layers size={16} /> Builds
-        </h2>
-        <span className="text-xs text-slate-500">{rows.length} known this session</span>
-        <button
-          onClick={onRefresh}
-          className="ml-auto flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-slate-300 hover:border-accent"
-        >
-          <RefreshCw size={13} /> Refresh
-        </button>
-      </div>
-      <p className="text-[11px] text-slate-500">
-        Every image build queued or run since the backend last started. Builds are serialised (one at
-        a time). Select a row to open its image and reattach to the build console.
-      </p>
+      <Section
+        title="Builds"
+        icon={<Layers size={13} />}
+        right={
+          <>
+            <span className="text-[11px] text-slate-500">{rows.length} known this session</span>
+            <Button variant="ghost" icon={<RefreshCw size={13} />} onClick={onRefresh}>
+              Refresh
+            </Button>
+          </>
+        }
+      >
+        <Hint>
+          Every image build queued or run since the backend last started. Builds are serialised (one
+          at a time). Select a row to open its image and reattach to the build console.
+        </Hint>
+      </Section>
 
       {sorted.length === 0 ? (
-        <p className="text-xs text-slate-600">No builds yet.</p>
+        <GlassCard>
+          <EmptyState icon={<Layers size={28} />}>No builds yet.</EmptyState>
+        </GlassCard>
       ) : (
-        <div className="divide-y divide-border rounded border border-border">
+        <RowGroup>
           {sorted.map((b) => {
             const img = byId.get(b.image_id);
             return (
-              <div key={b.image_id + b.queued_at} className="flex items-center gap-3 px-3 py-2 text-xs">
-                <BuildStateBadge status={b.status} />
+              <div key={b.image_id + b.queued_at} className="flex items-center gap-3 px-3 py-2.5 text-xs">
+                <StatusBadge tone={toneOf(b.status)}>{b.status}</StatusBadge>
                 <button
                   onClick={() => img && onSelect(img)}
                   disabled={!img}
-                  className="min-w-0 text-left disabled:cursor-default"
+                  className="min-w-0 flex-1 text-left disabled:cursor-default"
                 >
-                  <div className="truncate text-slate-200 hover:text-accent">
+                  <div className="truncate text-slate-200 transition-colors hover:text-accent">
                     {img?.name ?? <span className="text-slate-500">{b.image_id} (deleted)</span>}
                   </div>
                   {b.error && <div className="truncate text-[10px] text-red-400">{b.error}</div>}
                 </button>
-                <span className="ml-auto shrink-0 text-[10px] text-slate-500">
+                <span className="shrink-0 font-mono text-[10px] text-slate-600">
                   {fmtWhen(b.ended_at ?? b.started_at ?? b.queued_at)}
                 </span>
               </div>
             );
           })}
-        </div>
+        </RowGroup>
       )}
     </div>
   );
@@ -800,58 +819,4 @@ function errMsg(e: unknown): string {
     if (r?.data?.error) return r.data.error;
   }
   return e instanceof Error ? e.message : String(e);
-}
-
-function StatusBadge({ status }: { status: ImageStatus }) {
-  const color =
-    status === 'built'
-      ? 'text-emerald-400 border-emerald-900'
-      : status === 'building' || status === 'queued'
-        ? 'text-amber-400 border-amber-900'
-        : status === 'error'
-          ? 'text-red-400 border-red-900'
-          : 'text-slate-500 border-border';
-  return (
-    <span className={`rounded border px-2 py-0.5 text-[10px] uppercase tracking-wide ${color}`}>
-      image: {status}
-    </span>
-  );
-}
-
-function BuildStateBadge({ status }: { status: BuildJob['status'] }) {
-  const map: Record<BuildJob['status'], string> = {
-    running: 'text-amber-400 border-amber-900 bg-amber-950/40',
-    queued: 'text-slate-400 border-slate-700 bg-surface',
-    done: 'text-emerald-400 border-emerald-900 bg-emerald-950/40',
-    error: 'text-red-400 border-red-900 bg-red-950/40',
-  };
-  return (
-    <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${map[status]}`}>
-      {status}
-    </span>
-  );
-}
-
-function ImageDot({ status }: { status: ImageStatus }) {
-  const color =
-    status === 'built'
-      ? 'bg-emerald-400'
-      : status === 'building' || status === 'queued'
-        ? 'bg-amber-400'
-        : status === 'error'
-          ? 'bg-red-400'
-          : 'bg-slate-600';
-  return <span className={`ml-auto h-1.5 w-1.5 rounded-full ${color}`} title={`image: ${status}`} />;
-}
-
-function Label({ children }: { children: ReactNode }) {
-  return <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{children}</div>;
-}
-
-function Empty() {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-slate-600">
-      Select an image or create a new one.
-    </div>
-  );
 }

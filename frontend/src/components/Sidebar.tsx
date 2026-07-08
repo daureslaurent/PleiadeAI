@@ -53,7 +53,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`flex h-full shrink-0 flex-col border-r border-border bg-surface transition-all duration-200 ${
+      className={`glass flex h-full shrink-0 flex-col border-r transition-all duration-200 ${
         collapsed ? 'w-16' : 'w-60'
       }`}
     >
@@ -74,7 +74,7 @@ export function Sidebar() {
           <button
             onClick={() => setCollapsed(true)}
             title="Collapse sidebar"
-            className="ml-auto rounded-md p-1.5 text-slate-500 hover:bg-panel hover:text-slate-200"
+            className="ml-auto rounded-md p-1.5 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
           >
             <PanelLeftClose size={16} />
           </button>
@@ -85,7 +85,7 @@ export function Sidebar() {
         <button
           onClick={() => setCollapsed(false)}
           title="Expand sidebar"
-          className="mx-auto mb-1 rounded-md p-1.5 text-slate-500 hover:bg-panel hover:text-slate-200"
+          className="mx-auto mb-1 rounded-md p-1.5 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
         >
           <PanelLeftOpen size={16} />
         </button>
@@ -104,7 +104,7 @@ export function Sidebar() {
                 collapsed ? 'justify-center px-2' : 'gap-3 px-3',
                 isActive
                   ? 'bg-accent/15 font-medium text-accent'
-                  : 'text-slate-400 hover:bg-panel hover:text-slate-100',
+                  : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-100',
               ].join(' ')
             }
           >
@@ -120,7 +120,7 @@ export function Sidebar() {
                   <span className="relative shrink-0">
                     <Icon size={17} />
                     {showPin && collapsed && (
-                      <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-surface" />
+                      <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#161b22]" />
                     )}
                   </span>
                   {!collapsed && label}
@@ -140,10 +140,10 @@ export function Sidebar() {
       </nav>
 
       {/* Account footer */}
-      <div className="border-t border-border p-3">
+      <div className="border-t border-white/[0.06] p-3">
         {!collapsed && (
           <div className="mb-2 flex items-center gap-2 px-1">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-panel text-xs font-semibold text-slate-300">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.06] text-xs font-semibold text-slate-300">
               A
             </div>
             <div className="text-xs">
@@ -157,7 +157,7 @@ export function Sidebar() {
         <button
           onClick={logout}
           title={collapsed ? 'Sign out' : undefined}
-          className={`flex w-full items-center rounded-md py-2 text-xs text-slate-400 hover:bg-panel hover:text-slate-100 ${
+          className={`flex w-full items-center rounded-md py-2 text-xs text-slate-400 hover:bg-white/[0.05] hover:text-slate-100 ${
             collapsed ? 'justify-center px-2' : 'gap-2 px-3'
           }`}
         >

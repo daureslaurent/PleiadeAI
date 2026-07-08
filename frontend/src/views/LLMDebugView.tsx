@@ -69,7 +69,7 @@ export function LLMDebugView() {
   };
 
   return (
-    <div className="space-bg h-full overflow-auto">
+    <div className="h-full overflow-auto">
       <div className="mx-auto max-w-3xl space-y-4 p-6">
         <Toolbar
           limit={limit}

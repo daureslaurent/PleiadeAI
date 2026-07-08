@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { Save, Trash2, Wrench } from 'lucide-react';
+import { AlertTriangle, Save, Trash2, Wrench, Zap } from 'lucide-react';
 import { skillsApi, type Skill } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
+import { Button, Dot, EmptyState, Input, Select, useConfirm } from '../components/ui';
+import { MONACO_OPTIONS, PLEIADE_THEME, registerPleiadeTheme } from '../lib/monacoTheme';
 
 interface Draft {
   _id?: string;
@@ -47,6 +49,8 @@ export function SkillsView() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const confirm = useConfirm();
 
   const isNew = draft && !draft._id;
 
@@ -80,19 +84,30 @@ export function SkillsView() {
       parameters_schema,
     };
 
-    if (isNew) {
-      const created = await skillsApi.create(body);
-      await refresh();
-      setDraft(toDraft(created));
-    } else {
-      const saved = await skillsApi.save(draft._id!, body);
-      await refresh();
-      setDraft(toDraft(saved));
+    setSaving(true);
+    try {
+      if (isNew) {
+        const created = await skillsApi.create(body);
+        await refresh();
+        setDraft(toDraft(created));
+      } else {
+        const saved = await skillsApi.save(draft._id!, body);
+        await refresh();
+        setDraft(toDraft(saved));
+      }
+    } finally {
+      setSaving(false);
     }
   }
 
   async function remove() {
     if (!draft?._id) return;
+    const ok = await confirm({
+      title: `Delete skill “${draft.name}”?`,
+      body: 'Agents that list this skill in tools_allowed will silently lose it on their next turn. This cannot be undone.',
+      danger: true,
+    });
+    if (!ok) return;
     await skillsApi.remove(draft._id);
     setDraft(null);
     await refresh();
@@ -112,90 +127,94 @@ export function SkillsView() {
       onNew={() => setDraft(blank())}
       list={skills.map((s) => (
         <ListRow key={s._id} active={draft?._id === s._id} onClick={() => setDraft(toDraft(s))}>
-          <Wrench size={15} />
+          <Wrench size={15} className="shrink-0" />
           <span className="flex-1 truncate">{s.name}</span>
-          {!s.enabled && <span className="text-red-400" title="disabled">●</span>}
+          {!s.enabled && <Dot tone="error" title="disabled — circuit breaker tripped" />}
         </ListRow>
       ))}
     >
       {!draft ? (
-        <div className="flex h-full items-center justify-center text-sm text-slate-600">
-          Select a skill or create a new one.
-        </div>
+        <EmptyState icon={<Wrench size={28} />}>Select a skill or create a new one.</EmptyState>
       ) : (
         <div className="flex h-full flex-col">
           {/* Header row */}
-          <div className="flex items-center gap-2 border-b border-border bg-surface px-4 py-2">
-            <input
+          <div className="glass flex items-center gap-2 border-b px-4 py-2.5">
+            <Input
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               placeholder="skill_name"
-              className="w-48 rounded-md border border-border bg-panel px-3 py-1.5 text-sm outline-none focus:border-accent"
+              className="w-48 font-mono"
             />
-            <select
+            <Select
               value={draft.language}
               onChange={(e) => setDraft({ ...draft, language: e.target.value as 'ts' | 'py' })}
-              className="rounded-md border border-border bg-panel px-2 py-1.5 text-sm"
+              className="w-40"
             >
               <option value="ts">TypeScript</option>
               <option value="py">Python</option>
-            </select>
+            </Select>
             {draft._id && !draft.enabled && (
-              <button onClick={reEnable} className="text-xs text-amber-400">
+              <Button variant="ghost" icon={<Zap size={13} />} onClick={reEnable} className="text-amber-400 ring-amber-500/30 hover:bg-amber-500/10">
                 Re-enable (circuit tripped)
-              </button>
+              </Button>
             )}
             <div className="ml-auto flex items-center gap-2">
               {!isNew && (
-                <button
-                  onClick={remove}
-                  className="flex items-center gap-1 rounded-md border border-red-900 px-3 py-1.5 text-xs text-red-400 hover:bg-red-950"
-                >
-                  <Trash2 size={14} /> Delete
-                </button>
+                <Button variant="danger" icon={<Trash2 size={13} />} onClick={remove}>
+                  Delete
+                </Button>
               )}
-              <button
-                onClick={save}
-                className="flex items-center gap-1 rounded-md bg-accent px-4 py-1.5 text-sm font-semibold text-white"
-              >
-                <Save size={15} /> Save
-              </button>
+              <Button variant="primary" icon={<Save size={13} />} onClick={save} loading={saving}>
+                Save
+              </Button>
             </div>
           </div>
 
-          <input
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-            placeholder="Short description shown to the model…"
-            className="border-b border-border bg-panel px-4 py-2 text-sm outline-none"
-          />
+          <div className="border-b border-white/[0.06] px-4 py-2.5">
+            <Input
+              value={draft.description}
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              placeholder="Short description shown to the model…"
+            />
+          </div>
 
-          {/* Source + schema split */}
+          {/* Source + schema split — both editors sit in inset wells so the glass reads through. */}
           <div className="flex min-h-0 flex-1">
-            <div className="min-w-0 flex-1">
-              <div className="px-3 py-1 font-mono text-[10px] uppercase text-slate-500">Source</div>
-              <Editor
-                height="calc(100% - 24px)"
-                theme="vs-dark"
-                language={draft.language === 'py' ? 'python' : 'typescript'}
-                value={draft.source}
-                onChange={(v) => setDraft({ ...draft, source: v ?? '' })}
-              />
+            <div className="flex min-w-0 flex-1 flex-col bg-black/25">
+              <div className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                Source
+              </div>
+              <div className="min-h-0 flex-1">
+                <Editor
+                  height="100%"
+                  theme={PLEIADE_THEME}
+                  beforeMount={registerPleiadeTheme}
+                  language={draft.language === 'py' ? 'python' : 'typescript'}
+                  value={draft.source}
+                  onChange={(v) => setDraft({ ...draft, source: v ?? '' })}
+                  options={MONACO_OPTIONS}
+                />
+              </div>
             </div>
-            <div className="flex w-96 shrink-0 flex-col border-l border-border">
-              <div className="px-3 py-1 font-mono text-[10px] uppercase text-slate-500">
+            <div className="flex w-96 shrink-0 flex-col border-l border-white/[0.06] bg-black/25">
+              <div className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-slate-500">
                 Parameters schema (JSON)
               </div>
-              <Editor
-                height="calc(100% - 24px)"
-                theme="vs-dark"
-                language="json"
-                value={draft.schemaText}
-                onChange={(v) => setDraft({ ...draft, schemaText: v ?? '' })}
-              />
+              <div className="min-h-0 flex-1">
+                <Editor
+                  height="100%"
+                  theme={PLEIADE_THEME}
+                  beforeMount={registerPleiadeTheme}
+                  language="json"
+                  value={draft.schemaText}
+                  onChange={(v) => setDraft({ ...draft, schemaText: v ?? '' })}
+                  options={MONACO_OPTIONS}
+                />
+              </div>
               {schemaError && (
-                <div className="border-t border-red-900 bg-red-950/40 px-3 py-1 text-xs text-red-400">
-                  {schemaError}
+                <div className="flex items-start gap-1.5 border-t border-red-500/25 bg-red-500/[0.07] px-3 py-2 text-xs text-red-300">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-words">{schemaError}</span>
                 </div>
               )}
             </div>

@@ -79,7 +79,7 @@ export function FineTuningView() {
   const enabled = servers.filter((s) => s.enabled);
 
   return (
-    <div className="space-bg min-h-full">
+    <div className="min-h-full">
       <div className="mx-auto max-w-5xl space-y-4 px-4 py-5">
         <DatasetPanel
           stats={stats}

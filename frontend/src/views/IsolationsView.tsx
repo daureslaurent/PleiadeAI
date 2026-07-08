@@ -1,6 +1,21 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Box, Globe, HardDrive, KeyRound, Layers, Lock, Package, RefreshCw, Save, Server, Trash2, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  Box,
+  Cpu,
+  Globe,
+  HardDrive,
+  KeyRound,
+  Layers,
+  Lock,
+  Package,
+  RefreshCw,
+  Save,
+  Server,
+  Trash2,
+  Users,
+} from 'lucide-react';
 import {
   isolationsApi,
   imagesApi,
@@ -11,7 +26,25 @@ import {
   type IsolationVolume,
   type ManagedContainer,
 } from '../lib/api';
-import { MasterDetail, ListRow } from '../components/MasterDetail';
+import { MasterDetail, ListRow, ListDivider } from '../components/MasterDetail';
+import {
+  Button,
+  Callout,
+  Chip,
+  EmptyState,
+  Field,
+  GlassCard,
+  Hint,
+  Input,
+  RowGroup,
+  Section,
+  Select,
+  StatusBadge,
+  Textarea,
+  toneOf,
+  useConfirm,
+  type Tone,
+} from '../components/ui';
 
 interface Draft {
   _id?: string;
@@ -75,6 +108,7 @@ export function IsolationsView() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<IsolationStatus | null>(null);
   const [saving, setSaving] = useState(false);
+  const confirm = useConfirm();
 
   // Global managed-container overview (all profiles): shown in the detail pane instead of an editor.
   const [containers, setContainers] = useState<ManagedContainer[] | null>(null);
@@ -122,7 +156,13 @@ export function IsolationsView() {
   }
 
   async function removeContainer(name: string) {
-    if (!confirm(`Remove container "${name}"? An assigned agent recreates its own on next run.`)) return;
+    const ok = await confirm({
+      title: `Remove container “${name}”?`,
+      body: 'An assigned agent recreates its own on next run.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
     setContainersBusy(true);
     try {
       await isolationsApi.removeContainer(name);
@@ -138,7 +178,13 @@ export function IsolationsView() {
   async function removeOrphans() {
     const orphans = (containers ?? []).filter((c) => c.orphan);
     if (!orphans.length) return;
-    if (!confirm(`Remove ${orphans.length} orphaned container(s)? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Remove ${orphans.length} orphaned container(s)?`,
+      body: 'This cannot be undone.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
+    if (!ok) return;
     setContainersBusy(true);
     try {
       for (const c of orphans) await isolationsApi.removeContainer(c.container).catch(() => undefined);
@@ -188,7 +234,7 @@ export function IsolationsView() {
 
   async function clearSshKey() {
     if (!draft?._id) return;
-    if (!confirm('Remove the SSH private key from this profile?')) return;
+    if (!(await confirm({ title: 'Remove the SSH private key from this profile?', danger: true, confirmLabel: 'Remove' }))) return;
     await isolationsApi.update(draft._id, { ssh_private_key: '' });
     setDraft({ ...draft, ssh_private_key: '' });
     await loadStatus(draft._id);
@@ -196,7 +242,7 @@ export function IsolationsView() {
 
   async function clearVpnConf() {
     if (!draft?._id) return;
-    if (!confirm('Remove the WireGuard .conf from this profile?')) return;
+    if (!(await confirm({ title: 'Remove the WireGuard .conf from this profile?', danger: true, confirmLabel: 'Remove' }))) return;
     await isolationsApi.update(draft._id, { vpn_conf: '' });
     setDraft({ ...draft, vpn_conf: '' });
     await loadStatus(draft._id);
@@ -204,7 +250,7 @@ export function IsolationsView() {
 
   async function clearSudoPassword() {
     if (!draft?._id) return;
-    if (!confirm('Remove the remote sudo password from this profile?')) return;
+    if (!(await confirm({ title: 'Remove the remote sudo password from this profile?', danger: true, confirmLabel: 'Remove' }))) return;
     await isolationsApi.update(draft._id, { sudo_password: '' });
     setDraft({ ...draft, sudo_password: '' });
     await loadStatus(draft._id);
@@ -212,12 +258,12 @@ export function IsolationsView() {
 
   async function deleteVolume(v: IsolationVolume) {
     if (!draft?._id) return;
-    const msg = v.in_use
+    const body = v.in_use
       ? `Volume "${v.name}" is in use by ${v.used_by.map((u) => u.container).join(', ')}.\n\n` +
         `This removes that container (recreated on the agent's next run) and permanently deletes ` +
-        `the volume and all its files. Continue?`
+        `the volume and all its files.`
       : `Permanently delete volume "${v.name}" and all its files? This cannot be undone.`;
-    if (!confirm(msg)) return;
+    if (!(await confirm({ title: 'Delete volume?', body, danger: true }))) return;
     try {
       await isolationsApi.deleteVolume(draft._id, v.name, v.in_use);
       await loadStatus(draft._id);
@@ -229,10 +275,10 @@ export function IsolationsView() {
   async function remove() {
     if (!draft?._id) return;
     const count = status?.assigned_agents.length ?? 0;
-    const warn = count
-      ? `This profile is assigned to ${count} agent(s). Deleting it removes the shared volume and unassigns those agents (the image is kept). Continue?`
-      : 'Delete this isolation profile (removes its shared volume; the image is kept)?';
-    if (!confirm(warn)) return;
+    const body = count
+      ? `This profile is assigned to ${count} agent(s). Deleting it removes the shared volume and unassigns those agents (the image is kept).`
+      : 'Deleting it removes its shared volume; the image is kept.';
+    if (!(await confirm({ title: `Delete isolation profile “${draft.name}”?`, body, danger: true }))) return;
     await isolationsApi.remove(draft._id);
     setDraft(null);
     setStatus(null);
@@ -246,19 +292,24 @@ export function IsolationsView() {
       list={
         <>
           <ListRow active={showContainers} onClick={openContainers}>
-            <Layers size={15} /> Containers
+            <Layers size={15} className="shrink-0" />
+            <span className="flex-1 truncate">Containers</span>
             {orphanCount > 0 && (
-              <span className="ml-auto rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400">
+              <span className="shrink-0 rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-400">
                 {orphanCount} orphan
               </span>
             )}
           </ListRow>
-          <div className="my-1 border-t border-border" />
+          <ListDivider />
           {items.map((i) => (
             <ListRow key={i._id} active={!showContainers && draft?._id === i._id} onClick={() => select(i)}>
-              <Box size={15} /> {i.name}
+              <Box size={15} className="shrink-0" />
+              <span className="flex-1 truncate">{i.name}</span>
               {!i.image_id && (
-                <span className="ml-auto text-[10px] uppercase tracking-wide text-slate-600" title="no image assigned">
+                <span
+                  className="shrink-0 text-[10px] uppercase tracking-wider text-slate-600"
+                  title="no image assigned"
+                >
                   no image
                 </span>
               )}
@@ -276,131 +327,134 @@ export function IsolationsView() {
           onRemoveOrphans={removeOrphans}
         />
       ) : !draft ? (
-        <Empty />
+        <EmptyState icon={<Box size={28} />}>Select an isolation profile or create a new one.</EmptyState>
       ) : (
-        <div className="mx-auto max-w-3xl space-y-5 p-6">
-          <div className="flex items-center gap-3">
-            <input
+        <div className="mx-auto max-w-3xl space-y-4 p-6">
+          <div className="flex items-center gap-2">
+            <Input
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               placeholder="isolation_name (e.g. python-dev)"
-              className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+              className="flex-1 font-mono"
             />
             {!isNew && (
-              <button
-                onClick={remove}
-                className="flex items-center gap-1 rounded-md border border-red-900 px-3 py-2 text-xs text-red-400 hover:bg-red-950"
-              >
-                <Trash2 size={14} /> Delete
-              </button>
+              <Button variant="danger" icon={<Trash2 size={13} />} onClick={remove}>
+                Delete
+              </Button>
             )}
-            <button
-              onClick={save}
-              disabled={saving}
-              className="flex items-center gap-1 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              <Save size={15} /> Save
-            </button>
+            <Button variant="primary" icon={<Save size={13} />} onClick={save} loading={saving}>
+              Save
+            </Button>
           </div>
 
-          <Label>Description</Label>
-          <input
-            value={draft.description}
-            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-            placeholder="What this environment provides"
-            className="w-full rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
-          />
+          <Section title="Profile" icon={<Box size={13} />}>
+            <Field label="Description">
+              <Input
+                value={draft.description}
+                onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                placeholder="What this environment provides"
+              />
+            </Field>
+          </Section>
 
           {/* Docker image — built + managed on the Images page; the profile just references one. */}
-          <div className="space-y-2 rounded-md border border-border bg-surface/40 p-3">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
-                <Package size={13} /> Docker image
-              </span>
-              {status && status.image_id && <StatusBadge status={status.image_status ?? 'none'} />}
+          <Section
+            title="Docker image"
+            icon={<Package size={13} />}
+            right={
+              status &&
+              status.image_id && (
+                <StatusBadge tone={toneOf(status.image_status ?? 'none')}>
+                  image: {status.image_status ?? 'none'}
+                </StatusBadge>
+              )
+            }
+          >
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2">
+                <Select
+                  value={draft.image_id}
+                  onChange={(e) => setDraft({ ...draft, image_id: e.target.value })}
+                  className="flex-1"
+                >
+                  <option value="">— no image (agents can&apos;t launch) —</option>
+                  {images.map((img) => (
+                    <option key={img._id} value={img._id}>
+                      {img.name}
+                      {img.image_status !== 'built' ? ` (${img.image_status})` : ''}
+                    </option>
+                  ))}
+                </Select>
+                <Link
+                  to="/images"
+                  className="shrink-0 rounded-lg px-3 py-2 text-xs text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06]"
+                >
+                  Manage images
+                </Link>
+              </div>
+              {draft.image_id && status?.image_status && status.image_status !== 'built' && (
+                <Callout tone="warn" icon={<AlertTriangle size={13} />}>
+                  This image is not built yet — build it on the{' '}
+                  <Link to="/images" className="underline">
+                    Images
+                  </Link>{' '}
+                  page, or agents on this profile will error.
+                </Callout>
+              )}
+              <Hint>
+                Save any image change first — assigned agents pick up the new image on their next run.
+              </Hint>
             </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={draft.image_id}
-                onChange={(e) => setDraft({ ...draft, image_id: e.target.value })}
-                className="flex-1 rounded border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-accent"
-              >
-                <option value="">— no image (agents can't launch) —</option>
-                {images.map((img) => (
-                  <option key={img._id} value={img._id}>
-                    {img.name}
-                    {img.image_status !== 'built' ? ` (${img.image_status})` : ''}
-                  </option>
-                ))}
-              </select>
-              <Link
-                to="/images"
-                className="shrink-0 rounded border border-border px-2.5 py-1.5 text-xs text-slate-300 hover:border-accent"
-              >
-                Manage images
-              </Link>
-            </div>
-            {draft.image_id && status?.image_status && status.image_status !== 'built' && (
-              <p className="flex items-center gap-1.5 text-[11px] text-amber-400">
-                <AlertTriangle size={12} /> This image is not built yet — build it on the{' '}
-                <Link to="/images" className="underline">
-                  Images
-                </Link>{' '}
-                page, or agents on this profile will error.
-              </p>
-            )}
-            <p className="text-[11px] text-slate-500">
-              Save any image change first — assigned agents pick up the new image on their next run.
-            </p>
-          </div>
+          </Section>
 
-          <div className="grid grid-cols-4 gap-2 text-xs">
-            <Field label="CPUs">
-              <input
-                value={draft.cpus}
-                onChange={(e) => setDraft({ ...draft, cpus: e.target.value })}
-                className="w-full rounded border border-border bg-surface px-2 py-1"
-              />
-            </Field>
-            <Field label="Memory">
-              <input
-                value={draft.memory}
-                onChange={(e) => setDraft({ ...draft, memory: e.target.value })}
-                className="w-full rounded border border-border bg-surface px-2 py-1"
-              />
-            </Field>
-            <Field label="Network">
-              <select
-                value={draft.network}
-                onChange={(e) => setDraft({ ...draft, network: e.target.value as Isolation['network'] })}
-                className="w-full rounded border border-border bg-surface px-2 py-1"
-              >
-                <option value="host">host (LAN + host)</option>
-                <option value="bridge">bridge (NAT)</option>
-                <option value="none">none (offline)</option>
-                <option value="vpn">vpn (gluetun)</option>
-              </select>
-            </Field>
-            <Field label="Idle stop (min)">
-              <input
-                type="number"
-                value={Math.round(draft.idle_timeout_ms / 60000)}
-                onChange={(e) =>
-                  setDraft({ ...draft, idle_timeout_ms: Math.max(1, Number(e.target.value) || 30) * 60000 })
-                }
-                className="w-full rounded border border-border bg-surface px-2 py-1"
-              />
-            </Field>
-          </div>
+          <Section title="Resources" icon={<Cpu size={13} />}>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <Field label="CPUs">
+                <Input
+                  value={draft.cpus}
+                  onChange={(e) => setDraft({ ...draft, cpus: e.target.value })}
+                  className="py-1.5 text-xs"
+                />
+              </Field>
+              <Field label="Memory">
+                <Input
+                  value={draft.memory}
+                  onChange={(e) => setDraft({ ...draft, memory: e.target.value })}
+                  className="py-1.5 text-xs"
+                />
+              </Field>
+              <Field label="Network">
+                <Select
+                  value={draft.network}
+                  onChange={(e) => setDraft({ ...draft, network: e.target.value as Isolation['network'] })}
+                  className="py-1.5 text-xs"
+                >
+                  <option value="host">host (LAN + host)</option>
+                  <option value="bridge">bridge (NAT)</option>
+                  <option value="none">none (offline)</option>
+                  <option value="vpn">vpn (gluetun)</option>
+                </Select>
+              </Field>
+              <Field label="Idle stop (min)">
+                <Input
+                  type="number"
+                  value={Math.round(draft.idle_timeout_ms / 60000)}
+                  onChange={(e) =>
+                    setDraft({ ...draft, idle_timeout_ms: Math.max(1, Number(e.target.value) || 30) * 60000 })
+                  }
+                  className="py-1.5 text-xs"
+                />
+              </Field>
+            </div>
+          </Section>
 
           {/* VPN (gluetun / WireGuard) — only relevant in `vpn` network mode */}
           {draft.network === 'vpn' && (
-            <div className="space-y-2 rounded-md border border-border bg-surface/40 p-3">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
-                  <Globe size={13} /> VPN (gluetun / WireGuard)
-                </span>
-                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wide">
+            <Section
+              title="VPN (gluetun / WireGuard)"
+              icon={<Globe size={13} />}
+              right={
+                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wider">
                   {status?.vpn_conf_set ? (
                     <>
                       <span className="text-emerald-400">config set</span>
@@ -415,159 +469,157 @@ export function IsolationsView() {
                     <span className="text-slate-500">tunnel: {status.vpn_state}</span>
                   )}
                 </span>
+              }
+            >
+              <div className="space-y-2.5">
+                <Hint>
+                  Agent containers on this profile route all traffic through a dedicated gluetun
+                  container. Tools are held until the tunnel is healthy (kill-switch), so the real IP
+                  never leaks. Upload a standard WireGuard <code>.conf</code> — the backend parses it
+                  into gluetun&apos;s config. It contains the private key, so it is encrypted at rest
+                  and never shown again after saving.
+                </Hint>
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06]">
+                    Upload .conf
+                    <input
+                      type="file"
+                      accept=".conf,text/plain"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) setDraft({ ...draft, vpn_conf: await file.text() });
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {draft.vpn_conf.trim() && (
+                    <span className="text-[10px] uppercase tracking-wider text-amber-400">
+                      new config staged — save to apply
+                    </span>
+                  )}
+                </div>
+                <Textarea
+                  value={draft.vpn_conf}
+                  onChange={(e) => setDraft({ ...draft, vpn_conf: e.target.value })}
+                  rows={6}
+                  placeholder={
+                    status?.vpn_conf_set
+                      ? '•••••••• config set — upload or paste a new .conf to replace it'
+                      : '[Interface]\nPrivateKey = …\nAddress = 10.64.0.2/32\n\n[Peer]\nPublicKey = …\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0'
+                  }
+                />
               </div>
-              <p className="text-[11px] text-slate-500">
-                Agent containers on this profile route all traffic through a dedicated gluetun
-                container. Tools are held until the tunnel is healthy (kill-switch), so the real IP
-                never leaks. Upload a standard WireGuard <code>.conf</code> — the backend parses it
-                into gluetun's config. It contains the private key, so it is encrypted at rest and
-                never shown again after saving.
-              </p>
-              <div className="flex items-center gap-2">
-                <label className="cursor-pointer rounded border border-border bg-surface px-2 py-1 text-[11px] hover:border-accent">
-                  Upload .conf
-                  <input
-                    type="file"
-                    accept=".conf,text/plain"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) setDraft({ ...draft, vpn_conf: await file.text() });
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-                {draft.vpn_conf.trim() && (
-                  <span className="text-[10px] uppercase tracking-wide text-amber-400">
-                    new config staged — save to apply
-                  </span>
-                )}
-              </div>
-              <textarea
-                value={draft.vpn_conf}
-                onChange={(e) => setDraft({ ...draft, vpn_conf: e.target.value })}
-                rows={6}
-                spellCheck={false}
-                placeholder={
-                  status?.vpn_conf_set
-                    ? '•••••••• config set — upload or paste a new .conf to replace it'
-                    : '[Interface]\nPrivateKey = …\nAddress = 10.64.0.2/32\n\n[Peer]\nPublicKey = …\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0'
-                }
-                className="w-full rounded border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
-              />
-            </div>
+            </Section>
           )}
 
           {/* Outbound SSH client key */}
-          <div className="space-y-2 rounded-md border border-border bg-surface/40 p-3">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
-                <KeyRound size={13} /> Outbound SSH key
-              </span>
-              {status?.ssh_key_set ? (
-                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-emerald-400">
+          <Section
+            title="Outbound SSH key"
+            icon={<KeyRound size={13} />}
+            right={
+              status?.ssh_key_set ? (
+                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-emerald-400">
                   key set
                   <button onClick={clearSshKey} className="text-red-400 hover:underline">
                     remove
                   </button>
                 </span>
               ) : (
-                <span className="text-[10px] uppercase tracking-wide text-slate-600">no key</span>
-              )}
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Injected into each agent container at <code>~/.ssh/id_ed25519</code> (chmod 600) so the
-              agent can <code>git clone</code> / <code>ssh</code> out. Encrypted at rest; never shown
-              again after saving.
-            </p>
-            <textarea
-              value={draft.ssh_private_key}
-              onChange={(e) => setDraft({ ...draft, ssh_private_key: e.target.value })}
-              rows={4}
-              spellCheck={false}
-              placeholder={
-                status?.ssh_key_set
-                  ? '•••••••• key set — paste a new private key to replace it'
-                  : '-----BEGIN OPENSSH PRIVATE KEY-----\n…'
-              }
-              className="w-full rounded border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Public key (optional)</div>
-                <textarea
-                  value={draft.ssh_public_key}
-                  onChange={(e) => setDraft({ ...draft, ssh_public_key: e.target.value })}
-                  rows={3}
-                  spellCheck={false}
-                  placeholder="ssh-ed25519 AAAA… (→ id_ed25519.pub)"
-                  className="w-full rounded border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
-                />
+                <span className="text-[10px] uppercase tracking-wider text-slate-600">no key</span>
+              )
+            }
+          >
+            <div className="space-y-2.5">
+              <Hint>
+                Injected into each agent container at <code>~/.ssh/id_ed25519</code> (chmod 600) so the
+                agent can <code>git clone</code> / <code>ssh</code> out. Encrypted at rest; never shown
+                again after saving.
+              </Hint>
+              <Textarea
+                value={draft.ssh_private_key}
+                onChange={(e) => setDraft({ ...draft, ssh_private_key: e.target.value })}
+                rows={4}
+                placeholder={
+                  status?.ssh_key_set
+                    ? '•••••••• key set — paste a new private key to replace it'
+                    : '-----BEGIN OPENSSH PRIVATE KEY-----\n…'
+                }
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Public key (optional)">
+                  <Textarea
+                    value={draft.ssh_public_key}
+                    onChange={(e) => setDraft({ ...draft, ssh_public_key: e.target.value })}
+                    rows={3}
+                    placeholder="ssh-ed25519 AAAA… (→ id_ed25519.pub)"
+                  />
+                </Field>
+                <Field label="known_hosts (optional)">
+                  <Textarea
+                    value={draft.ssh_known_hosts}
+                    onChange={(e) => setDraft({ ...draft, ssh_known_hosts: e.target.value })}
+                    rows={3}
+                    placeholder="github.com ssh-ed25519 AAAA…"
+                  />
+                </Field>
               </div>
-              <div>
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">known_hosts (optional)</div>
-                <textarea
-                  value={draft.ssh_known_hosts}
-                  onChange={(e) => setDraft({ ...draft, ssh_known_hosts: e.target.value })}
-                  rows={3}
-                  spellCheck={false}
-                  placeholder="github.com ssh-ed25519 AAAA…"
-                  className="w-full rounded border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
-                />
-              </div>
+              <Hint>
+                SSH changes apply after <span className="text-slate-400">Save</span> and take effect on
+                each agent&apos;s next container start.
+              </Hint>
             </div>
-            <p className="text-[11px] text-slate-500">
-              SSH changes apply after <span className="text-slate-400">Save</span> and take effect on
-              each agent’s next container start.
-            </p>
-          </div>
+          </Section>
 
           {/* Remote sudo password */}
-          <div className="space-y-2 rounded-md border border-border bg-surface/40 p-3">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
-                <Lock size={13} /> Remote sudo password
-              </span>
-              {status?.sudo_password_set ? (
-                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-emerald-400">
+          <Section
+            title="Remote sudo password"
+            icon={<Lock size={13} />}
+            right={
+              status?.sudo_password_set ? (
+                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-emerald-400">
                   password set
                   <button onClick={clearSudoPassword} className="text-red-400 hover:underline">
                     remove
                   </button>
                 </span>
               ) : (
-                <span className="text-[10px] uppercase tracking-wide text-slate-600">no password</span>
-              )}
+                <span className="text-[10px] uppercase tracking-wider text-slate-600">no password</span>
+              )
+            }
+          >
+            <div className="space-y-2.5">
+              <Hint>
+                Planted in each agent container at <code>/opt/pleiade/sudo_pass</code> (chmod 600) with
+                a <code>SUDO_ASKPASS</code> helper, so the agent can escalate on a remote host it SSHes
+                into — e.g. <code>ssh host &apos;sudo -S -p &quot;&quot; cmd&apos; &lt; /opt/pleiade/sudo_pass</code>.
+                Encrypted at rest; never shown again after saving.
+              </Hint>
+              <Input
+                type="password"
+                value={draft.sudo_password}
+                onChange={(e) => setDraft({ ...draft, sudo_password: e.target.value })}
+                autoComplete="new-password"
+                spellCheck={false}
+                className="font-mono text-[11px]"
+                placeholder={
+                  status?.sudo_password_set
+                    ? '•••••••• password set — type a new one to replace it'
+                    : 'remote sudo password'
+                }
+              />
             </div>
-            <p className="text-[11px] text-slate-500">
-              Planted in each agent container at <code>/opt/pleiade/sudo_pass</code> (chmod 600) with a{' '}
-              <code>SUDO_ASKPASS</code> helper, so the agent can escalate on a remote host it SSHes into —
-              e.g. <code>ssh host 'sudo -S -p "" cmd' &lt; /opt/pleiade/sudo_pass</code>. Encrypted at
-              rest; never shown again after saving.
-            </p>
-            <input
-              type="password"
-              value={draft.sudo_password}
-              onChange={(e) => setDraft({ ...draft, sudo_password: e.target.value })}
-              autoComplete="new-password"
-              spellCheck={false}
-              placeholder={
-                status?.sudo_password_set
-                  ? '•••••••• password set — type a new one to replace it'
-                  : 'remote sudo password'
-              }
-              className="w-full rounded border border-border bg-surface px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
-            />
-          </div>
+          </Section>
 
           {isNew ? (
-            <p className="text-xs text-slate-500">Save the profile, then assign a built image and agents.</p>
+            <Hint>Save the profile, then assign a built image and agents.</Hint>
           ) : (
             <>
               {status && (
-                <div className="flex items-center gap-1 text-xs text-slate-500">
-                  <Users size={13} /> {status.assigned_agents.length} agent(s) assigned · network{' '}
-                  <code>{draft.network}</code> — pick <code>host</code> for LAN access.
+                <div className="flex items-center gap-1.5 px-1 text-[11px] text-slate-500">
+                  <Users size={12} /> {status.assigned_agents.length} agent(s) assigned · network{' '}
+                  <code className="text-slate-400">{draft.network}</code> — pick{' '}
+                  <code className="text-slate-400">host</code> for LAN access.
                 </div>
               )}
 
@@ -588,46 +640,34 @@ function fmtDate(s: string | null): string {
   return isNaN(d.getTime()) ? s : d.toLocaleString();
 }
 
-/** Colour for a container's docker state. */
-function stateTone(state: string): string {
-  if (state === 'running') return 'text-emerald-400 border-emerald-900 bg-emerald-950/40';
-  if (state === 'absent') return 'text-slate-500 border-border bg-surface';
-  if (state === 'exited' || state === 'created') return 'text-slate-400 border-slate-700 bg-surface';
-  return 'text-amber-400 border-amber-900 bg-amber-950/40';
+/** Map a container's docker state onto the shared tone vocabulary. */
+function stateTone(state: string): Tone {
+  if (state === 'running') return 'ok';
+  if (state === 'absent' || state === 'exited' || state === 'created') return 'idle';
+  return 'busy';
 }
 
 /** The per-agent containers ("instances") running under this profile's image. */
 function InstancesSection({ instances }: { instances: IsolationInstance[] }) {
   return (
-    <div className="space-y-2">
-      <Label>
-        <span className="flex items-center gap-1.5">
-          <Server size={13} /> Instances ({instances.length})
-        </span>
-      </Label>
+    <Section title={`Instances (${instances.length})`} icon={<Server size={13} />}>
       {instances.length === 0 ? (
-        <p className="text-[11px] text-slate-600">No agents are assigned to this profile.</p>
+        <Hint>No agents are assigned to this profile.</Hint>
       ) : (
-        <div className="divide-y divide-border rounded border border-border">
+        <RowGroup>
           {instances.map((i) => (
-            <div key={i.agent_id} className="flex items-center gap-3 px-3 py-2 text-xs">
+            <div key={i.agent_id} className="flex items-center gap-3 px-3 py-2.5 text-xs">
               <span className="font-medium text-slate-200">{i.agent_name}</span>
-              <span
-                className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${stateTone(i.state)}`}
-              >
-                {i.state}
-              </span>
-              <span className="ml-auto flex items-center gap-1.5 font-mono text-[10px] text-slate-500">
-                <span className="rounded bg-surface px-1.5 py-0.5 uppercase tracking-wide text-slate-400">
-                  {i.volume_mode}
-                </span>
-                {i.container}
+              <StatusBadge tone={stateTone(i.state)}>{i.state}</StatusBadge>
+              <span className="ml-auto flex min-w-0 items-center gap-1.5">
+                <Chip>{i.volume_mode}</Chip>
+                <span className="truncate font-mono text-[10px] text-slate-500">{i.container}</span>
               </span>
             </div>
           ))}
-        </div>
+        </RowGroup>
       )}
-    </div>
+    </Section>
   );
 }
 
@@ -640,96 +680,54 @@ function VolumesSection({
   onDelete: (v: IsolationVolume) => void;
 }) {
   return (
-    <div className="space-y-2">
-      <Label>
-        <span className="flex items-center gap-1.5">
-          <HardDrive size={13} /> Volumes ({volumes.filter((v) => v.exists).length})
-        </span>
-      </Label>
-      <div className="divide-y divide-border rounded border border-border">
-        {volumes.map((v) => (
-          <div key={v.name} className="flex items-start gap-3 px-3 py-2 text-xs">
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
-                  {v.scope}
-                </span>
-                {v.agent_name && <span className="text-slate-300">{v.agent_name}</span>}
-                {v.exists ? (
-                  v.in_use ? (
-                    <span className="rounded border border-amber-900 bg-amber-950/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-400">
-                      in use
-                    </span>
+    <Section title={`Volumes (${volumes.filter((v) => v.exists).length})`} icon={<HardDrive size={13} />}>
+      <div className="space-y-2.5">
+        <RowGroup>
+          {volumes.map((v) => (
+            <div key={v.name} className="flex items-start gap-3 px-3 py-2.5 text-xs">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Chip>{v.scope}</Chip>
+                  {v.agent_name && <span className="text-slate-300">{v.agent_name}</span>}
+                  {v.exists ? (
+                    v.in_use ? (
+                      <StatusBadge tone="busy">in use</StatusBadge>
+                    ) : (
+                      <StatusBadge tone="idle">idle</StatusBadge>
+                    )
                   ) : (
-                    <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
-                      idle
+                    <span className="text-[10px] uppercase tracking-wider text-slate-600">
+                      not created
                     </span>
-                  )
-                ) : (
-                  <span className="text-[10px] uppercase tracking-wide text-slate-600">not created</span>
+                  )}
+                </div>
+                <div className="truncate font-mono text-[10px] text-slate-500">{v.name}</div>
+                {v.exists && (
+                  <div className="text-[10px] text-slate-600">
+                    created {fmtDate(v.created_at)}
+                    {v.in_use && ` · mounted by ${v.used_by.map((u) => u.container).join(', ')}`}
+                  </div>
                 )}
               </div>
-              <div className="truncate font-mono text-[10px] text-slate-500">{v.name}</div>
-              {v.exists && (
-                <div className="text-[10px] text-slate-600">
-                  created {fmtDate(v.created_at)}
-                  {v.in_use && ` · mounted by ${v.used_by.map((u) => u.container).join(', ')}`}
-                </div>
-              )}
+              <Button
+                variant="danger"
+                icon={<Trash2 size={12} />}
+                onClick={() => onDelete(v)}
+                disabled={!v.exists}
+                title={v.exists ? 'Delete volume' : 'Nothing to delete'}
+                className="px-2 py-1"
+              >
+                Delete
+              </Button>
             </div>
-            <button
-              onClick={() => onDelete(v)}
-              disabled={!v.exists}
-              title={v.exists ? 'Delete volume' : 'Nothing to delete'}
-              className="flex shrink-0 items-center gap-1 rounded border border-red-900 px-2 py-1 text-[11px] text-red-400 hover:bg-red-950 disabled:cursor-not-allowed disabled:border-border disabled:text-slate-700 disabled:hover:bg-transparent"
-            >
-              <Trash2 size={12} /> Delete
-            </button>
-          </div>
-        ))}
+          ))}
+        </RowGroup>
+        <Hint>
+          Deleting a volume permanently removes its <code>/workspace</code> files. An in-use volume
+          also stops its container (recreated on the agent&apos;s next run).
+        </Hint>
       </div>
-      <p className="text-[11px] text-slate-500">
-        Deleting a volume permanently removes its <code>/workspace</code> files. An in-use volume also
-        stops its container (recreated on the agent's next run).
-      </p>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const color =
-    status === 'built'
-      ? 'text-emerald-400 border-emerald-900'
-      : status === 'building' || status === 'queued'
-        ? 'text-amber-400 border-amber-900'
-        : status === 'error'
-          ? 'text-red-400 border-red-900'
-          : 'text-slate-500 border-border';
-  return (
-    <span className={`rounded border px-2 py-0.5 text-[10px] uppercase tracking-wide ${color}`}>
-      image: {status}
-    </span>
-  );
-}
-
-function Label({ children }: { children: ReactNode }) {
-  return <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{children}</div>;
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function Empty() {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-slate-600">
-      Select an isolation profile or create a new one.
-    </div>
+    </Section>
   );
 }
 
@@ -755,52 +753,44 @@ function ContainersPanel({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-6">
-      <div className="flex items-center gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-          <Layers size={16} /> Managed containers
-        </h2>
-        <span className="text-xs text-slate-500">
-          {rows.length} total{orphans.length > 0 && ` · ${orphans.length} orphaned`}
-        </span>
-        <button
-          onClick={onRefresh}
-          disabled={busy}
-          className="ml-auto flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs text-slate-300 hover:border-accent disabled:opacity-50"
-        >
-          <RefreshCw size={13} /> Refresh
-        </button>
-        {orphans.length > 0 && (
-          <button
-            onClick={onRemoveOrphans}
-            disabled={busy}
-            className="flex items-center gap-1 rounded-md border border-red-900 px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-950 disabled:opacity-50"
-          >
-            <Trash2 size={13} /> Remove {orphans.length} orphan{orphans.length > 1 ? 's' : ''}
-          </button>
-        )}
-      </div>
-      <p className="text-[11px] text-slate-500">
-        Every docker container pleiade manages, across all profiles. <b>Orphaned</b> containers no
-        longer map to live config (their agent or profile was deleted / unassigned) and are safe to
-        remove. Removing an active agent's container is fine too — it is recreated on the agent's
-        next run.
-      </p>
+      <Section
+        title="Managed containers"
+        icon={<Layers size={13} />}
+        right={
+          <>
+            <span className="text-[11px] text-slate-500">
+              {rows.length} total{orphans.length > 0 && ` · ${orphans.length} orphaned`}
+            </span>
+            <Button variant="ghost" icon={<RefreshCw size={13} />} onClick={onRefresh} disabled={busy}>
+              Refresh
+            </Button>
+            {orphans.length > 0 && (
+              <Button variant="danger" icon={<Trash2 size={13} />} onClick={onRemoveOrphans} disabled={busy}>
+                Remove {orphans.length} orphan{orphans.length > 1 ? 's' : ''}
+              </Button>
+            )}
+          </>
+        }
+      >
+        <Hint>
+          Every docker container pleiade manages, across all profiles. <b>Orphaned</b> containers no
+          longer map to live config (their agent or profile was deleted / unassigned) and are safe to
+          remove. Removing an active agent&apos;s container is fine too — it is recreated on the
+          agent&apos;s next run.
+        </Hint>
+      </Section>
 
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-600">No managed containers exist right now.</p>
+        <GlassCard>
+          <EmptyState icon={<Layers size={28} />}>No managed containers exist right now.</EmptyState>
+        </GlassCard>
       ) : (
-        <div className="divide-y divide-border rounded border border-border">
+        <RowGroup>
           {rows.map((c) => (
-            <div key={c.container} className="flex items-center gap-3 px-3 py-2 text-xs">
-              <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
-                {c.kind}
-              </span>
-              <span
-                className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${stateTone(c.state)}`}
-              >
-                {c.state}
-              </span>
-              <div className="min-w-0">
+            <div key={c.container} className="flex items-center gap-3 px-3 py-2.5 text-xs">
+              <Chip>{c.kind}</Chip>
+              <StatusBadge tone={stateTone(c.state)}>{c.state}</StatusBadge>
+              <div className="min-w-0 flex-1">
                 <div className="truncate text-slate-200">
                   {c.agent_name ?? c.isolation_name ?? <span className="text-slate-500">unknown</span>}
                   {c.isolation_name && c.agent_name && (
@@ -814,16 +804,18 @@ function ContainersPanel({
                   </div>
                 )}
               </div>
-              <button
+              <Button
+                variant="danger"
+                icon={<Trash2 size={12} />}
                 onClick={() => onRemove(c.container)}
                 disabled={busy}
-                className="ml-auto flex shrink-0 items-center gap-1 rounded border border-red-900 px-2 py-1 text-[11px] text-red-400 hover:bg-red-950 disabled:opacity-50"
+                className="px-2 py-1"
               >
-                <Trash2 size={12} /> Remove
-              </button>
+                Remove
+              </Button>
             </div>
           ))}
-        </div>
+        </RowGroup>
       )}
     </div>
   );
