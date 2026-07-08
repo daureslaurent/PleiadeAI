@@ -995,7 +995,8 @@ export const llmDebugApi = {
     api.get<LlamaCallRecord[]>('/llama-logs', { params: { limit } }).then((r) => r.data),
   get: (id: string) => api.get<LlamaCallRecord>(`/llama-logs/${id}`).then((r) => r.data),
   stats: () => api.get<LlamaLogStats>('/llama-logs/stats').then((r) => r.data),
-  purgeArchive: () => api.delete<{ deleted: number }>('/llama-logs/archive').then((r) => r.data),
+  purgeArchive: () =>
+    api.delete<{ deleted: number; scoresDeleted: number }>('/llama-logs/archive').then((r) => r.data),
 };
 
 // ── Conversation Quality Scorer ────────────────────────────────────────────

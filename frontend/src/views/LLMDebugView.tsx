@@ -62,7 +62,7 @@ export function LLMDebugView() {
   );
 
   const onPurge = async () => {
-    if (!window.confirm('Purge the entire archive? This permanently deletes all stored calls (including future fine-tuning data). The capped debug view is unaffected.')) return;
+    if (!window.confirm('Purge the entire archive? This permanently deletes all stored calls (including future fine-tuning data) AND every Conversation Quality score, which is derived from them. The capped debug view is unaffected.')) return;
     await llmDebugApi.purgeArchive();
     await hydrate();
     setStats(await llmDebugApi.stats().catch(() => null));

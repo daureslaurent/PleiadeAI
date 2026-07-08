@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { llamaLogRepository, type LlamaLogDoc } from '../../../domain/llama-logs/llama-log.repository';
+import { conversationScoreRepository } from '../../../domain/scoring/conversation-score.repository';
 import { truncateRequestImages } from '../../../inference/truncate-images';
 import type { LlamaRequestCapture } from '../../../core/event-bus/events.types';
 
@@ -65,10 +66,15 @@ llamaLogsRouter.get('/stats', async (_req, res) => {
   res.json(await llamaLogRepository.stats());
 });
 
-/** Wipe the durable archive (guarded by a UI confirm dialog). Capped debug buffer is untouched. */
+/**
+ * Wipe the durable archive (guarded by a UI confirm dialog). Capped debug buffer is untouched.
+ * Also drops every Conversation Quality score: they derive from the archive transcripts, so once
+ * those are gone the verdicts can't be inspected/re-scored/exported and would only linger as orphans.
+ */
 llamaLogsRouter.delete('/archive', async (_req, res) => {
   const deleted = await llamaLogRepository.purgeArchive();
-  res.json({ deleted });
+  const scoresDeleted = await conversationScoreRepository.deleteByRunIds();
+  res.json({ deleted, scoresDeleted });
 });
 
 /** Full archive detail for one call (raw chunks + full images). */

@@ -40,6 +40,17 @@ export const conversationScoreRepository = {
     return ConversationScoreModel.findOne({ run_id: runId }).exec();
   },
 
+  /**
+   * Delete score verdicts by run id. Called when the llama archive is purged: the transcripts the
+   * scores derive from are gone, so the verdicts can no longer be inspected, re-scored, or exported —
+   * they'd only linger as orphans. With no `runIds` it wipes every score (matches a full archive purge).
+   */
+  async deleteByRunIds(runIds?: string[]): Promise<number> {
+    const filter = runIds ? { run_id: { $in: runIds } } : {};
+    const res = await ConversationScoreModel.deleteMany(filter).exec();
+    return res.deletedCount ?? 0;
+  },
+
   /** run_ids that already have a score — used to skip them in "unscored only" batch runs. */
   async scoredRunIds(): Promise<Set<string>> {
     const rows = await ConversationScoreModel.find({}, { run_id: 1 }).lean().exec();
