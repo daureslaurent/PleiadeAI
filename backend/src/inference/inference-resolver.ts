@@ -5,8 +5,9 @@ import type { EndpointDoc } from '../domain/endpoints/endpoint.model';
 
 /**
  * The probed real context size for a specific model on this endpoint (`n_ctx`), or `0` if we never
- * probed it. `model_contexts` is a Mongoose `Map`, but a lean/plain read yields an object — handle
- * both. Takes precedence over the manually-typed `context_window` when present.
+ * probed it. `model_contexts` is stored as a plain object (keyed by real model id, dots and all);
+ * older docs may still hydrate as a Mongoose `Map`, so handle both `.get()` and object access.
+ * Takes precedence over the manually-typed `context_window` when present.
  */
 function modelContext(endpoint: EndpointDoc | null, model: string): number {
   const mc = endpoint?.model_contexts as unknown;

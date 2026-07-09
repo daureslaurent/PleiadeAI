@@ -37,8 +37,13 @@ const EndpointSchema = new Schema(
      * discovery (`/props` runtime n_ctx, else `/v1/models` `meta.n_ctx_train`). This is the honest
      * ceiling the context meter renders against; it takes precedence over the manual `context_window`
      * above. Empty until the first discovery (then falls back to `context_window`/global settings).
+     *
+     * Stored as a plain object (not a Mongoose `Map`) because model ids can contain `.`
+     * (e.g. `LFM2.5-8B-multi`), which `Map` forbids as a key — that rejection used to make the whole
+     * discovery write throw. MongoDB stores dotted field names in a nested value fine, and we never
+     * query into this object (only whole-object read + keyed lookup by real model id), so `Mixed` is safe.
      */
-    model_contexts: { type: Map, of: Number, default: {} },
+    model_contexts: { type: Schema.Types.Mixed, default: {} },
     /** Exactly one endpoint is the default (used by agents that don't pick one). Enforced on write. */
     is_default: { type: Boolean, default: false },
     /**
