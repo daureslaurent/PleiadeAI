@@ -9,7 +9,7 @@
  * `args`, and writes { "ok": true, "result": ... } to stdout. Any throw becomes
  * { "ok": false, "error": <str> } with exit code 1.
  *
- * `docker cp`'d into the agent container at /opt/pleiade/node_runner.cjs at create time.
+ * `docker cp`'d into the agent container at /opt/pleiades/node_runner.cjs at create time.
  */
 'use strict';
 const vm = require('node:vm');

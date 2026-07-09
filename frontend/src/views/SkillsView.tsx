@@ -4,7 +4,7 @@ import { AlertTriangle, Save, Trash2, Wrench, Zap } from 'lucide-react';
 import { skillsApi, type Skill } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
 import { Button, Dot, EmptyState, Input, Select, useConfirm } from '../components/ui';
-import { MONACO_OPTIONS, PLEIADE_THEME, registerPleiadeTheme } from '../lib/monacoTheme';
+import { MONACO_OPTIONS, PLEIADES_THEME, registerPleiadesTheme } from '../lib/monacoTheme';
 
 interface Draft {
   _id?: string;
@@ -187,8 +187,8 @@ export function SkillsView() {
               <div className="min-h-0 flex-1">
                 <Editor
                   height="100%"
-                  theme={PLEIADE_THEME}
-                  beforeMount={registerPleiadeTheme}
+                  theme={PLEIADES_THEME}
+                  beforeMount={registerPleiadesTheme}
                   language={draft.language === 'py' ? 'python' : 'typescript'}
                   value={draft.source}
                   onChange={(v) => setDraft({ ...draft, source: v ?? '' })}
@@ -203,8 +203,8 @@ export function SkillsView() {
               <div className="min-h-0 flex-1">
                 <Editor
                   height="100%"
-                  theme={PLEIADE_THEME}
-                  beforeMount={registerPleiadeTheme}
+                  theme={PLEIADES_THEME}
+                  beforeMount={registerPleiadesTheme}
                   language="json"
                   value={draft.schemaText}
                   onChange={(v) => setDraft({ ...draft, schemaText: v ?? '' })}

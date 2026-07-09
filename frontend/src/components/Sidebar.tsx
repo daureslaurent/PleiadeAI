@@ -156,7 +156,7 @@ export function Sidebar() {
         </div>
         {!collapsed && (
           <div className="min-w-0 leading-tight">
-            <div className="font-mono text-sm font-semibold text-slate-100">PleiadeAI</div>
+            <div className="font-mono text-sm font-semibold text-slate-100">PleiadesAI</div>
             <div className="text-[10px] uppercase tracking-wider text-slate-500">Command Center</div>
             <div className="truncate font-mono text-[10px] tracking-normal text-slate-600" title="frontend · backend build">
               v{APP_VERSION} · srv {serverVersion ?? '—'}

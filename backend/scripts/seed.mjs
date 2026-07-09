@@ -1,4 +1,4 @@
-// Seed a fresh PleiadeAI database with demo agents and a skill so the UI has content.
+// Seed a fresh PleiadesAI database with demo agents and a skill so the UI has content.
 // Usage: node scripts/seed.mjs  (targets API_URL, default http://localhost:4000)
 const API = process.env.API_URL || 'http://localhost:4000';
 const USER = process.env.AUTH_USERNAME || 'admin';

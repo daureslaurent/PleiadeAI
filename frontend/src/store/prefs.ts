@@ -5,7 +5,7 @@ import { create } from 'zustand';
  * Kept separate from the backend-backed inference `settings` so a view toggle needs no API/migration.
  */
 
-const KEY = 'pleiade.prefs.v1';
+const KEY = 'pleiades.prefs.v1';
 
 interface PersistedPrefs {
   /** Show the collapsible `<think>` reasoning block for delegated sub-agents (top-level always shows). */

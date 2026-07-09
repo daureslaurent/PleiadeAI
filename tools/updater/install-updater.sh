@@ -62,15 +62,15 @@ if ! id -nG "$RUN_USER" | tr ' ' '\n' | grep -qx docker; then
   echo "         Fix with: sudo usermod -aG docker $RUN_USER  (then re-login)" >&2
 fi
 
-SERVICE=/etc/systemd/system/pleiade-update.service
-PATH_UNIT=/etc/systemd/system/pleiade-update.path
+SERVICE=/etc/systemd/system/pleiades-update.service
+PATH_UNIT=/etc/systemd/system/pleiades-update.path
 
 # --- the oneshot service that performs the update -----------------------------
 # ExecStartPre removes the trigger first so the .path unit re-arms and a failed run
 # can't loop. The update itself runs on the host, independent of Docker.
 cat > "$SERVICE" <<EOF
 [Unit]
-Description=PleiadeAI self-update (git pull + docker compose rebuild/restart)
+Description=PleiadesAI self-update (git pull + docker compose rebuild/restart)
 After=docker.service
 Wants=docker.service
 
@@ -90,11 +90,11 @@ EOF
 # re-arms once the service removes it.
 cat > "$PATH_UNIT" <<EOF
 [Unit]
-Description=Watch for PleiadeAI update trigger
+Description=Watch for PleiadesAI update trigger
 
 [Path]
 PathExists=$TRIGGER_FILE
-Unit=pleiade-update.service
+Unit=pleiades-update.service
 
 [Install]
 WantedBy=multi-user.target
@@ -103,15 +103,15 @@ EOF
 echo "==> Wrote $SERVICE"
 echo "==> Wrote $PATH_UNIT"
 
-CHECK_SERVICE=/etc/systemd/system/pleiade-update-check.service
-CHECK_PATH_UNIT=/etc/systemd/system/pleiade-update-check.path
+CHECK_SERVICE=/etc/systemd/system/pleiades-update-check.service
+CHECK_PATH_UNIT=/etc/systemd/system/pleiades-update-check.path
 
 # --- the oneshot service that runs a read-only update check -------------------
 # check_run.sh only does `git fetch` + writes .update/status.json — it never rebuilds
 # anything. ExecStartPre removes the trigger so the .path unit re-arms.
 cat > "$CHECK_SERVICE" <<EOF
 [Unit]
-Description=PleiadeAI update check (git fetch + write status.json)
+Description=PleiadesAI update check (git fetch + write status.json)
 
 [Service]
 Type=oneshot
@@ -127,11 +127,11 @@ EOF
 # --- the path unit that watches for the check trigger -------------------------
 cat > "$CHECK_PATH_UNIT" <<EOF
 [Unit]
-Description=Watch for PleiadeAI update-check trigger
+Description=Watch for PleiadesAI update-check trigger
 
 [Path]
 PathExists=$CHECK_TRIGGER_FILE
-Unit=pleiade-update-check.service
+Unit=pleiades-update-check.service
 
 [Install]
 WantedBy=multi-user.target
@@ -141,13 +141,13 @@ echo "==> Wrote $CHECK_SERVICE"
 echo "==> Wrote $CHECK_PATH_UNIT"
 
 systemctl daemon-reload
-systemctl enable --now pleiade-update.path
-systemctl enable --now pleiade-update-check.path
+systemctl enable --now pleiades-update.path
+systemctl enable --now pleiades-update-check.path
 
 echo "==> Installed and watching. Status:"
-systemctl --no-pager status pleiade-update.path || true
-systemctl --no-pager status pleiade-update-check.path || true
+systemctl --no-pager status pleiades-update.path || true
+systemctl --no-pager status pleiades-update-check.path || true
 echo
 echo "Done. Enable the toggle in Settings → System & Updates; the app then checks for"
 echo "updates periodically and 'Update app' applies them."
-echo "Update logs: $LOG_FILE   (or: journalctl -u pleiade-update.service)"
+echo "Update logs: $LOG_FILE   (or: journalctl -u pleiades-update.service)"

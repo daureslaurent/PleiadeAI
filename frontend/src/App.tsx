@@ -27,7 +27,7 @@ function PageHeader() {
   return (
     <header className="glass flex h-14 shrink-0 items-center gap-2 border-b px-6">
       {Icon && <Icon size={18} className="text-slate-400" />}
-      <h1 className="text-sm font-semibold text-slate-100">{current?.label ?? 'PleiadeAI'}</h1>
+      <h1 className="text-sm font-semibold text-slate-100">{current?.label ?? 'PleiadesAI'}</h1>
     </header>
   );
 }

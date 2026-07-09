@@ -15,7 +15,7 @@ A top-level agent that controls a Linux (MATE) desktop through the visual tools
 
 ## Prerequisites for it to actually work
 - **Isolation profile → visual image.** Assign the agent an isolation profile whose image has the **Visual desktop** toggle on (the Xvfb + x11vnc + MATE image). Without it, the `visual_*` tools return an isolation error.
-  - MATE users: the boot script auto-detects `mate-session`/`marco`; force it with `ENV PLEIADE_VISUAL_WM=marco` in the image Dockerfile if needed.
+  - MATE users: the boot script auto-detects `mate-session`/`marco`; force it with `ENV PLEIADES_VISUAL_WM=marco` in the image Dockerfile if needed.
 - **Vision endpoint.** In **Settings → Vision endpoint**, select an endpoint whose model supports vision (llama.cpp launched with `--mmproj`, e.g. Qwen2.5‑VL). `visual_screenshot` sends the screenshot there for analysis; without it, screenshots can't be interpreted.
 
 ## Watch / take over

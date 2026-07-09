@@ -1,4 +1,4 @@
-# PleiadeAI: Frontend Command Center & WebSockets
+# PleiadesAI: Frontend Command Center & WebSockets
 
 ## 1. Developer Interface Design
 The frontend uses Next.js or Vite with Tailwind CSS and `shadcn/ui`, built into an optimized production Nginx container. It utilizes a high-density, wide-layout dark mode designed for clear data parsing.

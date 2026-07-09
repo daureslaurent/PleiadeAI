@@ -1,11 +1,11 @@
 # Update System Plan (ported from cryptoBot)
 
-Self-update + update-check for PleiadeAI, adapted from cryptoBot's design.
+Self-update + update-check for PleiadesAI, adapted from cryptoBot's design.
 
 ## Decisions
 - **Trigger mechanism:** systemd host watcher + bind-mounted `./.update` trigger files
   (backend never runs git/docker for updates; the update survives `docker compose down`).
-  Note: PleiadeAI's backend *does* mount `/var/run/docker.sock` for agent isolation, but we
+  Note: PleiadesAI's backend *does* mount `/var/run/docker.sock` for agent isolation, but we
   still use the host watcher because a container can't reliably rebuild+swap itself.
 - **Tracked branch:** `master`.
 - **Scope:** update-check (pin + commits list) · update button + live log overlay ·
@@ -22,11 +22,11 @@ mount being present & writable (readiness check). Same master switch as cryptoBo
   `.update/status.json` (behindBy, shas, version strings, base64 commit fields).
 - `update_run.sh` — fetch master, `docker compose build` (old stack keeps serving),
   `docker compose up -d`, `docker image prune -f` (dangling only — leaves tagged
-  `pleiade_agent*` isolation images alone).
+  `pleiades_agent*` isolation images alone).
 
 ## systemd units (tools/updater/install-updater.sh)
-- `pleiade-update.path`/`.service` → `update_run.sh`
-- `pleiade-update-check.path`/`.service` → `check_run.sh`
+- `pleiades-update.path`/`.service` → `update_run.sh`
+- `pleiades-update-check.path`/`.service` → `check_run.sh`
 - Both run as the repo owner; `ExecStartPre=rm <trigger>` re-arms the `.path` unit.
 - Logs appended to `.update/update.log`.
 

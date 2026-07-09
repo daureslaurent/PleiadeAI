@@ -28,7 +28,7 @@ maintenanceRouter.get('/export', async (req, res) => {
   }
   const bundle = await dataResetService.exportData(categories);
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', `attachment; filename="pleiade-data-backup-${Date.now()}.json"`);
+  res.setHeader('Content-Disposition', `attachment; filename="pleiades-data-backup-${Date.now()}.json"`);
   res.send(JSON.stringify(bundle));
 });
 

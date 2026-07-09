@@ -6,7 +6,7 @@ object from stdin — { "source": <str>, "args": <obj> } — where `source` defi
 `run(args)` function. The return value is serialised to stdout as { "ok": true, "result": ... };
 any error becomes { "ok": false, "error": <str> } with a non-zero exit code.
 
-This file is `docker cp`'d into the agent container at /opt/pleiade/py_runner.py at create time,
+This file is `docker cp`'d into the agent container at /opt/pleiades/py_runner.py at create time,
 so Python skills run with the exact same protocol whether isolated or not.
 """
 import json

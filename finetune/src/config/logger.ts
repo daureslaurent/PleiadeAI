@@ -9,7 +9,7 @@ import { env, isProduction } from './env';
  */
 export const rootLogger: Logger = pino({
   level: env.LOG_LEVEL,
-  base: { service: 'pleiade-finetune' },
+  base: { service: 'pleiades-finetune' },
   timestamp: pino.stdTimeFunctions.isoTime,
   formatters: {
     level: (label) => ({ level: label }),

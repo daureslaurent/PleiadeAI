@@ -238,7 +238,7 @@ function UpdateOverlay({ onClose }: { onClose: () => void }) {
               ? 'Update failed'
               : phase === 'waiting'
                 ? 'Rebuilding — waiting for the stack to come back…'
-                : 'Updating PleiadeAI…'}
+                : 'Updating PleiadesAI…'}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden p-4">

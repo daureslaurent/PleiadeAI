@@ -178,8 +178,8 @@ class DockerService {
   }
 
   /**
-   * List every pleiade-managed container (agent containers, tagged `pleiade.agent=<agentId>`, and
-   * gluetun VPN containers, tagged `pleiade.isolation=<isolationId>`) regardless of run state. Used
+   * List every pleiades-managed container (agent containers, tagged `pleiades.agent=<agentId>`, and
+   * gluetun VPN containers, tagged `pleiades.isolation=<isolationId>`) regardless of run state. Used
    * by the isolation overview to surface running + stale/orphaned instances for cleanup. Two `ps`
    * calls because multiple `--filter label=` are AND-ed, not OR-ed.
    */
@@ -193,7 +193,7 @@ class DockerService {
         '--filter',
         `label=${label}`,
         '--format',
-        '{{.Names}}\t{{.State}}\t{{.Label "pleiade.agent"}}\t{{.Label "pleiade.isolation"}}',
+        '{{.Names}}\t{{.State}}\t{{.Label "pleiades.agent"}}\t{{.Label "pleiades.isolation"}}',
       ]);
       if (res.exitCode !== 0) return [];
       return res.stdout
@@ -206,8 +206,8 @@ class DockerService {
         });
     };
     const [agents, gluetuns] = await Promise.all([
-      query('pleiade.agent'),
-      query('pleiade.isolation'),
+      query('pleiades.agent'),
+      query('pleiades.isolation'),
     ]);
     // De-dupe by container name (a container can't carry both labels today, but be safe).
     const byName = new Map<string, { name: string; state: string; agentId?: string; isolationId?: string }>();
@@ -303,7 +303,7 @@ class DockerService {
     const argv = [
       'create',
       '--name', opts.container,
-      '--label', `pleiade.agent=${opts.agentId}`,
+      '--label', `pleiades.agent=${opts.agentId}`,
       '-v', `${opts.volume}:${opts.workdir}`,
       '-w', opts.workdir,
       '--cpus', opts.cpus,
@@ -335,7 +335,7 @@ class DockerService {
     const argv = [
       'create',
       '--name', opts.container,
-      '--label', `pleiade.isolation=${opts.isolationId}`,
+      '--label', `pleiades.isolation=${opts.isolationId}`,
       '--cap-add', 'NET_ADMIN',
       '--device', '/dev/net/tun:/dev/net/tun',
       ...opts.envArgs,

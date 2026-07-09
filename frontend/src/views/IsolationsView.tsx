@@ -706,9 +706,9 @@ export function IsolationsView() {
           >
             <div className="space-y-2.5">
               <Hint>
-                Planted in each agent container at <code>/opt/pleiade/sudo_pass</code> (chmod 600) with
+                Planted in each agent container at <code>/opt/pleiades/sudo_pass</code> (chmod 600) with
                 a <code>SUDO_ASKPASS</code> helper, so the agent can escalate on a remote host it SSHes
-                into — e.g. <code>ssh host &apos;sudo -S -p &quot;&quot; cmd&apos; &lt; /opt/pleiade/sudo_pass</code>.
+                into — e.g. <code>ssh host &apos;sudo -S -p &quot;&quot; cmd&apos; &lt; /opt/pleiades/sudo_pass</code>.
                 Encrypted at rest; never shown again after saving.
               </Hint>
               <Input
@@ -848,7 +848,7 @@ function VolumesSection({
 }
 
 /**
- * Global overview of every pleiade-managed docker container (agent + gluetun) across all profiles,
+ * Global overview of every pleiades-managed docker container (agent + gluetun) across all profiles,
  * with orphans flagged for cleanup and a per-row / bulk remove.
  */
 function ContainersPanel({
@@ -889,7 +889,7 @@ function ContainersPanel({
         }
       >
         <Hint>
-          Every docker container pleiade manages, across all profiles. <b>Orphaned</b> containers no
+          Every docker container pleiades manages, across all profiles. <b>Orphaned</b> containers no
           longer map to live config (their agent or profile was deleted / unassigned) and are safe to
           remove. Removing an active agent&apos;s container is fine too — it is recreated on the
           agent&apos;s next run.

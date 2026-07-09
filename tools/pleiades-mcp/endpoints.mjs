@@ -1,6 +1,6 @@
 /**
- * The read-only surface of the PleiadeAI API, described once and consumed twice: the MCP server
- * turns each entry into a tool (`pleiade_<name>`), and `scripts/prod.mjs` turns each into a
+ * The read-only surface of the PleiadesAI API, described once and consumed twice: the MCP server
+ * turns each entry into a tool (`pleiades_<name>`), and `scripts/prod.mjs` turns each into a
  * subcommand. Adding a capability means adding one entry here.
  *
  * `args` is a flat map of argument name → { type, description, required? }. `resolve(args)` returns
@@ -47,7 +47,7 @@ export const ENDPOINTS = [
   {
     name: 'llama_log',
     description: 'One inference call in full, by its call id.',
-    args: { call_id: { type: 'string', description: 'The call_id from pleiade_llama_logs', required: true } },
+    args: { call_id: { type: 'string', description: 'The call_id from pleiades_llama_logs', required: true } },
     resolve: (a) => ({ path: `/api/llama-logs/${a.call_id}` }),
   },
   {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mirror a prod PleiadeAI instance into the local one.
+ * Mirror a prod PleiadesAI instance into the local one.
  *
  * Reads prod through the read-only API key (`GET /api/transfer/export/clone`) and writes locally
  * through the operator REST API (`POST /api/transfer/import/clone`). The import is **destructive**:
@@ -19,15 +19,15 @@
  * Qdrant vectors. Agents relink to a same-named local endpoint, else the fleet default.
  *
  * Config (environment or the gitignored `.env.prod`):
- *   PLEIADE_API_URL / PLEIADE_API_KEY            — the prod source (read-only key)
- *   PLEIADE_LOCAL_URL                            — target, default http://localhost:8374
- *   PLEIADE_LOCAL_USERNAME / PLEIADE_LOCAL_PASSWORD — target operator login (AUTH_* in its .env)
+ *   PLEIADES_API_URL / PLEIADES_API_KEY            — the prod source (read-only key)
+ *   PLEIADES_LOCAL_URL                            — target, default http://localhost:8374
+ *   PLEIADES_LOCAL_USERNAME / PLEIADES_LOCAL_PASSWORD — target operator login (AUTH_* in its .env)
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
-import { apiGet, envValue, loadConfig, PleiadeError } from '../tools/pleiade-mcp/client.mjs';
+import { apiGet, envValue, loadConfig, PleiadesError } from '../tools/pleiades-mcp/client.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DUMP_DIR = path.join(REPO_ROOT, '.dumps');
@@ -47,7 +47,7 @@ function parseFlags(argv) {
 }
 
 function localTargetUrl() {
-  return envValue('PLEIADE_LOCAL_URL', 'http://localhost:8374').replace(/\/+$/, '');
+  return envValue('PLEIADES_LOCAL_URL', 'http://localhost:8374').replace(/\/+$/, '');
 }
 
 /**
@@ -57,11 +57,11 @@ function localTargetUrl() {
  * host we're about to reject as an unsafe target.
  */
 async function localSession(baseUrl) {
-  const username = envValue('PLEIADE_LOCAL_USERNAME');
-  const password = envValue('PLEIADE_LOCAL_PASSWORD');
+  const username = envValue('PLEIADES_LOCAL_USERNAME');
+  const password = envValue('PLEIADES_LOCAL_PASSWORD');
   if (!username || !password) {
     throw new Error(
-      'Missing PLEIADE_LOCAL_USERNAME / PLEIADE_LOCAL_PASSWORD. These are the target instance\'s ' +
+      'Missing PLEIADES_LOCAL_USERNAME / PLEIADES_LOCAL_PASSWORD. These are the target instance\'s ' +
         'AUTH_USERNAME / AUTH_PASSWORD — put them in .env.prod, or export them for this run.',
     );
   }
@@ -73,7 +73,7 @@ async function localSession(baseUrl) {
   }).catch((err) => {
     throw new Error(`Cannot reach the local instance at ${baseUrl}: ${err.message}`);
   });
-  if (!res.ok) throw new Error(`Local login rejected (${res.status}) — check PLEIADE_LOCAL_USERNAME/PASSWORD.`);
+  if (!res.ok) throw new Error(`Local login rejected (${res.status}) — check PLEIADES_LOCAL_USERNAME/PASSWORD.`);
 
   const { token } = await res.json();
   return { baseUrl, token };
@@ -89,7 +89,7 @@ function assertSafeTarget(prodUrl, localUrl, force) {
   const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local');
   if (!isLoopback && !force) {
     throw new Error(
-      `PLEIADE_LOCAL_URL (${localUrl}) is not a loopback address. If you really mean to REPLACE the ` +
+      `PLEIADES_LOCAL_URL (${localUrl}) is not a loopback address. If you really mean to REPLACE the ` +
         `data on that host, re-run with --force.`,
     );
   }
@@ -101,7 +101,7 @@ async function fetchBundle(logs) {
   try {
     return await apiGet('/api/transfer/export/clone', query, { timeoutMs: 300_000 });
   } catch (err) {
-    if (err instanceof PleiadeError && err.status === 404) {
+    if (err instanceof PleiadesError && err.status === 404) {
       throw new Error(
         'Prod has no GET /api/transfer/export/clone — redeploy the backend there before cloning.',
       );
@@ -112,7 +112,7 @@ async function fetchBundle(logs) {
 
 function saveBundle(bundle, out) {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  const file = out ?? path.join(DUMP_DIR, `pleiade-clone-${stamp}.json`);
+  const file = out ?? path.join(DUMP_DIR, `pleiades-clone-${stamp}.json`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(bundle));
   return file;
@@ -189,7 +189,7 @@ async function main() {
     console.log(`Saved snapshot → ${path.relative(REPO_ROOT, saved)}`);
   }
 
-  if (bundle.type !== 'pleiade-clone') throw new Error(`Not a pleiade-clone bundle (got "${bundle.type}").`);
+  if (bundle.type !== 'pleiades-clone') throw new Error(`Not a pleiades-clone bundle (got "${bundle.type}").`);
 
   printPlan(bundle, await localCounts(local));
 
@@ -212,6 +212,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`\n${err instanceof PleiadeError ? err.message : err.message ?? err}`);
+  console.error(`\n${err instanceof PleiadesError ? err.message : err.message ?? err}`);
   process.exitCode = 1;
 });

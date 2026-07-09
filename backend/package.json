@@ -1,8 +1,8 @@
 {
-  "name": "pleiade-backend",
+  "name": "pleiades-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "PleiadeAI stateless multi-agent orchestration backend",
+  "description": "PleiadesAI stateless multi-agent orchestration backend",
   "type": "commonjs",
   "main": "dist/index.js",
   "engines": {

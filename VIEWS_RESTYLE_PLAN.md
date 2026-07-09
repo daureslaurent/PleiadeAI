@@ -33,15 +33,15 @@ glass views.
    `{ text, created_at, source: 'auto_turn'|'remember_tool', session_id?, tags? }` (see
    `backend/src/domain/memory/agent-memory.service.ts:29`) — render those fields, raw JSON behind a
    disclosure.
-6. **Monaco gets a `pleiade-dark` theme** with a transparent background over a `bg-black/25` well.
+6. **Monaco gets a `pleiades-dark` theme** with a transparent background over a `bg-black/25` well.
 7. **Images / Isolation keep their single-column flow**, regrouped into labelled glass strata
    (the `FineTuningView` pattern). No IA change.
 
 ## Work items
 
 ### 1. `frontend/src/lib/monacoTheme.ts` (new)
-`pleiade-dark`: `editor.background: #00000000`, accent cursor, palette-matched token colors.
-Exported `registerPleiadeTheme(monaco)` + `MONACO_OPTIONS` defaults (no minimap, 12px, no
+`pleiades-dark`: `editor.background: #00000000`, accent cursor, palette-matched token colors.
+Exported `registerPleiadesTheme(monaco)` + `MONACO_OPTIONS` defaults (no minimap, 12px, no
 scroll-beyond-last-line). Applied in `SkillsView` (2×) and `ImagesView` (1×).
 
 ### 2. `frontend/src/components/ui/` (new)

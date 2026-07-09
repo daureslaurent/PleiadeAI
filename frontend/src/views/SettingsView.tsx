@@ -536,7 +536,7 @@ function BackupTransfer() {
           ? await transferApi.exportConfig(ids, all)
           : await transferApi.exportMemory(ids, all);
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadBlob(blob, `pleiade-${kind}-${stamp}.json`);
+      downloadBlob(blob, `pleiades-${kind}-${stamp}.json`);
       setNote({ kind: 'ok', text: `${kind === 'config' ? 'Config' : 'Memory'} exported (${ids.length} agent${ids.length === 1 ? '' : 's'}).` });
     } catch {
       setNote({ kind: 'err', text: 'Export failed.' });
@@ -559,8 +559,8 @@ function BackupTransfer() {
       setNote({ kind: 'err', text: 'That file is not valid JSON.' });
       return;
     }
-    if ((bundle as { type?: string })?.type !== 'pleiade-config') {
-      setNote({ kind: 'err', text: 'Not a Pleiade config file (expected a pleiade-config export).' });
+    if ((bundle as { type?: string })?.type !== 'pleiades-config') {
+      setNote({ kind: 'err', text: 'Not a Pleiades config file (expected a pleiades-config export).' });
       return;
     }
     const agentCount = (bundle as { agents?: unknown[] }).agents?.length ?? 0;
@@ -956,7 +956,7 @@ function ClearDataPanel() {
         setBusy('backup');
         const blob = await maintenanceApi.exportBlob(CLEAR_CATEGORIES);
         const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-        downloadBlob(blob, `pleiade-data-backup-${stamp}.json`);
+        downloadBlob(blob, `pleiades-data-backup-${stamp}.json`);
       }
       setBusy('clear');
       const summary = await maintenanceApi.clear(CLEAR_CATEGORIES);

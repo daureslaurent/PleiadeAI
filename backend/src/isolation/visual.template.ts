@@ -45,7 +45,7 @@ export const VISUAL_CONTROL_LOCK = `${VISUAL_DIR}/human_control`;
  *
  * `socat` is what the backend relay exec's into; `pyautogui`/`pillow` back the Phase 4 driver skill.
  */
-export const VISUAL_DOCKERFILE_SNIPPET = `# --- PleiadeAI visual layer (Xvfb desktop + loopback VNC, driven by the visual_* skill) ---
+export const VISUAL_DOCKERFILE_SNIPPET = `# --- PleiadesAI visual layer (Xvfb desktop + loopback VNC, driven by the visual_* skill) ---
 RUN apt-get update && apt-get install -y --no-install-recommends \\
       xvfb x11vnc fluxbox xdotool scrot socat procps \\
       x11-utils x11-xserver-utils fonts-dejavu-core \\
@@ -87,14 +87,14 @@ export function assertVisualLayer(dockerfile: string): string[] {
  *  - exit 1 + `VISUAL_TIMEOUT` on stderr → stack did not come up within the deadline
  */
 export const VISUAL_BOOT_SCRIPT = `#!/usr/bin/env bash
-# PleiadeAI visual stack boot — idempotent, detached daemons. Safe to call repeatedly.
+# PleiadesAI visual stack boot — idempotent, detached daemons. Safe to call repeatedly.
 set -u
 
 VDIR=${JSON.stringify(VISUAL_DIR)}
 DNUM=${JSON.stringify(VISUAL_DISPLAY)}
 SOCK=${JSON.stringify(VISUAL_VNC_SOCK)}
 PASSFILE=${JSON.stringify(VISUAL_PASS_FILE)}
-GEOMETRY="\${PLEIADE_VISUAL_GEOMETRY:-1280x800x24}"
+GEOMETRY="\${PLEIADES_VISUAL_GEOMETRY:-1280x800x24}"
 
 mkdir -p "$VDIR"
 
@@ -151,9 +151,9 @@ done
 
 # Start a window manager / desktop session (once) so windows get decorations and xdotool /
 # visual_windows can manage them. Prefer a full desktop session (MATE/XFCE), then a bare WM. Override
-# with the PLEIADE_VISUAL_WM env var — a full command is allowed (e.g. "mate-session", "marco",
-# "startxfce4", or your own launcher). Set it in the image Dockerfile: ENV PLEIADE_VISUAL_WM=marco.
-WM_CMD="\${PLEIADE_VISUAL_WM:-}"
+# with the PLEIADES_VISUAL_WM env var — a full command is allowed (e.g. "mate-session", "marco",
+# "startxfce4", or your own launcher). Set it in the image Dockerfile: ENV PLEIADES_VISUAL_WM=marco.
+WM_CMD="\${PLEIADES_VISUAL_WM:-}"
 if [ -z "$WM_CMD" ]; then
   for cand in mate-session marco xfce4-session openbox fluxbox; do
     if command -v "$cand" >/dev/null 2>&1; then WM_CMD="$cand"; break; fi

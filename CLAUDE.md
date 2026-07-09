@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What PleiadeAI is
+## What PleiadesAI is
 
 A single-operator, multi-agent AI orchestration "command center". A stateless Node/TypeScript
 backend runs agents that stream tokens from a remote `llama.cpp` server, call tools/skills in a
@@ -10,7 +10,7 @@ sandbox, delegate to each other via `ask_agent` hops, recall memories from Qdran
 autonomous cron jobs. A React/Vite frontend renders the live event stream (chat + a debugger drawer
 showing tool calls, reasoning `<think>` blocks, and cross-agent hops).
 
-The `NN-*.md` files at the repo root (`01-PLEIADE_ARCHITECTURE_AND_DATA.md`, etc.) are the design
+The `NN-*.md` files at the repo root (`01-PLEIADES_ARCHITECTURE_AND_DATA.md`, etc.) are the design
 spec; source comments frequently reference their sections (e.g. "spec §4").
 
 ## Commands
@@ -86,7 +86,7 @@ Key seams:
   family it unlocks — currently `agents:write` → `/api/agents`). Keys are always blocked from
   `/api/api-keys` by `requireOperator`, and have their response bodies scrubbed by `redact.ts` —
   `GET /api/endpoints` and `GET /api/settings` otherwise return inference credentials in plaintext.
-  Keys can't open a websocket: the WS handshake calls `verifyToken` directly. `tools/pleiade-mcp/`
+  Keys can't open a websocket: the WS handshake calls `verifyToken` directly. `tools/pleiades-mcp/`
   consumes this surface (MCP server + `scripts/prod.mjs` CLI).
 
 Layout: `domain/<entity>/` holds each entity's Mongoose model + repository/service; HTTP routes are

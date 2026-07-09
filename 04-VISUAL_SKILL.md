@@ -22,7 +22,7 @@ Design decisions (see `VISUAL_SKILL_PLAN.md` §2/§4 for the trade-offs):
   container, planted and booted on demand like the skill harnesses — never baked into an image
   entrypoint. So the `visual_*` skill drives the same display locally, no cross-container X forwarding.
 - **Relay over the Docker socket, not the network.** x11vnc serves RFB on a **Unix socket**
-  (`/opt/pleiade/visual/vnc.sock`) — no TCP port on any network. The backend streams it with
+  (`/opt/pleiades/visual/vnc.sock`) — no TCP port on any network. The backend streams it with
   `docker exec -i <c> socat - UNIX-CONNECT:<sock>`, so the relay is identical under `host`, `bridge`,
   and `vpn` network modes and can never collide on a port.
 - **Single authenticated ingress.** The browser's noVNC opens a raw binary WebSocket at
@@ -61,7 +61,7 @@ Design decisions (see `VISUAL_SKILL_PLAN.md` §2/§4 for the trade-offs):
 - The WebSocket relay requires a valid JWT (same secret as the socket.io handshake).
 - x11vnc is additionally password-protected; the password is generated per container lifetime, planted
   mode-600 at runtime (never in image layers), and rotates whenever the container restarts.
-- Human takeover writes `/opt/pleiade/visual/human_control`; `visual_act` refuses while it exists, so
+- Human takeover writes `/opt/pleiades/visual/human_control`; `visual_act` refuses while it exists, so
   the agent and operator never fight over input.
 
 ## Limitations / notes

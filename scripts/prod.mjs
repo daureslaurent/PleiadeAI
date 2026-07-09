@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Read-only CLI against a deployed PleiadeAI instance. Same surface as the MCP server
- * (`tools/pleiade-mcp/`), for shell use and as a fallback when MCP isn't wired up.
+ * Read-only CLI against a deployed PleiadesAI instance. Same surface as the MCP server
+ * (`tools/pleiades-mcp/`), for shell use and as a fallback when MCP isn't wired up.
  *
  *   node scripts/prod.mjs                          # list subcommands
  *   node scripts/prod.mjs agents
@@ -9,10 +9,10 @@
  *   node scripts/prod.mjs llama_logs --limit=25
  *   node scripts/prod.mjs get --path=/api/isolations
  *
- * Config: PLEIADE_API_URL + PLEIADE_API_KEY, from the environment or the repo's `.env.prod`.
+ * Config: PLEIADES_API_URL + PLEIADES_API_KEY, from the environment or the repo's `.env.prod`.
  */
-import { apiGet, PleiadeError } from '../tools/pleiade-mcp/client.mjs';
-import { ENDPOINTS } from '../tools/pleiade-mcp/endpoints.mjs';
+import { apiGet, PleiadesError } from '../tools/pleiades-mcp/client.mjs';
+import { ENDPOINTS } from '../tools/pleiades-mcp/endpoints.mjs';
 
 const byName = new Map(ENDPOINTS.map((e) => [e.name, e]));
 
@@ -41,7 +41,7 @@ function parseArgs(argv, endpoint) {
 }
 
 function usage() {
-  console.log('Read-only access to a PleiadeAI instance.\n\nUsage: node scripts/prod.mjs <command> [--key=value ...]\n');
+  console.log('Read-only access to a PleiadesAI instance.\n\nUsage: node scripts/prod.mjs <command> [--key=value ...]\n');
   const width = Math.max(...ENDPOINTS.map((e) => e.name.length));
   for (const e of ENDPOINTS) {
     console.log(`  ${e.name.padEnd(width)}  ${e.description}`);
@@ -73,6 +73,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err instanceof PleiadeError ? err.message : `${err.message ?? err}`);
+  console.error(err instanceof PleiadesError ? err.message : `${err.message ?? err}`);
   process.exitCode = 1;
 });

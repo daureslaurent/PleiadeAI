@@ -66,7 +66,7 @@ const ImageSchema = new Schema(
 
     /**
      * Visual desktop resolution (the Xvfb/VNC screen size). Null → the boot script default
-     * (1280×800). Injected as `PLEIADE_VISUAL_GEOMETRY=<w>x<h>x24` when the desktop boots, so a change
+     * (1280×800). Injected as `PLEIADES_VISUAL_GEOMETRY=<w>x<h>x24` when the desktop boots, so a change
      * applies on the next desktop start (no rebuild). A change invalidates any click calibration.
      */
     visual_width: { type: Number, default: null },

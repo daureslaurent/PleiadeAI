@@ -8,7 +8,7 @@ const REPO_ROOT = path.resolve(HERE, '..', '..');
 /**
  * Minimal `KEY=value` reader for `.env.prod` (gitignored). Avoids a `dotenv` dependency so both the
  * MCP server and the CLI can run with a bare `node` and no install step. Real environment variables
- * always win, so `PLEIADE_API_URL=… node scripts/prod.mjs` overrides the file.
+ * always win, so `PLEIADES_API_URL=… node scripts/prod.mjs` overrides the file.
  */
 function loadEnvFile() {
   const file = path.join(REPO_ROOT, '.env.prod');
@@ -39,11 +39,11 @@ export function envValue(name, fallback = undefined) {
 /** Resolve `{ baseUrl, apiKey }`, or throw an operator-readable error explaining what's missing. */
 export function loadConfig() {
   const file = loadEnvFile();
-  const baseUrl = process.env.PLEIADE_API_URL || file.PLEIADE_API_URL;
-  const apiKey = process.env.PLEIADE_API_KEY || file.PLEIADE_API_KEY;
+  const baseUrl = process.env.PLEIADES_API_URL || file.PLEIADES_API_URL;
+  const apiKey = process.env.PLEIADES_API_KEY || file.PLEIADES_API_KEY;
 
   if (!baseUrl || !apiKey) {
-    const missing = [!baseUrl && 'PLEIADE_API_URL', !apiKey && 'PLEIADE_API_KEY'].filter(Boolean);
+    const missing = [!baseUrl && 'PLEIADES_API_URL', !apiKey && 'PLEIADES_API_KEY'].filter(Boolean);
     throw new Error(
       `Missing ${missing.join(' and ')}. Set them in ${path.join(REPO_ROOT, '.env.prod')} ` +
         `(see .env.prod.example) or in the environment. Mint a key in the app under Settings → API Keys.`,
@@ -52,10 +52,10 @@ export function loadConfig() {
   return { baseUrl: baseUrl.replace(/\/+$/, ''), apiKey };
 }
 
-export class PleiadeError extends Error {
+export class PleiadesError extends Error {
   constructor(message, status) {
     super(message);
-    this.name = 'PleiadeError';
+    this.name = 'PleiadesError';
     this.status = status;
   }
 }
@@ -80,8 +80,8 @@ export async function apiGet(pathname, query = {}, { timeoutMs = 30_000 } = {}) 
   try {
     res = await fetch(url, { headers: { 'X-API-Key': apiKey }, signal: controller.signal });
   } catch (err) {
-    if (err.name === 'AbortError') throw new PleiadeError(`GET ${url.pathname} timed out after ${timeoutMs}ms`);
-    throw new PleiadeError(`GET ${url.pathname} failed: ${err.message}`);
+    if (err.name === 'AbortError') throw new PleiadesError(`GET ${url.pathname} timed out after ${timeoutMs}ms`);
+    throw new PleiadesError(`GET ${url.pathname} failed: ${err.message}`);
   } finally {
     clearTimeout(timer);
   }
@@ -95,7 +95,7 @@ export async function apiGet(pathname, query = {}, { timeoutMs = 30_000 } = {}) 
     } catch {
       /* not JSON — keep the raw snippet */
     }
-    throw new PleiadeError(`GET ${url.pathname} → ${res.status}: ${detail}`, res.status);
+    throw new PleiadesError(`GET ${url.pathname} → ${res.status}: ${detail}`, res.status);
   }
 
   try {

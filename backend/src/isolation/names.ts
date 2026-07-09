@@ -53,6 +53,6 @@ export function agentIdFromContainerName(name: string): string | null {
 }
 
 /** Directory inside the agent container that holds the skill harnesses (`docker cp`'d at create). */
-export const HARNESS_DIR = '/opt/pleiade';
+export const HARNESS_DIR = '/opt/pleiades';
 /** Working directory (backed by the persistent volume) for bash + skills inside the container. */
 export const WORKSPACE_DIR = '/workspace';

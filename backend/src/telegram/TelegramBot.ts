@@ -269,7 +269,7 @@ class TelegramBot {
     ];
     await telegramClient.sendMessage(
       chatId,
-      '*PleiadeAI command center*\nPick an agent, then just send messages to chat with it.',
+      '*PleiadesAI command center*\nPick an agent, then just send messages to chat with it.',
       { keyboard },
     );
   }

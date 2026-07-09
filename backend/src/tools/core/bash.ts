@@ -12,7 +12,7 @@ const MAX_OUTPUT_CHARS = 30_000;
 
 /**
  * `bash` — terminal tool matching OpenCode's name and argument schema so OpenCode-tuned models
- * emit compatible tool calls. Executes a shell command inside the `pleiade_backend` container
+ * emit compatible tool calls. Executes a shell command inside the `pleiades_backend` container
  * (spec §3: all execution is bounded to the container; reach external hosts via network/SSH).
  *
  * Each call is a fresh non-interactive `bash -c` (no persistent session state between calls).

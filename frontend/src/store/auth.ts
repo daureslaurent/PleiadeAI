@@ -13,20 +13,20 @@ interface AuthState {
  * workspace mounts, every request 401s, and the operator is stranded with no login window.
  */
 function readValidToken(): string | null {
-  const token = localStorage.getItem('pleiade_token');
+  const token = localStorage.getItem('pleiades_token');
   if (!token) return null;
   try {
     const payload = token.split('.')[1];
     if (!payload) throw new Error('malformed token');
     const claims = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
     if (typeof claims.exp === 'number' && claims.exp * 1000 <= Date.now()) {
-      localStorage.removeItem('pleiade_token');
+      localStorage.removeItem('pleiades_token');
       return null;
     }
     return token;
   } catch {
     // Malformed token — treat as logged out rather than trusting it.
-    localStorage.removeItem('pleiade_token');
+    localStorage.removeItem('pleiades_token');
     return null;
   }
 }
@@ -34,12 +34,12 @@ function readValidToken(): string | null {
 export const useAuth = create<AuthState>((set) => ({
   token: readValidToken(),
   setToken: (token) => {
-    localStorage.setItem('pleiade_token', token);
+    localStorage.setItem('pleiades_token', token);
     resetSocket();
     set({ token });
   },
   logout: () => {
-    localStorage.removeItem('pleiade_token');
+    localStorage.removeItem('pleiades_token');
     resetSocket();
     set({ token: null });
   },

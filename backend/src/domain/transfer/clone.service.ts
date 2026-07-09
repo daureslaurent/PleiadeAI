@@ -9,7 +9,7 @@ import { createLogger } from '../../config/logger';
 
 const log = createLogger('clone-service');
 
-export const CLONE_TYPE = 'pleiade-clone';
+export const CLONE_TYPE = 'pleiades-clone';
 export const CLONE_VERSION = 1;
 
 /** Cap on cloned inference calls — the archive is unbounded and each row carries prompt+completion. */
@@ -40,7 +40,7 @@ export interface CloneSummary {
 }
 
 /**
- * A **mirror** of one instance's operational data, distinct from the portable `pleiade-config`
+ * A **mirror** of one instance's operational data, distinct from the portable `pleiades-config`
  * export in `transfer.routes.ts`.
  *
  * The difference is `_id` preservation. `import/config` carries agents *by name* and mints fresh

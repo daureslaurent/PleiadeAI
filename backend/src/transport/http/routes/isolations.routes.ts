@@ -29,7 +29,7 @@ isolationsRouter.get('/', async (_req, res) => {
 });
 
 /**
- * Global overview of every pleiade-managed container across all profiles (agent containers +
+ * Global overview of every pleiades-managed container across all profiles (agent containers +
  * gluetun VPN containers), classified against current Mongo state so stale/orphaned instances are
  * flagged. Declared before `/:id` so `containers` isn't matched as a profile id.
  *
@@ -104,7 +104,7 @@ isolationsRouter.get('/containers', async (_req, res) => {
 
 /**
  * Remove a single managed container by name. Validated against the live managed-container list so
- * only pleiade-labelled containers can be targeted. Agent containers go through the manager (clears
+ * only pleiades-labelled containers can be targeted. Agent containers go through the manager (clears
  * the idle-stop timer); gluetun containers are removed directly.
  */
 isolationsRouter.delete('/containers/:name', async (req, res) => {
@@ -405,7 +405,7 @@ isolationsRouter.post('/:id/ssh/generate', async (req, res) => {
   }
   const id = String(iso._id);
   const type = req.body?.type === 'rsa' ? 'rsa' : 'ed25519';
-  const key = await generateSshKeyPair(type, `pleiade-${iso.name}`);
+  const key = await generateSshKeyPair(type, `pleiades-${iso.name}`);
   await isolationRepository.update(id, {
     ssh_private_key_enc: encryptSecret(key.privateKey),
     ssh_public_key: key.publicKey,

@@ -208,7 +208,7 @@ export const webFetch: Tool = {
     try {
       const res = await fetch(url, {
         signal: controller.signal,
-        headers: { 'user-agent': 'PleiadeAI-webfetch/1.0' },
+        headers: { 'user-agent': 'PleiadesAI-webfetch/1.0' },
       });
       if (!res.ok) {
         return { result: { ok: false, status: res.status, error: `request failed (${res.status})` } };

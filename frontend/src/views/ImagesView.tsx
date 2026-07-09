@@ -44,7 +44,7 @@ import {
   toneOf,
   useConfirm,
 } from '../components/ui';
-import { MONACO_OPTIONS, PLEIADE_THEME, registerPleiadeTheme } from '../lib/monacoTheme';
+import { MONACO_OPTIONS, PLEIADES_THEME, registerPleiadesTheme } from '../lib/monacoTheme';
 
 interface Draft {
   _id?: string;
@@ -70,8 +70,8 @@ interface Draft {
  * tooling the visual_screenshot / visual_act tools drive. Injected up front so the operator can
  * still edit it freely before building.
  */
-const VISUAL_MARKER = '# --- PleiadeAI visual layer';
-const VISUAL_SNIPPET = `# --- PleiadeAI visual layer (Xvfb desktop + loopback VNC, driven by the visual_* tools) ---
+const VISUAL_MARKER = '# --- PleiadesAI visual layer';
+const VISUAL_SNIPPET = `# --- PleiadesAI visual layer (Xvfb desktop + loopback VNC, driven by the visual_* tools) ---
 RUN apt-get update && apt-get install -y --no-install-recommends \\
       xvfb x11vnc fluxbox xdotool scrot socat procps \\
       x11-utils x11-xserver-utils fonts-dejavu-core \\
@@ -427,8 +427,8 @@ export function ImagesView() {
               <Editor
                 height="300px"
                 defaultLanguage="dockerfile"
-                theme={PLEIADE_THEME}
-                beforeMount={registerPleiadeTheme}
+                theme={PLEIADES_THEME}
+                beforeMount={registerPleiadesTheme}
                 value={draft.dockerfile}
                 onChange={(v) => setDraft({ ...draft, dockerfile: v ?? '' })}
                 options={MONACO_OPTIONS}

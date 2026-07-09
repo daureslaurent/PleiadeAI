@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PleiadeAI MCP server — read-only access to a deployed instance via an API key.
+ * PleiadesAI MCP server — read-only access to a deployed instance via an API key.
  *
  * Speaks MCP over stdio: newline-delimited JSON-RPC 2.0 on stdin/stdout. Implemented by hand
  * against the three methods a tools-only server needs (`initialize`, `tools/list`, `tools/call`)
@@ -8,14 +8,14 @@
  *
  * stdout carries protocol frames *only* — diagnostics go to stderr, or a client will choke.
  *
- * Config: PLEIADE_API_URL + PLEIADE_API_KEY, from the environment or the repo's `.env.prod`.
+ * Config: PLEIADES_API_URL + PLEIADES_API_KEY, from the environment or the repo's `.env.prod`.
  */
 import readline from 'node:readline';
-import { apiGet, loadConfig, PleiadeError } from './client.mjs';
+import { apiGet, loadConfig, PleiadesError } from './client.mjs';
 import { ENDPOINTS, inputSchemaOf } from './endpoints.mjs';
 
 const PROTOCOL_VERSION = '2024-11-05';
-const TOOL_PREFIX = 'pleiade_';
+const TOOL_PREFIX = 'pleiades_';
 
 const byToolName = new Map(ENDPOINTS.map((e) => [`${TOOL_PREFIX}${e.name}`, e]));
 
@@ -52,7 +52,7 @@ async function callTool(name, args) {
     return toolResult(JSON.stringify(data, null, 2));
   } catch (err) {
     // Surface the instance's own explanation (403 read-only, 404, auth) rather than a stack trace.
-    const detail = err instanceof PleiadeError ? err.message : `${err}`;
+    const detail = err instanceof PleiadesError ? err.message : `${err}`;
     return toolResult(detail, true);
   }
 }
@@ -65,7 +65,7 @@ async function handle(request) {
       reply(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'pleiade', version: '1.0.0' },
+        serverInfo: { name: 'pleiades', version: '1.0.0' },
       });
       return;
 
@@ -98,9 +98,9 @@ function main() {
   // silently broken server just sees every tool call error.
   try {
     const { baseUrl } = loadConfig();
-    process.stderr.write(`[pleiade-mcp] read-only, pointed at ${baseUrl}\n`);
+    process.stderr.write(`[pleiades-mcp] read-only, pointed at ${baseUrl}\n`);
   } catch (err) {
-    process.stderr.write(`[pleiade-mcp] ${err.message}\n`);
+    process.stderr.write(`[pleiades-mcp] ${err.message}\n`);
     process.exit(1);
   }
 
@@ -111,11 +111,11 @@ function main() {
     try {
       request = JSON.parse(line);
     } catch {
-      process.stderr.write(`[pleiade-mcp] ignoring non-JSON line\n`);
+      process.stderr.write(`[pleiades-mcp] ignoring non-JSON line\n`);
       return;
     }
     handle(request).catch((err) => {
-      process.stderr.write(`[pleiade-mcp] handler failed: ${err?.stack ?? err}\n`);
+      process.stderr.write(`[pleiades-mcp] handler failed: ${err?.stack ?? err}\n`);
       if (request.id !== undefined) replyError(request.id, -32603, `Internal error: ${err?.message ?? err}`);
     });
   });

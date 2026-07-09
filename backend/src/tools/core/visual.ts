@@ -97,7 +97,7 @@ async function captureCleanThumb(
     DISPLAY_ENV,
     ...(await captureDelaySnippet()),
     'scrot -o "$raw"',
-    `size=$(python3 - "$raw" "$thumb" <<'PLEIADE_THUMB_PY'`,
+    `size=$(python3 - "$raw" "$thumb" <<'PLEIADES_THUMB_PY'`,
     'import sys',
     'from PIL import Image',
     'src, thumb = sys.argv[1], sys.argv[2]',
@@ -105,7 +105,7 @@ async function captureCleanThumb(
     'w, h = im.size',
     't = im.copy(); t.thumbnail((720, 720)); t.save(thumb, "JPEG", quality=60)',
     "print('%dx%d' % (w, h))",
-    'PLEIADE_THUMB_PY',
+    'PLEIADES_THUMB_PY',
     ')',
     'echo "VISUAL_SIZE:$size"',
     'echo "VISUAL_THUMB:"',
@@ -362,7 +362,7 @@ async function captureScreen(exec: AgentExecutor, grid: boolean, sourcePath?: st
     `draw="${grid ? '1' : '0'}"`,
     DISPLAY_ENV,
     ...(sourcePath ? [] : [...(await captureDelaySnippet()), 'scrot -o "$raw"']),
-    `size=$(python3 - "$raw" "$out" "$thumb" "$draw" "$cthumb" <<'PLEIADE_GRID_PY'`,
+    `size=$(python3 - "$raw" "$out" "$thumb" "$draw" "$cthumb" <<'PLEIADES_GRID_PY'`,
     'import sys',
     'from PIL import Image, ImageDraw',
     'src, out, thumb, draw, cthumb = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]',
@@ -388,7 +388,7 @@ async function captureScreen(exec: AgentExecutor, grid: boolean, sourcePath?: st
     'im.save(out)',
     't = im.copy(); t.thumbnail((720, 720)); t.save(thumb, "JPEG", quality=60)',
     "print('%dx%d' % (w, h))",
-    'PLEIADE_GRID_PY',
+    'PLEIADES_GRID_PY',
     ')',
     'echo "VISUAL_PATH:$raw"',
     'echo "VISUAL_SIZE:$size"',
@@ -573,7 +573,7 @@ async function renderCalibTarget(exec: AgentExecutor, x: number, y: number, W: n
   const command = [
     'set -e',
     `mkdir -p ${SHOT_DIR}`,
-    `python3 - ${W} ${H} ${x} ${y} "${out}" <<'PLEIADE_CALIB_PY'`,
+    `python3 - ${W} ${H} ${x} ${y} "${out}" <<'PLEIADES_CALIB_PY'`,
     'import sys',
     'from PIL import Image, ImageDraw',
     'W, H, x, y, out = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]',
@@ -583,7 +583,7 @@ async function renderCalibTarget(exec: AgentExecutor, x: number, y: number, W: n
     'd.line([(x - r * 2, y), (x + r * 2, y)], fill=(255, 255, 255), width=1)',
     'd.line([(x, y - r * 2), (x, y + r * 2)], fill=(255, 255, 255), width=1)',
     'im.save(out)',
-    'PLEIADE_CALIB_PY',
+    'PLEIADES_CALIB_PY',
   ].join('\n');
   try {
     const res = await exec.run(command, { timeoutMs: TIMEOUT_MS });
@@ -978,9 +978,9 @@ export const visualAct: Tool = {
     // Feed the driver on stdin (via a heredoc) so the base64 blob never needs shell escaping.
     const command = [
       DISPLAY_ENV,
-      "python3 - <<'PLEIADE_VISUAL_PY'",
+      "python3 - <<'PLEIADES_VISUAL_PY'",
       actScript(b64Args),
-      'PLEIADE_VISUAL_PY',
+      'PLEIADES_VISUAL_PY',
     ].join('\n');
 
     const res = await exec.run(command, { timeoutMs: TIMEOUT_MS });
@@ -1089,7 +1089,7 @@ export const visualClick: Tool = {
 
     // Click the resolved pixel via the same driver visual_act uses.
     const b64Args = Buffer.from(JSON.stringify({ action, x: loc.x, y: loc.y })).toString('base64');
-    const command = [DISPLAY_ENV, "python3 - <<'PLEIADE_VISUAL_PY'", actScript(b64Args), 'PLEIADE_VISUAL_PY'].join('\n');
+    const command = [DISPLAY_ENV, "python3 - <<'PLEIADES_VISUAL_PY'", actScript(b64Args), 'PLEIADES_VISUAL_PY'].join('\n');
     const res = await exec.run(command, { timeoutMs: TIMEOUT_MS });
     if (res.timedOut) return { result: { ok: false, error: 'visual_click timed out' } };
     const line = res.stdout.trim().split('\n').filter(Boolean).pop() ?? '';
@@ -1206,9 +1206,9 @@ export const visualWindows: Tool = {
     const b64Args = Buffer.from(JSON.stringify(args)).toString('base64');
     const command = [
       DISPLAY_ENV,
-      "python3 - <<'PLEIADE_VISUAL_PY'",
+      "python3 - <<'PLEIADES_VISUAL_PY'",
       windowsScript(b64Args),
-      'PLEIADE_VISUAL_PY',
+      'PLEIADES_VISUAL_PY',
     ].join('\n');
 
     const res = await ctx.exec!.run(command, { timeoutMs: TIMEOUT_MS });

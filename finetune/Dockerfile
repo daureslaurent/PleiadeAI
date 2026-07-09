@@ -1,4 +1,4 @@
-# PleiadeAI fine-tune service — CUDA + Axolotl (QLoRA/DeepSpeed) + llama.cpp (GGUF) + Node API.
+# PleiadesAI fine-tune service — CUDA + Axolotl (QLoRA/DeepSpeed) + llama.cpp (GGUF) + Node API.
 #
 # The `-devel` CUDA image is required: bitsandbytes / flash-attn / DeepSpeed build CUDA
 # extensions against the toolkit headers at install time.

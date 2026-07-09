@@ -10,7 +10,7 @@ import { env, isProduction } from './env';
  */
 export const rootLogger: Logger = pino({
   level: env.LOG_LEVEL,
-  base: { service: 'pleiade-backend' },
+  base: { service: 'pleiades-backend' },
   timestamp: pino.stdTimeFunctions.isoTime,
   formatters: {
     level: (label) => ({ level: label }),

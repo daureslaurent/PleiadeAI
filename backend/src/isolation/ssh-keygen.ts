@@ -121,6 +121,6 @@ export async function generateSshKeyPair(
   type: SshKeyType,
   comment: string,
 ): Promise<GeneratedSshKey> {
-  const safeComment = (comment || 'pleiade').replace(/[^\w.@-]+/g, '-').slice(0, 64) || 'pleiade';
+  const safeComment = (comment || 'pleiades').replace(/[^\w.@-]+/g, '-').slice(0, 64) || 'pleiades';
   return type === 'rsa' ? generateRsa(safeComment) : generateEd25519(safeComment);
 }

@@ -99,7 +99,7 @@ async function fileToDataUrl(file: File): Promise<string | null> {
 
 /** Default nudge sent by the Continue button / auto-continue. Editable + persisted per browser. */
 const DEFAULT_CONTINUE = 'Continue where you left off and complete the task. Do not stop until it is done.';
-const CONTINUE_KEY = 'pleiade.continuePhrase';
+const CONTINUE_KEY = 'pleiades.continuePhrase';
 /** Safety ceiling on consecutive auto-continues so a stuck agent can't loop forever unattended. */
 const MAX_AUTO_CONTINUE = 25;
 

@@ -6,7 +6,7 @@ My operating manual for controlling this Linux (MATE) desktop. Read it before ac
 - Display `:99`, roughly **1280×800** px. Coordinates: x ∈ [0, 1279], y ∈ [0, 799], origin top-left.
 - Desktop: **MATE** (window manager `marco`) — real title bars; the close button is top-right of each window.
 - `bash` runs on **this same machine**. GUI programs need the display, so prefix them:
-  `export DISPLAY=:99 XAUTHORITY=/opt/pleiade/visual/Xauthority`
+  `export DISPLAY=:99 XAUTHORITY=/opt/pleiades/visual/Xauthority`
 
 ## The loop (every time)
 **LOOK** (`visual_screenshot`) → **PLAN** → **ACT** (one step) → **VERIFY** (screenshot or `bash`) → adapt. Never fire two actions blind.
@@ -20,7 +20,7 @@ Don't ask a "list/read" question expecting coordinates, or a "where" question ex
 ## Launching applications — use `bash`, not menus
 Launch detached so it survives the command, then wait ~1–2s and screenshot:
 ```
-DISPLAY=:99 XAUTHORITY=/opt/pleiade/visual/Xauthority setsid nohup <app> >/dev/null 2>&1 &
+DISPLAY=:99 XAUTHORITY=/opt/pleiades/visual/Xauthority setsid nohup <app> >/dev/null 2>&1 &
 ```
 Common apps: `firefox`, `chromium`, `mate-terminal` / `xterm`, `caja` (files), `pluma` (text editor).
 Opening with a target is best, e.g. `firefox "https://example.com"` or `caja /workspace`.

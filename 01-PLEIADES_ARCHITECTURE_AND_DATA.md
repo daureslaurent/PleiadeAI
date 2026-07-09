@@ -1,7 +1,7 @@
-# PleiadeAI: System Architecture, Data Models & Governance
+# PleiadesAI: System Architecture, Data Models & Governance
 
 ## 1. Project Overview
-PleiadeAI is an optimized, multi-agent AI orchestration platform designed as a developer-level command center. The system utilizes a stateless Node.js/TypeScript backend, an in-process EventBus for high-speed routing, and a remote `llama.cpp` instance for inference. All data states are fully transparent and exposed directly to the frontend UI.
+PleiadesAI is an optimized, multi-agent AI orchestration platform designed as a developer-level command center. The system utilizes a stateless Node.js/TypeScript backend, an in-process EventBus for high-speed routing, and a remote `llama.cpp` instance for inference. All data states are fully transparent and exposed directly to the frontend UI.
 
 **Core Technology Stack:**
 - **Backend:** Node.js, TypeScript, native `EventEmitter`.

@@ -12,8 +12,8 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-for unit in pleiade-update.path pleiade-update.service \
-            pleiade-update-check.path pleiade-update-check.service; do
+for unit in pleiades-update.path pleiades-update.service \
+            pleiades-update-check.path pleiades-update-check.service; do
   systemctl disable --now "$unit" 2>/dev/null || true
   rm -f "/etc/systemd/system/$unit"
   echo "==> Removed $unit"

@@ -1,6 +1,6 @@
-# DIRECT_ART.md — PleiadeAI Visual Direction
+# DIRECT_ART.md — PleiadesAI Visual Direction
 
-Art direction for the PleiadeAI frontend. Defined during the chat-workspace restyle (July 2026);
+Art direction for the PleiadesAI frontend. Defined during the chat-workspace restyle (July 2026);
 every new view or component should be judged against this document. The living reference
 implementation is the Agent Workspace (`views/AgentWorkspace.tsx` and everything it renders).
 
@@ -8,7 +8,7 @@ implementation is the Agent Workspace (`views/AgentWorkspace.tsx` and everything
 
 ## 1. Concept — *"Glass over the Pleiades"*
 
-PleiadeAI is named after the Pleiades star cluster, and the interface commits to that identity:
+PleiadesAI is named after the Pleiades star cluster, and the interface commits to that identity:
 a single-operator **command center floating in deep space**. The UI is built as two strata:
 
 1. **The backdrop** — a deep-space gradient with faint nebula glows and twinkling CSS stars.

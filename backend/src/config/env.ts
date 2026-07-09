@@ -61,7 +61,7 @@ const EnvSchema = z.object({
   // /var/run/docker.sock using the `docker` CLI. These are defaults for new agents' containers
   // (each agent can override cpus/memory/network/idle in its Isolation panel).
   DOCKER_BIN: z.string().default('docker'),
-  AGENT_IMAGE_PREFIX: z.string().default('pleiade_agent'),
+  AGENT_IMAGE_PREFIX: z.string().default('pleiades_agent'),
   AGENT_CONTAINER_CPUS: z.string().default('1'),
   AGENT_CONTAINER_MEMORY: z.string().default('1g'),
   AGENT_CONTAINER_NETWORK: z.string().default('host'),

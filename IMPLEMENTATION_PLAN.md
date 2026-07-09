@@ -1,12 +1,12 @@
-# PleiadeAI — Implementation Plan & Build Handle
+# PleiadesAI — Implementation Plan & Build Handle
 
 > Durable implementation guide derived from the three architecture specs
-> (`01-PLEIADE_ARCHITECTURE_AND_DATA.md`, `02-SKILLS_AND_AUTONOMY.md`,
+> (`01-PLEIADES_ARCHITECTURE_AND_DATA.md`, `02-SKILLS_AND_AUTONOMY.md`,
 > `03-FRONTEND_UI_AND_STREAMING.md`). This file is the canonical execution handle:
 > follow the build sequence, honor the locked decisions, and check off steps as they land.
 
 ## 1. Context
-PleiadeAI is a greenfield, developer-focused multi-agent AI command center. Philosophy:
+PleiadesAI is a greenfield, developer-focused multi-agent AI command center. Philosophy:
 **absolute runtime transparency** (IDE/debugger-style frontend) and **strict architectural
 isolation**. The backend is stateless Node/TypeScript with an **in-process EventBus**; inference
 runs on a remote `llama.cpp` OpenAI-compatible endpoint. State lives in MongoDB; vector memory in
@@ -20,8 +20,8 @@ source yet.
   `VITE_API_URL` / `VITE_WS_URL` build args. (Not Next.js.)
 - **Backend = Node 22-alpine.** `backend/Dockerfile` compiles TS → `dist/index.js`; Python 3 +
   build toolchain pre-installed for the skill sandbox. Entry: `node dist/index.js`, port `4000`.
-- **Services:** `pleiade_mongo` (27017), `pleiade_qdrant` (6333/6334), `pleiade_backend` (4000),
-  `pleiade_frontend` (3000), network `pleiade_net`. `LLAMA_API_URL` points at the remote llama.cpp.
+- **Services:** `pleiades_mongo` (27017), `pleiades_qdrant` (6333/6334), `pleiades_backend` (4000),
+  `pleiades_frontend` (3000), network `pleiades_net`. `LLAMA_API_URL` points at the remote llama.cpp.
 - **Reuse, do not recreate:** `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile`,
   `.gitignore`.
 

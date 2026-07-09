@@ -1,4 +1,4 @@
-# PleiadeAI public edge (single entrypoint).
+# PleiadesAI public edge (single entrypoint).
 #
 # Caddy is the ONLY container that publishes a host port. It terminates the public HTTP
 # connection and reverse-proxies inward on the private docker network:

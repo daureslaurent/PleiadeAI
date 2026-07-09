@@ -10,10 +10,10 @@ that the update rebuilds and swaps.
 Browser ──POST /api/host/update──▶ backend ──writes──▶ <repo>/.update/trigger
                                                               │ (bind mount)
                                                               ▼
-                                              systemd pleiade-update.path
+                                              systemd pleiades-update.path
                                                               │ file appeared
                                                               ▼
-                                              pleiade-update.service
+                                              pleiades-update.service
                                                   rm trigger → update_run.sh
 ```
 
@@ -33,9 +33,9 @@ can list the commits ahead and the sidebar can show a pin:
 backend (hourly / "Check now") ──writes──▶ <repo>/.update/check   (trigger)
                                                    │ (bind mount)
                                                    ▼
-                                   systemd pleiade-update-check.path
+                                   systemd pleiades-update-check.path
                                                    ▼
-                                   pleiade-update-check.service
+                                   pleiades-update-check.service
                                        rm check → check_run.sh
                                                    │
                               git fetch origin master + compare HEAD..origin/master
@@ -82,6 +82,6 @@ sudo tools/updater/uninstall-updater.sh
 - `docker-compose.yml` bind-mounts `./.update` into the backend. If that mount is missing the
   backend reports the bridge as "not ready" and the button is disabled with a hint.
 - Update output is appended to `./.update/update.log` and also visible via
-  `journalctl -u pleiade-update.service` (or `…-update-check.service`).
+  `journalctl -u pleiades-update.service` (or `…-update-check.service`).
 - Trigger a manual update for testing: `touch ./.update/trigger`.
 - Trigger a manual check for testing: `touch ./.update/check` → inspect `./.update/status.json`.

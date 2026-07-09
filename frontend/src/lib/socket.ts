@@ -7,7 +7,7 @@ import { io, type Socket } from 'socket.io-client';
 let socket: Socket | null = null;
 
 export function getSocket(): Socket {
-  const token = localStorage.getItem('pleiade_token') ?? '';
+  const token = localStorage.getItem('pleiades_token') ?? '';
   if (!socket) {
     // Empty VITE_WS_URL → connect same-origin (behind the Caddy edge). Pass `undefined` rather than
     // '' because socket.io-client mishandles an empty-string URL (it does not resolve to the origin).

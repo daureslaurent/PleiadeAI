@@ -1,4 +1,4 @@
-# PleiadeAI: OpenCode Skills, Autonomy & Resilience Protocols
+# PleiadesAI: OpenCode Skills, Autonomy & Resilience Protocols
 
 ## 1. Multimodal Input Processing
 Agents can analyze images via the backend's proxy to `llama.cpp` (running a VLM).
@@ -12,7 +12,7 @@ Every agent possesses automated visibility and mutation capabilities over its lo
 
 ## 3. The Dynamic Skill Environment & Reliability Engine
 Skills are modular TypeScript or Python scripts stored dynamically in MongoDB.
-*   **Sandbox Limitation:** All skills execute strictly inside the isolated bounds of the `pleiade_backend` Docker container. Any external OS interaction must occur via network APIs or standard SSH loopbacks defined in parameters.
+*   **Sandbox Limitation:** All skills execute strictly inside the isolated bounds of the `pleiades_backend` Docker container. Any external OS interaction must occur via network APIs or standard SSH loopbacks defined in parameters.
 *   **Execution Isolation:** TypeScript runs via native child worker threads. Python executes via spawned isolated sub-processes passing data over clean JSON streams.
 *   **Execution Auditing:** Sandbox spin-ups, `stdout`/`stderr` streams, and exit codes are piped to the Pino logger.
 *   **Skill Execution Boundaries & Circuit Breakers:** Sandboxes have a hard timeout (e.g., 15s). If a skill hangs or crashes three consecutive times, the backend trips a circuit breaker, marking it as `disabled` in MongoDB and throwing an error to the EventBus.

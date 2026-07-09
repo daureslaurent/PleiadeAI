@@ -1,8 +1,8 @@
 {
-  "name": "pleiade-finetune",
+  "name": "pleiades-finetune",
   "version": "0.1.0",
   "private": true,
-  "description": "PleiadeAI headless dual-GPU fine-tuning microservice (Axolotl QLoRA + GGUF export)",
+  "description": "PleiadesAI headless dual-GPU fine-tuning microservice (Axolotl QLoRA + GGUF export)",
   "type": "commonjs",
   "main": "dist/server.js",
   "engines": {

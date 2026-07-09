@@ -1,4 +1,4 @@
-// Isolate the Vision endpoint from PleiadeAI: sends ONE image straight to the configured vision
+// Isolate the Vision endpoint from PleiadesAI: sends ONE image straight to the configured vision
 // endpoint's /v1/chat/completions and prints the raw response (content, finish_reason, token usage).
 // If this returns garbage too, the problem is the endpoint/model/mmproj — not the app.
 //

@@ -1,9 +1,9 @@
-# PleiadeAI Fine-Tune Service
+# PleiadesAI Fine-Tune Service
 
 A standalone, headless microservice that runs multi-GPU **QLoRA** fine-tuning with
 [Axolotl](https://github.com/axolotl-ai-cloud/axolotl) and exports a **GGUF** for serving with
 llama.cpp. It runs on a dedicated dual-GPU box (2×16GB = 32GB VRAM) and is driven over HTTP by the
-main PleiadeAI backend.
+main PleiadesAI backend.
 
 It is intentionally self-contained: it does **not** import from or modify the main backend. It only
 mirrors the backend's house style (Express, Zod fail-fast env, Pino `createLogger`, native `fetch`)

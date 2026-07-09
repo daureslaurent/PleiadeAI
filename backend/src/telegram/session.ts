@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../domain/agents/jit-builder';
 
 /**
- * In-memory conversation state for one Telegram chat. PleiadeAI is single-operator, so keeping
+ * In-memory conversation state for one Telegram chat. PleiadesAI is single-operator, so keeping
  * this in process (and losing it on restart) is an acceptable trade for zero persistence overhead;
  * the durable record of an exchange is the agent's own Qdrant memory.
  */

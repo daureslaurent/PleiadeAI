@@ -1,8 +1,8 @@
-# PleiadeAI — production compose (OVH-oriented, single public entrypoint).
+# PleiadesAI — production compose (OVH-oriented, single public entrypoint).
 #
 # SECURITY MODEL: exactly ONE container publishes a host port — `caddy` (the reverse-proxy edge).
 # Every other service (mongo, qdrant, embeddings, searxng, llama-fallback, backend, frontend) is
-# reachable ONLY on the internal `pleiade_net` bridge, never from the public internet. Caddy routes
+# reachable ONLY on the internal `pleiades_net` bridge, never from the public internet. Caddy routes
 # /api + /socket.io + /health to the backend and everything else to the SPA. Secrets come from a
 # gitignored `.env` (see .env.example) — none are hardcoded here.
 #
@@ -27,10 +27,10 @@ services:
   # ----------------------------------------
   mongodb:
     image: mongo:7.0
-    container_name: pleiade_mongo
+    container_name: pleiades_mongo
     restart: unless-stopped
     volumes:
-      - pleiade_mongo_data:/data/db
+      - pleiades_mongo_data:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -39,14 +39,14 @@ services:
       start_period: 20s
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: pleiade_qdrant
+    container_name: pleiades_qdrant
     restart: unless-stopped
     volumes:
-      - pleiade_qdrant_data:/qdrant/storage
+      - pleiades_qdrant_data:/qdrant/storage
     healthcheck:
       # The qdrant image ships no curl/wget but does have bash → probe the REST port over /dev/tcp.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
@@ -56,7 +56,7 @@ services:
       start_period: 15s
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
   # ----------------------------------------
   # 2. EMBEDDINGS (CPU llama.cpp — powers Qdrant vector memory)
@@ -66,14 +66,14 @@ services:
   # EMBEDDING_MODEL (.env) in sync with the model served here.
   embeddings:
     image: ghcr.io/ggml-org/llama.cpp:server
-    container_name: pleiade_embeddings
+    container_name: pleiades_embeddings
     restart: unless-stopped
     command: >
       -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q4_K_M
       --embedding --pooling mean
       --host 0.0.0.0 --port 8080
     volumes:
-      - pleiade_embeddings_models:/root/.cache/huggingface
+      - pleiades_embeddings_models:/root/.cache/huggingface
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 20s
@@ -83,7 +83,7 @@ services:
       start_period: 600s
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
   # ----------------------------------------
   # 2b. FALLBACK INFERENCE (CPU llama.cpp — last-resort chat model)
@@ -93,7 +93,7 @@ services:
   # primary endpoint is unreachable. Note: plain llama-server keeps the model resident while running.
   llama-fallback:
     image: ghcr.io/ggml-org/llama.cpp:server
-    container_name: pleiade_llama_fallback
+    container_name: pleiades_llama_fallback
     restart: unless-stopped
     command: >
       -hf bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M
@@ -102,7 +102,7 @@ services:
       --ctx-size 8192
       --host 0.0.0.0 --port 8080
     volumes:
-      - pleiade_fallback_models:/root/.cache/huggingface
+      - pleiades_fallback_models:/root/.cache/huggingface
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
       interval: 15s
@@ -112,7 +112,7 @@ services:
       start_period: 600s
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
   # ----------------------------------------
   # 3. WEB SEARCH (SearXNG — powers the web_search tool's `searxng` provider)
@@ -120,7 +120,7 @@ services:
   # Self-hosted metasearch. The backend queries its JSON API at http://searxng:8080 (internal only).
   searxng:
     image: searxng/searxng:latest
-    container_name: pleiade_searxng
+    container_name: pleiades_searxng
     restart: unless-stopped
     environment:
       - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://localhost/}
@@ -135,22 +135,22 @@ services:
       start_period: 20s
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
   # ----------------------------------------
-  # 4. PLEIADE APPLICATION SERVICES (internal only — reached via the caddy edge)
+  # 4. PLEIADES APPLICATION SERVICES (internal only — reached via the caddy edge)
   # ----------------------------------------
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: pleiade_backend
+    container_name: pleiades_backend
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: 4000
       # Internal service wiring (docker-network hostnames — not secrets).
-      MONGO_URI: mongodb://mongodb:27017/pleiade
+      MONGO_URI: mongodb://mongodb:27017/pleiades
       QDRANT_URL: http://qdrant:6333
       EMBEDDING_API_URL: http://embeddings:8080
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text-v1.5}
@@ -209,7 +209,7 @@ services:
         condition: service_started
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
   frontend:
     build:
@@ -220,7 +220,7 @@ services:
         # the SPA and the API under one origin, so no absolute host needs baking into the build.
         VITE_API_URL: ""
         VITE_WS_URL: ""
-    container_name: pleiade_frontend
+    container_name: pleiades_frontend
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
@@ -230,22 +230,22 @@ services:
       start_period: 10s
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
   # ----------------------------------------
   # 5. PUBLIC EDGE (the ONLY service with a published port)
   # ----------------------------------------
   caddy:
     image: caddy:2-alpine
-    container_name: pleiade_caddy
+    container_name: pleiades_caddy
     restart: unless-stopped
     ports:
       - "${PUBLIC_HTTP_PORT:-80}:80"
       # - "443:443"   # uncomment when you move to HTTPS (see caddy/Caddyfile)
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - pleiade_caddy_data:/data
-      - pleiade_caddy_config:/config
+      - pleiades_caddy_data:/data
+      - pleiades_caddy_config:/config
     depends_on:
       backend:
         condition: service_healthy
@@ -253,16 +253,16 @@ services:
         condition: service_started
     logging: *default-logging
     networks:
-      - pleiade_net
+      - pleiades_net
 
 volumes:
-  pleiade_mongo_data:
-  pleiade_qdrant_data:
-  pleiade_embeddings_models:
-  pleiade_fallback_models:
-  pleiade_caddy_data:
-  pleiade_caddy_config:
+  pleiades_mongo_data:
+  pleiades_qdrant_data:
+  pleiades_embeddings_models:
+  pleiades_fallback_models:
+  pleiades_caddy_data:
+  pleiades_caddy_config:
 
 networks:
-  pleiade_net:
+  pleiades_net:
     driver: bridge

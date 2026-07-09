@@ -2,7 +2,7 @@
 
 Run each agent's Linux-based execution (the `bash` tool + Python/TS skills) inside its **own
 Docker container**, built from a **per-agent Dockerfile** editable in the Agents page. When
-isolation is **off**, execution stays in `pleiade_backend` exactly as today.
+isolation is **off**, execution stays in `pleiades_backend` exactly as today.
 
 ## Refactor v2 — shared Isolation profiles ✅
 Isolation is now a **first-class shared entity** with its own page, not embedded per-agent.
@@ -12,8 +12,8 @@ Isolation is now a **first-class shared entity** with its own page, not embedded
 - **Agents reference a profile**: `agent.isolation_id` (null ⇒ backend) + `isolation_volume_mode`
   (`individual` ⇒ own `/workspace` volume, `shared` ⇒ the profile's shared volume). Chosen per
   agent on the Agents page.
-- **One image per profile** (`pleiade_iso_<isoId>`), built once on the Isolation page; **each agent
-  still gets its own container** (`pleiade_agent_<agentId>`) → agents stay isolated from each other.
+- **One image per profile** (`pleiades_iso_<isoId>`), built once on the Isolation page; **each agent
+  still gets its own container** (`pleiades_agent_<agentId>`) → agents stay isolated from each other.
 - **Routes**: `/api/isolations` CRUD + `/:id/build` (SSE) + `/:id/status`; per-agent container ops
   moved to `/api/agents/:id/container` (status/stop/delete-volume). Profile delete tears down all
   assigned containers + shared image + shared volume and unassigns agents. Agent delete removes its
@@ -46,7 +46,7 @@ Backend + frontend typecheck and build clean. Implementation notes / deviations:
   pure chat turn never boots the container. Any tool call for an isolated agent triggers the boot;
   only `bash`/skills hard-error when it isn't ready — net tools ignore `ctx.exec`.
 - Skill harnesses (`py_runner.py`, `node_runner.cjs`) are shipped to `dist/` by `build:assets`
-  (`.cjs` added to the asset copier) and `docker cp`'d into `/opt/pleiade` at container create.
+  (`.cjs` added to the asset copier) and `docker cp`'d into `/opt/pleiades` at container create.
 
 ## Locked decisions (from operator)
 | Topic | Decision |
@@ -66,10 +66,10 @@ Backend + frontend typecheck and build clean. Implementation notes / deviations:
 | Editor | Monaco (`@monaco-editor/react`, already used by Skills) + Build/logs panel + container controls. |
 
 ## Naming
-- Image: `pleiade_agent_<agentId>:latest`
-- Container: `pleiade_agent_<agentId>`
-- Volume: `pleiade_agent_ws_<agentId>`
-- Harness dir in container: `/opt/pleiade/` (`py_runner.py`, `node_runner.js`, `docker cp`'d at create).
+- Image: `pleiades_agent_<agentId>:latest`
+- Container: `pleiades_agent_<agentId>`
+- Volume: `pleiades_agent_ws_<agentId>`
+- Harness dir in container: `/opt/pleiades/` (`py_runner.py`, `node_runner.js`, `docker cp`'d at create).
 
 ## Security note
 Mounting `docker.sock` grants the backend root-equivalent control of the host Docker daemon.
@@ -110,7 +110,7 @@ Migration adds the field to existing agents (backfill defaults). Repository gain
     reset idle timer. Returns an `AgentExecutor`.
   - `AgentExecutor.run(command, {timeoutMs,onOutput})` → `docker exec -w /workspace`.
   - `AgentExecutor.runScript(interpreter, source, stdinJson, {timeoutMs})` → exec
-    `python3 /opt/pleiade/py_runner.py` or `node /opt/pleiade/node_runner.js`, feeding
+    `python3 /opt/pleiades/py_runner.py` or `node /opt/pleiades/node_runner.js`, feeding
     `{source|code, args}` on stdin (mirrors current runner.py / ts-worker contract).
   - Idle map + timers; `teardown(agentId, {removeImage,removeVolume})`.
 - `harness/py_runner.py` — reuse existing `runner.py` (reads `{source,args}` stdin → JSON stdout).
@@ -144,7 +144,7 @@ the tool call returns a hard error result (no backend fallback).
 - `DELETE /api/agents/:id` (existing) → extend to full teardown (container+image+volume).
 
 ### 7. env.ts
-`DOCKER_BIN=docker`, `AGENT_IMAGE_PREFIX=pleiade_agent`,
+`DOCKER_BIN=docker`, `AGENT_IMAGE_PREFIX=pleiades_agent`,
 `AGENT_CONTAINER_CPUS=1`, `AGENT_CONTAINER_MEMORY=1g`, `AGENT_CONTAINER_IDLE_MS=1800000`,
 `AGENT_CONTAINER_NETWORK=bridge`.
 

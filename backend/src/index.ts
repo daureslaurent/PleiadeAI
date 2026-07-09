@@ -113,7 +113,7 @@ async function main(): Promise<void> {
     .catch((err) => rootLogger.error({ err }, 'failed to schedule update check'));
 
   httpServer.listen(env.PORT, () => {
-    rootLogger.info({ port: env.PORT }, 'pleiade backend listening');
+    rootLogger.info({ port: env.PORT }, 'pleiades backend listening');
   });
 
   const shutdown = async (signal: string): Promise<void> => {

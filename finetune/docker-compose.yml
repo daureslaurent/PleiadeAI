@@ -15,8 +15,8 @@ services:
         FLASH_ATTN_VERSION: ${FLASH_ATTN_VERSION:-2.7.4.post1}
         AXOLOTL_REF: ${AXOLOTL_REF:-v0.6.0}
         TRANSFORMERS_VERSION: ${TRANSFORMERS_VERSION:-4.47.1}
-    image: pleiade-finetune
-    container_name: pleiade-finetune
+    image: pleiades-finetune
+    container_name: pleiades-finetune
     restart: unless-stopped
     env_file: .env
     ports:

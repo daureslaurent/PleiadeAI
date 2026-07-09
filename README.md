@@ -1,1 +1,1 @@
-# PleiadeAI
+# PleiadesAI

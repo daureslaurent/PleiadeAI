@@ -1,6 +1,6 @@
-# SearXNG configuration for Pleiade's web_search tool.
+# SearXNG configuration for Pleiades's web_search tool.
 # Layered on top of the image's built-in defaults (use_default_settings: true),
-# so this only overrides what Pleiade needs.
+# so this only overrides what Pleiades needs.
 use_default_settings: true
 
 server:

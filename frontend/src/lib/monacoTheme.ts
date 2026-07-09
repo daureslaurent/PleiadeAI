@@ -1,7 +1,7 @@
 import type { Monaco } from '@monaco-editor/react';
 
 /**
- * `pleiade-dark` — the Monaco theme for the deep-space art direction (DIRECT_ART §2).
+ * `pleiades-dark` — the Monaco theme for the deep-space art direction (DIRECT_ART §2).
  *
  * Monaco's stock `vs-dark` paints an opaque `#1e1e1e`, which reads as a grey hole punched in the
  * glass. This theme makes the editor background fully transparent (`#00000000`) so the host well
@@ -9,16 +9,16 @@ import type { Monaco } from '@monaco-editor/react';
  * keywords/actions, reasoning purple for cognition-adjacent constructs (control flow), emerald for
  * strings, slate for structure. Cursor and selection are accent.
  */
-export const PLEIADE_THEME = 'pleiade-dark';
+export const PLEIADES_THEME = 'pleiades-dark';
 
 let registered = false;
 
-export function registerPleiadeTheme(monaco: Monaco): void {
+export function registerPleiadesTheme(monaco: Monaco): void {
   // Monaco keeps themes on a global registry; defining it twice is harmless but pointless.
   if (registered) return;
   registered = true;
 
-  monaco.editor.defineTheme(PLEIADE_THEME, {
+  monaco.editor.defineTheme(PLEIADES_THEME, {
     base: 'vs-dark',
     inherit: true,
     rules: [

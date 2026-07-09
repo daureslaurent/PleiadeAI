@@ -29,7 +29,7 @@ export function AuthGuard() {
         onSubmit={onSubmit}
         className="w-80 space-y-4 rounded-lg border border-border bg-surface p-6"
       >
-        <h1 className="font-mono text-lg font-bold text-accent">PleiadeAI Command Center</h1>
+        <h1 className="font-mono text-lg font-bold text-accent">PleiadesAI Command Center</h1>
         <input
           className="w-full rounded border border-border bg-panel px-3 py-2 text-sm"
           placeholder="Username"

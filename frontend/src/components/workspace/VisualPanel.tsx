@@ -14,7 +14,7 @@ interface Props {
 export function openDesktopWindow(agentId: string, agentName: string) {
   const url = `${window.location.origin}/desktop/${agentId}?name=${encodeURIComponent(agentName)}`;
   // A stable per-agent window name so re-opening focuses the existing window instead of duplicating.
-  window.open(url, `pleiade-desktop-${agentId}`, 'width=1320,height=880');
+  window.open(url, `pleiades-desktop-${agentId}`, 'width=1320,height=880');
 }
 
 /**

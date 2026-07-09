@@ -1,13 +1,13 @@
 # API Key System + Prod Data Retrieval Tooling
 
-Goal: let an external agent (Claude Code) pull read-only data out of a deployed PleiadeAI
+Goal: let an external agent (Claude Code) pull read-only data out of a deployed PleiadesAI
 instance without handing it the operator's password or a full-privilege JWT.
 
 ## Decisions
 
 | Question | Decision |
 | --- | --- |
-| Tool form | MCP server (`tools/pleiade-mcp/`) **and** a CLI (`scripts/prod.mjs`) |
+| Tool form | MCP server (`tools/pleiades-mcp/`) **and** a CLI (`scripts/prod.mjs`) |
 | Key scope | Read-only: the key authenticates, but non-`GET`/`HEAD` methods are rejected `403` |
 | Management | Full UI — a new **API Keys** section in Settings; plaintext shown once |
 | Credentials | Real prod URL + key live in a gitignored `.env.prod` |
@@ -50,13 +50,13 @@ is rendered exactly once, in a copy-to-clipboard callout, and is unrecoverable a
 
 ## Tooling
 
-* `tools/pleiade-mcp/index.mjs` — dependency-free stdio MCP server (hand-rolled JSON-RPC:
-  `initialize`, `tools/list`, `tools/call`). Tools: `pleiade_get`, `pleiade_agents`,
-  `pleiade_sessions`, `pleiade_session_messages`, `pleiade_llama_logs`, `pleiade_scoring_summary`,
-  `pleiade_scores`, `pleiade_inbox`, `pleiade_memory`.
+* `tools/pleiades-mcp/index.mjs` — dependency-free stdio MCP server (hand-rolled JSON-RPC:
+  `initialize`, `tools/list`, `tools/call`). Tools: `pleiades_get`, `pleiades_agents`,
+  `pleiades_sessions`, `pleiades_session_messages`, `pleiades_llama_logs`, `pleiades_scoring_summary`,
+  `pleiades_scores`, `pleiades_inbox`, `pleiades_memory`.
 * `scripts/prod.mjs` — same surface as a CLI: `node scripts/prod.mjs agents`, `… get /api/skills`.
 * `.mcp.json` at the repo root wires the MCP server into Claude Code.
-* Both read `PLEIADE_API_URL` + `PLEIADE_API_KEY` from the environment or `.env.prod`.
+* Both read `PLEIADES_API_URL` + `PLEIADES_API_KEY` from the environment or `.env.prod`.
 
 ## Follow-up: cloning prod → local
 

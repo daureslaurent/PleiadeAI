@@ -134,7 +134,7 @@ export class AgentExecutor {
 
   /**
    * Run a skill harness with a JSON payload on stdin (mirrors the backend sandbox protocol):
-   * `python3 /opt/pleiade/py_runner.py` or `node /opt/pleiade/node_runner.cjs`. Returns the raw
+   * `python3 /opt/pleiades/py_runner.py` or `node /opt/pleiades/node_runner.cjs`. Returns the raw
    * stdout (the harness prints a `{ok,result|error}` JSON document) for the caller to parse.
    */
   runScript(
@@ -225,13 +225,13 @@ class AgentContainerManager {
       stdin: VISUAL_BOOT_SCRIPT,
     });
     // Inject the image's configured screen resolution (default when unset). The boot script reads
-    // PLEIADE_VISUAL_GEOMETRY; since it's idempotent, a changed resolution only takes effect on a
+    // PLEIADES_VISUAL_GEOMETRY; since it's idempotent, a changed resolution only takes effect on a
     // fresh boot (i.e. after the container/desktop restarts).
     const geometry = await this.visualGeometry(agentId);
     const res = await dockerService.exec(container, [
       'sh',
       '-c',
-      `PLEIADE_VISUAL_GEOMETRY='${geometry}' bash ${VISUAL_BOOT_FILE}`,
+      `PLEIADES_VISUAL_GEOMETRY='${geometry}' bash ${VISUAL_BOOT_FILE}`,
     ]);
     if (res.exitCode !== 0) {
       if (res.stderr.includes('VISUAL_MISSING_BINARIES')) {

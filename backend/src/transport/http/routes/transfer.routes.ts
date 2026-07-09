@@ -24,8 +24,8 @@ const log = createLogger('transfer-routes');
  */
 export const transferRouter = Router();
 
-const CONFIG_TYPE = 'pleiade-config';
-const MEMORY_TYPE = 'pleiade-memory';
+const CONFIG_TYPE = 'pleiades-config';
+const MEMORY_TYPE = 'pleiades-memory';
 const FORMAT_VERSION = 1;
 
 /** Heuristic: does a parameter key name a secret whose value must not be exported? */
@@ -145,7 +145,7 @@ async function buildMemoryBundle(agents: AgentDoc[]) {
 
 function sendDownload(res: Parameters<Parameters<typeof transferRouter.get>[1]>[1], name: string, bundle: unknown, pretty = false) {
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', `attachment; filename="pleiade-${name}-${Date.now()}.json"`);
+  res.setHeader('Content-Disposition', `attachment; filename="pleiades-${name}-${Date.now()}.json"`);
   res.send(JSON.stringify(bundle, null, pretty ? 2 : undefined));
 }
 

@@ -14,7 +14,7 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('pleiade_token');
+  const token = localStorage.getItem('pleiades_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -217,7 +217,7 @@ export interface IsolationStatus {
 }
 
 /**
- * One pleiade-managed docker container across all profiles (GET /isolations/containers).
+ * One pleiades-managed docker container across all profiles (GET /isolations/containers).
  * `orphan` means it no longer maps to live config (agent/profile deleted or unassigned).
  */
 export interface ManagedContainer {
@@ -379,7 +379,7 @@ export const agentsApi = {
   deleteFile: (id: string, path: string) =>
     api.delete(`/agents/${id}/container/files`, { params: { path } }).then((r) => r.data),
   uploadFile: (id: string, path: string, file: File) => {
-    const token = localStorage.getItem('pleiade_token');
+    const token = localStorage.getItem('pleiades_token');
     return fetch(
       `${API_BASE}/api/agents/${id}/container/files?path=${encodeURIComponent(path)}`,
       {
@@ -396,7 +396,7 @@ export const agentsApi = {
   },
   /** Fetch a file as a blob and trigger a browser download. */
   async downloadFile(id: string, path: string): Promise<void> {
-    const token = localStorage.getItem('pleiade_token');
+    const token = localStorage.getItem('pleiades_token');
     const res = await fetch(
       `${API_BASE}/api/agents/${id}/container/download?path=${encodeURIComponent(path)}`,
       { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
@@ -443,7 +443,7 @@ export const visualApi = {
       .then((r) => r.data.calibration),
   /** Build the `ws(s)://…` relay URL (with JWT) the noVNC RFB client connects to. */
   wsUrl: (wsPath: string): string => {
-    const token = localStorage.getItem('pleiade_token') ?? '';
+    const token = localStorage.getItem('pleiades_token') ?? '';
     const base = API_BASE
       ? API_BASE.replace(/^http/, 'ws')
       : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
@@ -464,7 +464,7 @@ export interface BuildHandlers {
  * image build-log reattach flow.
  */
 async function consumeBuildStream(url: string, handlers: BuildHandlers): Promise<void> {
-  const token = localStorage.getItem('pleiade_token');
+  const token = localStorage.getItem('pleiades_token');
   const res = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
@@ -539,7 +539,7 @@ export const isolationsApi = {
       .then((r) => r.data),
   remove: (id: string) => api.delete(`/isolations/${id}`).then((r) => r.data),
 
-  /** Every pleiade-managed container across all profiles, with orphan classification. */
+  /** Every pleiades-managed container across all profiles, with orphan classification. */
   listContainers: () =>
     api.get<ManagedContainer[]>('/isolations/containers').then((r) => r.data),
   /** Remove one managed container by name (agent containers clear their idle timer too). */
@@ -627,7 +627,7 @@ export interface SessionResource {
 }
 
 async function fetchResourceBlob(sessionId: string, handle: string): Promise<Blob> {
-  const token = localStorage.getItem('pleiade_token');
+  const token = localStorage.getItem('pleiades_token');
   const res = await fetch(
     `${API_BASE}/api/resources/${encodeURIComponent(sessionId)}/${encodeURIComponent(handle)}/content`,
     { headers: token ? { Authorization: `Bearer ${token}` } : undefined },

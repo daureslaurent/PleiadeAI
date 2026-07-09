@@ -9,7 +9,7 @@ import { createLogger } from '../../config/logger';
 
 const log = createLogger('data-reset');
 
-export const BACKUP_TYPE = 'pleiade-data-backup';
+export const BACKUP_TYPE = 'pleiades-data-backup';
 export const BACKUP_VERSION = 1;
 
 /**

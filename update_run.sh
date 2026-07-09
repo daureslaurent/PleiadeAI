@@ -28,7 +28,7 @@ echo "==> Swapping in new containers..."
 docker compose up -d
 
 # Drop now-dangling old image layers freed by the rebuild. Dangling-only (no -a), so
-# tagged per-agent isolation images (pleiade_agent*) are left alone.
+# tagged per-agent isolation images (pleiades_agent*) are left alone.
 echo "==> Pruning dangling images..."
 docker image prune -f
 

@@ -1,5 +1,5 @@
 // Visual desktop resolution: each image gains `visual_width` / `visual_height` (null → the boot
-// default 1280×800). Injected as PLEIADE_VISUAL_GEOMETRY when the desktop boots. Purely additive.
+// default 1280×800). Injected as PLEIADES_VISUAL_GEOMETRY when the desktop boots. Purely additive.
 
 module.exports = {
   async up(db) {
