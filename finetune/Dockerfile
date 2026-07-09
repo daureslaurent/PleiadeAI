@@ -43,18 +43,29 @@ RUN pip install --upgrade pip packaging wheel \
 # prebuilt wheel over a 30-45 min source compile. It's kept out of the axolotl
 # extras because `.[flash-attn]` builds under pip isolation (no torch visible ->
 # "No module named 'torch'") and always compiles from source.
+# axolotl v0.6.0 hard-pins torchao==0.5.0 but leaves transformers UNBOUNDED
+# (`transformers>=4.46.3`). Building in 2026, pip resolves the newest transformers,
+# whose torchao quantizer imports `torchao.quantization.Float8WeightOnlyConfig` at
+# module load — a symbol torchao 0.5.0 doesn't have, so every model load crashes with
+# `AttributeError`. Pin transformers to axolotl 0.6.0's tested version (still satisfies
+# `>=4.46.3`, pairs with torchao 0.5.0, predates the Float8WeightOnlyConfig import).
+ARG TRANSFORMERS_VERSION=4.47.1
 COPY scripts/install-flash-attn.sh /opt/install-flash-attn.sh
 RUN chmod +x /opt/install-flash-attn.sh \
     && git clone --depth 1 --branch "${AXOLOTL_REF}" https://github.com/axolotl-ai-cloud/axolotl /opt/axolotl \
     && cd /opt/axolotl \
-    && pip install -e '.[deepspeed]' \
+    && pip install -e '.[deepspeed]' "transformers==${TRANSFORMERS_VERSION}" \
     && FLASH_ATTN_VERSION="${FLASH_ATTN_VERSION}" /opt/install-flash-attn.sh \
     && pip install "gguf>=0.10.0" sentencepiece protobuf
 
 # --- llama.cpp (pinned): convert_hf_to_gguf.py + llama-quantize for GGUF export ---
+# Do NOT `pip install -r requirements.txt` here: llama.cpp's convert requirements carry
+# `torch~=2.2.1` and `transformers<5.0.0`, which silently downgrade torch (undoing the
+# 2.5.1 alignment from ec9c9a3, breaking the flash-attn wheel) and re-drift transformers.
+# convert_hf_to_gguf.py's actual runtime deps (gguf, sentencepiece, protobuf, numpy) are
+# already provided by the axolotl + line-52 installs, so nothing extra is needed.
 RUN git clone --depth 1 --branch "${LLAMACPP_REF}" https://github.com/ggerganov/llama.cpp /opt/llama.cpp \
     && cd /opt/llama.cpp \
-    && pip install -r requirements.txt \
     && cmake -B build -DLLAMA_CURL=OFF \
     && cmake --build build --config Release -j --target llama-quantize
 

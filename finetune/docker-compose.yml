@@ -14,6 +14,7 @@ services:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}
         FLASH_ATTN_VERSION: ${FLASH_ATTN_VERSION:-2.7.4.post1}
         AXOLOTL_REF: ${AXOLOTL_REF:-v0.6.0}
+        TRANSFORMERS_VERSION: ${TRANSFORMERS_VERSION:-4.47.1}
     image: pleiade-finetune
     container_name: pleiade-finetune
     restart: unless-stopped
