@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import Editor from '../components/CodeEditor';
 import { AlertTriangle, Save, Trash2, Wrench, Zap } from 'lucide-react';
 import { skillsApi, type Skill } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
