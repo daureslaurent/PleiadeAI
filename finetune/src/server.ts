@@ -13,6 +13,7 @@ import { getHardwareInfo, getUsageReport } from './lib/hardware';
 import { buildFeasibilityTable, computePlan, DEFAULT_SEQ_LEN } from './lib/capability';
 import { resolveModelSizeB } from './lib/model-size';
 import type { CapabilityReport, TrainRequest } from './types';
+import versionData from './version.json';
 
 const log = createLogger('server');
 
@@ -53,8 +54,10 @@ const upload = multer({
 });
 
 // --- Health (public) ---
+// Also carries the service's own build version so the backend can surface it on the Fine-Tuning
+// page. Bumped independently whenever a commit touches `finetune/` (scripts/bump-version.mjs).
 app.get('/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, version: versionData.version, build: versionData.build });
 });
 
 app.use(requireApiKey);

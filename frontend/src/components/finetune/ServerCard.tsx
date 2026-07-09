@@ -33,9 +33,22 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
   const [hardware, setHardware] = useState<HardwareReport | null>(null);
   const [hwError, setHwError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // The remote service's own build version (GET /health) — bumped independently of this app.
+  const [version, setVersion] = useState<string | null>(null);
 
   // Live telemetry: paused when the tab is hidden, stopped on unmount.
   const { usage, error: usageError } = useUsagePolling(server._id, 3000, server.enabled);
+
+  useEffect(() => {
+    let alive = true;
+    finetuneServersApi
+      .health(server._id)
+      .then((h) => alive && setVersion(h.version ?? null))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [server._id]);
 
   const loadHardware = useCallback(async () => {
     setRefreshing(true);
@@ -60,7 +73,17 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
       <header className="mb-3 flex items-center gap-2.5">
         <Server size={15} className="text-accent" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-slate-100">{server.name}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-semibold text-slate-100">{server.name}</span>
+            {version && (
+              <span
+                title="fine-tune server build version"
+                className="shrink-0 rounded-full bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+              >
+                v{version}
+              </span>
+            )}
+          </div>
           <div className="truncate font-mono text-[11px] text-slate-500">{server.base_url}</div>
         </div>
         {anyLive && (

@@ -104,6 +104,15 @@ finetuneServersRouter.delete('/:id', async (req, res) => {
 
 // --- Proxies to the remote fine-tune service ---
 
+/** Liveness + the remote service's build version (shown on the Fine-Tuning page). */
+finetuneServersRouter.get('/:id/health', async (req, res) => {
+  try {
+    res.json(await finetuneServerService.getHealth(req.params.id));
+  } catch (err) {
+    sendRemoteError(res, err, 'health check');
+  }
+});
+
 /** Static hardware + per-model-size feasibility table. */
 finetuneServersRouter.get('/:id/hardware', async (req, res) => {
   try {

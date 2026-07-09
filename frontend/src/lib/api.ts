@@ -838,12 +838,20 @@ export interface UpdateLogChunk {
   size: number;
 }
 
+/** Backend build version — bumped independently of the frontend when `backend/` changes. */
+export interface BackendVersion {
+  version: string;
+  build: number;
+  date: string;
+}
+
 export const hostApi = {
   getUpdate: () => api.get<UpdateInfo>('/host/update').then((r) => r.data),
   checkUpdate: () => api.post<UpdateInfo>('/host/update/check').then((r) => r.data),
   runUpdate: () => api.post<{ ok: boolean; logOffset: number }>('/host/update').then((r) => r.data),
   updateLog: (since: number) =>
     api.get<UpdateLogChunk>('/host/update/log', { params: { since } }).then((r) => r.data),
+  getVersion: () => api.get<BackendVersion>('/host/version').then((r) => r.data),
 };
 
 /** One OpenAI-compatible inference endpoint with its autodiscovered model list. */
@@ -1223,6 +1231,13 @@ export interface StartTrainBody {
     | { source: 'manual'; dataset_id: string };
 }
 
+/** `GET /health` on a remote fine-tune server. version/build absent on older servers. */
+export interface FinetuneHealth {
+  ok: boolean;
+  version?: string;
+  build?: number;
+}
+
 export const finetuneServersApi = {
   list: () => api.get<FinetuneServer[]>('/finetune-servers').then((r) => r.data),
   create: (body: NewFinetuneServer) =>
@@ -1231,6 +1246,8 @@ export const finetuneServersApi = {
     api.patch<FinetuneServer>(`/finetune-servers/${id}`, patch).then((r) => r.data),
   remove: (id: string) => api.delete(`/finetune-servers/${id}`).then((r) => r.data),
 
+  health: (id: string) =>
+    api.get<FinetuneHealth>(`/finetune-servers/${id}/health`).then((r) => r.data),
   hardware: (id: string) =>
     api.get<HardwareReport>(`/finetune-servers/${id}/hardware`).then((r) => r.data),
   usage: (id: string) => api.get<UsageReport>(`/finetune-servers/${id}/usage`).then((r) => r.data),

@@ -24,6 +24,13 @@ export class FinetuneServerError extends Error {
 
 // --- Remote response shapes (mirror of finetune/src/types.ts) ---
 
+/** `GET /health` on the remote service. `version`/`build` are absent on older servers. */
+export interface HealthReport {
+  ok: boolean;
+  version?: string;
+  build?: number;
+}
+
 export interface GpuUsage {
   index: number;
   name: string;
@@ -171,6 +178,13 @@ export const finetuneServerService = {
     const { server, apiKey } = await resolve(id);
     const res = await request(`${baseUrl(server)}/hardware`, { headers: authHeaders(apiKey) });
     return (await res.json()) as CapabilityReport;
+  },
+
+  /** Liveness + the remote service's own build version (`GET /health`, public on the server). */
+  async getHealth(id: string | Types.ObjectId): Promise<HealthReport> {
+    const { server, apiKey } = await resolve(id);
+    const res = await request(`${baseUrl(server)}/health`, { headers: authHeaders(apiKey) });
+    return (await res.json()) as HealthReport;
   },
 
   /** Live GPU/CPU/RAM utilization (`GET /usage`). Polled by the UI while the page is open. */

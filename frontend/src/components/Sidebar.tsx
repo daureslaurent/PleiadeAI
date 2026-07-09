@@ -62,6 +62,20 @@ export function Sidebar() {
   const logout = useAuth((s) => s.logout);
   const [collapsed, setCollapsed] = usePersistentState('sidebar:collapsed', false);
   const [updateCount, setUpdateCount] = useState(0);
+  // Backend build version — bumped independently of this frontend bundle, so it's fetched at
+  // runtime rather than baked in. Falls back to a dash when the backend is unreachable.
+  const [serverVersion, setServerVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    hostApi
+      .getVersion()
+      .then((v) => alive && setServerVersion(v.version))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Poll the host bridge so the "update available" pin survives reloads and refreshes while the
   // app is open. No-op unless updates are enabled + the watcher has written a status.
@@ -143,8 +157,9 @@ export function Sidebar() {
         {!collapsed && (
           <div className="min-w-0 leading-tight">
             <div className="font-mono text-sm font-semibold text-slate-100">PleiadeAI</div>
-            <div className="truncate text-[10px] uppercase tracking-wider text-slate-500">
-              Command Center · <span className="normal-case tracking-normal text-slate-600">v{APP_VERSION}</span>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Command Center</div>
+            <div className="truncate font-mono text-[10px] tracking-normal text-slate-600" title="frontend · backend build">
+              v{APP_VERSION} · srv {serverVersion ?? '—'}
             </div>
           </div>
         )}

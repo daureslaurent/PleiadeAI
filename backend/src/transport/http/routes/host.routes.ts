@@ -9,11 +9,18 @@ import {
 } from '../../../host';
 import { settingsService } from '../../../domain/settings/settings.service';
 import { createLogger } from '../../../config/logger';
+import { BACKEND_VERSION, BACKEND_BUILD, BACKEND_DATE } from '../../../version';
 
 const log = createLogger('host-routes');
 
 /** Host self-update endpoints (spec: update system ported from cryptoBot). */
 export const hostRouter = Router();
+
+// Backend build version — surfaced next to the frontend version in the sidebar ("srv 1.0.x").
+// Bumped independently of the frontend whenever a commit touches `backend/` (scripts/bump-version.mjs).
+hostRouter.get('/version', (_req: Request, res: Response) => {
+  res.json({ version: BACKEND_VERSION, build: BACKEND_BUILD, date: BACKEND_DATE });
+});
 
 // Update status: whether the action is usable (feature toggle + host bind mount wired up)
 // plus the last known origin/master comparison. `updateAvailable` drives the sidebar pin
