@@ -17,7 +17,9 @@ x-logging: &default-logging
 
 services:
   sd-server:
-    image: ${SD_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master}
+    # leejet publishes only accelerator tags (no plain CPU `master`): master-cuda,
+    # master-vulkan, master-sycl, master-musa. Default to CUDA; override via SD_IMAGE.
+    image: ${SD_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master-cuda}
     container_name: image_gen_sd_server
     restart: unless-stopped
     entrypoint: /sd-server
@@ -38,12 +40,12 @@ services:
       - "${SD_BIND:-0.0.0.0}:${SD_PORT:-1234}:${SD_PORT:-1234}"
     logging: *default-logging
     # --- NVIDIA GPU ---------------------------------------------------------
-    # Use a CUDA image tag in .env (SD_IMAGE=...cuda) AND uncomment the block below.
-    # Requires the NVIDIA Container Toolkit on the host.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+    # The default image (master-cuda) needs the NVIDIA Container Toolkit on the host.
+    # For a non-NVIDIA host, set SD_IMAGE to master-vulkan/sycl/musa and delete this block.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
