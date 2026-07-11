@@ -48,8 +48,11 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     key: 'default_negative_prompt',
     label: 'Negative prompt',
     type: 'string',
-    default: '',
-    hint: 'What to avoid in every image (e.g. "blurry, text, watermark"). Leave blank for none.',
+    default:
+      'blurry, low quality, low resolution, soft focus, out of focus, jpeg artifacts, ' +
+      'deformed, disfigured, bad anatomy, extra limbs, watermark, text, signature',
+    hint: 'What to avoid in every image. Note: FLUX is guidance-distilled, so this only bites when ' +
+      'real CFG is on (guidance > 1). Leave blank for none.',
   },
 ];
 
