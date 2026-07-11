@@ -29,20 +29,22 @@ services:
     # present, sized from each device's free VRAM — so on a multi-GPU box no single card gets
     # starved (a single 12 GB card OOM'd at VAE decode with the whole ~10 GB model on one device).
     # On a single-GPU box it's a no-op (places everything on that GPU).
-    # --max-vram sets an explicit per-device budget (GiB) for the graph-cut layer split, overriding
-    # --auto-fit's "free VRAM minus a margin" default. On an asymmetric pair (8 GB 2070 = cuda1,
-    # 12 GB 3060 = cuda0) auto-detect left the 2070 ~0.4 GB short (its slice's compute buffer needs
-    # ~3 GB and only ~2.85 GB was free). Claiming cuda1=7 hands the 2070 its real headroom so its
-    # segment fits. NOTE: this OOMs hard (not a graceful skip) if the 2070 isn't actually that free —
-    # verify with `nvidia-smi` that nothing else (e.g. an llama.cpp server) is resident on it, and
-    # tune via SD_MAX_VRAM (e.g. cuda0=11.5,cuda1=7.5). Lower cuda0 pushes MORE weight onto the 2070.
-    # --diffusion-fa runs flash attention in the diffusion model. FLUX's attention compute buffer
-    # scales with image_seq_len (9216 at 768px), and on an asymmetric multi-GPU box (e.g. 8 GB 2070
-    # + 12 GB 3060) the smaller card OOMs on that per-segment activation buffer even though its
-    # weight slice is tiny ("segment N needs 2153 MB, only 2058 available"). FA collapses that buffer
-    # with no quality loss — required once the diffusion model is Q8 and the split lands on an 8 GB card.
-    # --vae-tiling additionally decodes the VAE in tiles (~1.6 GB buffer -> ~0.4 GB); kept as cheap
-    # belt-and-suspenders so the final decode can't OOM regardless of placement.
+    # Why Q8 needs streaming on this hardware: at Q8 the diffusion weights (12.1 GB) + text encoders
+    # (3.4 GB) + the TWO per-card compute buffers a layer split allocates (~3.2 GB each) total ~22 GB,
+    # but an 8 GB 2070 + 12 GB 3060 pair only has ~19.7 GB free. No placement or per-device budget
+    # fixes a capacity shortfall — plain --auto-fit OOMs the 8 GB card ("segment N needs 3187 MB, only
+    # 2850 available") because it also reserves the encoders there. So we stream instead:
+    # --offload-to-cpu parks the full weights in system RAM (needs ~16 GB free RAM) and loads layers
+    # into VRAM on demand; --stream-layers adds residency+prefetch on top of --max-vram (it is a no-op
+    # WITHOUT --max-vram); --max-vram then acts as each card's VRAM residency window, not a hard weight
+    # cap. Trade-off: streaming is PCIe-bound (per-step layer transfers), so generation is slower — the
+    # cost of keeping Q8 quality on 20 GB of VRAM. Drop to Q5_K_S (~8.3 GB) via SD_DIFFUSION_MODEL to
+    # run fully resident (no streaming) if speed matters more than the last bit of quality.
+    # --diffusion-fa runs flash attention in the diffusion model, shrinking the O(seq_len) attention
+    # activation buffer (image_seq_len 9216 at 768px) — keeps the per-card compute buffer as small as
+    # possible so more of the residency window is spent on weights.
+    # --vae-tiling additionally decodes the VAE in tiles (~1.6 GB buffer -> ~0.4 GB); cheap insurance
+    # so the final decode can't OOM regardless of placement.
     command: >
       --diffusion-model /models/${SD_DIFFUSION_MODEL:-flux1-dev-Q8_0.gguf}
       --t5xxl           /models/${SD_T5XXL:-t5-v1_1-xxl-encoder-Q4_K_M.gguf}
@@ -50,6 +52,8 @@ services:
       --vae             /models/${SD_VAE:-ae.safetensors}
       --auto-fit
       --max-vram ${SD_MAX_VRAM:-cuda0=11,cuda1=7}
+      --offload-to-cpu
+      --stream-layers
       --diffusion-fa
       --vae-tiling
       --listen-ip 0.0.0.0
