@@ -25,34 +25,42 @@ services:
     entrypoint: /sd-server
     # Flags per `sd-server -h`. FLUX needs four files: diffusion model + two text encoders + VAE.
     # For a single-file model (e.g. SD 1.5 GGUF), replace all four with a single `-m /models/<file>`.
-    # --auto-fit spreads the modules (text encoders / diffusion / VAE) across whatever GPUs are
-    # present, sized from each device's free VRAM — so on a multi-GPU box no single card gets
-    # starved (a single 12 GB card OOM'd at VAE decode with the whole ~10 GB model on one device).
-    # On a single-GPU box it's a no-op (places everything on that GPU).
-    # Why Q8 needs streaming on this hardware: at Q8 the diffusion weights (12.1 GB) + text encoders
-    # (3.4 GB) + the TWO per-card compute buffers a layer split allocates (~3.2 GB each) total ~22 GB,
-    # but an 8 GB 2070 + 12 GB 3060 pair only has ~19.7 GB free. No placement or per-device budget
-    # fixes a capacity shortfall — plain --auto-fit OOMs the 8 GB card ("segment N needs 3187 MB, only
-    # 2850 available") because it also reserves the encoders there. So we stream instead:
-    # --offload-to-cpu parks the full weights in system RAM (needs ~16 GB free RAM) and loads layers
-    # into VRAM on demand; --stream-layers adds residency+prefetch on top of --max-vram (it is a no-op
-    # WITHOUT --max-vram); --max-vram then acts as each card's VRAM residency window, not a hard weight
-    # cap. Trade-off: streaming is PCIe-bound (per-step layer transfers), so generation is slower — the
-    # cost of keeping Q8 quality on 20 GB of VRAM. Drop to Q5_K_S (~8.3 GB) via SD_DIFFUSION_MODEL to
-    # run fully resident (no streaming) if speed matters more than the last bit of quality.
+    #
+    # Why NOT --auto-fit here: at Q8 the diffusion weights (12.1 GB) + encoders (3.4 GB) + the two
+    # per-card compute buffers a layer split allocates (~3.2 GB each) total ~22 GB, but the 8 GB 2070
+    # + 12 GB 3060 pair only has ~19.7 GB free. --auto-fit's response is a full-residency layer split
+    # that OOMs the 8 GB card ("segment 9 needs 3187 MB, only 2850 available") — AND it "Overrides
+    # --backend and --params-backend" (per its -h), so it silently ignores every streaming/placement
+    # flag below. That is why identical OOMs recurred no matter what we added. So auto-fit is OFF and
+    # we place modules explicitly:
+    #   --backend        = where each module COMPUTES. Diffusion on cuda0 (the 12 GB 3060; note ggml's
+    #                      cuda0/cuda1 are the REVERSE of nvidia-smi indices on this box — cuda0 is the
+    #                      3060, confirmed by cuda0 holding the 9.6 GB slice). Encoders + VAE on cuda1
+    #                      (the 8 GB 2070), fully resident (~3.5 GB, fits its ~7.8 GB free).
+    #   --params-backend = where each module's WEIGHTS LIVE. diffusion=cpu parks the 12.1 GB in system
+    #                      RAM (needs ~13 GB free RAM) instead of VRAM; only the encoders/VAE weights
+    #                      sit in VRAM. This is the actual offload lever (--offload-to-cpu is the global
+    #                      equivalent but auto-fit ate it; the targeted form survives).
+    #   --max-vram cuda0 = the 3060's VRAM residency WINDOW for the streamed diffusion layers (not a
+    #                      hard weight cap). With ~3 GB compute buffer, an 11 GiB window keeps ~8 GB of
+    #                      layers resident and streams the remaining ~4 GB from RAM per step.
+    #   --stream-layers  = residency+prefetch on top of --max-vram (no-op without it); prefetches the
+    #                      next layers so the PCIe transfers overlap compute instead of stalling.
+    # Trade-off: only ~1/3 of the weights stream, but generation is still slower than fully resident.
+    # For a faster, fully-resident run set SD_DIFFUSION_MODEL=flux1-dev-Q5_K_S.gguf (~8.3 GB) — that
+    # fits VRAM outright and needs none of the streaming flags.
+    #
     # --diffusion-fa runs flash attention in the diffusion model, shrinking the O(seq_len) attention
-    # activation buffer (image_seq_len 9216 at 768px) — keeps the per-card compute buffer as small as
-    # possible so more of the residency window is spent on weights.
-    # --vae-tiling additionally decodes the VAE in tiles (~1.6 GB buffer -> ~0.4 GB); cheap insurance
-    # so the final decode can't OOM regardless of placement.
+    # activation buffer (image_seq_len 9216 at 768px) so more of the residency window holds weights.
+    # --vae-tiling decodes the VAE in tiles (~1.6 GB buffer -> ~0.4 GB); cheap insurance vs decode OOM.
     command: >
       --diffusion-model /models/${SD_DIFFUSION_MODEL:-flux1-dev-Q8_0.gguf}
       --t5xxl           /models/${SD_T5XXL:-t5-v1_1-xxl-encoder-Q4_K_M.gguf}
       --clip_l          /models/${SD_CLIP_L:-clip_l.safetensors}
       --vae             /models/${SD_VAE:-ae.safetensors}
-      --auto-fit
-      --max-vram ${SD_MAX_VRAM:-cuda0=11,cuda1=7}
-      --offload-to-cpu
+      --backend ${SD_BACKEND:-diffusion=cuda0,te=cuda1,vae=cuda1}
+      --params-backend ${SD_PARAMS_BACKEND:-diffusion=cpu}
+      --max-vram ${SD_MAX_VRAM:-cuda0=11}
       --stream-layers
       --diffusion-fa
       --vae-tiling
