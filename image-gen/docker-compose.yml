@@ -29,6 +29,11 @@ services:
     # present, sized from each device's free VRAM — so on a multi-GPU box no single card gets
     # starved (a single 12 GB card OOM'd at VAE decode with the whole ~10 GB model on one device).
     # On a single-GPU box it's a no-op (places everything on that GPU).
+    # --diffusion-fa runs flash attention in the diffusion model. FLUX's attention compute buffer
+    # scales with image_seq_len (9216 at 768px), and on an asymmetric multi-GPU box (e.g. 8 GB 2070
+    # + 12 GB 3060) the smaller card OOMs on that per-segment activation buffer even though its
+    # weight slice is tiny ("segment N needs 2153 MB, only 2058 available"). FA collapses that buffer
+    # with no quality loss — required once the diffusion model is Q8 and the split lands on an 8 GB card.
     # --vae-tiling additionally decodes the VAE in tiles (~1.6 GB buffer -> ~0.4 GB); kept as cheap
     # belt-and-suspenders so the final decode can't OOM regardless of placement.
     command: >
@@ -37,6 +42,7 @@ services:
       --clip_l          /models/${SD_CLIP_L:-clip_l.safetensors}
       --vae             /models/${SD_VAE:-ae.safetensors}
       --auto-fit
+      --diffusion-fa
       --vae-tiling
       --listen-ip 0.0.0.0
       --listen-port ${SD_PORT:-1234}
