@@ -45,7 +45,9 @@ services:
       - ./models:/models
       - ./output:/output
     ports:
-      - "${SD_BIND:-0.0.0.0}:${SD_PORT:-1234}:${SD_PORT:-1234}"
+      # host_port:container_port. Set SD_HOST_PORT (+ SD_BIND=127.0.0.1) to publish on a private port
+      # when fronting with gpu-broker; defaults to SD_PORT so a standalone run is unchanged.
+      - "${SD_BIND:-0.0.0.0}:${SD_HOST_PORT:-1234}:${SD_PORT:-1234}"
     logging: *default-logging
     # --- NVIDIA GPU ---------------------------------------------------------
     # The default image (master-cuda) needs the NVIDIA Container Toolkit on the host.

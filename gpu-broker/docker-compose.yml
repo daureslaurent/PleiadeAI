@@ -1,0 +1,21 @@
+# gpu-broker — VRAM mutex fronting the GPU inference containers on this box.
+#
+# host networking: the broker listens on the public service ports directly and reaches each managed
+# container on 127.0.0.1:<upstreamPort> (their localhost-only published ports). The Docker socket is
+# mounted so the broker can start/stop the sibling containers. It manages containers it does NOT own
+# (image_gen_sd_server, your llama vision container) — bring those up once via their own compose.
+
+services:
+  gpu-broker:
+    build: .
+    container_name: gpu_broker
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config.json:/app/config.json:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,26 @@
+{
+  "idleTimeoutSec": 300,
+  "startTimeoutSec": 180,
+  "stopSettleMs": 2000,
+  "dockerSocket": "/var/run/docker.sock",
+  "services": [
+    {
+      "name": "image",
+      "listenPort": 1234,
+      "container": "image_gen_sd_server",
+      "upstreamHost": "127.0.0.1",
+      "upstreamPort": 8201,
+      "healthPath": "/v1/models",
+      "models": ["sd-cpp-local"]
+    },
+    {
+      "name": "vision",
+      "listenPort": 8080,
+      "container": "REPLACE_WITH_LLAMA_VISION_CONTAINER",
+      "upstreamHost": "127.0.0.1",
+      "upstreamPort": 8202,
+      "healthPath": "/health",
+      "models": ["REPLACE_WITH_VISION_MODEL_ID"]
+    }
+  ]
+}
