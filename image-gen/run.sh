@@ -10,8 +10,9 @@
 #   ./run.sh test         POST a sample prompt to the running server and save the PNG
 #
 # Weights are pulled from Hugging Face into ./models. See .env.example to swap models.
-# Defaults target FLUX.1-dev (GGUF via city96 — ungated; the VAE is pulled from the
-# Apache-2.0 schnell repo since it is byte-identical to dev's gated ae.safetensors).
+# Defaults target FLUX.1-dev (GGUF via city96 — ungated; the VAE is pulled from an
+# ungated schnell GGUF mirror since it is byte-identical to dev's gated ae.safetensors —
+# black-forest-labs/FLUX.1-schnell is now gated and 401s without an HF token).
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -27,7 +28,7 @@ declare -A FILES=(
   ["flux1-dev-Q4_0.gguf"]="https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q4_0.gguf"
   ["t5-v1_1-xxl-encoder-Q4_K_M.gguf"]="https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q4_K_M.gguf"
   ["clip_l.safetensors"]="https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"
-  ["ae.safetensors"]="https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors"
+  ["ae.safetensors"]="https://huggingface.co/second-state/FLUX.1-schnell-GGUF/resolve/main/ae.safetensors"
 )
 
 log() { printf '\033[1;36m[image-gen]\033[0m %s\n' "$*"; }
