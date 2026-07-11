@@ -25,14 +25,18 @@ services:
     entrypoint: /sd-server
     # Flags per `sd-server -h`. FLUX needs four files: diffusion model + two text encoders + VAE.
     # For a single-file model (e.g. SD 1.5 GGUF), replace all four with a single `-m /models/<file>`.
-    # --vae-tiling decodes the VAE in tiles: on a 12 GB card the full-frame VAE compute buffer
-    # (~1.6 GB) can't fit alongside the ~10 GB of FLUX weights and generation OOMs at the final
-    # decode step. Tiling shrinks that buffer to a fraction at no meaningful quality cost.
+    # --auto-fit spreads the modules (text encoders / diffusion / VAE) across whatever GPUs are
+    # present, sized from each device's free VRAM — so on a multi-GPU box no single card gets
+    # starved (a single 12 GB card OOM'd at VAE decode with the whole ~10 GB model on one device).
+    # On a single-GPU box it's a no-op (places everything on that GPU).
+    # --vae-tiling additionally decodes the VAE in tiles (~1.6 GB buffer -> ~0.4 GB); kept as cheap
+    # belt-and-suspenders so the final decode can't OOM regardless of placement.
     command: >
       --diffusion-model /models/${SD_DIFFUSION_MODEL:-flux1-dev-Q4_0.gguf}
       --t5xxl           /models/${SD_T5XXL:-t5-v1_1-xxl-encoder-Q4_K_M.gguf}
       --clip_l          /models/${SD_CLIP_L:-clip_l.safetensors}
       --vae             /models/${SD_VAE:-ae.safetensors}
+      --auto-fit
       --vae-tiling
       --listen-ip 0.0.0.0
       --listen-port ${SD_PORT:-1234}
