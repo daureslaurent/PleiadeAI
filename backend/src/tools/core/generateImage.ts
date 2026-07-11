@@ -10,38 +10,46 @@ const log = createLogger('tool:generate_image');
 const MAX_N = 4;
 
 /**
- * Operator-tunable defaults, rendered on the Tools page. The LLM may override any of these per call;
- * when it omits a field, the value here is used. FLUX.1-dev-friendly defaults (balanced quality/speed).
+ * Operator-tunable generation settings, rendered on the Tools page. These are the *only* place the
+ * generation parameters are set — the agent supplies just a `prompt` and every other knob (size,
+ * count, steps, guidance, negative prompt) comes from here. FLUX.1-dev-friendly defaults.
  */
 const CONFIG_SCHEMA: ToolConfigField[] = [
   {
     key: 'default_size',
-    label: 'Default size',
+    label: 'Size',
     type: 'select',
     options: ['512x512', '768x768', '1024x1024', '1024x768', '768x1024'],
     default: '768x768',
-    hint: 'Image dimensions when the model doesn’t specify one. Larger is dramatically slower on CPU.',
+    hint: 'Image dimensions for every generation. Larger is dramatically slower.',
   },
   {
     key: 'default_steps',
-    label: 'Default steps',
+    label: 'Steps (cycles)',
     type: 'number',
     default: 20,
-    hint: 'Sampling steps when unspecified. FLUX.1-dev wants ~20-28; schnell only ~4.',
+    hint: 'Sampling steps/cycles. FLUX.1-dev wants ~20-28; schnell only ~4.',
   },
   {
     key: 'default_guidance',
-    label: 'Default guidance',
+    label: 'Guidance',
     type: 'number',
     default: 3.5,
-    hint: 'CFG / distilled-guidance scale when unspecified. ~3.5 suits FLUX.1-dev.',
+    hint: 'CFG / distilled-guidance scale. ~3.5 suits FLUX.1-dev.',
   },
   {
     key: 'default_n',
-    label: 'Default count',
+    label: 'Count',
     type: 'number',
     default: 1,
-    hint: `How many images per call when unspecified (max ${MAX_N}).`,
+    hint: `How many images per generation (max ${MAX_N}).`,
+  },
+  {
+    key: 'default_negative_prompt',
+    label: 'Negative prompt',
+    type: 'string',
+    default: '',
+    hint: 'What to avoid in every image (e.g. "blurry, text, watermark"). Leave blank for none.',
   },
 ];
 
@@ -63,12 +71,10 @@ export const generateImage: Tool = {
   name: 'generate_image',
   description:
     'Generate an image from a text description using the configured image model (e.g. FLUX). Give a ' +
-    'vivid, detailed `prompt` (subject, style, lighting, composition). Optional: `size` (e.g. ' +
-    '"1024x1024"), `n` (count, max ' +
-    MAX_N +
-    '), `negative_prompt` (what to avoid), `steps`, `seed` (for a reproducible image), `guidance`. ' +
-    'The image is saved as an `img_N` resource you can then save to a file (`write`/`data`) or hand ' +
-    'to another agent. Generation can take a while on CPU.',
+    'vivid, detailed `prompt` (subject, style, lighting, composition) — that is the only input. Size, ' +
+    'count, steps, guidance and negative prompt are fixed by the operator on the Tools page and are ' +
+    'not chosen per call. The image is saved as an `img_N` resource you can then save to a file ' +
+    '(`write`/`data`) or hand to another agent. Generation can take a while.',
   parameters: {
     type: 'object',
     properties: {
@@ -76,48 +82,26 @@ export const generateImage: Tool = {
         type: 'string',
         description: 'What to depict — be specific about subject, style, lighting, and composition.',
       },
-      size: {
-        type: 'string',
-        description: 'Image dimensions as "WIDTHxHEIGHT" (e.g. "1024x1024"). Omit to use the default.',
-      },
-      n: {
-        type: 'integer',
-        description: `How many images to generate (1-${MAX_N}). Omit for the default.`,
-      },
-      negative_prompt: {
-        type: 'string',
-        description: 'What to avoid in the image (e.g. "blurry, text, watermark"). Optional.',
-      },
-      steps: {
-        type: 'integer',
-        description: 'Sampling steps. More = slower, potentially more detailed. Omit for the default.',
-      },
-      seed: {
-        type: 'integer',
-        description: 'RNG seed for a reproducible result. Omit for a random image each time.',
-      },
-      guidance: {
-        type: 'number',
-        description: 'Guidance / CFG scale (how closely to follow the prompt). Omit for the default.',
-      },
     },
     required: ['prompt'],
     additionalProperties: false,
   },
+  configSchema: CONFIG_SCHEMA,
 
   async execute(args, ctx) {
     const prompt = String(args.prompt ?? '').trim();
     if (!prompt) return { result: { ok: false, error: 'prompt is required' } };
 
+    // Every generation parameter comes from the operator's Tools-page config — the agent only
+    // supplies the prompt. Seed is always random (no reproducible-seed knob to keep the tool simple).
     const { config } = await toolConfigService.resolve(generateImage.name, CONFIG_SCHEMA);
 
-    const size = args.size ? String(args.size).trim() : String(config.default_size);
-    const n = clampInt(args.n ?? config.default_n, 1, MAX_N, 1);
-    const steps =
-      args.steps !== undefined ? clampInt(args.steps, 1, 150, Number(config.default_steps)) : Number(config.default_steps);
-    const guidance = args.guidance !== undefined ? Number(args.guidance) : Number(config.default_guidance);
-    const negativePrompt = args.negative_prompt ? String(args.negative_prompt).trim() : undefined;
-    const seed = args.seed !== undefined && Number.isFinite(Number(args.seed)) ? Math.trunc(Number(args.seed)) : undefined;
+    const size = String(config.default_size);
+    const n = clampInt(config.default_n, 1, MAX_N, 1);
+    const steps = clampInt(config.default_steps, 1, 150, 20);
+    const guidance = Number(config.default_guidance);
+    const negativePrompt = String(config.default_negative_prompt ?? '').trim() || undefined;
+    const seed = undefined;
 
     log.info({ agent: ctx.agentName, size, n, steps }, 'generate_image');
 
