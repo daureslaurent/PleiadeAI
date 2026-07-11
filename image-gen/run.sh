@@ -25,7 +25,7 @@ PORT="${PORT:-1234}"
 # name -> Hugging Face resolve URL. Edit here (and .env) to use different weights.
 declare -A FILES=(
   ["flux1-dev-Q4_0.gguf"]="https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q4_0.gguf"
-  ["t5-v1_1-xxl-encoder-Q4_0.gguf"]="https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q4_0.gguf"
+  ["t5-v1_1-xxl-encoder-Q4_K_M.gguf"]="https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q4_K_M.gguf"
   ["clip_l.safetensors"]="https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"
   ["ae.safetensors"]="https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors"
 )

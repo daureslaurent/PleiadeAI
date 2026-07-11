@@ -25,7 +25,7 @@ services:
     # For a single-file model (e.g. SD 1.5 GGUF), replace all four with a single `-m /models/<file>`.
     command: >
       --diffusion-model /models/${SD_DIFFUSION_MODEL:-flux1-dev-Q4_0.gguf}
-      --t5xxl           /models/${SD_T5XXL:-t5-v1_1-xxl-encoder-Q4_0.gguf}
+      --t5xxl           /models/${SD_T5XXL:-t5-v1_1-xxl-encoder-Q4_K_M.gguf}
       --clip_l          /models/${SD_CLIP_L:-clip_l.safetensors}
       --vae             /models/${SD_VAE:-ae.safetensors}
       --listen-ip 0.0.0.0
