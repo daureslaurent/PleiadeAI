@@ -775,6 +775,10 @@ export interface InferenceSettings {
   vision_max_tokens: number | null;
   vision_frequency_penalty: number | null;
   vision_presence_penalty: number | null;
+  /** Image generation endpoint for `generate_image` ('' → the tool reports it's unconfigured). */
+  image_endpoint_id: string;
+  /** Model on `image_endpoint_id` for generation ('' → that endpoint's default). */
+  image_model: string;
   /** Host self-update master switch — gates the "Update app" action + the periodic check. */
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */

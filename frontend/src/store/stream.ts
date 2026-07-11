@@ -15,6 +15,7 @@ import type {
   TruncatedEvent,
   TurnScoredEvent,
   VisionEvent,
+  ImageGenEvent,
   VisualActEvent,
 } from '../lib/ws-events.types';
 
@@ -38,6 +39,20 @@ export interface VisionInfo {
   height?: number;
   /** Set when the located point was snapped to an OCR text box — shows an "OCR" chip on the card. */
   snap?: { text: string; x: number; y: number } | null;
+}
+
+/** Generation metadata surfaced on a `generate_image` tool block (prompt + params + model). The
+ * images themselves live on the block's `images` (from `tool_end`); this frames them as a generation. */
+export interface ImageGenInfo {
+  prompt: string;
+  size: string;
+  n: number;
+  steps: number;
+  guidance: number;
+  seed: number | null;
+  negativePrompt: string | null;
+  model: string;
+  count: number;
 }
 
 /** Where a `visual_act` call acted: a screenshot + the marked pixel(s), surfaced on its tool block. */
@@ -70,6 +85,8 @@ export type Block =
       images?: { id?: string; dataUrl: string }[];
       /** Vision analysis attached to a `visual_screenshot` call: screenshot thumbnail + the model's answer. */
       vision?: VisionInfo;
+      /** Generation metadata attached to a `generate_image` call: prompt + params + model. */
+      imageGen?: ImageGenInfo;
       /** Action marker attached to a `visual_act` call: screenshot + where the action landed. */
       visualAct?: VisualActInfo;
     }
@@ -117,6 +134,7 @@ type LiveItem =
       result?: unknown;
       images?: { id?: string; dataUrl: string }[];
       vision?: VisionInfo;
+      imageGen?: ImageGenInfo;
       visualAct?: VisualActInfo;
     }
   /** Placeholder marking where a child agent frame was spawned within this frame's stream. */
@@ -184,6 +202,7 @@ export function buildBlocks(
         result: it.result,
         images: it.images,
         vision: it.vision,
+        imageGen: it.imageGen,
         visualAct: it.visualAct,
       });
     } else {
@@ -458,6 +477,31 @@ export const useStream = create<StreamState>((set, get) => ({
                   width: e.width,
                   height: e.height,
                   snap: e.snap,
+                },
+              }
+            : it,
+        ),
+      }));
+    });
+
+    // Generation card for a generate_image call: attach the prompt + params + model to its tool block.
+    // The images themselves land via `tool_end` (as the block's `images`), so this only adds framing.
+    socket.on('image_gen', (e: ImageGenEvent) => {
+      set((s) => ({
+        liveItems: s.liveItems.map((it) =>
+          it.kind === 'tool' && it.callId === e.callId
+            ? {
+                ...it,
+                imageGen: {
+                  prompt: e.prompt,
+                  size: e.size,
+                  n: e.n,
+                  steps: e.steps,
+                  guidance: e.guidance,
+                  seed: e.seed,
+                  negativePrompt: e.negativePrompt,
+                  model: e.model,
+                  count: e.count,
                 },
               }
             : it,

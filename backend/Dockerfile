@@ -26,5 +26,10 @@ RUN npm ci --only=production
 # Copy compiled JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
 
+# MongoDB migrations + their config: applied automatically at boot (see src/db/migrate.ts) so an
+# app update / restart never runs new code against an un-migrated schema. Plain CommonJS, no build step.
+COPY migrate-mongo-config.js ./
+COPY migrations ./migrations
+
 EXPOSE 4000
 CMD ["node", "dist/index.js"]

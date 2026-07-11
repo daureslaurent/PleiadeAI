@@ -31,6 +31,10 @@ export interface EffectiveSettings {
   vision_max_tokens: number | null;
   vision_frequency_penalty: number | null;
   vision_presence_penalty: number | null;
+  /** Image generation endpoint for `generate_image` ('' → the tool reports it's unconfigured). */
+  image_endpoint_id: string;
+  /** Model on `image_endpoint_id` for generation ('' → that endpoint's default). */
+  image_model: string;
   /** Host self-update master switch — gates the "Update app" action + the periodic check. */
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */
@@ -82,6 +86,8 @@ export const settingsService = {
         doc?.vision_frequency_penalty === undefined ? 0.4 : doc.vision_frequency_penalty,
       vision_presence_penalty:
         doc?.vision_presence_penalty === undefined ? 0.2 : doc.vision_presence_penalty,
+      image_endpoint_id: doc?.image_endpoint_id ?? '',
+      image_model: doc?.image_model ?? '',
       update_enabled: doc?.update_enabled ?? false,
       update_check_interval_hours: doc?.update_check_interval_hours ?? 1,
       scoring_enabled: doc?.scoring_enabled ?? false,

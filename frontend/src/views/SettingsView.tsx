@@ -291,6 +291,42 @@ export function SettingsView() {
               <NullableNumber label="presence_penalty" value={form.vision_presence_penalty} step={0.1} onChange={(v) => set('vision_presence_penalty', v)} />
             </div>
           </Field>
+          <Field
+            label="Image endpoint (for generate_image)"
+            hint="The generate_image tool sends prompts here (POST /v1/images/generations). Point it at an OpenAI-compatible image server — e.g. the bundled image-gen/ stable-diffusion.cpp FLUX box. Per-image defaults (size/steps/guidance) live on the Tools page."
+          >
+            <div className="flex gap-2">
+              <select
+                value={form.image_endpoint_id}
+                onChange={(e) => {
+                  set('image_endpoint_id', e.target.value);
+                  set('image_model', '');
+                }}
+                className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+              >
+                <option value="">None — generate_image is unavailable</option>
+                {endpoints.map((e) => (
+                  <option key={e._id} value={e._id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+              {form.image_endpoint_id && (
+                <select
+                  value={form.image_model}
+                  onChange={(e) => set('image_model', e.target.value)}
+                  className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+                >
+                  <option value="">Endpoint default</option>
+                  {(endpoints.find((e) => e._id === form.image_endpoint_id)?.models ?? []).map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </Field>
         </Section>
 
         {/* Conversation Quality Scorer — LLM-as-judge that rates each turn for the SFT dataset. */}

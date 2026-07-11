@@ -4,6 +4,7 @@ import cors from 'cors';
 import { env } from './config/env';
 import { rootLogger } from './config/logger';
 import { connectMongo, disconnectMongo } from './db/mongoose';
+import { runMigrations } from './db/migrate';
 import { setupAgenda } from './autonomy/agenda.setup';
 import { attachSocket } from './transport/ws/socket';
 import { attachVisualProxy } from './transport/ws/visual-proxy';
@@ -45,8 +46,12 @@ import { telegramBot } from './telegram/TelegramBot';
 async function main(): Promise<void> {
   await connectMongo();
 
-  // Bring the scoring collection's indexes in line with the per-run model even if the deploy skipped
-  // `migrate-mongo up`: a leftover UNIQUE turn_id index silently drops every sub-agent run's score.
+  // Apply pending MongoDB migrations before serving, so an app update / restart never runs new code
+  // against an un-migrated schema. Idempotent; aborts boot on failure (see runMigrations).
+  await runMigrations();
+
+  // Bring the scoring collection's indexes in line with the per-run model even if a migration was
+  // missed: a leftover UNIQUE turn_id index silently drops every sub-agent run's score.
   await reconcileScoringIndexes();
 
   // Persist every captured llama call (LLM Debug page) into Mongo. Registered once, best-effort.

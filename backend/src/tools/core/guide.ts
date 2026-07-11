@@ -79,6 +79,24 @@ Captures the agent's live desktop and a vision model answers about it. Two modes
 \`question\`: ask to READ/DESCRIBE ("what's on screen?") for a text answer, or LOCATE ("where is the
 Submit button?") for pixel coordinates you pass to \`visual_act\`. To *click* a described element,
 prefer \`visual_click\` (locate + click in one step). See the \`visual\` topic guide.`,
+
+  generate_image: `# generate_image — text-to-image
+
+\`generate_image({prompt})\` creates an image from a description using the configured Image endpoint
+(Settings → Image endpoint; e.g. a FLUX server). Generation is **slow on CPU** — expect tens of
+seconds to minutes per image.
+
+Writing a good prompt: be concrete about **subject, style, lighting, and composition** ("a red fox
+in a snowy forest at dawn, cinematic, shallow depth of field") rather than a bare noun. Use
+\`negative_prompt\` to exclude things ("blurry, text, watermark").
+
+Options (all optional): \`size\` ("1024x1024"), \`n\` (count, capped), \`steps\` (more = slower/finer),
+\`seed\` (repeat the *same* image — reuse a seed to iterate on a prompt), \`guidance\` (how strictly to
+follow the prompt). Sensible defaults live on the Tools page, so a bare \`prompt\` works.
+
+The result is saved as an \`img_N\` **resource** (see the \`data\`/\`resources\` guides): to keep the file,
+\`write({filePath, from_handle:"img_N"})\`; to hand it to another agent, just name the handle when you
+\`ask_agent\`. If it fails with "no Image endpoint configured", tell the operator to set one in Settings.`,
 };
 
 /** Cross-tool workflow topics — the multi-step flows the per-tool docs can't capture. `tools` marks

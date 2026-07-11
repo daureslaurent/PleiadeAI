@@ -84,6 +84,22 @@ export interface ToolContext {
     snap?: { text: string; x: number; y: number } | null;
   }) => void;
   /**
+   * Emit a generation card to the UI for the current tool call: the prompt + effective sampling params
+   * + model. Used by `generate_image` so the operator sees what was asked for; the image pixels flow
+   * separately as tool-result images (pooled/persisted), so they aren't sent twice.
+   */
+  emitImageGen?: (payload: {
+    prompt: string;
+    size: string;
+    n: number;
+    steps: number;
+    guidance: number;
+    seed: number | null;
+    negativePrompt: string | null;
+    model: string;
+    count: number;
+  }) => void;
+  /**
    * The turn's live image pool (data URLs, each with a stable `id` handle): the user/parent
    * attachments plus any images tools/skills have acquired so far this turn (e.g. a picture read via
    * `read`). Available to `analyze_image` (describe one by `image_id`) and forwardable to a subagent

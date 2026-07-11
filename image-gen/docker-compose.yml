@@ -1,0 +1,49 @@
+# image-gen — self-hosted GGUF image generation server (stable-diffusion.cpp `sd-server`).
+#
+# Exposes an OpenAI-compatible endpoint on http://<host>:${SD_PORT:-1234}/v1/images/generations,
+# so PleiadesAI (and any OpenAI image client) can generate images the same way it streams chat from
+# a remote llama.cpp box. Point a `generate_image` tool / image endpoint at this URL.
+#
+# Models are NOT baked into the image — they are mounted from ./models (populate it with run.sh).
+# Model file names are driven by the .env in this folder (see .env.example); defaults target
+# FLUX.1-dev GGUF. This compose is standalone (its own network) and is NOT part of the root
+# PleiadesAI stack; run it from this directory with `docker compose up -d`.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  sd-server:
+    image: ${SD_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master}
+    container_name: image_gen_sd_server
+    restart: unless-stopped
+    entrypoint: /sd-server
+    # Flags per `sd-server -h`. FLUX needs four files: diffusion model + two text encoders + VAE.
+    # For a single-file model (e.g. SD 1.5 GGUF), replace all four with a single `-m /models/<file>`.
+    command: >
+      --diffusion-model /models/${SD_DIFFUSION_MODEL:-flux1-dev-Q4_0.gguf}
+      --t5xxl           /models/${SD_T5XXL:-t5-v1_1-xxl-encoder-Q4_0.gguf}
+      --clip_l          /models/${SD_CLIP_L:-clip_l.safetensors}
+      --vae             /models/${SD_VAE:-ae.safetensors}
+      --listen-ip 0.0.0.0
+      --listen-port ${SD_PORT:-1234}
+      -v
+    volumes:
+      - ./models:/models
+      - ./output:/output
+    ports:
+      - "${SD_BIND:-0.0.0.0}:${SD_PORT:-1234}:${SD_PORT:-1234}"
+    logging: *default-logging
+    # --- NVIDIA GPU ---------------------------------------------------------
+    # Use a CUDA image tag in .env (SD_IMAGE=...cuda) AND uncomment the block below.
+    # Requires the NVIDIA Container Toolkit on the host.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

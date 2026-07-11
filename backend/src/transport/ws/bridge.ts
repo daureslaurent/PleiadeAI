@@ -91,6 +91,25 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  eventBus.on(
+    'agent:image_generated',
+    ({ ctx, callId, prompt, size, n, steps, guidance, seed, negativePrompt, model, count }) => {
+      io.to(ctx.sessionId).emit('image_gen', {
+        type: 'image_gen',
+        callId,
+        prompt,
+        size,
+        n,
+        steps,
+        guidance,
+        seed,
+        negativePrompt,
+        model,
+        count,
+      });
+    },
+  );
+
   eventBus.on('tool:execution_complete', ({ ctx, callId, tool, status, result, images }) => {
     io.to(ctx.sessionId).emit('tool_end', {
       type: 'tool_end',

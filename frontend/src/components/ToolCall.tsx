@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, ChevronRight, Eye, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
 import { describeTool, visualActDetail } from '../lib/toolSummary';
 
@@ -11,6 +11,7 @@ export function ToolCall({ block }: { block: ToolBlock }) {
   if (block.tool === 'visual_act' || block.visualAct) return <VisualActBlock block={block} />;
   if (block.tool === 'visual_screenshot' || block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
+  if (block.tool === 'generate_image' || block.imageGen) return <ImageGenBlock block={block} />;
   return <GenericToolBlock block={block} />;
 }
 
@@ -223,6 +224,107 @@ function VisionBlock({ block }: { block: ToolBlock }) {
               <Eye size={11} /> vision
             </div>
             <div className="whitespace-pre-wrap leading-relaxed text-slate-300">{v.answer}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Generation card for `generate_image`: the prompt + the effective sampling params + the produced
+ * image(s), inline in the chat. Prompt/params come from the live `imageGen` event when present, else
+ * fall back to the tool call `args` (which persist across a reload). Click an image to open full-size.
+ */
+function ImageGenBlock({ block }: { block: ToolBlock }) {
+  const [zoom, setZoom] = useState<number | null>(null);
+  const g = block.imageGen;
+  const args = block.args ?? {};
+  // Prefer the resolved live values; fall back to the persisted args so a reloaded turn still reads.
+  const prompt = String(g?.prompt ?? args.prompt ?? '').trim();
+  const size = g?.size ?? (args.size ? String(args.size) : undefined);
+  const steps = g?.steps ?? (args.steps != null ? Number(args.steps) : undefined);
+  const guidance = g?.guidance ?? (args.guidance != null ? Number(args.guidance) : undefined);
+  const seed = g?.seed ?? (args.seed != null ? Number(args.seed) : null);
+  const model = g?.model ?? '';
+  const images = block.images ?? [];
+  const error =
+    block.status === 'error' && block.result && typeof block.result === 'object' && 'error' in block.result
+      ? String((block.result as { error: unknown }).error)
+      : null;
+
+  // Compact "768x768 · 20 steps · cfg 3.5 · seed 42" chip line — only the parts we actually know.
+  const meta = [
+    size,
+    steps != null ? `${steps} steps` : null,
+    guidance != null ? `cfg ${guidance}` : null,
+    seed != null ? `seed ${seed}` : null,
+  ].filter(Boolean) as string[];
+
+  return (
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <ImagePlus size={13} className="shrink-0 text-accent" />
+        <span className="font-medium text-slate-200">{block.tool}</span>
+        {model && (
+          <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+            {model}
+          </span>
+        )}
+        <span className="ml-auto">
+          <StatusIcon status={block.status} />
+        </span>
+      </div>
+
+      <div className="space-y-2 border-t border-white/[0.06] p-3">
+        {prompt && (
+          <div className="text-slate-300">
+            <span className="text-slate-500">Prompt: </span>
+            {prompt}
+          </div>
+        )}
+        {meta.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {meta.map((m) => (
+              <span key={m} className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+                {m}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {images.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {images.map((img, i) => (
+              <button
+                key={img.id ?? i}
+                onClick={() => setZoom((z) => (z === i ? null : i))}
+                className="block"
+                title={img.id ? `${img.id} — click to ${zoom === i ? 'shrink' : 'enlarge'}` : 'click to enlarge'}
+              >
+                <span className="relative inline-block">
+                  <img
+                    src={img.dataUrl}
+                    alt={img.id ?? `generated image ${i}`}
+                    className={`block rounded border border-border object-contain ${zoom === i ? 'w-full' : 'max-h-52'}`}
+                  />
+                  {img.id && (
+                    <span className="absolute bottom-0 left-0 right-0 rounded-b bg-black/60 px-1 py-px text-center text-[9px] font-mono text-slate-200">
+                      {img.id}
+                    </span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="flex items-start gap-1.5 text-[11px] text-amber-400">
+            <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+            {error}
+          </div>
+        ) : (
+          <div className="text-slate-500">
+            {block.status === 'running' ? 'Generating image… (can take a while on CPU)' : 'No image produced.'}
           </div>
         )}
       </div>

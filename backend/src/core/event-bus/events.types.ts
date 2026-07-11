@@ -164,6 +164,31 @@ export interface VisualActPayload {
   snap?: { text: string; x: number; y: number } | null;
 }
 
+/**
+ * A `generate_image` call produced one or more images. Drives the chat's generation card (prompt +
+ * the effective sampling params + model). The image pixels themselves ride the tool's
+ * `tool:execution_complete` payload (pooled + persisted like any tool-acquired image); this event
+ * carries only the framing metadata, so the picture isn't sent twice over the wire.
+ */
+export interface ImageGeneratedPayload {
+  ctx: EventContext;
+  /** Correlates with the `generate_image` tool call that produced it. */
+  callId: string;
+  prompt: string;
+  /** Effective dimensions used, e.g. `768x768`. */
+  size: string;
+  /** Number of images produced. */
+  n: number;
+  steps: number;
+  guidance: number;
+  seed: number | null;
+  negativePrompt: string | null;
+  /** The image model id (empty when unknown). */
+  model: string;
+  /** Count of images actually returned (may differ from requested `n`). */
+  count: number;
+}
+
 export interface ContextUsagePayload {
   ctx: EventContext;
   /** Prompt tokens on this inference pass — the current context size. */
@@ -325,6 +350,7 @@ export interface EventMap {
   'tool:output_chunk': ToolOutputChunkPayload;
   'tool:vision': VisionAnalysisPayload;
   'tool:visual_act': VisualActPayload;
+  'agent:image_generated': ImageGeneratedPayload;
   'tool:execution_complete': ToolCompletePayload;
   'agent:ask_agent': AskAgentPayload;
   'agent:ask_agent_done': AskAgentDonePayload;

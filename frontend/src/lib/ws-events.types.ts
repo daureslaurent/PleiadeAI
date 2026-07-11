@@ -79,6 +79,27 @@ export interface VisionEvent {
   snap?: { text: string; x: number; y: number } | null;
 }
 
+/**
+ * A `generate_image` call produced image(s). Carries the prompt + effective sampling params + model
+ * for the chat's generation card; the images themselves arrive on the matching `tool_end` (pooled +
+ * persisted like any tool-acquired image), so they're not duplicated here.
+ */
+export interface ImageGenEvent {
+  type: 'image_gen';
+  callId: string;
+  prompt: string;
+  size: string;
+  n: number;
+  steps: number;
+  guidance: number;
+  seed: number | null;
+  negativePrompt: string | null;
+  /** The image model id (empty when unknown). */
+  model: string;
+  /** Number of images actually returned. */
+  count: number;
+}
+
 /** Action marker for a `visual_act` call: a screenshot + where the action landed (drive-the-desktop). */
 export interface VisualActEvent {
   type: 'visual_act';
@@ -215,6 +236,7 @@ export type WsEvent =
   | ToolOutputEvent
   | ToolEndEvent
   | VisionEvent
+  | ImageGenEvent
   | SystemAlertEvent
   | AskUserEvent
   | TruncatedEvent

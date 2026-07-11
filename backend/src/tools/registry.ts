@@ -15,6 +15,7 @@ import { bash } from './core/bash';
 import { scheduleTask } from './core/scheduleTask';
 import { visualScreenshot, visualAct, visualClick, visualWindows } from './core/visual';
 import { analyzeImage } from './core/analyzeImage';
+import { generateImage } from './core/generateImage';
 import { data } from './core/data';
 import { guide } from './core/guide';
 import { read } from './core/fs/read';
@@ -54,6 +55,8 @@ const CORE_TOOLS: Record<string, Tool> = {
   [visualClick.name]: visualClick,
   [visualWindows.name]: visualWindows,
   [analyzeImage.name]: analyzeImage,
+  // Text-to-image generation via the configured Image endpoint (opt-in per agent via tools_allowed).
+  [generateImage.name]: generateImage,
   // Session resource pool (list/save/store) — auto-granted to every agent (see AgentRunner).
   [data.name]: data,
   // Man-style tool/workflow guides — auto-granted to every agent (see AgentRunner).

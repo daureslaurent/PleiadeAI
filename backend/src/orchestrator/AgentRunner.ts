@@ -743,6 +743,8 @@ export class AgentRunner {
         eventBus.emit('tool:vision', { ctx, callId: call.id, ...payload }),
       emitVisualAct: (payload) =>
         eventBus.emit('tool:visual_act', { ctx, callId: call.id, ...payload }),
+      emitImageGen: (payload) =>
+        eventBus.emit('agent:image_generated', { ctx, callId: call.id, ...payload }),
       attachedImages: delegation.pool.all(),
       availableTools: [...toolMap.values()].map((t) => ({
         name: t.name,
