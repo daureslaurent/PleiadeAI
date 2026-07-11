@@ -1,5 +1,5 @@
 {
-  "idleTimeoutSec": 300,
+  "idleTimeoutSec": 0,
   "startTimeoutSec": 180,
   "stopSettleMs": 2000,
   "dockerSocket": "/var/run/docker.sock",

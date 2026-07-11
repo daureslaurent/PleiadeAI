@@ -5,15 +5,17 @@ once — e.g. a llama.cpp **vision** server and the **image-gen** FLUX server sh
 
 It runs one HTTP listener per service. On a request it makes that service the *only* one loaded:
 stop whichever other service is running (freeing its VRAM), start the target container, wait until
-it's healthy, then proxy. After `idleTimeoutSec` with nothing in flight it stops the service again,
-so the box idles at zero GPU use between bursts.
+it's healthy, then proxy. A loaded service is **only stopped when another service needs its VRAM** (a
+swap) — finishing a task leaves it warm, so back-to-back requests to the same service skip the cold
+load. Optionally, `idleTimeoutSec > 0` also unloads a service after it sits idle that long; leave it
+at `0` (the default) to unload only on a swap.
 
 ```
 request → gpu-broker (:1234 image / :8080 vision)
             is the other service running?  → docker stop it, wait for VRAM to free
             target container running?       → docker start it, poll health
             proxy the request → upstream container
-            0 in-flight for idleTimeoutSec  → docker stop it
+            (idle-unload optional: 0 in-flight for idleTimeoutSec → docker stop it)
 ```
 
 **At most one managed container runs at a time.** GET `/v1/models` is answered locally from config,
@@ -70,7 +72,7 @@ the host-published upstreams, and mounts the Docker socket so it can start/stop 
 
 | key | meaning |
 | --- | --- |
-| `idleTimeoutSec` | stop a service after this long with 0 in-flight requests (default 300) |
+| `idleTimeoutSec` | also stop a service after this long with 0 in-flight requests; `0` disables idle-unload so a service only stops on a swap (default `0`) |
 | `startTimeoutSec` | how long to wait for a cold-started container to become healthy (default 180) |
 | `stopSettleMs` | grace after `docker stop` for the driver to reclaim VRAM before starting the next (default 2000) |
 | `dockerSocket` | Docker Engine API socket (default `/var/run/docker.sock`) |

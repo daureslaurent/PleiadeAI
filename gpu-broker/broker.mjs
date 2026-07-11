@@ -5,9 +5,11 @@
  *
  * It exposes one HTTP listener per service. When a request arrives, it makes that service the *only*
  * one loaded: it stops whichever other service is running (freeing its VRAM), starts the target
- * container if needed, waits for it to become healthy, then proxies the request. After a service
- * sits idle for `idleTimeoutSec` with no in-flight requests it is stopped again, so the box returns
- * to zero GPU use between bursts.
+ * container if needed, waits for it to become healthy, then proxies the request. A loaded service is
+ * only ever stopped when another service needs its VRAM (a swap) — finishing a task does not unload
+ * it, so back-to-back requests to the same service stay warm. Optionally, `idleTimeoutSec > 0` also
+ * unloads a service after it sits idle that long with no in-flight requests; set it to 0 (the
+ * default) to disable idle-unload entirely and keep the last-used service resident until a swap.
  *
  * Design notes / invariants:
  *   - At most one managed container runs at a time (the mutex). Enforced by a single serialized
@@ -29,7 +31,7 @@ import { readFileSync } from 'node:fs';
 
 const CONFIG = JSON.parse(readFileSync(process.env.BROKER_CONFIG || './config.json', 'utf8'));
 const DOCKER_SOCK = CONFIG.dockerSocket || '/var/run/docker.sock';
-const IDLE_MS = (CONFIG.idleTimeoutSec ?? 300) * 1000;
+const IDLE_MS = (CONFIG.idleTimeoutSec ?? 0) * 1000; // 0 → no idle-unload; a service only stops on a swap
 const START_TIMEOUT_MS = (CONFIG.startTimeoutSec ?? 180) * 1000;
 const STOP_SETTLE_MS = CONFIG.stopSettleMs ?? 2000; // grace for the driver to reclaim VRAM after stop
 const SERVICES = CONFIG.services ?? [];
@@ -133,6 +135,8 @@ function clearIdle(name) {
 
 function scheduleIdle(svc) {
   clearIdle(svc.name);
+  // idleTimeoutSec <= 0 disables idle-unload: the service stays loaded until a swap needs its VRAM.
+  if (IDLE_MS <= 0) return;
   idleTimers.set(
     svc.name,
     setTimeout(() => {
@@ -278,7 +282,10 @@ async function main() {
       log(`[${svc.name}] listening on :${svc.listenPort} → ${svc.upstreamHost || '127.0.0.1'}:${svc.upstreamPort} (container ${svc.container})`),
     );
   }
-  log(`ready — one of [${SERVICES.map((s) => s.name).join(', ')}] loaded at a time, idle-unload after ${IDLE_MS / 1000}s`);
+  log(
+    `ready — one of [${SERVICES.map((s) => s.name).join(', ')}] loaded at a time, ` +
+      `${IDLE_MS > 0 ? `idle-unload after ${IDLE_MS / 1000}s` : 'idle-unload disabled (unload only on swap)'}`,
+  );
 }
 
 main().catch((e) => {
