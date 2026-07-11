@@ -72,15 +72,19 @@ async function dockerStop(container) {
 }
 
 // ---------------------------------------------------------------------------
-// Health probe against the upstream (the container's own port).
-// ---------------------------------------------------------------------------
+// Readiness probe against the upstream (the container's own port). "Ready" means the container is
+// *listening and answering HTTP* — ANY status code counts, including 503. We deliberately don't
+// require 200: llama.cpp's /health returns 503 while a model loads, and with on-demand model loading
+// (e.g. a models.ini setup) it can stay 503 until the first real request triggers a load. The
+// upstream owns its own model-load/queueing; the broker only needs to know the process is up. A
+// refused connection or timeout (process not bound yet) is the not-ready signal.
 function probe(svc) {
   return new Promise((resolve) => {
     const req = http.request(
       { host: svc.upstreamHost || '127.0.0.1', port: svc.upstreamPort, path: svc.healthPath || '/v1/models', method: 'GET', timeout: 3000 },
       (res) => {
         res.resume();
-        resolve((res.statusCode ?? 500) >= 200 && (res.statusCode ?? 500) < 500);
+        resolve(typeof res.statusCode === 'number'); // any HTTP response ⇒ listening
       },
     );
     req.on('error', () => resolve(false));
