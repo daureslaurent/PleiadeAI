@@ -29,6 +29,13 @@ services:
     # present, sized from each device's free VRAM — so on a multi-GPU box no single card gets
     # starved (a single 12 GB card OOM'd at VAE decode with the whole ~10 GB model on one device).
     # On a single-GPU box it's a no-op (places everything on that GPU).
+    # --max-vram sets an explicit per-device budget (GiB) for the graph-cut layer split, overriding
+    # --auto-fit's "free VRAM minus a margin" default. On an asymmetric pair (8 GB 2070 = cuda1,
+    # 12 GB 3060 = cuda0) auto-detect left the 2070 ~0.4 GB short (its slice's compute buffer needs
+    # ~3 GB and only ~2.85 GB was free). Claiming cuda1=7 hands the 2070 its real headroom so its
+    # segment fits. NOTE: this OOMs hard (not a graceful skip) if the 2070 isn't actually that free —
+    # verify with `nvidia-smi` that nothing else (e.g. an llama.cpp server) is resident on it, and
+    # tune via SD_MAX_VRAM (e.g. cuda0=11.5,cuda1=7.5). Lower cuda0 pushes MORE weight onto the 2070.
     # --diffusion-fa runs flash attention in the diffusion model. FLUX's attention compute buffer
     # scales with image_seq_len (9216 at 768px), and on an asymmetric multi-GPU box (e.g. 8 GB 2070
     # + 12 GB 3060) the smaller card OOMs on that per-segment activation buffer even though its
@@ -42,6 +49,7 @@ services:
       --clip_l          /models/${SD_CLIP_L:-clip_l.safetensors}
       --vae             /models/${SD_VAE:-ae.safetensors}
       --auto-fit
+      --max-vram ${SD_MAX_VRAM:-cuda0=11,cuda1=7}
       --diffusion-fa
       --vae-tiling
       --listen-ip 0.0.0.0
