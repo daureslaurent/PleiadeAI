@@ -32,10 +32,19 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
   },
   {
     key: 'default_guidance',
-    label: 'Guidance',
+    label: 'Guidance (distilled)',
     type: 'number',
     default: 3.5,
-    hint: 'CFG / distilled-guidance scale. ~3.5 suits FLUX.1-dev.',
+    hint: 'FLUX distilled-guidance scale (~3.5). This shapes the image and is NOT real CFG — leave it here.',
+  },
+  {
+    key: 'default_cfg_scale',
+    label: 'Real CFG',
+    type: 'number',
+    default: 1,
+    hint: 'Classifier-free-guidance scale. FLUX.1-dev is guidance-distilled and must stay at 1 (off) — ' +
+      'raising it burns/oversaturates the image and doubles the time. Only increase on a non-distilled ' +
+      'model. The negative prompt only takes effect when this is > 1.',
   },
   {
     key: 'default_n',
@@ -48,11 +57,9 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     key: 'default_negative_prompt',
     label: 'Negative prompt',
     type: 'string',
-    default:
-      'blurry, low quality, low resolution, soft focus, out of focus, jpeg artifacts, ' +
-      'deformed, disfigured, bad anatomy, extra limbs, watermark, text, signature',
-    hint: 'What to avoid in every image. Note: FLUX is guidance-distilled, so this only bites when ' +
-      'real CFG is on (guidance > 1). Leave blank for none.',
+    default: '',
+    hint: 'What to avoid in every image. FLUX is guidance-distilled, so this is a no-op unless Real CFG ' +
+      'is set > 1 (which itself degrades FLUX-dev). Leave blank on FLUX.',
   },
 ];
 
@@ -103,14 +110,17 @@ export const generateImage: Tool = {
     const n = clampInt(config.default_n, 1, MAX_N, 1);
     const steps = clampInt(config.default_steps, 1, 150, 20);
     const guidance = Number(config.default_guidance);
+    // Older tool configs predate this knob — default to 1 (real CFG off) so FLUX-dev stays un-burnt.
+    const cfgScaleRaw = Number(config.default_cfg_scale);
+    const cfgScale = Number.isFinite(cfgScaleRaw) ? cfgScaleRaw : 1;
     const negativePrompt = String(config.default_negative_prompt ?? '').trim() || undefined;
     const seed = undefined;
 
-    log.info({ agent: ctx.agentName, size, n, steps }, 'generate_image');
+    log.info({ agent: ctx.agentName, size, n, steps, cfgScale }, 'generate_image');
 
     let out;
     try {
-      out = await generateImages({ prompt, negativePrompt, size, n, steps, guidance, seed });
+      out = await generateImages({ prompt, negativePrompt, size, n, steps, guidance, cfgScale, seed });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Config/server problems are expected failure modes — return them as a normal tool error the

@@ -22,8 +22,15 @@ export interface ImageGenParams {
   n?: number;
   /** Sampling steps (FLUX.1-dev wants ~20-28; schnell ~4). Best-effort — depends on the server build. */
   steps?: number;
-  /** Guidance / CFG scale (FLUX.1-dev ~3.5). Best-effort — depends on the server build. */
+  /** Distilled-guidance scale (FLUX.1-dev ~3.5). This is NOT real CFG. Best-effort — depends on the server build. */
   guidance?: number;
+  /**
+   * Real classifier-free-guidance scale. FLUX.1-dev is guidance-*distilled* and must run with real CFG
+   * OFF (1.0) — any value > 1 makes it run an unconditional pass it was never trained for, producing
+   * burnt / oversaturated / banded output and ~2x the compute. Only raise this on a non-distilled model.
+   * Defaults to 1.0 (off). A negative prompt is only sent when this is > 1, since it's a no-op otherwise.
+   */
+  cfgScale?: number;
   /** RNG seed for reproducibility (-1 / omitted → random). Best-effort. */
   seed?: number;
 }
@@ -77,13 +84,18 @@ export async function generateImages(params: ImageGenParams): Promise<ImageGenRe
     response_format: 'b64_json',
   };
   if (params.size) body.size = params.size;
-  if (params.negativePrompt) body.negative_prompt = params.negativePrompt;
   if (params.steps !== undefined) body.steps = params.steps;
-  if (params.guidance !== undefined) {
-    // Different sd-server builds read the FLUX distilled-guidance value under different keys — send both.
-    body.cfg_scale = params.guidance;
-    body.guidance = params.guidance;
-  }
+
+  // Distilled guidance and real CFG are DIFFERENT knobs. On FLUX.1-dev the distilled `guidance` (~3.5)
+  // shapes the image; real `cfg_scale` must stay at 1.0 (off) or the distilled model burns out. Send
+  // them as separate values — never mirror guidance onto cfg_scale (that was the "ugly output" bug).
+  if (params.guidance !== undefined) body.guidance = params.guidance;
+  const cfgScale = params.cfgScale ?? 1;
+  body.cfg_scale = cfgScale;
+
+  // A negative prompt only does anything when real CFG is on (cfg_scale > 1). Sending it at cfg 1.0 is
+  // a pure no-op on FLUX, so only include it when CFG is actually engaged.
+  if (cfgScale > 1 && params.negativePrompt) body.negative_prompt = params.negativePrompt;
   if (params.seed !== undefined) body.seed = params.seed;
 
   const controller = new AbortController();
