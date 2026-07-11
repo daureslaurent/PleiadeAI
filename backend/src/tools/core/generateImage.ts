@@ -103,7 +103,8 @@ export const generateImage: Tool = {
     if (!prompt) return { result: { ok: false, error: 'prompt is required' } };
 
     // Every generation parameter comes from the operator's Tools-page config — the agent only
-    // supplies the prompt. Seed is always random (no reproducible-seed knob to keep the tool simple).
+    // supplies the prompt. No seed knob (kept simple): `generateImages` sends -1, i.e. a random draw
+    // per call — leaving it unset would inherit sd-server's fixed default seed and repeat the image.
     const { config } = await toolConfigService.resolve(generateImage.name, CONFIG_SCHEMA);
 
     const size = String(config.default_size);

@@ -2,7 +2,7 @@
 #
 # run.sh — one-shot bootstrap for the GGUF image generation server.
 #
-#   ./run.sh              download FLUX.1-schnell GGUF weights (if missing), then start the server
+#   ./run.sh              download FLUX.1-dev GGUF weights (if missing), then start the server
 #   ./run.sh models       download the model files only
 #   ./run.sh up           start the server only (assumes models present)
 #   ./run.sh down         stop the server
@@ -19,16 +19,30 @@ cd "$(dirname "$0")"
 
 MODELS_DIR="./models"
 OUTPUT_DIR="./output"
-PORT="${SD_PORT:-1234}"
-[ -f .env ] && PORT="$(grep -E '^SD_PORT=' .env | cut -d= -f2 || echo 1234)"
-PORT="${PORT:-1234}"
 
-# name -> Hugging Face resolve URL. Edit here (and .env) to use different weights.
+# Read a key out of .env, falling back to the environment and then to a default.
+env_get() {
+  local key="$1" def="${2:-}" val=""
+  [ -f .env ] && val="$(sed -n "s/^${key}=//p" .env | tail -n1 | tr -d '\r')"
+  [ -n "$val" ] || val="$(printenv "$key" || true)"
+  printf '%s' "${val:-$def}"
+}
+
+PORT="$(env_get SD_PORT 1234)"
+# The four FLUX files, named exactly as docker-compose/.env expect them. The diffusion quant is
+# whatever SD_DIFFUSION_MODEL asks for: city96/FLUX.1-dev-gguf publishes every flux1-dev-<QUANT>.gguf
+# under one repo, so the URL is derived from the file name and any quant works with no edit here.
+DIFFUSION_MODEL="$(env_get SD_DIFFUSION_MODEL flux1-dev-Q4_K_S.gguf)"
+T5XXL="$(env_get SD_T5XXL t5-v1_1-xxl-encoder-Q4_K_M.gguf)"
+CLIP_L="$(env_get SD_CLIP_L clip_l.safetensors)"
+VAE="$(env_get SD_VAE ae.safetensors)"
+
+# name -> Hugging Face resolve URL.
 declare -A FILES=(
-  ["flux1-dev-Q8_0.gguf"]="https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q8_0.gguf"
-  ["t5-v1_1-xxl-encoder-Q4_K_M.gguf"]="https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q4_K_M.gguf"
-  ["clip_l.safetensors"]="https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"
-  ["ae.safetensors"]="https://huggingface.co/cocktailpeanut/xulf-schnell/resolve/main/ae.safetensors"
+  ["$DIFFUSION_MODEL"]="https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/$DIFFUSION_MODEL"
+  ["$T5XXL"]="https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/$T5XXL"
+  ["$CLIP_L"]="https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/$CLIP_L"
+  ["$VAE"]="https://huggingface.co/cocktailpeanut/xulf-schnell/resolve/main/$VAE"
 )
 
 log() { printf '\033[1;36m[image-gen]\033[0m %s\n' "$*"; }
@@ -67,11 +81,17 @@ test_server() {
   mkdir -p "$OUTPUT_DIR"
   local out="$OUTPUT_DIR/test-$(date +%s).png"
   log "requesting a test image from port $PORT ..."
+  # The OpenAI route only reads prompt/n/size/output_format; native knobs (steps, sampler, real CFG
+  # vs distilled guidance) ride along in an <sd_cpp_extra_args> block inside the prompt, which the
+  # server strips before generating. Same mechanism the backend uses — see inference/image-generate.ts.
+  local args='{"sample_params":{"sample_method":"euler","sample_steps":24,"guidance":{"txt_cfg":1.0,"distilled_guidance":3.5}}}'
+  local body
+  body="$(printf '{"prompt":"a lovely cat holding a sign says \\"flux.cpp\\", cinematic lighting <sd_cpp_extra_args>%s</sd_cpp_extra_args>","n":1,"size":"1024x1024"}' "$args")"
   # Extract b64_json from the OpenAI-shaped response and decode to a PNG.
   local b64
   b64="$(curl -fsS "http://localhost:$PORT/v1/images/generations" \
     -H 'Content-Type: application/json' \
-    -d '{"prompt":"a lovely cat, cinematic lighting","n":1,"size":"512x512"}' \
+    -d "$body" \
     | sed -n 's/.*"b64_json"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
   [ -n "$b64" ] || { echo "error: no image in response (is the model still loading?)" >&2; exit 1; }
   echo "$b64" | base64 -d > "$out"

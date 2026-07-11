@@ -20,9 +20,9 @@ export interface ImageGenParams {
   size?: string;
   /** Number of images to produce in one call. */
   n?: number;
-  /** Sampling steps (FLUX.1-dev wants ~20-28; schnell ~4). Best-effort — depends on the server build. */
+  /** Sampling steps (FLUX.1-dev wants ~20-28; schnell ~4). */
   steps?: number;
-  /** Distilled-guidance scale (FLUX.1-dev ~3.5). This is NOT real CFG. Best-effort — depends on the server build. */
+  /** Distilled-guidance scale (FLUX.1-dev ~3.5). This is NOT real CFG. */
   guidance?: number;
   /**
    * Real classifier-free-guidance scale. FLUX.1-dev is guidance-*distilled* and must run with real CFG
@@ -31,7 +31,7 @@ export interface ImageGenParams {
    * Defaults to 1.0 (off). A negative prompt is only sent when this is > 1, since it's a no-op otherwise.
    */
   cfgScale?: number;
-  /** RNG seed for reproducibility (-1 / omitted → random). Best-effort. */
+  /** RNG seed for reproducibility (negative → random; omitted → the server's default seed). */
   seed?: number;
 }
 
@@ -47,6 +47,47 @@ export interface ImageGenResult {
 /** Shape of the OpenAI-compatible `/v1/images/generations` response (as served by sd-server). */
 interface ImagesResponse {
   data?: { b64_json?: string; url?: string }[];
+}
+
+/**
+ * Native stable-diffusion.cpp generation params (the `sdcpp API` request schema — see
+ * `examples/server/api.md`). Only the fields we actually drive; everything else keeps the server's
+ * CLI defaults.
+ */
+interface SdCppExtraArgs {
+  negative_prompt?: string;
+  seed?: number;
+  sample_params: {
+    sample_method: string;
+    sample_steps?: number;
+    guidance: {
+      /** REAL classifier-free guidance (the server calls it txt_cfg; `--cfg-scale` on the CLI). */
+      txt_cfg?: number;
+      /** FLUX's distilled guidance (`--guidance` on the CLI). A different knob from txt_cfg. */
+      distilled_guidance?: number;
+    };
+  };
+}
+
+/**
+ * FLUX wants plain `euler`, not the SD-era `euler_a` that sd-server defaults to (upstream
+ * `docs/flux.md` uses `--sampling-method euler` in every FLUX example).
+ */
+const SAMPLE_METHOD = 'euler';
+
+/**
+ * sd-server's OpenAI route is a thin compatibility shim: it reads **only** `prompt`, `n`, `size`,
+ * `output_format` and `output_compression` from the body and drops everything else on the floor
+ * (`examples/server/routes_openai.cpp`). Steps, samplers, seeds, negative prompts and both guidance
+ * scales are reachable only through the native schema, which the OpenAI route accepts as a JSON blob
+ * embedded in the prompt inside an `<sd_cpp_extra_args>` tag — the server extracts it, applies it,
+ * and strips it from the text before generating (`examples/server/api.md` §sd_cpp_extra_args).
+ *
+ * So: send them that way, or silently inherit the server's CLI defaults (which include a real CFG of
+ * **7.0** — the value that burns FLUX-dev).
+ */
+function embedExtraArgs(prompt: string, args: SdCppExtraArgs): string {
+  return `${prompt} <sd_cpp_extra_args>${JSON.stringify(args)}</sd_cpp_extra_args>`;
 }
 
 /**
@@ -76,27 +117,34 @@ export async function generateImages(params: ImageGenParams): Promise<ImageGenRe
   const base = target.url.replace(/\/+$/, '');
   const url = `${base}/v1/images/generations`;
 
-  // OpenAI-shaped body + the stable-diffusion.cpp extensions. Unknown fields are ignored by servers
-  // that don't support them, so the extras degrade gracefully across builds.
+  // Distilled guidance and real CFG are DIFFERENT knobs. On FLUX.1-dev the distilled guidance (~3.5)
+  // shapes the image; real CFG (`txt_cfg`) must stay at 1.0 (off) or the distilled model burns out.
+  // Send them as separate values — never mirror guidance onto txt_cfg (that was the "ugly output" bug).
+  const cfgScale = params.cfgScale ?? 1;
+  const extra: SdCppExtraArgs = {
+    sample_params: {
+      sample_method: SAMPLE_METHOD,
+      guidance: { txt_cfg: cfgScale },
+    },
+  };
+  if (params.steps !== undefined) extra.sample_params.sample_steps = params.steps;
+  if (params.guidance !== undefined) extra.sample_params.guidance.distilled_guidance = params.guidance;
+  // A negative prompt only does anything when real CFG is on (txt_cfg > 1). Sending it at cfg 1.0 is
+  // a pure no-op on FLUX, so only include it when CFG is actually engaged.
+  if (cfgScale > 1 && params.negativePrompt) extra.negative_prompt = params.negativePrompt;
+  // sd-server's own default seed is a FIXED 42 (`--seed`, "use random seed for < 0"), so omitting the
+  // seed doesn't mean "random" — it means the same prompt returns byte-identical images forever.
+  // Default to -1 so each call is a fresh draw unless the caller pins a seed.
+  extra.seed = params.seed ?? -1;
+
+  // OpenAI-shaped body. Only prompt/n/size/output_format survive the compat route (see
+  // embedExtraArgs) — every other knob rides inside the prompt tag.
   const body: Record<string, unknown> = {
-    prompt: params.prompt,
+    prompt: embedExtraArgs(params.prompt, extra),
     n: params.n ?? 1,
-    response_format: 'b64_json',
+    output_format: 'png',
   };
   if (params.size) body.size = params.size;
-  if (params.steps !== undefined) body.steps = params.steps;
-
-  // Distilled guidance and real CFG are DIFFERENT knobs. On FLUX.1-dev the distilled `guidance` (~3.5)
-  // shapes the image; real `cfg_scale` must stay at 1.0 (off) or the distilled model burns out. Send
-  // them as separate values — never mirror guidance onto cfg_scale (that was the "ugly output" bug).
-  if (params.guidance !== undefined) body.guidance = params.guidance;
-  const cfgScale = params.cfgScale ?? 1;
-  body.cfg_scale = cfgScale;
-
-  // A negative prompt only does anything when real CFG is on (cfg_scale > 1). Sending it at cfg 1.0 is
-  // a pure no-op on FLUX, so only include it when CFG is actually engaged.
-  if (cfgScale > 1 && params.negativePrompt) body.negative_prompt = params.negativePrompt;
-  if (params.seed !== undefined) body.seed = params.seed;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
