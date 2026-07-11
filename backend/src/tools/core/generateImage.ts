@@ -12,7 +12,8 @@ const MAX_N = 4;
 /**
  * Operator-tunable generation settings, rendered on the Tools page. These are the *only* place the
  * generation parameters are set — the agent supplies just a `prompt` and every other knob (size,
- * count, steps, guidance, negative prompt) comes from here. FLUX.1-dev-friendly defaults.
+ * count, steps, guidance, negative prompt) comes from here. Defaults suit the bundled `image-gen/`
+ * server's FLUX.2-klein-9B (distilled: 4 steps at real CFG 1.0).
  */
 const CONFIG_SCHEMA: ToolConfigField[] = [
   {
@@ -27,24 +28,26 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     key: 'default_steps',
     label: 'Steps (cycles)',
     type: 'number',
-    default: 24,
-    hint: 'Sampling steps/cycles. FLUX.1-dev wants ~20-28 for crisp detail; schnell only ~4.',
+    default: 4,
+    hint: 'Sampling steps/cycles. FLUX.2-klein is a 4-step distilled model — more steps just cost time. ' +
+      'The non-distilled klein-*base* wants ~20, and FLUX.1-dev ~20-28.',
   },
   {
     key: 'default_guidance',
     label: 'Guidance (distilled)',
     type: 'number',
     default: 3.5,
-    hint: 'FLUX distilled-guidance scale (~3.5). This shapes the image and is NOT real CFG — leave it here.',
+    hint: 'FLUX.1 distilled-guidance scale (~3.5) — NOT real CFG. FLUX.2 has no distilled-guidance ' +
+      'input, so this is ignored there; it only matters if you point the endpoint back at a FLUX.1 model.',
   },
   {
     key: 'default_cfg_scale',
     label: 'Real CFG',
     type: 'number',
     default: 1,
-    hint: 'Classifier-free-guidance scale. FLUX.1-dev is guidance-distilled and must stay at 1 (off) — ' +
-      'raising it burns/oversaturates the image and doubles the time. Only increase on a non-distilled ' +
-      'model. The negative prompt only takes effect when this is > 1.',
+    hint: 'Classifier-free-guidance scale. FLUX.2-klein (like FLUX.1-dev) is guidance-distilled and must ' +
+      'stay at 1 (off) — raising it burns/oversaturates the image and doubles the time. Raise it only on ' +
+      'a non-distilled model (klein-base wants 4.0). The negative prompt only takes effect when this is > 1.',
   },
   {
     key: 'default_n',
@@ -58,8 +61,8 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     label: 'Negative prompt',
     type: 'string',
     default: '',
-    hint: 'What to avoid in every image. FLUX is guidance-distilled, so this is a no-op unless Real CFG ' +
-      'is set > 1 (which itself degrades FLUX-dev). Leave blank on FLUX.',
+    hint: 'What to avoid in every image. A distilled FLUX (klein, FLUX.1-dev) ignores this unless Real CFG ' +
+      'is set > 1 — which itself degrades those models. Only useful on a non-distilled model (klein-base).',
   },
 ];
 

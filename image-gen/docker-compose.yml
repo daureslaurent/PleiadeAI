@@ -6,7 +6,7 @@
 #
 # Models are NOT baked into the image — they are mounted from ./models (populate it with run.sh).
 # Model file names are driven by the .env in this folder (see .env.example); defaults target
-# FLUX.1-dev GGUF. This compose is standalone (its own network) and is NOT part of the root
+# FLUX.2-klein-9B GGUF. This compose is standalone (its own network) and is NOT part of the root
 # PleiadesAI stack; run it from this directory with `docker compose up -d`.
 
 x-logging: &default-logging
@@ -23,44 +23,47 @@ services:
     container_name: image_gen_sd_server
     restart: unless-stopped
     entrypoint: /sd-server
-    # Flags follow upstream's FLUX guide (docs/flux.md) + examples/server/README.md.
-    # FLUX needs four files: diffusion model + two text encoders + VAE. For a single-file model
-    # (e.g. SD 1.5 GGUF), replace all four with a single `-m /models/<file>`.
+    # Flags follow upstream's FLUX.2 guide (docs/flux2.md) + examples/server/README.md.
     #
-    # Generation defaults (the `--cfg-scale`/`--guidance`/`--sampling-method`/`--steps` block) matter
-    # more than they look: sd-server's OpenAI route only reads `prompt`/`n`/`size`/`output_format`
-    # from the request body — every other knob comes from these CLI defaults unless the client sends
-    # a native `<sd_cpp_extra_args>` block (which the backend's image-generate.ts now does). So a
-    # server left on the stock --cfg-scale 7.0 runs FLUX-dev at real CFG 7 no matter what the client
-    # asks for, which is what burns/oversaturates the output.
-    #   --cfg-scale 1.0     REAL classifier-free guidance, OFF. FLUX-dev is guidance-*distilled*;
-    #                       upstream's flux.md says "--cfg-scale is recommended to be set to 1".
-    #   --guidance 3.5      the DISTILLED guidance FLUX actually conditions on. Different knob.
-    #   --sampling-method   euler, per flux.md (the stock default is euler_a, meant for SD-era models).
-    #   --steps 24          FLUX-dev wants ~20-28. For schnell set SD_STEPS=4.
+    # FLUX.2 is a different model layout from FLUX.1: the CLIP-L + T5-XXL pair is gone, replaced by a
+    # single LLM text encoder (`--llm`; Qwen3 for the klein family, Mistral-Small-3.2 for FLUX.2-dev),
+    # and it uses its own VAE. Three files: diffusion model + LLM + VAE.
+    # Default is FLUX.2-klein-9B, the largest FLUX.2 that fits this box: FLUX.2-dev needs ~19 GB of
+    # weights *plus* a 24B Mistral encoder, which does not fit in 12+8 GB without brutal streaming.
     #
-    # Placement: `--backend te=cpu` is the current spelling of flux.md's (now deprecated) --clip-on-cpu.
-    # It keeps T5-XXL + CLIP-L off the GPU so the whole VRAM budget goes to the diffusion weights —
-    # which is how upstream fits FLUX in 6 GB (or 4 GB) without any RAM offload. At Q4_K_S (~6.9 GB)
-    # the diffusion model is fully resident on one card, so none of the streaming machinery is needed.
-    # --diffusion-fa runs flash attention in the diffusion model (smaller attention buffer at 1 MP);
-    # --vae-tiling decodes the VAE in tiles (~1.6 GB buffer -> ~0.4 GB), cheap insurance vs decode OOM.
+    # Generation defaults (`--cfg-scale`/`--sampling-method`/`--steps`) matter more than they look:
+    # sd-server's OpenAI route only reads `prompt`/`n`/`size`/`output_format` from the request body —
+    # every other knob comes from these CLI defaults unless the client sends a native
+    # `<sd_cpp_extra_args>` block (which the backend's image-generate.ts does). A server left on the
+    # stock --cfg-scale 7.0 runs a distilled model at real CFG 7 regardless of what the client asks
+    # for, which is what burns/oversaturates the output.
+    #   --cfg-scale 1.0     REAL classifier-free guidance, OFF. klein is guidance-*distilled*, so
+    #                       flux2.md runs every klein example at 1.0. (klein-*base* is NOT distilled:
+    #                       it wants SD_CFG_SCALE=4.0 + SD_STEPS=20, and only then does a negative
+    #                       prompt do anything.)
+    #   --steps 4           klein is a 4-step distilled model. That is why it is fast despite 9B.
+    #   --sampling-method   euler, per flux2.md (the stock default is euler_a, meant for SD-era models).
+    # There is no --guidance here: FLUX.2 has no distilled-guidance input (that was a FLUX.1 knob).
     #
-    # SD_EXTRA_ARGS is the escape hatch for weights that DON'T fit — e.g. running Q8_0 (~12.7 GB) on a
-    # 12 GB card needs offload + a residency window, and the flags are tuned per box:
-    #   SD_EXTRA_ARGS=--params-backend diffusion=cpu --max-vram cuda0=11 --stream-layers
+    # Placement: the 9B diffusion weights at Q8_0 (~10 GB) sit on cuda0 — the 12 GB 3060; note ggml's
+    # cuda0/cuda1 are the REVERSE of nvidia-smi indices on this box. The Qwen3-8B encoder (~5 GB) and
+    # the VAE (~0.3 GB) go on cuda1 (the 8 GB 2070), so everything is fully resident and nothing has
+    # to stream across PCIe per step. --diffusion-fa (flash attention) keeps the attention buffer small
+    # enough for the 3060 to hold weights + compute; --vae-tiling decodes the VAE in tiles.
+    #
+    # SD_EXTRA_ARGS is the escape hatch for weights that DON'T fit — e.g. a single-GPU box, where the
+    # encoder can't have its own card:
+    #   SD_EXTRA_ARGS=--offload-to-cpu          (flux2.md's own answer; keeps weights in RAM)
     # (Never add --auto-fit: per its own -h it "Overrides --backend and --params-backend", so it
-    # silently discards every placement flag above and re-OOMs.)
+    # silently discards every placement flag above and OOMs.)
     command: >
-      --diffusion-model /models/${SD_DIFFUSION_MODEL:-flux1-dev-Q4_K_S.gguf}
-      --t5xxl           /models/${SD_T5XXL:-t5-v1_1-xxl-encoder-Q4_K_M.gguf}
-      --clip_l          /models/${SD_CLIP_L:-clip_l.safetensors}
-      --vae             /models/${SD_VAE:-ae.safetensors}
-      --backend ${SD_BACKEND:-te=cpu}
+      --diffusion-model /models/${SD_DIFFUSION_MODEL:-flux-2-klein-9b-Q8_0.gguf}
+      --llm             /models/${SD_LLM:-Qwen3-8B-Q4_K_M.gguf}
+      --vae             /models/${SD_VAE:-flux2-vae.safetensors}
+      --backend ${SD_BACKEND:-diffusion=cuda0,te=cuda1,vae=cuda1}
       --cfg-scale ${SD_CFG_SCALE:-1.0}
-      --guidance ${SD_GUIDANCE:-3.5}
       --sampling-method ${SD_SAMPLING_METHOD:-euler}
-      --steps ${SD_STEPS:-24}
+      --steps ${SD_STEPS:-4}
       --diffusion-fa
       --vae-tiling
       ${SD_EXTRA_ARGS:-}
