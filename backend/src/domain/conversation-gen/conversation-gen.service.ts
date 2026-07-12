@@ -90,9 +90,13 @@ export const conversationGenService = {
     const exchanges: Exchange[] = [];
     // The target's own view of the chat: what it is given as history on each follow-up turn.
     const history: ChatMessage[] = [];
+    // Has anything at all been written to this session? A session with the interviewer's question in
+    // it is evidence, even if the agent then failed — only a session nobody ever spoke in is deleted.
+    let spoken = false;
+    let failure = '';
 
     try {
-      for (let i = 0; i < turns; i++) {
+      for (let i = 0; i < turns && !failure; i++) {
         const question = await nextQuestion({
           interviewer,
           target,
@@ -102,10 +106,14 @@ export const conversationGenService = {
         });
         // A silent interviewer ends the conversation here: keep whatever exchanges we already have
         // rather than discarding a half-good conversation.
-        if (!question) break;
+        if (!question) {
+          if (!spoken) failure = 'interviewer produced no question';
+          break;
+        }
 
         await sessionRepository.addMessage(sessionId, { role: 'user', text: question });
         eventBus.emit('chat:user_message', { ctx, content: question });
+        spoken = true;
 
         // Mirror the run off the EventBus exactly as the socket layer does for a client that left,
         // so the persisted turn keeps its rich blocks (tool calls, sub-agent hops) — that detail is
@@ -146,6 +154,38 @@ export const conversationGenService = {
             turnId: result.turnId,
             runId: result.runId,
           });
+        } catch (err) {
+          // The agent's run blew up (a dead endpoint, or — seen in the wild — llama.cpp refusing to
+          // parse a tool call whose argument string is too long). Keep the conversation: persist the
+          // partial turn with an error note, exactly as the socket layer does for a live chat whose
+          // inference dies. Deleting it here would leave the operator with a pulsing agent and no
+          // trace of why. The conversation ends at this exchange.
+          failure = err instanceof Error ? err.message : String(err);
+          const turn = recorder.build('');
+          const blocks = [
+            ...turn.blocks,
+            { kind: 'text' as const, text: `\n\n⚠️ Conversation interrupted — the agent's run failed: ${failure}` },
+          ];
+          await sessionRepository
+            .addMessage(sessionId, {
+              role: 'assistant',
+              text: '',
+              blocks,
+              reasoning: turn.reasoning || undefined,
+              trace: turn.trace,
+              context_tokens: turn.contextTokens,
+              context_window: turn.contextWindow,
+            })
+            .catch((e) => log.error({ err: String(e) }, 'failed to persist interrupted turn'));
+          eventBus.emit('conversation:turn_complete', {
+            ctx,
+            answer: '',
+            blocks,
+            turnId: '',
+            runId: '',
+          });
+          log.error({ err: failure, agent: target.name, sessionId }, 'generated conversation interrupted');
+          break;
         } finally {
           recorder.stop();
         }
@@ -155,15 +195,20 @@ export const conversationGenService = {
         history.push({ role: 'assistant', content: answer });
       }
 
-      if (!exchanges.length) {
-        // Nothing was said — don't leave an empty session lying around in the pool.
+      if (!spoken) {
+        // Nobody ever said anything — don't leave an empty session lying around in the pool.
         await sessionRepository.delete(sessionId);
-        await generatorRepository.recordRun(gen._id, { error: 'interviewer produced no question' });
+        await generatorRepository.recordRun(gen._id, { error: failure || 'interviewer produced no question' });
         return null;
       }
 
-      await generatorRepository.recordRun(gen._id, {});
-      log.info({ agent: target.name, sessionId, exchanges: exchanges.length }, 'conversation generated');
+      // A conversation that broke mid-way is still kept and still readable, but it isn't a success:
+      // the error is recorded so the Conversations page shows why, and the count doesn't move.
+      await generatorRepository.recordRun(gen._id, failure ? { error: failure } : {});
+      log.info(
+        { agent: target.name, sessionId, exchanges: exchanges.length, failed: Boolean(failure) },
+        'conversation generated',
+      );
       return sessionId;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -178,9 +223,10 @@ export const conversationGenService = {
       });
       await generatorRepository.recordRun(gen._id, { error: message });
       log.error({ err: message, agent: target.name, sessionId }, 'conversation generation failed');
-      // Keep a partial conversation (it is still usable data); drop a session that never got a turn.
-      if (!exchanges.length) await sessionRepository.delete(sessionId).catch(() => undefined);
-      return exchanges.length ? sessionId : null;
+      // Keep whatever was said (it is still readable evidence of what went wrong); drop only a
+      // session nobody ever spoke in.
+      if (!spoken) await sessionRepository.delete(sessionId).catch(() => undefined);
+      return spoken ? sessionId : null;
     }
   },
 };

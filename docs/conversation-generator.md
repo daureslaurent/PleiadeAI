@@ -91,6 +91,19 @@ The agent's tokens need no new plumbing: the bridge is room-scoped by `sessionId
 already reaches whoever is watching. The error path emits `conversation:turn_complete` with empty
 blocks too — otherwise a failed run leaves the watching UI spinning forever.
 
+## Where a conversation appears (and what a pulsing agent means)
+
+The session belongs to the **target** agent. If the target is a top-level orchestrator, it will
+delegate via `ask_agent`, and those **sub-agents pulse as "working" while owning no session of their
+own** — normal delegation behaviour, but confusing when the conversation wasn't started by a human.
+Filtering LLM Debug by `source: interview` tells you instantly whether a generator is behind it.
+
+A conversation that breaks mid-way is **kept**, with the partial turn persisted under an
+`⚠️ Conversation interrupted` note (mirroring how `socket.ts` saves a live chat whose inference
+dies). Only a session nobody ever spoke in is deleted. An earlier version deleted any conversation
+whose first exchange failed, which erased the evidence and left the operator staring at a pulsing
+agent with no conversation anywhere — don't reintroduce that.
+
 ## Operational note
 
 The interviewer runs on the **fleet default endpoint**. If that default is the built-in 1.5B CPU
