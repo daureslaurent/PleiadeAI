@@ -57,6 +57,22 @@ const LOG_LEVEL = CONFIG.logLevel || 'info'; // 'debug' also logs probes and per
 const SERVICES = CONFIG.services ?? [];
 const byName = new Map(SERVICES.map((s) => [s.name, s]));
 
+/**
+ * Read-only "is it up / what does it serve" paths, which must NEVER cost a model load.
+ *
+ * A monitor, a container healthcheck, or a client's endpoint-discovery hitting `GET /health` every
+ * few seconds is otherwise indistinguishable from real work: each poll would make its service the
+ * active one, so the polled service can never stay unloaded and every poll that lands while the
+ * *other* service is busy queues up and swaps it out the moment it finishes. That is a permanent
+ * ping-pong driven entirely by monitoring.
+ *
+ * So on a GET to one of these: if the service happens to be loaded and ready, proxy it (a real
+ * answer, costs nothing); otherwise answer locally without touching the GPU.
+ */
+const PASSIVE_PATHS = new Set(
+  CONFIG.passivePaths ?? ['/health', '/props', '/slots', '/metrics', '/v1/models', '/models'],
+);
+
 const log = (...a) => console.log(new Date().toISOString(), '[gpu-broker]', ...a);
 const debug = (...a) => {
   if (LOG_LEVEL === 'debug') log(...a);
@@ -467,10 +483,23 @@ async function handle(svc, req, res) {
     return;
   }
 
-  // Model discovery — synthesized from config so polling never forces a load/swap.
-  if (req.method === 'GET' && path === '/v1/models') {
+  // The model list is always synthesized from config — stable, and polling it must never load a model.
+  if ((req.method === 'GET' || req.method === 'HEAD') && (path === '/v1/models' || path === '/models')) {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ object: 'list', data: (svc.models || []).map((id) => ({ id, object: 'model', owned_by: 'gpu-broker' })) }));
+    return;
+  }
+
+  // Any other read-only probe path: answer it ourselves unless the service happens to be loaded
+  // already. A monitor polling /health every 5s must not pin this service as the active one — that
+  // alone is enough to make the box swap forever (it's what the ping-pong in the wild turned out to be).
+  if ((req.method === 'GET' || req.method === 'HEAD') && PASSIVE_PATHS.has(path) && !(active === svc.name && activeReady)) {
+    debug(`[${svc.name}] passive ${req.method} ${path} answered locally (not loaded — ${stateLine()})`);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    // 200, not 503: the *broker* is healthy and will load this service on the first real request.
+    // A 503 here would make a container healthcheck / monitor declare the service down and, worse,
+    // possibly restart it out from under us.
+    res.end(JSON.stringify({ status: 'ok', loaded: false, active, broker: 'gpu-broker' }));
     return;
   }
 
@@ -574,6 +603,7 @@ async function main() {
       `${IDLE_MS > 0 ? `idle-unload after ${IDLE_MS / 1000}s` : 'idle-unload disabled (unload only on swap)'}; ` +
       `swapGrace=${SWAP_GRACE_MS}ms maxWait=${MAX_WAIT_MS / 1000}s upstreamRetries=${UPSTREAM_RETRIES} logLevel=${LOG_LEVEL}`,
   );
+  log(`GET/HEAD on [${[...PASSIVE_PATHS].join(', ')}] is answered locally when the service isn't loaded — polling never loads a model`);
 }
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

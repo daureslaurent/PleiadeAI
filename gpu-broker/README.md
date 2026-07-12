@@ -23,6 +23,20 @@ request → gpu-broker (:1234 image / :8080 vision)
 **At most one managed container runs at a time.** GET `/v1/models` is answered locally from config,
 so a client polling the model list never forces a load/swap.
 
+## Polling must never load a model
+
+A monitor or container healthcheck hitting `GET /health` every few seconds is, to a naive broker,
+indistinguishable from real work: each poll makes its service the active one. The polled service can
+then **never stay unloaded**, and any poll that lands while the *other* service is busy queues up and
+swaps it out the instant it finishes. That alone produces an endless ping-pong — with an idle box.
+
+So `GET`/`HEAD` on a **passive path** (`/health`, `/props`, `/slots`, `/metrics`, `/v1/models`,
+`/models` — override with `passivePaths`) is answered *by the broker* when that service isn't loaded,
+and proxied to the real upstream when it happens to be. It never loads, starts, or swaps anything.
+The local answer is a `200` (`{"status":"ok","loaded":false,…}`), not a 503 — the *broker* is healthy
+and will load the service on the first real request; a 503 would make a healthcheck declare the
+service down and possibly restart it out from under us.
+
 ## Readiness is the whole ballgame
 
 llama.cpp **binds its port several seconds before the model is loaded**, answers `/health` with `503`
@@ -105,6 +119,7 @@ the host-published upstreams, and mounts the Docker socket so it can start/stop 
 | `upstreamRetries` | replays when the upstream drops the connection before we've answered the client (default 3) |
 | `retryDelayMs` | pause before a replay (default 2000) |
 | `maxBodyBytes` | bodies above this (or chunked) are streamed through and can't be replayed (default 64 MB) |
+| `passivePaths` | GET/HEAD paths answered locally when the service isn't loaded, so polling can't load a model (default `["/health","/props","/slots","/metrics","/v1/models","/models"]`) |
 | `logLevel` | `info` (default) or `debug` — `debug` adds probe results and admission timings |
 | `dockerSocket` | Docker Engine API socket (default `/var/run/docker.sock`) |
 | `services[]` | one per GPU service — see below |
