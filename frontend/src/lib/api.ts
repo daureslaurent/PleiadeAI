@@ -707,6 +707,9 @@ export const memoryApi = {
     api.get<Array<{ id: string | number; payload: Record<string, unknown> }>>(`/memory/${agentId}`).then((r) => r.data),
   remove: (agentId: string, ids: Array<string | number>) =>
     api.delete(`/memory/${agentId}/points`, { data: { ids } }).then((r) => r.data),
+  /** Wipe the agent's entire namespace server-side (the listing is paged — see the route). */
+  clear: (agentId: string) =>
+    api.delete<{ ok: boolean; deleted: number }>(`/memory/${agentId}/all`).then((r) => r.data),
 };
 
 export const inboxApi = {

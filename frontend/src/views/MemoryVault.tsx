@@ -136,6 +136,23 @@ export function MemoryVault() {
     setPoints((ps) => (ps ? ps.filter((x) => x.id !== p.id) : ps));
   }
 
+  /**
+   * Erase the agent's entire memory. Server-side (`memoryApi.clear`), NOT a loop over the ids on
+   * screen: the listing is paged, so an id-based wipe would leave everything past the first page
+   * behind while looking like it had worked.
+   */
+  async function removeAll() {
+    if (!agent) return;
+    const ok = await confirm({
+      title: `Erase all memories for ${agent.name}?`,
+      body: `Every memory in ${agent.qdrant_namespace} is permanently destroyed — including any not listed on this page. The agent keeps working, but starts remembering from nothing. This cannot be undone.`,
+      danger: true,
+    });
+    if (!ok) return;
+    await memoryApi.clear(agentId);
+    setPoints([]);
+  }
+
   /** Bulk-delete everything currently filtered in — how a namespace of legacy transcripts gets wiped. */
   async function removeShown() {
     if (!shown?.length) return;
@@ -222,6 +239,18 @@ export function MemoryVault() {
               className="shrink-0 rounded-lg border border-red-500/20 px-2 py-1 text-[10px] font-medium text-red-400/90 transition-colors hover:bg-red-500/10 hover:text-red-400"
             >
               Delete {shown.length} shown
+            </button>
+          )}
+
+          {/* Erases the whole namespace, not just what's listed — hence the separate, blunter button. */}
+          {!!points?.length && (
+            <button
+              onClick={removeAll}
+              title="Permanently destroy every memory this agent holds"
+              className="flex shrink-0 items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/5 px-2 py-1 text-[10px] font-medium text-red-400 transition-colors hover:bg-red-500/15"
+            >
+              <Trash2 size={11} />
+              Erase all
             </button>
           )}
         </GlassCard>

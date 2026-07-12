@@ -161,6 +161,23 @@ class QdrantService {
     await this.client.delete(namespace, { wait: true, points: ids });
     log.info({ namespace, count: ids.length }, 'qdrant points deleted');
   }
+
+  /**
+   * Wipe an agent's entire memory (Memory Vault "erase all"). Drops the collection rather than
+   * deleting the ids the UI happens to be showing — `list` is paged, so an id-based "delete all"
+   * would silently leave everything past the first page behind. `ensureNamespace` recreates the
+   * collection lazily on the next write, so the agent keeps working, with no memories.
+   *
+   * Returns how many points were destroyed (read before the drop, for the confirmation).
+   */
+  async clearNamespace(namespace: string): Promise<number> {
+    const { exists } = await this.client.collectionExists(namespace);
+    if (!exists) return 0;
+    const { count } = await this.client.count(namespace, { exact: true });
+    await this.client.deleteCollection(namespace);
+    log.warn({ namespace, count }, 'qdrant namespace wiped');
+    return count;
+  }
 }
 
 export const qdrantService = new QdrantService();

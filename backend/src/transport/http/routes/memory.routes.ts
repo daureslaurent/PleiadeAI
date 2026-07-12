@@ -23,6 +23,21 @@ memoryRouter.get('/:agentId', async (req, res) => {
   res.json(await qdrantService.list(namespace));
 });
 
+/**
+ * Wipe the agent's whole memory. Deliberately server-side: the listing is paged, so a client-driven
+ * "delete every id I can see" would leave everything past the first page behind and *look* like it
+ * worked. Still namespace-scoped — one agent's erase can never touch another's.
+ */
+memoryRouter.delete('/:agentId/all', async (req, res) => {
+  const namespace = await namespaceFor(req.params.agentId);
+  if (!namespace) {
+    res.status(404).json({ error: 'agent not found' });
+    return;
+  }
+  const deleted = await qdrantService.clearNamespace(namespace);
+  res.json({ ok: true, deleted });
+});
+
 memoryRouter.delete('/:agentId/points', async (req, res) => {
   const namespace = await namespaceFor(req.params.agentId);
   if (!namespace) {
