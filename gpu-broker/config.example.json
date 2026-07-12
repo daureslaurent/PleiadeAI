@@ -1,7 +1,13 @@
 {
   "idleTimeoutSec": 0,
-  "startTimeoutSec": 180,
+  "startTimeoutSec": 300,
+  "stopTimeoutSec": 30,
   "stopSettleMs": 2000,
+  "swapGraceMs": 1500,
+  "maxWaitSec": 180,
+  "upstreamRetries": 3,
+  "retryDelayMs": 2000,
+  "logLevel": "info",
   "dockerSocket": "/var/run/docker.sock",
   "services": [
     {
@@ -16,11 +22,11 @@
     {
       "name": "vision",
       "listenPort": 8080,
-      "container": "REPLACE_WITH_LLAMA_VISION_CONTAINER",
+      "container": "llama-server",
       "upstreamHost": "127.0.0.1",
       "upstreamPort": 8202,
       "healthPath": "/health",
-      "models": ["REPLACE_WITH_VISION_MODEL_ID"]
+      "models": ["REPLACE_WITH_YOUR_CHAT_MODEL_ID"]
     }
   ]
 }
