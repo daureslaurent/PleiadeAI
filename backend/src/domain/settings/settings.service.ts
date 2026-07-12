@@ -51,6 +51,13 @@ export interface EffectiveSettings {
   max_tool_iterations: number;
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
+  /**
+   * Post-turn memory distillation: the agent's own model rewrites a completed turn into 0..N
+   * standalone memories instead of the raw transcript being embedded verbatim. See
+   * `docs/memory-souvenirs.md`. Off → the agent only remembers what it saves via `remember`.
+   */
+  memory_distill_enabled: boolean;
+  memory_max_tokens: number;
 }
 
 const KEY = 'global';
@@ -98,6 +105,8 @@ export const settingsService = {
       scoring_max_tokens: doc?.scoring_max_tokens ?? 1024,
       max_tool_iterations: doc?.max_tool_iterations ?? 50,
       agents_md: doc?.agents_md ?? '',
+      memory_distill_enabled: doc?.memory_distill_enabled ?? true,
+      memory_max_tokens: doc?.memory_max_tokens ?? 800,
     };
   },
 

@@ -7,6 +7,7 @@ import { updateNotebook } from './core/updateNotebook';
 import { webSearch } from './core/webSearch';
 import { webFetch } from './core/webFetch';
 import { remember } from './core/remember';
+import { forget } from './core/forget';
 import { askAgent } from './core/askAgent';
 import { askParent } from './core/askParent';
 import { askUser } from './core/askUser';
@@ -43,6 +44,7 @@ const CORE_TOOLS: Record<string, Tool> = {
   [webSearch.name]: webSearch,
   [webFetch.name]: webFetch,
   [remember.name]: remember,
+  [forget.name]: forget,
   [askAgent.name]: askAgent,
   [askParent.name]: askParent,
   [askUser.name]: askUser,

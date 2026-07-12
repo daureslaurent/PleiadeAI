@@ -12,12 +12,25 @@ import type { RecalledMemory } from '../store/stream';
  * carries its similarity to the query, how it was written, and its age).
  */
 
-/** `auto_turn` = the passive whole-transcript capture; `remember` = a fact the agent chose to save. */
+/**
+ * How the memory came to exist. `distiller` = the agent's own model rewrote a finished turn into it;
+ * `remember_tool` = the agent deliberately chose to save it mid-turn; `auto_turn` = the legacy raw
+ * whole-transcript capture (no longer written — anything still tagged this way is old junk).
+ */
 function sourceLabel(source?: string): string {
-  if (source === 'remember') return 'saved';
-  if (source === 'auto_turn') return 'auto';
+  if (source === 'remember_tool' || source === 'remember') return 'saved';
+  if (source === 'distiller') return 'distilled';
+  if (source === 'auto_turn') return 'legacy';
   return source || 'unknown';
 }
+
+/** Each kind reads differently to the model, so label it plainly for the operator too. */
+const KIND_LABEL: Record<string, string> = {
+  fact: 'fact',
+  preference: 'preference',
+  procedure: 'how-to',
+  episode: 'episode',
+};
 
 /** Compact age: "3d", "5h", "just now". */
 function fmtAge(iso?: string): string | null {
@@ -34,10 +47,16 @@ function fmtAge(iso?: string): string | null {
 
 function MemoryItem({ memory }: { memory: RecalledMemory }) {
   const [open, setOpen] = useState(false);
-  const pct = Math.round(Math.max(0, Math.min(1, memory.score)) * 100);
+  // Show the *similarity*, not the composite rerank score: "how much is this actually about my
+  // question" is what the operator needs to judge the recall. The rerank score is why it ranked
+  // where it did, which is a different question — it rides in the tooltip.
+  const sim = memory.similarity ?? memory.score;
+  const pct = Math.round(Math.max(0, Math.min(1, sim)) * 100);
+  const rank = Math.round(Math.max(0, Math.min(1, memory.score)) * 100);
   const age = fmtAge(memory.createdAt);
   // A weak match is the tell that recall pulled in noise — say so rather than dressing it up.
   const weak = pct < 60;
+  const kind = memory.kind ? (KIND_LABEL[memory.kind] ?? memory.kind) : null;
 
   return (
     <button
@@ -45,19 +64,25 @@ function MemoryItem({ memory }: { memory: RecalledMemory }) {
       className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] p-2 text-left transition-colors hover:border-white/[0.12] hover:bg-white/[0.05]"
     >
       <div className="mb-1 flex items-center gap-2 text-[10px]">
+        {kind && (
+          <span
+            className="rounded bg-reasoning/15 px-1 py-px font-mono uppercase tracking-wide text-reasoning"
+            title={memory.subject ? `Subject: ${memory.subject}` : undefined}
+          >
+            {kind}
+          </span>
+        )}
         <span
-          className={[
-            'rounded px-1 py-px font-mono uppercase tracking-wide',
-            memory.source === 'remember'
-              ? 'bg-reasoning/15 text-reasoning'
-              : 'bg-white/[0.06] text-slate-500',
-          ].join(' ')}
+          className="rounded bg-white/[0.06] px-1 py-px font-mono uppercase tracking-wide text-slate-500"
+          title={`How this memory was written (${memory.source ?? 'unknown'})`}
         >
           {sourceLabel(memory.source)}
         </span>
         <span
           className="flex items-center gap-1.5"
-          title={`Similarity to this turn's query: ${pct}%`}
+          title={`Similarity to this turn's query: ${pct}% · rerank score ${rank}%${
+            memory.importance ? ` · importance ${memory.importance}/5` : ''
+          }`}
         >
           <span className="h-1 w-10 overflow-hidden rounded-full bg-white/[0.06]">
             <span
@@ -132,7 +157,7 @@ export function MemoriesBadge({ memories }: { memories: RecalledMemory[] }) {
           className="glass-card absolute left-0 top-full z-30 mt-1.5 w-[min(24rem,calc(100vw-3rem))] animate-fade-up rounded-2xl border p-2.5"
         >
           <p className="mb-2 px-0.5 text-[10px] uppercase tracking-wide text-slate-500">
-            Recalled into the prompt · by similarity
+            Recalled into the prompt · ranked
           </p>
           <div className="max-h-80 space-y-1.5 overflow-y-auto">
             {memories.map((m, i) => (

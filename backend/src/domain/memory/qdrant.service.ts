@@ -14,6 +14,28 @@ export interface MemoryPoint {
   id: string | number;
   score?: number;
   payload: Record<string, unknown>;
+  /** Only populated by `search` when `withVector` is set (needed for MMR diversity filtering). */
+  vector?: number[];
+}
+
+export interface SearchOptions {
+  limit?: number;
+  /**
+   * Minimum cosine similarity. **Load-bearing**: without it Qdrant happily returns its top-N no
+   * matter how irrelevant, and since unrelated normalized embeddings still score ~0.3+, every
+   * single query came back "full" of noise that was then injected as "relevant memories".
+   */
+  scoreThreshold?: number;
+  /** Restrict to points whose payload matches (e.g. `{ kind: 'fact' }`). */
+  filter?: Record<string, string>;
+  /**
+   * Exclude points whose payload matches (e.g. `{ status: 'superseded' }`). Prefer this over a
+   * positive `status: 'active'` filter: a point written before the field existed carries no
+   * `status` at all, and Qdrant's `must` would drop it — an exclusion keeps legacy memories
+   * readable while still retiring the ones explicitly marked.
+   */
+  mustNot?: Record<string, string>;
+  withVector?: boolean;
 }
 
 const DEFAULT_VECTOR_SIZE = 768; // llama.cpp embedding dimension; override per deployment.
@@ -42,15 +64,47 @@ class QdrantService {
     await this.client.upsert(namespace, { wait: true, points });
   }
 
-  async search(namespace: string, vector: number[], limit = 5): Promise<MemoryPoint[]> {
+  async search(namespace: string, vector: number[], opts: SearchOptions = {}): Promise<MemoryPoint[]> {
     const { exists } = await this.client.collectionExists(namespace);
     if (!exists) return [];
-    const results = await this.client.search(namespace, { vector, limit, with_payload: true });
+    const clause = (entries: Record<string, string>) =>
+      Object.entries(entries).map(([key, value]) => ({ key, match: { value } }));
+    const filter =
+      opts.filter || opts.mustNot
+        ? {
+            ...(opts.filter ? { must: clause(opts.filter) } : {}),
+            ...(opts.mustNot ? { must_not: clause(opts.mustNot) } : {}),
+          }
+        : undefined;
+    const results = await this.client.search(namespace, {
+      vector,
+      limit: opts.limit ?? 5,
+      score_threshold: opts.scoreThreshold,
+      filter,
+      with_payload: true,
+      with_vector: opts.withVector ?? false,
+    });
     return results.map((r) => ({
       id: r.id,
       score: r.score,
       payload: (r.payload ?? {}) as Record<string, unknown>,
+      vector: Array.isArray(r.vector) ? (r.vector as number[]) : undefined,
     }));
+  }
+
+  /**
+   * Merge fields into an existing point's payload, leaving the vector untouched. This is what lets a
+   * memory be reinforced (usage/importance bumps) or retired (`status: 'superseded'`) without
+   * re-embedding it. Missing point → Qdrant no-ops rather than throwing.
+   */
+  async setPayload(
+    namespace: string,
+    id: string | number,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const { exists } = await this.client.collectionExists(namespace);
+    if (!exists) return;
+    await this.client.setPayload(namespace, { wait: false, payload, points: [id] });
   }
 
   /** Inspector listing for the Memory Vault UI (scroll, no vector query). */

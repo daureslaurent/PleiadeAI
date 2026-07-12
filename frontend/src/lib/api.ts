@@ -803,6 +803,14 @@ export interface InferenceSettings {
   max_tool_iterations: number;
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
+  /**
+   * Post-turn memory distillation: the agent's own model rewrites a finished turn into 0..N
+   * standalone memories, instead of the raw transcript being embedded verbatim. Off → an agent only
+   * remembers what it deliberately saves with `remember`.
+   */
+  memory_distill_enabled: boolean;
+  /** Token budget for the distillation reply (a small JSON object). */
+  memory_max_tokens: number;
 }
 
 export const settingsApi = {

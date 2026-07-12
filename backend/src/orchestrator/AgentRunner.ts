@@ -10,6 +10,7 @@ import {
   type ChatMessage,
 } from '../domain/agents/jit-builder';
 import { agentMemory } from '../domain/memory/agent-memory.service';
+import { memoryDistiller } from '../domain/memory/memory-distiller';
 import { settingsService } from '../domain/settings/settings.service';
 import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { scoringService } from '../domain/scoring/scoring.service';
@@ -23,6 +24,8 @@ import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
 import { data } from '../tools/core/data';
 import { guide } from '../tools/core/guide';
+import { remember } from '../tools/core/remember';
+import { forget } from '../tools/core/forget';
 import { read } from '../tools/core/fs/read';
 import { askParent } from '../tools/core/askParent';
 import { askUser } from '../tools/core/askUser';
@@ -218,6 +221,10 @@ export class AgentRunner {
     const orchestrationTools = agent.subagent
       ? [...agent.tools_allowed, ...visualTools, ...imageTools]
       : [...agent.tools_allowed, annuaire.name, askAgent.name, ...visualTools, ...imageTools];
+    // An agent that can write memory must be able to retire one: without `forget`, a memory that
+    // turns out to be wrong is recalled forever alongside its own correction, and the model is handed
+    // the contradiction with no way to resolve it. Granted with `remember`, never on its own.
+    const memoryTools = agent.tools_allowed.includes(remember.name) ? [forget.name] : [];
     // Every agent can reach the operator via `ask_user`; only a delegated run (has a caller) gets
     // `ask_parent` to bounce a question back up. Every agent also gets `data` so it can see, save,
     // and store the session's shared resource pool — that's how a delegate reaches a blob/image its
@@ -225,6 +232,7 @@ export class AgentRunner {
     const effectiveTools = [
       ...new Set([
         ...orchestrationTools,
+        ...memoryTools,
         askUser.name,
         data.name,
         guide.name,
@@ -239,9 +247,11 @@ export class AgentRunner {
       parameters: t.parameters,
     }));
 
-    // Auto-RAG: pull the most relevant memories for this query and inject them as a system
-    // block ahead of the conversation. Best-effort — an embeddings outage yields no memories.
-    const recalled = await agentMemory.recall(agent.qdrant_namespace, input.userText);
+    // Auto-RAG: pull the most relevant memories for this query and inject them as a system block
+    // ahead of the conversation. Recall now applies a similarity floor and a composite rerank
+    // (see agent-memory.service), so an irrelevant turn legitimately retrieves *nothing* — the
+    // block is absent rather than padded with noise. Best-effort: an embeddings outage yields none.
+    const recalled = await agentMemory.recall(agent.qdrant_namespace, buildRecallQuery(input));
     const memoryMessage = buildMemoryMessage(recalled);
 
     // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
@@ -252,10 +262,14 @@ export class AgentRunner {
         ctx,
         runId,
         memories: recalled.map((m) => ({
-          text: typeof m.payload.text === 'string' ? m.payload.text : '',
-          score: m.score ?? 0,
-          source: typeof m.payload.source === 'string' ? m.payload.source : undefined,
-          createdAt: typeof m.payload.created_at === 'string' ? m.payload.created_at : undefined,
+          text: m.payload.text,
+          score: m.score,
+          similarity: m.similarity,
+          kind: m.payload.kind,
+          subject: m.payload.subject || undefined,
+          importance: m.payload.importance,
+          source: m.payload.source,
+          createdAt: m.payload.created_at,
         })),
       });
     }
@@ -521,14 +535,19 @@ export class AgentRunner {
       });
     }
 
-    // Light auto-storage: persist the exchange so the agent passively accrues context. Fire and
-    // forget — never let a memory write delay or fail the response returned to the caller.
+    // Distil the exchange into long-term memory: the agent's own model rewrites what just happened
+    // into zero or more standalone souvenirs (see docs/memory-souvenirs.md), instead of the raw
+    // `"User: …\nAgent: …"` transcript being embedded verbatim as one point — which produced a
+    // vector that pointed nowhere and fed the agent's own past prose back to it as fact.
+    // Fire and forget: a memory write must never delay or fail the response returned to the caller.
     if (finalText.trim()) {
-      void agentMemory.remember(
-        agent.qdrant_namespace,
-        `User: ${input.userText}\n${agent.name}: ${finalText}`,
-        { source: 'auto_turn', session_id: input.sessionId },
-      );
+      memoryDistiller.distillTurn({
+        agent,
+        userText: input.userText,
+        agentText: finalText,
+        sessionId: input.sessionId,
+        turnId,
+      });
     }
 
     // Hand back the images this turn *acquired* (source `tool`: read from disk, produced by a skill,
@@ -960,6 +979,26 @@ export class AgentRunner {
       throw err;
     }
   }
+}
+
+/** Below this, a message is too short to embed to anything meaningful on its own. */
+const ANAPHORIC_QUERY_CHARS = 30;
+
+/**
+ * The text we embed to search memory. The raw user message alone is a poor query for a follow-up:
+ * "and the second one?" carries no topic, embeds to mush, and retrieves noise. When the message is
+ * short enough to be anaphoric, prepend the previous user message so the query keeps the subject
+ * the operator is still talking about.
+ */
+function buildRecallQuery(input: { userText: string; history?: ChatMessage[] }): string {
+  const text = input.userText.trim();
+  if (text.length >= ANAPHORIC_QUERY_CHARS || !input.history?.length) return text;
+
+  const priorUser = [...input.history]
+    .reverse()
+    .find((m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim());
+  if (!priorUser || typeof priorUser.content !== 'string') return text;
+  return `${priorUser.content.trim()}\n${text}`;
 }
 
 /** Best-effort parse of a cached tool result string; falls back to the raw string. */

@@ -146,9 +146,21 @@ export interface AskUserEvent {
 /** One memory the agent auto-recalled from its vector store and injected into this run's prompt. */
 export interface RecalledMemory {
   text: string;
-  /** Cosine similarity to the turn's query (0–1). */
+  /**
+   * Composite rerank score that won this memory its slot: similarity, recency, importance, and how
+   * often it has proven useful before. Deliberately NOT the raw cosine — a memory can beat a more
+   * similar one by being recent, important, or repeatedly recalled.
+   */
   score: number;
-  /** `auto_turn` (passive transcript capture) or `remember` (a deliberate save). */
+  /** Raw cosine similarity to the turn's query (0–1), so the two can be compared. */
+  similarity?: number;
+  /** `fact` | `preference` | `procedure` | `episode`. */
+  kind?: string;
+  /** Short topic key the memory is filed under. */
+  subject?: string;
+  /** 1–5. */
+  importance?: number;
+  /** `distiller` (the agent's model rewrote a turn into it), `remember_tool`, or legacy `auto_turn`. */
   source?: string;
   createdAt?: string;
 }

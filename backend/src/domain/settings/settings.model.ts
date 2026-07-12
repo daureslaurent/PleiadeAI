@@ -75,6 +75,15 @@ const SettingsSchema = new Schema(
      * instructions live in `agent.agents_md`; the agent's own writable doc is `agent.notebook`.
      */
     agents_md: { type: String, default: '' },
+    /**
+     * Memory distillation (`docs/memory-souvenirs.md`). When on, a completed turn is passed back
+     * through the agent's *own* model, which writes 0..N standalone memories instead of the raw
+     * transcript being dumped into Qdrant verbatim. Costs one short extra completion per turn, so
+     * it is a switch; off means the agent only remembers what it deliberately saves via `remember`.
+     */
+    memory_distill_enabled: { type: Boolean, default: true },
+    /** Token budget for that distillation call. The reply is a small JSON object. */
+    memory_max_tokens: { type: Number, default: 800 },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

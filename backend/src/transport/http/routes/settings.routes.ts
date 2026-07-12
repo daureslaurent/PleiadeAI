@@ -59,6 +59,11 @@ settingsRouter.put('/', async (req, res) => {
     patch.max_tool_iterations = Math.max(1, Number(b.max_tool_iterations) || 50);
   // Fleet-wide AGENTS.md house rules. Operator-only — agents read this block, no tool writes it.
   if (typeof b.agents_md === 'string') patch.agents_md = b.agents_md;
+  // Post-turn memory distillation (docs/memory-souvenirs.md).
+  if (b.memory_distill_enabled !== undefined)
+    patch.memory_distill_enabled = Boolean(b.memory_distill_enabled);
+  if (b.memory_max_tokens !== undefined)
+    patch.memory_max_tokens = Math.max(128, Number(b.memory_max_tokens) || 800);
 
   const updated = await settingsService.update(patch);
   // (Re)arm or stop the periodic host update check to match the new settings.

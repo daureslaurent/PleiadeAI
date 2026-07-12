@@ -411,6 +411,31 @@ export function SettingsView() {
           </Field>
         </Section>
 
+        {/* Long-term memory — post-turn distillation into the agent's Qdrant namespace. */}
+        <Section
+          icon={Brain}
+          title="Long-term memory"
+          subtitle="After a turn, the agent's own model rewrites what happened into standalone memories — most turns produce none. Inspect the result in the Memory Vault."
+        >
+          <Toggle
+            label="Distil memories from turns"
+            hint="When on, each completed turn costs one short extra completion, and what it teaches is stored as typed memories (facts, preferences, how-tos, episodes). Off → the agent only remembers what it deliberately saves with the `remember` tool."
+            checked={form.memory_distill_enabled}
+            onChange={(v) => set('memory_distill_enabled', v)}
+          />
+          <Field
+            label="Distiller max tokens"
+            hint="Token budget for the distiller's reply. It returns a small JSON object, but a reasoning model still needs room to think before it — keep this ≥512."
+          >
+            <NumberInput
+              value={form.memory_max_tokens}
+              min={128}
+              step={1}
+              onChange={(v) => set('memory_max_tokens', v)}
+            />
+          </Field>
+        </Section>
+
         {/* Interface — client-side display preferences (applied instantly, not part of Save) */}
         <Section icon={MonitorCog} title="Interface" subtitle="Display preferences (saved on this device)">
           <Toggle

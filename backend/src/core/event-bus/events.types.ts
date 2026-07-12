@@ -196,9 +196,24 @@ export interface ImageGeneratedPayload {
  */
 export interface RecalledMemory {
   text: string;
-  /** Cosine similarity to the turn's query (0–1). */
+  /**
+   * Composite rerank score that won this memory its slot — similarity, recency, importance and how
+   * often it has proven useful before (see `agent-memory.service`). NOT the raw cosine: a memory can
+   * outrank a more similar one by being recent, important, or repeatedly useful.
+   */
   score: number;
-  /** How the memory was written: `auto_turn` (passive transcript capture) or `remember` (deliberate). */
+  /** Raw cosine similarity to the turn's query (0–1), so the operator can see the two diverge. */
+  similarity?: number;
+  /** fact | preference | procedure | episode. */
+  kind?: string;
+  /** Short topic key the memory is filed under ("gpu-broker", "operator"). */
+  subject?: string;
+  /** 1–5; weighs into `score`. */
+  importance?: number;
+  /**
+   * How the memory was written: `distiller` (the agent's own model rewrote a turn into it),
+   * `remember_tool` (deliberate), or `auto_turn` (legacy raw-transcript capture, no longer written).
+   */
   source?: string;
   /** ISO timestamp the memory was stored. */
   createdAt?: string;
@@ -253,7 +268,7 @@ export interface TurnTruncatedPayload {
  */
 
 /** Where a captured llama call originated — used to filter training noise later. */
-export type LlamaCallSource = 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge';
+export type LlamaCallSource = 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge' | 'memory';
 
 /** Token accounting mirrored from `TokenUsage` (kept structural to avoid an inference→events import). */
 export interface LlamaUsage {
