@@ -154,7 +154,7 @@ export function MemoriesBadge({ memories }: { memories: RecalledMemory[] }) {
         <div
           role="dialog"
           aria-label="Memories recalled into this turn"
-          className="glass-card absolute left-0 top-full z-30 mt-1.5 w-[min(24rem,calc(100vw-3rem))] animate-fade-up rounded-2xl border p-2.5"
+          className="glass-popover absolute left-0 top-full z-30 mt-1.5 w-[min(24rem,calc(100vw-3rem))] animate-fade-up rounded-2xl border p-2.5"
         >
           <p className="mb-2 px-0.5 text-[10px] uppercase tracking-wide text-slate-500">
             Recalled into the prompt · ranked

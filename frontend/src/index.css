@@ -77,6 +77,20 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+/* Popovers float *over* content rather than over the page background, so the
+   frost of `glass-card` would leave the text underneath legible through them.
+   Near-opaque, with a deeper shadow to lift it off what it covers. */
+.glass-popover {
+  background: rgba(13, 17, 24, 0.97);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
 /* Shimmering "live" text (thinking labels): a sheen sweeping across the glyphs. */
 .text-shimmer {
   background: linear-gradient(
