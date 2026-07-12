@@ -127,6 +127,40 @@ export function AgentWorkspace() {
     };
   }, []);
 
+  // The Conversation Generator opened a new conversation with an agent: drop it into that agent's
+  // session list right away, so an interview appears (and can be watched) without a reload. Only for
+  // agents whose list we've already loaded — the rest fetch it fresh when expanded.
+  useEffect(() => {
+    const socket = getSocket();
+    const onCreated = (s: {
+      sessionId: string;
+      agentId: string;
+      agentName: string;
+      title: string;
+      origin: 'user' | 'synthetic';
+    }) => {
+      setSessionsByAgent((prev) => {
+        const list = prev[s.agentId];
+        if (!list || list.some((x) => x._id === s.sessionId)) return prev;
+        const now = new Date().toISOString();
+        const session: Session = {
+          _id: s.sessionId,
+          agent_id: s.agentId,
+          agent_name: s.agentName,
+          title: s.title,
+          origin: s.origin,
+          created_at: now,
+          updated_at: now,
+        };
+        return { ...prev, [s.agentId]: [session, ...list] };
+      });
+    };
+    socket.on('session:created', onCreated);
+    return () => {
+      socket.off('session:created', onCreated);
+    };
+  }, []);
+
   // Refresh any expanded agent's session list when runs start/finish (new titles, reordering).
   const workingCount = workingSessions.length;
   useEffect(() => {

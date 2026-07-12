@@ -1,4 +1,6 @@
 import { createLogger } from '../../config/logger';
+import { eventBus } from '../../core/event-bus/EventBus';
+import type { EventContext } from '../../core/event-bus/events.types';
 import { sessionLock } from '../../core/session/SessionLock';
 import { agentRunner } from '../../orchestrator/AgentRunner';
 import { TurnRecorder } from '../../transport/ws/TurnRecorder';
@@ -67,6 +69,22 @@ export const conversationGenService = {
     });
     const sessionId = String(session._id);
 
+    // Everything below is mirrored to any Workspace watching, so a generated conversation can be read
+    // as it happens instead of only after a reload (see `bridge.ts`). `depth: 0` — the target is the
+    // directly-addressed agent of this session, exactly as if the operator had typed the question.
+    const ctx: EventContext = {
+      sessionId,
+      agentId: String(target._id),
+      agentName: target.name,
+      depth: 0,
+    };
+    eventBus.emit('conversation:session_created', {
+      sessionId,
+      agentId: String(target._id),
+      agentName: target.name,
+      title: session.title,
+    });
+
     log.info({ agent: target.name, sessionId, turns, topic }, 'generating conversation');
 
     const exchanges: Exchange[] = [];
@@ -87,6 +105,7 @@ export const conversationGenService = {
         if (!question) break;
 
         await sessionRepository.addMessage(sessionId, { role: 'user', text: question });
+        eventBus.emit('chat:user_message', { ctx, content: question });
 
         // Mirror the run off the EventBus exactly as the socket layer does for a client that left,
         // so the persisted turn keeps its rich blocks (tool calls, sub-agent hops) — that detail is
@@ -117,6 +136,16 @@ export const conversationGenService = {
             turn_id: result.turnId,
             run_id: result.runId,
           });
+          // Settle the watching client's live buffer into a finished turn. The turn is already
+          // persisted here, so `persisted: true` on the wire stops the client saving it twice.
+          eventBus.emit('conversation:turn_complete', {
+            ctx,
+            answer,
+            blocks: turn.blocks,
+            memories: turn.memories,
+            turnId: result.turnId,
+            runId: result.runId,
+          });
         } finally {
           recorder.stop();
         }
@@ -138,6 +167,15 @@ export const conversationGenService = {
       return sessionId;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // A watching client is mid-turn and would spin forever: close the turn out. Empty blocks →
+      // the client clears its "working" state without appending a turn.
+      eventBus.emit('conversation:turn_complete', {
+        ctx,
+        answer: '',
+        blocks: [],
+        turnId: '',
+        runId: '',
+      });
       await generatorRepository.recordRun(gen._id, { error: message });
       log.error({ err: message, agent: target.name, sessionId }, 'conversation generation failed');
       // Keep a partial conversation (it is still usable data); drop a session that never got a turn.

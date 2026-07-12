@@ -10,6 +10,39 @@ import { eventBus } from '../../core/event-bus/EventBus';
  * fields (ids, args, timings) are dropped here.
  */
 export function attachBridge(io: Server): void {
+  // --- Conversation Generator (docs/conversation-generator.md) -------------------------------
+  // A generated conversation has no client driving it, so the two halves a chat client normally
+  // supplies itself — the user turn it just sent, and the terminal `chat:done` — have to come off
+  // the bus instead. With these, a Workspace sitting on the session watches the interview unfold
+  // live (the agent's tokens already stream: the bridge is room-scoped by sessionId).
+
+  // The interviewer's question, as a `user` turn. Also flips the session to "working": the target
+  // agent starts its run the instant the question lands.
+  eventBus.on('chat:user_message', ({ ctx, content }) => {
+    io.to(ctx.sessionId).emit('chat:user', { sessionId: ctx.sessionId, text: content });
+    io.to(ctx.sessionId).emit('chat:running', { sessionId: ctx.sessionId });
+  });
+
+  // The target's answer, already persisted by the generator → `persisted: true` so a watching client
+  // renders the rich blocks but does NOT save the turn a second time.
+  eventBus.on('conversation:turn_complete', ({ ctx, answer, blocks, memories, turnId, runId }) => {
+    io.to(ctx.sessionId).emit('chat:done', {
+      sessionId: ctx.sessionId,
+      answer,
+      persisted: true,
+      blocks,
+      memories,
+      turnId,
+      runId,
+    });
+  });
+
+  // A brand-new generated session: broadcast, since no client can be in its room yet — every open
+  // Workspace adds the row to the agent's session list without a reload.
+  eventBus.on('conversation:session_created', ({ sessionId, agentId, agentName, title }) => {
+    io.emit('session:created', { sessionId, agentId, agentName, title, origin: 'synthetic' });
+  });
+
   eventBus.on('agent:stream_chunk', ({ ctx, content, isReasoning }) => {
     io.to(ctx.sessionId).emit('stream_chunk', {
       type: 'stream_chunk',

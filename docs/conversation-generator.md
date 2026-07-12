@@ -75,12 +75,33 @@ leaked speaker labels, and any attempt to ventriloquise the agent's reply are st
   are filterable on the LLM Debug page. (`llama-logs`' own enum was missing `'memory'` as well — it
   rejected every memory-distillation capture on insert. Both are now listed.)
 
+## Live streaming
+
+A generated conversation has no client driving it, so the two halves a chat client normally supplies
+itself have to come off the EventBus instead — otherwise the Workspace only shows the conversation
+after a reload. `conversation-gen.service` emits, and `bridge.ts` maps:
+
+| Internal event | Wire event | Why |
+| --- | --- | --- |
+| `conversation:session_created` | `session:created` (broadcast) | No client can be in the new session's room yet; every open Workspace adds the row to the agent's list. |
+| `chat:user_message` | `chat:user` + `chat:running` | The interviewer's question, as a `user` turn, and the target starting work. |
+| `conversation:turn_complete` | `chat:done` (`persisted: true`) | Settles the live buffer into a finished turn. Already persisted server-side, so the client must not save it again. |
+
+The agent's tokens need no new plumbing: the bridge is room-scoped by `sessionId`, so `stream_chunk`
+already reaches whoever is watching. The error path emits `conversation:turn_complete` with empty
+blocks too — otherwise a failed run leaves the watching UI spinning forever.
+
 ## Operational note
 
 The interviewer runs on the **fleet default endpoint**. If that default is the built-in 1.5B CPU
 fallback, the generated conversations are worth very little as training data — the interviewer parrots
 the agent and the agent parrots it back. Point the default at a real model before enabling a
 generator.
+
+Its call suppresses the model's thinking channel (`enable_thinking: false`, retried unconstrained if
+the endpoint rejects the kwarg). Without that, a reasoning default model spends the entire token
+budget inside `<think>`, returns empty content (`finish: 'length'`), and every conversation dies with
+`interviewer produced no question`. If that error ever reappears, that is the first thing to check.
 
 ## Frontend
 

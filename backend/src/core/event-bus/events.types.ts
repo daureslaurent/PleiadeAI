@@ -390,11 +390,42 @@ export interface SystemAlertPayload {
 }
 
 // ---------------------------------------------------------------------------
+// Conversation Generator (docs/conversation-generator.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * A generated conversation just opened a session. Broadcast (not room-scoped): no client is in the
+ * new session's room yet, and every open Workspace wants the row to appear in its sidebar live.
+ */
+export interface ConversationSessionCreatedPayload {
+  sessionId: string;
+  agentId: string;
+  agentName: string;
+  title: string;
+}
+
+/**
+ * One exchange of a generated conversation finished and was persisted by the generator. Carries the
+ * assembled turn so a Workspace watching this session settles its live buffer into a finished turn —
+ * exactly as it does for a chat the operator drove.
+ */
+export interface ConversationTurnCompletePayload {
+  ctx: EventContext;
+  answer: string;
+  blocks: unknown[];
+  memories?: RecalledMemory[];
+  turnId: string;
+  runId: string;
+}
+
+// ---------------------------------------------------------------------------
 // Event name → payload map
 // ---------------------------------------------------------------------------
 
 export interface EventMap {
   'chat:user_message': UserMessagePayload;
+  'conversation:session_created': ConversationSessionCreatedPayload;
+  'conversation:turn_complete': ConversationTurnCompletePayload;
   'agent:stream_chunk': StreamChunkPayload;
   'agent:tool_invoke': ToolInvokePayload;
   'tool:output_chunk': ToolOutputChunkPayload;

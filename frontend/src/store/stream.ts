@@ -683,6 +683,17 @@ export const useStream = create<StreamState>((set, get) => ({
       set({ lastTurnTruncated: true });
     });
 
+    // A `user` turn this client did not send: the Conversation Generator's interviewer asking the
+    // agent its next question. Locally-sent messages are appended by `send()`, so this only ever
+    // fires for a generated conversation the operator happens to be watching.
+    socket.on('chat:user', ({ sessionId, text }: { sessionId: string; text: string }) => {
+      set((s) =>
+        sessionId === s.activeSessionId
+          ? { turns: [...s.turns, { role: 'user' as const, blocks: [{ kind: 'text' as const, text }] }] }
+          : {},
+      );
+    });
+
     // A run is still in flight for a session we just re-opened (e.g. the user refreshed mid-turn).
     // Reflect the working state so the UI doesn't look stopped; the terminal `chat:done` (broadcast
     // to the room) will resolve it.

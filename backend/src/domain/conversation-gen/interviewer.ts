@@ -1,18 +1,22 @@
 import { createLogger } from '../../config/logger';
 import { llamaClient } from '../../inference/LlamaClient';
 import { runWithCaptureContext } from '../../inference/capture-context';
-import { resolveInference, resolveFallbacks } from '../../inference/inference-resolver';
+import { resolveInference } from '../../inference/inference-resolver';
 import type { AgentDoc } from '../agents/agent.model';
 import type { ChatMessage } from '../agents/jit-builder';
 
 const log = createLogger('interviewer');
 
 /**
- * Budget for one question. Generous not because the question is long — it must not be — but because a
- * reasoning model spends this budget on its `<think>` block first: too small and the call is cut off
- * mid-thought, leaving no content at all (`finish: length`, empty text) and no question to ask. The
- * session titler carries the same scar.
+ * The interviewer has nothing to deliberate about — it writes one message. Suppressing the thinking
+ * channel is what makes a modest budget safe: left to think, a reasoning model (PleiadesAI, the
+ * observed fleet default) burns the *whole* budget inside `<think>` and returns empty content
+ * (`finish: 'length'`, zero content tokens), so the conversation dies with "no question". The memory
+ * distiller and the judge suppress it the same way.
  */
+const NO_THINKING = { enable_thinking: false } as const;
+
+/** Budget for one question — headroom for a model that ignores the no-thinking hint, not for prose. */
 const MAX_TOKENS = 1200;
 /** Deliberately hot — the whole point is a wide, non-repetitive spread of questions. */
 const TEMPERATURE = 1.0;
@@ -141,19 +145,25 @@ export async function nextQuestion(input: InterviewerInput): Promise<string | nu
     ];
 
     const inference = await resolveInference({ endpoint_id: null, model: '' });
-    const fallbacks = await resolveFallbacks(inference.url);
 
-    const { text } = await runWithCaptureContext({ source: 'interview' }, () =>
-      llamaClient.streamChat(
-        messages,
-        [],
-        { onToken: () => {} },
-        undefined,
-        { maxTokens: MAX_TOKENS, temperature: TEMPERATURE },
-        inference,
-        fallbacks,
-      ),
-    );
+    const ask = (thinking: boolean): Promise<string> =>
+      runWithCaptureContext({ source: 'interview' }, () =>
+        llamaClient.complete(inference, messages, {
+          maxTokens: MAX_TOKENS,
+          temperature: TEMPERATURE,
+          chatTemplateKwargs: thinking ? undefined : NO_THINKING,
+        }),
+      );
+
+    let text: string;
+    try {
+      text = await ask(false);
+    } catch (err) {
+      // Not every OpenAI-ish backend accepts `chat_template_kwargs` (same caveat the memory distiller
+      // and judge handle) — retry letting it think, and lean on the `<think>` stripping below.
+      log.debug({ err: String(err) }, 'no-thinking interview call rejected — retrying unconstrained');
+      text = await ask(true);
+    }
     const question = cleanQuestion(text, input.target.name);
     if (!question) {
       // Nothing usable: either the model said nothing, or it was cut off inside its reasoning block
