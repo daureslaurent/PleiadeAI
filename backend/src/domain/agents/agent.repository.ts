@@ -96,6 +96,7 @@ export const agentRepository = {
         | 'description'
         | 'subagent'
         | 'agents_md'
+        | 'notebook'
         | 'isolation_id'
         | 'isolation_volume_mode'
         | 'endpoint_id'
@@ -118,9 +119,9 @@ export const agentRepository = {
     await AgentModel.updateMany({ isolation_id: isolationId }, { $set: { isolation_id: null } }).exec();
   },
 
-  /** Replace the agent's AGENTS.md notebook wholesale (backs `update_agents_md` in replace mode). */
-  setAgentsMd(id: string | Types.ObjectId, content: string): Promise<AgentDoc | null> {
-    return AgentModel.findByIdAndUpdate(id, { $set: { agents_md: content } }, { new: true }).exec();
+  /** Replace the agent's own notebook wholesale (backs `update_notebook` in replace mode). */
+  setNotebook(id: string | Types.ObjectId, content: string): Promise<AgentDoc | null> {
+    return AgentModel.findByIdAndUpdate(id, { $set: { notebook: content } }, { new: true }).exec();
   },
 
   /** Remove a single KV parameter (backs the parameter grid's delete action). */

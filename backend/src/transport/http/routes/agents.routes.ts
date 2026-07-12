@@ -91,9 +91,24 @@ agentsRouter.patch('/:id', async (req, res) => {
   res.json(agent);
 });
 
-/** Replace the agent's AGENTS.md notebook (mirrors the `update_agents_md` tool, replace mode). */
+/**
+ * Replace the agent's AGENTS.md charter. Operator-only by construction: there is no tool behind this
+ * route, so an agent cannot rewrite its own standing instructions (its writable doc is the notebook).
+ */
 agentsRouter.put('/:id/agents-md', async (req, res) => {
-  const agent = await agentRepository.setAgentsMd(req.params.id, String(req.body?.content ?? ''));
+  const agent = await agentRepository.update(req.params.id, {
+    agents_md: String(req.body?.content ?? ''),
+  });
+  if (!agent) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  res.json(agent);
+});
+
+/** Replace the agent's notebook (mirrors the `update_notebook` tool, replace mode). */
+agentsRouter.put('/:id/notebook', async (req, res) => {
+  const agent = await agentRepository.setNotebook(req.params.id, String(req.body?.content ?? ''));
   if (!agent) {
     res.status(404).json({ error: 'not found' });
     return;

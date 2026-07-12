@@ -69,6 +69,12 @@ const SettingsSchema = new Schema(
     // Fleet default for the per-turn tool-round ceiling. An agent may override it with its own
     // `max_tool_iterations`; when the agent leaves that blank this value applies. Guards tool loops.
     max_tool_iterations: { type: Number, default: 50 },
+    /**
+     * Fleet-wide AGENTS.md — house rules injected into *every* agent's system prompt (subagents
+     * included) as a read-only block. Operator-owned: no tool writes it. Per-agent standing
+     * instructions live in `agent.agents_md`; the agent's own writable doc is `agent.notebook`.
+     */
+    agents_md: { type: String, default: '' },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

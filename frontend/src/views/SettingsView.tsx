@@ -8,6 +8,7 @@ import {
   DatabaseBackup,
   Download,
   Eraser,
+  FileLock2,
   KeyRound,
   Loader2,
   Gauge,
@@ -326,6 +327,26 @@ export function SettingsView() {
                 </select>
               )}
             </div>
+          </Field>
+        </Section>
+
+        {/* Fleet-wide AGENTS.md. Operator-owned: injected read-only into every agent's prompt. */}
+        <Section
+          icon={FileLock2}
+          title="House rules (AGENTS.md)"
+          subtitle="Standing instructions injected into every agent's prompt, subagents included. Agents cannot edit this — no tool writes it. Per-agent instructions live on each agent's page; the agent's own writable notes are its Notebook."
+        >
+          <Field
+            label="AGENTS.md"
+            hint="Markdown. Leave empty to inject nothing. Takes effect on each agent's next turn — no restart."
+          >
+            <textarea
+              value={form.agents_md}
+              onChange={(e) => set('agents_md', e.target.value)}
+              rows={10}
+              placeholder="# House rules&#10;- Rules every agent in this fleet must follow."
+              className="w-full rounded-md border border-border bg-panel px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+            />
           </Field>
         </Section>
 

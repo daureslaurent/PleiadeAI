@@ -31,11 +31,19 @@ const AgentSchema = new Schema(
     qdrant_namespace: { type: String, required: true, unique: true },
     parameters: { type: Map, of: String, default: () => new Map<string, string>() },
     /**
-     * Free-form Markdown notebook the agent owns and rewrites itself (via `update_agents_md`).
-     * Unlike the authored `system_prompt`, this is a living scratchpad — persisted learnings,
-     * conventions, TODOs — injected JIT into the prompt and editable from the Agents page.
+     * This agent's AGENTS.md — its operator-authored charter. Injected JIT into the prompt and
+     * editable *only* by the operator (Agents page / API): no tool can write it, so an agent can
+     * never overwrite the standing instructions it was given. Complements the fleet-wide house
+     * rules in `settings.agents_md`. The agent's own writable scratchpad is `notebook`.
      */
     agents_md: { type: String, default: '' },
+    /**
+     * Free-form Markdown scratchpad the agent owns and rewrites itself (via `update_notebook`).
+     * Unlike `agents_md` / `system_prompt`, this is a living document — persisted learnings,
+     * conventions, TODOs — injected JIT *after* the authored prompt so it reads as the agent's own
+     * notes rather than as instruction. The operator may also correct it from the Agents page.
+     */
+    notebook: { type: String, default: '' },
     /**
      * Optional assignment to a shared Isolation profile (see `isolations` collection). When set,
      * the agent's `bash` tool and Python/TS skills run in a dedicated container built from that

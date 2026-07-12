@@ -288,8 +288,10 @@ export interface Agent {
   tools_allowed: string[];
   qdrant_namespace: string;
   parameters: Record<string, string>;
-  /** Agent-owned Markdown notebook, editable here or by the agent via `update_agents_md`. */
+  /** The agent's AGENTS.md charter: operator-authored standing instructions. Agents cannot edit it. */
   agents_md: string;
+  /** The agent's own Markdown notebook — it writes this via `update_notebook`; the operator may correct it. */
+  notebook: string;
   /** Assigned isolation profile (null = runs on the backend). */
   isolation_id: string | null;
   /**
@@ -331,7 +333,8 @@ export interface Notification {
   created_at: string;
 }
 
-export type NewAgent = Omit<Agent, '_id'>;
+/** A new agent's notebook always starts empty — the agent writes it itself via `update_notebook`. */
+export type NewAgent = Omit<Agent, '_id' | 'notebook'>;
 
 export const agentsApi = {
   list: () => api.get<Agent[]>('/agents').then((r) => r.data),
@@ -414,6 +417,8 @@ export const agentsApi = {
   },
   setAgentsMd: (id: string, content: string) =>
     api.put<Agent>(`/agents/${id}/agents-md`, { content }).then((r) => r.data),
+  setNotebook: (id: string, content: string) =>
+    api.put<Agent>(`/agents/${id}/notebook`, { content }).then((r) => r.data),
   remove: (id: string) => api.delete(`/agents/${id}`).then((r) => r.data),
   setParam: (id: string, key: string, value: string) =>
     api.put<Agent>(`/agents/${id}/parameters/${encodeURIComponent(key)}`, { value }).then((r) => r.data),
@@ -793,6 +798,8 @@ export interface InferenceSettings {
   scoring_max_tokens: number;
   /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
   max_tool_iterations: number;
+  /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
+  agents_md: string;
 }
 
 export const settingsApi = {

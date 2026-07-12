@@ -43,16 +43,39 @@ export function renderParameterBlock(parameters: Map<string, string>): string {
 }
 
 /**
- * Render the agent's self-owned AGENTS.md notebook as a Markdown block. This is a living
- * scratchpad the agent rewrites via `update_agents_md` — persisted conventions, learnings, and
- * TODOs that outlive any single session but stay separate from the human-authored system prompt.
+ * Render the fleet-wide AGENTS.md (`settings.agents_md`) as a "House rules" block. Operator-owned
+ * standing instructions that bind *every* agent, subagents included. No tool can write it — the
+ * agent may only read it. Empty → omitted entirely rather than advertised as blank.
+ */
+export function renderHouseRulesBlock(houseRules: string | undefined): string {
+  const body = (houseRules ?? '').trim();
+  if (!body) return '';
+  return `## House rules\nStanding instructions for every agent in this fleet. You cannot edit them; follow them.\n\n${body}`;
+}
+
+/**
+ * Render this agent's own AGENTS.md — its operator-authored charter. Like the house rules it is
+ * read-only to the agent: it exists so standing instructions survive whatever the agent later
+ * writes into its `notebook`. Empty → omitted (a blank charter is not worth prompt tokens).
  */
 export function renderAgentsMdBlock(agentsMd: string | undefined): string {
   const body = (agentsMd ?? '').trim();
+  if (!body) return '';
+  return `## AGENTS.md\nYour operator's standing instructions for you. You cannot edit them; follow them.\n\n${body}`;
+}
+
+/**
+ * Render the agent's self-owned notebook. This is the one prompt document the agent may write (via
+ * `update_notebook`) — persisted conventions, learnings, and TODOs that outlive a session. Injected
+ * *after* the authored system prompt so it reads as the agent's own notes, never as instruction
+ * outranking the operator's AGENTS.md.
+ */
+export function renderNotebookBlock(notebook: string | undefined): string {
+  const body = (notebook ?? '').trim();
   if (!body) {
-    return '## AGENTS.md\n_(empty — use `update_agents_md` to record durable notes for your future self.)_';
+    return '## Notebook\n_(empty — use `update_notebook` to record durable notes for your future self.)_';
   }
-  return `## AGENTS.md\nYour persistent notebook. Keep it current with \`update_agents_md\`.\n\n${body}`;
+  return `## Notebook\nYour own notes, written by you on earlier turns. Keep them current with \`update_notebook\`.\n\n${body}`;
 }
 
 /**
@@ -122,20 +145,33 @@ export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date()):
 }
 
 /**
- * Compose the JIT system prompt: environment block, parameter block, then the agent's own
- * AGENTS.md notebook, then (for top-level agents) the orchestration directive, then the
- * human-authored prompt. Called once per session assembly, and again is unnecessary — parameter
- * and notebook mutations mid-turn take effect on the next turn's rebuild.
+ * Compose the JIT system prompt. Ordering is deliberate and encodes who owns what:
+ *
+ *   environment · parameters · house rules · AGENTS.md · [orchestration] · tool use
+ *   --- authored system_prompt ---
+ *   notebook
+ *
+ * Everything before the authored prompt is operator-owned and read-only to the agent; the notebook
+ * — the only document the agent can write — comes *after* it, so the agent's own notes can never be
+ * read as outranking the instructions it was given. Called once per session assembly: parameter and
+ * notebook mutations mid-turn take effect on the next turn's rebuild.
+ *
+ * `houseRules` is the fleet-wide `settings.agents_md`; the caller supplies it since settings are
+ * fetched async (see `AgentRunner`).
  */
-export function buildSystemMessage(agent: AgentDoc): ChatMessage {
-  const envBlock = renderEnvironmentBlock(agent);
-  const paramBlock = renderParameterBlock(agent.parameters as Map<string, string>);
-  const agentsMdBlock = renderAgentsMdBlock(agent.agents_md as string | undefined);
-  const orchestrationBlock = agent.subagent ? '' : `${renderOrchestrationBlock()}\n\n`;
-  const toolUseBlock = renderToolUseBlock();
+export function buildSystemMessage(agent: AgentDoc, houseRules?: string): ChatMessage {
+  const before = [
+    renderEnvironmentBlock(agent),
+    renderParameterBlock(agent.parameters as Map<string, string>),
+    renderHouseRulesBlock(houseRules),
+    renderAgentsMdBlock(agent.agents_md as string | undefined),
+    agent.subagent ? '' : renderOrchestrationBlock(),
+    renderToolUseBlock(),
+  ].filter(Boolean);
+  const notebookBlock = renderNotebookBlock(agent.notebook as string | undefined);
   return {
     role: 'system',
-    content: `${envBlock}\n\n${paramBlock}\n\n${agentsMdBlock}\n\n${orchestrationBlock}${toolUseBlock}\n\n---\n\n${agent.system_prompt}`,
+    content: `${before.join('\n\n')}\n\n---\n\n${agent.system_prompt}\n\n---\n\n${notebookBlock}`,
   };
 }
 

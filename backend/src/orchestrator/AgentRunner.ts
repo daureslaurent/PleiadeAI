@@ -10,6 +10,7 @@ import {
   type ChatMessage,
 } from '../domain/agents/jit-builder';
 import { agentMemory } from '../domain/memory/agent-memory.service';
+import { settingsService } from '../domain/settings/settings.service';
 import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { scoringService } from '../domain/scoring/scoring.service';
 import { resolveInference, resolveFallbacks, type ResolvedInference } from '../inference/inference-resolver';
@@ -247,7 +248,11 @@ export class AgentRunner {
     // `system` turn. Many chat templates (including the GGUFs we serve) enforce "System message must
     // be at the beginning" and hard-fail on a second one — merging keeps retrieval visible as a
     // labelled block without breaking the template or the runtime message ordering.
-    const systemMessage = buildSystemMessage(agent);
+    // Fleet-wide AGENTS.md house rules ride into the prompt as a read-only block, ahead of the
+    // agent's own charter (see `buildSystemMessage`). Read per turn so an edit on the Settings page
+    // binds every agent on its next turn without a restart.
+    const { agents_md: houseRules } = await settingsService.get();
+    const systemMessage = buildSystemMessage(agent, houseRules);
     if (
       memoryMessage &&
       typeof systemMessage.content === 'string' &&

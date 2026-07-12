@@ -119,6 +119,7 @@ async function buildConfigBundle(agents: AgentDoc[]) {
       qdrant_namespace: a.qdrant_namespace,
       parameters: sanitizeParameters(a.parameters as unknown as Map<string, string>),
       agents_md: a.agents_md ?? '',
+      notebook: a.notebook ?? '',
       isolation_name: a.isolation_id ? isoNameById.get(String(a.isolation_id)) ?? null : null,
       isolation_volume_mode: a.isolation_volume_mode ?? 'individual',
       endpoint_name: a.endpoint_id ? endpointNameById.get(String(a.endpoint_id)) ?? null : null,
@@ -283,6 +284,7 @@ transferRouter.post('/import/config', async (req, res) => {
       system_prompt: inc.system_prompt,
       tools_allowed: Array.isArray(inc.tools_allowed) ? (inc.tools_allowed as string[]) : [],
       agents_md: String(inc.agents_md ?? ''),
+      notebook: String(inc.notebook ?? ''),
       isolation_id,
       isolation_volume_mode: inc.isolation_volume_mode === 'shared' ? 'shared' : 'individual',
       endpoint_id,
@@ -320,9 +322,10 @@ transferRouter.post('/import/config', async (req, res) => {
         color: fields.color,
         icon: fields.icon,
       });
-      // create() doesn't cover isolation/agents_md/volume mode — patch them in.
+      // create() doesn't cover isolation/agents_md/notebook/volume mode — patch them in.
       await agentRepository.update(String(created._id), {
         agents_md: fields.agents_md,
+        notebook: fields.notebook,
         isolation_id: fields.isolation_id,
         isolation_volume_mode: fields.isolation_volume_mode,
       } as never);

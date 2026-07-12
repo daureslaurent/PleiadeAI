@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Box, Cpu, NotebookPen, Save, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { Box, Cpu, FileLock2, NotebookPen, Save, Sparkles, Trash2, Loader2 } from 'lucide-react';
 import { agentsApi, settingsApi, skillsApi, toolsApi, type Agent, type Skill, type ToolInfo } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
 import { AgentIsolationSelect } from './AgentIsolationSelect';
@@ -41,6 +41,7 @@ interface Draft {
   qdrant_namespace: string;
   parameters: Record<string, string>;
   agents_md: string;
+  notebook: string;
   isolation_id: string | null;
   isolation_volume_mode: 'individual' | 'shared';
   endpoint_id: string | null;
@@ -62,6 +63,7 @@ const blank = (): Draft => ({
   qdrant_namespace: '',
   parameters: {},
   agents_md: '',
+  notebook: '',
   isolation_id: null,
   isolation_volume_mode: 'individual',
   endpoint_id: null,
@@ -127,6 +129,7 @@ export function AgentsView() {
       qdrant_namespace: a.qdrant_namespace,
       parameters: { ...(a.parameters ?? {}) },
       agents_md: a.agents_md ?? '',
+      notebook: a.notebook ?? '',
       isolation_id: a.isolation_id ?? null,
       isolation_volume_mode: a.isolation_volume_mode ?? 'individual',
       endpoint_id: a.endpoint_id ?? null,
@@ -185,6 +188,7 @@ export function AgentsView() {
         icon: draft.icon,
       });
       await agentsApi.setAgentsMd(draft._id!, draft.agents_md);
+      await agentsApi.setNotebook(draft._id!, draft.notebook);
       await refresh();
     }
   }
@@ -483,9 +487,9 @@ export function AgentsView() {
 
           <FieldLabel>
             <span className="flex items-center gap-1.5">
-              <NotebookPen size={13} /> AGENTS.md
+              <FileLock2 size={13} /> AGENTS.md
               <span className="normal-case text-slate-600">
-                — living notebook the agent edits itself via <code>update_agents_md</code>
+                — your standing instructions for this agent. Read-only to it: no tool can edit this.
               </span>
             </span>
           </FieldLabel>
@@ -493,7 +497,23 @@ export function AgentsView() {
             value={draft.agents_md}
             onChange={(e) => setDraft({ ...draft, agents_md: e.target.value })}
             rows={8}
-            placeholder="# Notes&#10;Persistent conventions, learnings, and TODOs. Injected into the agent's prompt each turn."
+            placeholder="# AGENTS.md&#10;Conventions and rules this agent must follow. Injected above its system prompt each turn. Fleet-wide rules belong in Settings → House rules."
+            className="w-full rounded-md border border-border bg-panel px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+          />
+
+          <FieldLabel>
+            <span className="flex items-center gap-1.5">
+              <NotebookPen size={13} /> Notebook
+              <span className="normal-case text-slate-600">
+                — the agent's own notes, written by it via <code>update_notebook</code>. You may correct them.
+              </span>
+            </span>
+          </FieldLabel>
+          <textarea
+            value={draft.notebook}
+            onChange={(e) => setDraft({ ...draft, notebook: e.target.value })}
+            rows={8}
+            placeholder="Empty — the agent fills this in as it learns. Injected below its system prompt each turn."
             className="w-full rounded-md border border-border bg-panel px-3 py-2 font-mono text-sm outline-none focus:border-accent"
           />
 

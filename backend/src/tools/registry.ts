@@ -3,7 +3,7 @@ import { skillRepository } from '../domain/skills/skill.repository';
 import { toolConfigService } from '../domain/tools/tool-config.service';
 import { skillRunner } from './sandbox/SkillRunner';
 import { setAgentParameter } from './core/setAgentParameter';
-import { updateAgentsMd } from './core/updateAgentsMd';
+import { updateNotebook } from './core/updateNotebook';
 import { webSearch } from './core/webSearch';
 import { webFetch } from './core/webFetch';
 import { remember } from './core/remember';
@@ -39,7 +39,7 @@ export const VISUAL_TOOL_NAMES = ['visual_screenshot', 'visual_act', 'visual_cli
 /** Static core tools every agent implicitly gets, keyed by name. */
 const CORE_TOOLS: Record<string, Tool> = {
   [setAgentParameter.name]: setAgentParameter,
-  [updateAgentsMd.name]: updateAgentsMd,
+  [updateNotebook.name]: updateNotebook,
   [webSearch.name]: webSearch,
   [webFetch.name]: webFetch,
   [remember.name]: remember,

@@ -38,7 +38,7 @@ async function main() {
     name: 'devops_agent',
     description: 'Handles deployments, infrastructure, and CI/CD questions.',
     system_prompt: 'You are a DevOps agent. Be concise and precise.',
-    tools_allowed: ['set_agent_parameter', 'update_agents_md', 'web_search', 'webfetch', 'remember', 'ask_agent', 'annuaire', 'echo_upper'],
+    tools_allowed: ['set_agent_parameter', 'update_notebook', 'web_search', 'webfetch', 'remember', 'ask_agent', 'annuaire', 'echo_upper'],
     qdrant_namespace: 'devops_agent',
     parameters: { ssh_target: 'user@10.0.0.5', region: 'eu-west-1' },
     agents_md:
