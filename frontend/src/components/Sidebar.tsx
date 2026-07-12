@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Cpu, Database, Gauge, LogOut, MessagesSquare, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Terminal, Users, Wrench, Blocks } from 'lucide-react';
+import { Bot, Box, Bug, Cpu, Database, Gauge, LogOut, MessagesSquare, Mic, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Terminal, Users, Wrench, Blocks } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { hostApi } from '../lib/api';
@@ -46,6 +46,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/llm', label: 'LLM', icon: Cpu },
       { to: '/llm-debug', label: 'LLM Debug', icon: Bug },
+      // Head of the training-data pipeline: it fills the pool that Scoring triages and Fine-Tuning trains on.
+      { to: '/conversations', label: 'Conversations', icon: Mic },
       { to: '/scoring', label: 'Scoring', icon: Gauge },
       { to: '/finetuning', label: 'Fine-Tuning', icon: Sparkles },
     ],

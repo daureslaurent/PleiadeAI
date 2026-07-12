@@ -18,7 +18,12 @@ const LlamaLogSchema = new Schema(
   {
     /** Correlates the live start→delta→end stream with the persisted record. */
     call_id: { type: String, required: true, index: true },
-    source: { type: String, enum: ['chat-turn', 'title-gen', 'identity', 'vision', 'judge'], required: true, index: true },
+    source: {
+      type: String,
+      enum: ['chat-turn', 'title-gen', 'identity', 'vision', 'judge', 'memory', 'interview'],
+      required: true,
+      index: true,
+    },
     endpoint: { type: String, required: true },
     model: { type: String, required: true, index: true },
     /** Linkage (null for side tasks that run outside a live session). */

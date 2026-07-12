@@ -126,6 +126,13 @@ export interface RunInput {
    * inference stream and bails out of the tool loop instead of finishing the turn.
    */
   signal?: AbortSignal;
+  /**
+   * Whether this turn is distilled into the agent's long-term memory afterwards (default `true`).
+   * The Conversation Generator passes `false`: its conversations are synthetic training data, and
+   * writing them back would flood the agent's Qdrant namespace with souvenirs of chats it never
+   * really had. Recall is unaffected — the agent still answers with everything it genuinely knows.
+   */
+  persistMemory?: boolean;
 }
 
 /**
@@ -494,6 +501,7 @@ export class AgentRunner {
           turnId,
           pool: imagePool,
           supportsVision: inference.supportsVision,
+          persistMemory: input.persistMemory !== false,
         });
         // executeToolCall already appended the tool message (and any following image message) to
         // `messages` in the correct order; here we only cache its content for the duplicate short-circuit.
@@ -540,7 +548,7 @@ export class AgentRunner {
     // `"User: …\nAgent: …"` transcript being embedded verbatim as one point — which produced a
     // vector that pointed nowhere and fed the agent's own past prose back to it as fact.
     // Fire and forget: a memory write must never delay or fail the response returned to the caller.
-    if (finalText.trim()) {
+    if (finalText.trim() && input.persistMemory !== false) {
       memoryDistiller.distillTurn({
         agent,
         userText: input.userText,
@@ -721,6 +729,8 @@ export class AgentRunner {
       pool: TurnImagePool;
       /** Whether the agent's model can see raw pixels — gates folding tool images into its context. */
       supportsVision: boolean;
+      /** Carried into any sub-agent hop, so a synthetic turn doesn't write memories anywhere. */
+      persistMemory: boolean;
     },
   ): Promise<ChatMessage> {
     let args: Record<string, unknown> = {};
@@ -769,11 +779,17 @@ export class AgentRunner {
       agentName: ctx.agentName,
       depth: ctx.depth,
       invokeSubAgent: canSpawn
-        ? this.makeInvoker(ctx, delegation.callerHistory, delegation.turnId, delegation.signal)
+        ? this.makeInvoker(ctx, delegation.callerHistory, delegation.turnId, delegation.signal, delegation.persistMemory)
         : undefined,
       askParent:
         canSpawn && delegation.caller
-          ? this.makeParentAsker(ctx, delegation.caller, delegation.turnId, delegation.signal)
+          ? this.makeParentAsker(
+              ctx,
+              delegation.caller,
+              delegation.turnId,
+              delegation.signal,
+              delegation.persistMemory,
+            )
           : undefined,
       askUser: (question) => askUserBroker.ask(ctx, question),
       callId: call.id,
@@ -883,7 +899,8 @@ export class AgentRunner {
     parentCtx: EventContext,
     callerHistory: ChatMessage[],
     turnId: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    persistMemory: boolean,
   ) {
     return (targetAgentName: string, query: string, images?: ImageBlock[]): Promise<RunResult> =>
       this.hop(parentCtx, targetAgentName, query, {
@@ -892,6 +909,7 @@ export class AgentRunner {
         caller: { agentName: parentCtx.agentName, task: query, history: callerHistory },
         signal,
         turnId,
+        persistMemory,
       });
   }
 
@@ -904,7 +922,8 @@ export class AgentRunner {
     childCtx: EventContext,
     caller: NonNullable<RunInput['caller']>,
     turnId: string,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    persistMemory: boolean,
   ) {
     return async (question: string): Promise<string> => {
       const framed =
@@ -917,6 +936,7 @@ export class AgentRunner {
         history: caller.history,
         signal,
         turnId,
+        persistMemory,
       });
       return text;
     };
@@ -931,7 +951,10 @@ export class AgentRunner {
     fromCtx: EventContext,
     targetAgentName: string,
     query: string,
-    run: Pick<RunInput, 'userText' | 'history' | 'caller' | 'signal' | 'images' | 'turnId'>,
+    run: Pick<
+      RunInput,
+      'userText' | 'history' | 'caller' | 'signal' | 'images' | 'turnId' | 'persistMemory'
+    >,
   ): Promise<RunResult> {
     const childDepth = fromCtx.depth + 1;
     if (!hopGuard.canHop(childDepth)) {

@@ -5,14 +5,20 @@ import { agentRepository } from '../../../domain/agents/agent.repository';
 /** CRUD for conversation sessions + their message history (backs the Workspace). */
 export const sessionsRouter = Router();
 
-/** List sessions for an agent: `GET /api/sessions?agentId=…`. */
+/**
+ * List sessions for an agent: `GET /api/sessions?agentId=…&origin=user|synthetic|all`.
+ * `origin` defaults to `user` — the Workspace shows the operator's own chats, not the (potentially
+ * thousands of) conversations produced by the Conversation Generator.
+ */
 sessionsRouter.get('/', async (req, res) => {
   const agentId = req.query.agentId as string | undefined;
   if (!agentId) {
     res.status(400).json({ error: 'agentId query param required' });
     return;
   }
-  res.json(await sessionRepository.listByAgent(agentId));
+  const raw = req.query.origin;
+  const origin = raw === 'synthetic' || raw === 'all' ? raw : 'user';
+  res.json(await sessionRepository.listByAgent(agentId, origin));
 });
 
 sessionsRouter.post('/', async (req, res) => {

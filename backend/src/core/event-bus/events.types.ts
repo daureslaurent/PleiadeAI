@@ -268,7 +268,15 @@ export interface TurnTruncatedPayload {
  */
 
 /** Where a captured llama call originated — used to filter training noise later. */
-export type LlamaCallSource = 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge' | 'memory';
+export type LlamaCallSource =
+  | 'chat-turn'
+  | 'title-gen'
+  | 'identity'
+  | 'vision'
+  | 'judge'
+  | 'memory'
+  /** The Conversation Generator's interviewer asking a target agent its next question. */
+  | 'interview';
 
 /** Token accounting mirrored from `TokenUsage` (kept structural to avoid an inference→events import). */
 export interface LlamaUsage {

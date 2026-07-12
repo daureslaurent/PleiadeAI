@@ -13,19 +13,55 @@ function deriveTitle(text: string): string {
  * handler go through here so the persistence shape stays in one place.
  */
 export const sessionRepository = {
-  listByAgent(agentId: string | Types.ObjectId): Promise<SessionDoc[]> {
-    return SessionModel.find({ agent_id: agentId }).sort({ updated_at: -1 }).exec();
+  /**
+   * Sessions for one agent, newest first. `origin` defaults to `user` so the Workspace sidebar shows
+   * the operator's own chats only — a generator can produce thousands of `synthetic` sessions, which
+   * are listed on their own page instead. Pass `'all'` to list both.
+   */
+  listByAgent(
+    agentId: string | Types.ObjectId,
+    origin: 'user' | 'synthetic' | 'all' = 'user',
+  ): Promise<SessionDoc[]> {
+    const filter: Record<string, unknown> = { agent_id: agentId };
+    // Sessions predating the `origin` field are the operator's own — match them as `user`.
+    if (origin === 'user') filter.origin = { $ne: 'synthetic' };
+    else if (origin !== 'all') filter.origin = origin;
+    return SessionModel.find(filter).sort({ updated_at: -1 }).exec();
+  },
+
+  /** Generated sessions, newest first — optionally narrowed to one generator. */
+  listSynthetic(input: { generatorId?: string | Types.ObjectId; limit?: number } = {}): Promise<SessionDoc[]> {
+    const filter: Record<string, unknown> = { origin: 'synthetic' };
+    if (input.generatorId) filter.generator_id = input.generatorId;
+    return SessionModel.find(filter)
+      .sort({ created_at: -1 })
+      .limit(input.limit ?? 50)
+      .exec();
+  },
+
+  countSynthetic(generatorId?: string | Types.ObjectId): Promise<number> {
+    const filter: Record<string, unknown> = { origin: 'synthetic' };
+    if (generatorId) filter.generator_id = generatorId;
+    return SessionModel.countDocuments(filter).exec();
   },
 
   findById(id: string | Types.ObjectId): Promise<SessionDoc | null> {
     return SessionModel.findById(id).exec();
   },
 
-  create(input: { agentId: string | Types.ObjectId; agentName: string; title?: string }): Promise<SessionDoc> {
+  create(input: {
+    agentId: string | Types.ObjectId;
+    agentName: string;
+    title?: string;
+    origin?: 'user' | 'synthetic';
+    generatorId?: string | Types.ObjectId;
+  }): Promise<SessionDoc> {
     return SessionModel.create({
       agent_id: input.agentId,
       agent_name: input.agentName,
       title: input.title ?? 'New session',
+      origin: input.origin ?? 'user',
+      generator_id: input.generatorId ?? null,
     });
   },
 

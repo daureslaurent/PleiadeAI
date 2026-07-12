@@ -568,6 +568,8 @@ export interface Session {
   agent_id: string;
   agent_name: string;
   title: string;
+  /** `synthetic` → produced by the Conversation Generator, not a chat the operator had. */
+  origin?: 'user' | 'synthetic';
   created_at: string;
   updated_at: string;
 }
@@ -715,6 +717,56 @@ export const memoryApi = {
 export const inboxApi = {
   list: () => api.get<Notification[]>('/inbox').then((r) => r.data),
   markRead: (id: string) => api.post(`/inbox/${id}/read`).then((r) => r.data),
+};
+
+/**
+ * One Conversation Generator row: an interviewer agent that periodically chats up `target_agent` to
+ * harvest multi-turn conversations for training (see `docs/conversation-generator.md`).
+ */
+export interface ConversationGenerator {
+  _id: string;
+  target_agent_id: string;
+  target_agent_name: string;
+  interviewer_agent_id: string;
+  enabled: boolean;
+  interval_minutes: number;
+  /** Question→answer exchanges per generated conversation. */
+  turns: number;
+  /** Subjects to steer the interviewer; one is drawn per conversation. Empty → it picks its own. */
+  topics: string[];
+  last_run_at: string | null;
+  last_error: string;
+  conversations_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ConversationGeneratorInput = Partial<{
+  target_agent_id: string;
+  interviewer_agent_id: string;
+  enabled: boolean;
+  interval_minutes: number;
+  turns: number;
+  topics: string[];
+}>;
+
+export const conversationGenApi = {
+  list: () => api.get<ConversationGenerator[]>('/conversation-gen').then((r) => r.data),
+  create: (input: ConversationGeneratorInput) =>
+    api.post<ConversationGenerator>('/conversation-gen', input).then((r) => r.data),
+  update: (id: string, patch: ConversationGeneratorInput) =>
+    api.patch<ConversationGenerator>(`/conversation-gen/${id}`, patch).then((r) => r.data),
+  remove: (id: string) => api.delete(`/conversation-gen/${id}`).then((r) => r.data),
+  /** Kick one conversation off-schedule. Returns as soon as it starts — poll `list` for the outcome. */
+  runNow: (id: string) =>
+    api.post<{ started: boolean }>(`/conversation-gen/${id}/run-now`).then((r) => r.data),
+  /** The generated sessions, newest first (all generators when `generatorId` is omitted). */
+  sessions: (generatorId?: string, limit = 50) =>
+    api
+      .get<{ sessions: Session[]; total: number }>('/conversation-gen/sessions', {
+        params: { generatorId, limit },
+      })
+      .then((r) => r.data),
 };
 
 export interface AutonomyJob {
@@ -1014,7 +1066,7 @@ export interface LlamaCallRecord {
   turnId: string | null;
   /** Agent-run id (null for side-task calls) — links a record to its Conversation Quality score. */
   runId: string | null;
-  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge';
+  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge' | 'memory' | 'interview';
   endpoint: string;
   model: string;
   sessionId: string | null;

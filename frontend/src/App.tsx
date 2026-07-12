@@ -14,6 +14,7 @@ import { AutonomyInbox } from './views/AutonomyInbox';
 import { LLMView } from './views/LLMView';
 import { LLMDebugView } from './views/LLMDebugView';
 import { ScoringView } from './views/ScoringView';
+import { ConversationsView } from './views/ConversationsView';
 import { FineTuningView } from './views/FineTuningView';
 import { SettingsView } from './views/SettingsView';
 import { VisualDesktopWindow } from './views/VisualDesktopWindow';
@@ -74,6 +75,7 @@ export default function App() {
           <Route path="/autonomy" element={<AutonomyInbox />} />
           <Route path="/llm" element={<LLMView />} />
           <Route path="/llm-debug" element={<LLMDebugView />} />
+          <Route path="/conversations" element={<ConversationsView />} />
           <Route path="/scoring" element={<ScoringView />} />
           <Route path="/finetuning" element={<FineTuningView />} />
           <Route path="/settings" element={<SettingsView />} />

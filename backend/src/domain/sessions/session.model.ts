@@ -16,6 +16,16 @@ const SessionSchema = new Schema(
      * A manual rename flips this to `false`, freezing the title against further auto-updates.
      */
     title_auto: { type: Boolean, default: true },
+    /**
+     * Who the "user" side of this conversation was. `synthetic` marks a session produced by the
+     * Conversation Generator (an interviewer agent talking to this one to harvest training data —
+     * see `docs/conversation-generator.md`). The Workspace lists `user` sessions only, so thousands
+     * of generated threads never bury the operator's own chats; everything else (scoring, the
+     * fine-tune dataset builder) treats both alike.
+     */
+    origin: { type: String, enum: ['user', 'synthetic'], default: 'user', index: true },
+    /** Synthetic only: the `conversation_generators` row that produced this session. */
+    generator_id: { type: Schema.Types.ObjectId, ref: 'ConversationGenerator', default: null, index: true },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

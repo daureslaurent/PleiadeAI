@@ -438,6 +438,8 @@ const SOURCE_STYLE: Record<string, string> = {
   identity: 'border-reasoning/25 bg-reasoning/10 text-reasoning',
   vision: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-400',
   judge: 'border-amber-400/25 bg-amber-400/10 text-amber-400',
+  memory: 'border-sky-400/25 bg-sky-400/10 text-sky-400',
+  interview: 'border-fuchsia-400/25 bg-fuchsia-400/10 text-fuchsia-400',
 };
 
 function TagChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {

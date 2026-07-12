@@ -1,6 +1,6 @@
+import type { Types } from 'mongoose';
 import { endpointRepository } from '../domain/endpoints/endpoint.repository';
 import { settingsService } from '../domain/settings/settings.service';
-import type { AgentDoc } from '../domain/agents/agent.model';
 import type { EndpointDoc } from '../domain/endpoints/endpoint.model';
 
 /**
@@ -51,12 +51,22 @@ export interface ResolvedInference {
 }
 
 /**
+ * Whose inference target to resolve. Structural rather than `Pick<AgentDoc, …>` so a caller with no
+ * agent at all can ask for one by passing `{}`: side tasks such as the Conversation Generator's
+ * interviewer deliberately run on the *fleet default* endpoint + model rather than any agent's.
+ */
+export interface InferenceTarget {
+  endpoint_id?: Types.ObjectId | string | null;
+  model?: string;
+}
+
+/**
  * Resolve the endpoint + model an agent should use this turn, layering global sampling settings
  * on top. Precedence: the agent's assigned endpoint → the default endpoint → the legacy global
  * settings connection. The model follows the agent's pick, then the endpoint's first discovered
  * model, then the global default model. Sampling always comes from global settings.
  */
-export async function resolveInference(agent: Pick<AgentDoc, 'endpoint_id' | 'model'>): Promise<ResolvedInference> {
+export async function resolveInference(agent: InferenceTarget): Promise<ResolvedInference> {
   const settings = await settingsService.get();
   const endpoint = agent.endpoint_id
     ? await endpointRepository.findById(agent.endpoint_id)

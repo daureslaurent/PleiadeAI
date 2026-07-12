@@ -17,6 +17,7 @@ import { skillsRouter } from './transport/http/routes/skills.routes';
 import { memoryRouter } from './transport/http/routes/memory.routes';
 import { inboxRouter } from './transport/http/routes/inbox.routes';
 import { autonomyRouter } from './transport/http/routes/autonomy.routes';
+import { conversationGenRouter } from './transport/http/routes/conversation-gen.routes';
 import { settingsRouter } from './transport/http/routes/settings.routes';
 import { endpointsRouter } from './transport/http/routes/endpoints.routes';
 import { llmRouter } from './transport/http/routes/llm.routes';
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
   app.use('/api/memory', requireAuth, memoryRouter);
   app.use('/api/inbox', requireAuth, inboxRouter);
   app.use('/api/autonomy', requireAuth, autonomyRouter);
+  app.use('/api/conversation-gen', requireAuth, conversationGenRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
   app.use('/api/endpoints', requireAuth, endpointsRouter);
   app.use('/api/llm', requireAuth, llmRouter);
