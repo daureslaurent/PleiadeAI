@@ -23,6 +23,12 @@ const MessageSchema = new Schema(
     reasoning: { type: String, default: undefined },
     /** Assistant only: debugger trace entries produced during this turn. */
     trace: { type: Schema.Types.Mixed, default: undefined },
+    /**
+     * Assistant only: the memories auto-recalled into the top-level run's prompt for this turn
+     * (`{ text, score, source, createdAt }[]`), so the chat's "memories" badge survives a reload.
+     * A sub-agent's own recall rides inside its `blocks` entry instead.
+     */
+    memories: { type: Schema.Types.Mixed, default: undefined },
     /** Assistant only: session context size (prompt tokens) after this turn, for the chat header. */
     context_tokens: { type: Number, default: undefined },
     /** Assistant only: model context window at the time, so the header can show a fraction. */

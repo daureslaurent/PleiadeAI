@@ -143,6 +143,30 @@ export interface AskUserEvent {
   question: string;
 }
 
+/** One memory the agent auto-recalled from its vector store and injected into this run's prompt. */
+export interface RecalledMemory {
+  text: string;
+  /** Cosine similarity to the turn's query (0–1). */
+  score: number;
+  /** `auto_turn` (passive transcript capture) or `remember` (a deliberate save). */
+  source?: string;
+  createdAt?: string;
+}
+
+/**
+ * Memories folded into an agent-run's prompt before inference — the chat's "memories" badge. Routed
+ * by depth like `context_usage`: `depth === 0` belongs to the turn itself, `depth > 0` to the
+ * delegated sub-agent's own bubble. Only emitted when the recall actually returned something.
+ */
+export interface MemoryRecallEvent {
+  type: 'memory_recall';
+  sessionId: string;
+  agent: string;
+  depth: number;
+  runId: string;
+  memories: RecalledMemory[];
+}
+
 /**
  * Context size (prompt tokens) reported after an agent run. `depth === 0` is the session's
  * user-facing agent (drives the chat header meter); `depth > 0` is a delegated sub-agent run, whose
@@ -241,6 +265,7 @@ export type WsEvent =
   | AskUserEvent
   | TruncatedEvent
   | ContextUsageEvent
+  | MemoryRecallEvent
   | LlamaCallStartEvent
   | LlamaCallDeltaEvent
   | LlamaCallEndEvent

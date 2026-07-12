@@ -14,10 +14,14 @@ import type {
   ToolStartEvent,
   TruncatedEvent,
   TurnScoredEvent,
+  MemoryRecallEvent,
+  RecalledMemory,
   VisionEvent,
   ImageGenEvent,
   VisualActEvent,
 } from '../lib/ws-events.types';
+
+export type { RecalledMemory };
 
 /** Session context size shown in the chat header (prompt tokens vs the model's context window). */
 export interface ContextUsage {
@@ -111,6 +115,8 @@ export type Block =
       runId?: string;
       /** The Conversation Quality score for this sub-agent run, once the scorer has judged it. */
       score?: TurnScore;
+      /** Memories auto-recalled into this sub-agent's own prompt (its bubble gets its own badge). */
+      memories?: RecalledMemory[];
       children: Block[];
     };
 
@@ -155,6 +161,8 @@ interface LiveFrame {
   contextWindow?: number;
   /** The sub-agent run's id (from the `agent_hop` event) — the scored unit for this bubble. */
   runId?: string;
+  /** Memories the auto-RAG step injected into this frame's prompt, if any. */
+  memories?: RecalledMemory[];
 }
 
 /**
@@ -219,6 +227,7 @@ export function buildBlocks(
         promptTokens: f.promptTokens,
         contextWindow: f.contextWindow,
         runId: f.runId,
+        memories: f.memories,
         children: buildBlocks(it.refFrameId, items, frames),
       });
     }
@@ -267,6 +276,8 @@ export type Turn =
       runId?: string;
       /** The Conversation Quality score for the top-level run, once the scorer has judged it. */
       score?: TurnScore;
+      /** Memories auto-recalled into the top-level run's prompt — the turn header's "memories" badge. */
+      memories?: RecalledMemory[];
     };
 
 /** Raw trace entries for the debugger drawer (kept alongside the inline blocks). */
@@ -625,6 +636,20 @@ export const useStream = create<StreamState>((set, get) => ({
       );
     });
 
+    // Memories the auto-RAG step injected into a run's prompt. Attributed to the frame that consumed
+    // them — the root frame for the turn's own badge, a sub-agent's frame for its bubble — so both
+    // ride the existing frame → block plumbing (and the snapshot/persist paths) unchanged.
+    socket.on('memory_recall', (e: MemoryRecallEvent) => {
+      if (e.sessionId !== get().activeSessionId) return;
+      set((s) => {
+        const frameId = e.depth === 0 ? 'root' : s.frameStack[s.frameStack.length - 1];
+        const frame = frameId ? s.liveFrames[frameId] : undefined;
+        // A sub-agent's recall lands just before its first token, so the top frame is still its own.
+        if (!frameId || !frame || (e.depth > 0 && frame.agent !== e.agent)) return {};
+        return { liveFrames: { ...s.liveFrames, [frameId]: { ...frame, memories: e.memories } } };
+      });
+    });
+
     socket.on('context_usage', (e: ContextUsageEvent) => {
       // Only reflect the on-screen session; background runs update their own persisted messages.
       if (e.sessionId !== get().activeSessionId) return;
@@ -709,6 +734,7 @@ export const useStream = create<StreamState>((set, get) => ({
         answer,
         persisted,
         blocks: serverBlocks,
+        memories: serverMemories,
         turnId,
         runId,
       }: {
@@ -717,6 +743,8 @@ export const useStream = create<StreamState>((set, get) => ({
         persisted?: boolean;
         /** Rich blocks the backend assembled when it persisted the turn itself (client was gone). */
         blocks?: Block[];
+        /** Memories the backend recorded for the top-level run when it persisted the turn itself. */
+        memories?: RecalledMemory[];
         /** Backend turn id — groups this turn's parent + sub-agent runs. */
         turnId?: string;
         /** Depth-0 agent-run id — tag the saved turn so its quality score attaches on refresh. */
@@ -755,11 +783,16 @@ export const useStream = create<StreamState>((set, get) => ({
         const trace = s.liveReasoning
           ? [...s.trace, { kind: 'reasoning' as const, label: '<think>', detail: s.liveReasoning }]
           : s.trace;
+        // The top-level run's recall lives on the root frame (or comes back with a server-persisted
+        // turn); it settles onto the turn so the badge stays with the message.
+        const memories = persisted ? serverMemories : s.liveFrames.root?.memories;
 
         set({
           ...shared,
           streaming: false,
-          turns: hasContent ? [...s.turns, { role: 'assistant', blocks, turnId, runId }] : s.turns,
+          turns: hasContent
+            ? [...s.turns, { role: 'assistant', blocks, turnId, runId, memories }]
+            : s.turns,
           liveItems: [],
           liveFrames: {},
           frameStack: ['root'],
@@ -780,6 +813,7 @@ export const useStream = create<StreamState>((set, get) => ({
               blocks,
               reasoning: s.liveReasoning || undefined,
               trace: trace.slice(s.turnTraceStart),
+              memories,
               context_tokens: s.contextUsage?.promptTokens,
               context_window: s.contextUsage?.contextWindow,
               turn_id: turnId,
@@ -845,6 +879,7 @@ export const useStream = create<StreamState>((set, get) => ({
             blocks: (m.blocks as Block[] | undefined) ?? [{ kind: 'text', text: m.text }],
             turnId: m.turn_id,
             runId: m.run_id,
+            memories: m.memories as RecalledMemory[] | undefined,
           },
     );
     const trace: TraceEntry[] = messages.flatMap((m) => (m.trace as TraceEntry[] | undefined) ?? []);

@@ -583,6 +583,8 @@ export interface StoredMessage {
   blocks?: unknown[];
   reasoning?: string;
   trace?: unknown[];
+  /** Assistant only: memories auto-recalled into the top-level run's prompt for this turn. */
+  memories?: unknown[];
   /** Assistant only: session context size (prompt tokens) recorded for this turn. */
   context_tokens?: number;
   /** Assistant only: model context window at the time of this turn. */
@@ -601,6 +603,7 @@ export interface NewMessage {
   blocks?: unknown[];
   reasoning?: string;
   trace?: unknown[];
+  memories?: unknown[];
   context_tokens?: number;
   context_window?: number;
   turn_id?: string;

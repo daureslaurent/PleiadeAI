@@ -3,6 +3,8 @@ import type {
   AskAgentDonePayload,
   AskAgentPayload,
   ContextUsagePayload,
+  MemoryRecallPayload,
+  RecalledMemory,
   StreamChunkPayload,
   ToolCompletePayload,
   ToolInvokePayload,
@@ -47,6 +49,8 @@ export type Block =
       contextWindow?: number;
       /** The sub-agent run's id — carried so its Conversation Quality score attaches to this bubble. */
       runId?: string;
+      /** Memories auto-recalled into this sub-agent's prompt, if any. */
+      memories?: RecalledMemory[];
       children: Block[];
     };
 
@@ -86,6 +90,8 @@ interface Frame {
   contextWindow?: number;
   /** The sub-agent run's id (from `agent:ask_agent`) — the scored unit for this frame's bubble. */
   runId?: string;
+  /** Memories the auto-RAG step injected into this frame's prompt. */
+  memories?: RecalledMemory[];
 }
 
 /** Pull a human-readable output string out of a tool result (mirrors the frontend helper). */
@@ -102,6 +108,8 @@ export interface RecordedTurn {
   trace: TraceEntry[];
   contextTokens?: number;
   contextWindow?: number;
+  /** Memories injected into the top-level (depth-0) run's prompt — the turn's "memories" badge. */
+  memories?: RecalledMemory[];
 }
 
 /** A live item carrying the `id` the frontend store keys its own `LiveItem`s by. */
@@ -146,6 +154,7 @@ export interface TurnSnapshot {
       promptTokens?: number;
       contextWindow?: number;
       runId?: string;
+      memories?: RecalledMemory[];
     }
   >;
   frameStack: string[];
@@ -176,6 +185,7 @@ export class TurnRecorder {
   private readonly onHop = (p: AskAgentPayload) => this.handleHop(p);
   private readonly onHopDone = (p: AskAgentDonePayload) => this.handleHopDone(p);
   private readonly onContext = (p: ContextUsagePayload) => this.handleContext(p);
+  private readonly onMemory = (p: MemoryRecallPayload) => this.handleMemory(p);
 
   constructor(
     private readonly sessionId: string,
@@ -202,6 +212,7 @@ export class TurnRecorder {
     eventBus.on('agent:ask_agent', this.onHop);
     eventBus.on('agent:ask_agent_done', this.onHopDone);
     eventBus.on('agent:context_usage', this.onContext);
+    eventBus.on('agent:memory_recall', this.onMemory);
   }
 
   stop(): void {
@@ -214,6 +225,7 @@ export class TurnRecorder {
     eventBus.off('agent:ask_agent', this.onHop);
     eventBus.off('agent:ask_agent_done', this.onHopDone);
     eventBus.off('agent:context_usage', this.onContext);
+    eventBus.off('agent:memory_recall', this.onMemory);
   }
 
   /** Only events belonging to this run's session are ours (the bus is process-global). */
@@ -325,6 +337,19 @@ export class TurnRecorder {
     }
   }
 
+  /**
+   * Memories injected into a run's prompt, attributed to the frame that consumed them: the depth-0
+   * recall belongs to the root frame (the turn's own badge), a sub-agent's to its still-open frame.
+   * The recall fires before the run's first token, so the top frame is already this agent's.
+   */
+  private handleMemory(p: MemoryRecallPayload): void {
+    if (!this.mine(p.ctx.sessionId)) return;
+    const frame = p.ctx.depth === 0 ? this.frames.get('root') : this.frames.get(this.top);
+    if (!frame) return;
+    if (p.ctx.depth > 0 && frame.agent !== p.ctx.agentName) return;
+    frame.memories = p.memories;
+  }
+
   /** Fold the flat log for `frameId` into the nested Block tree (mirrors the frontend `buildBlocks`). */
   private buildBlocks(frameId: string): Block[] {
     const out: Block[] = [];
@@ -357,6 +382,7 @@ export class TurnRecorder {
           promptTokens: f.promptTokens,
           contextWindow: f.contextWindow,
           runId: f.runId,
+          memories: f.memories,
           children: this.buildBlocks(it.refFrameId),
         });
       }
@@ -418,6 +444,7 @@ export class TurnRecorder {
       trace,
       contextTokens: this.contextTokens,
       contextWindow: this.contextWindow,
+      memories: this.frames.get('root')?.memories,
     };
   }
 }

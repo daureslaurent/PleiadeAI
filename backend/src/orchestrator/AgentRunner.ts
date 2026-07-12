@@ -244,6 +244,22 @@ export class AgentRunner {
     const recalled = await agentMemory.recall(agent.qdrant_namespace, input.userText);
     const memoryMessage = buildMemoryMessage(recalled);
 
+    // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
+    // recall instead of guessing. Only fires when something was injected — the badge's presence in
+    // the chat is itself the signal that this turn was shaped by memory.
+    if (memoryMessage && recalled.length) {
+      eventBus.emit('agent:memory_recall', {
+        ctx,
+        runId,
+        memories: recalled.map((m) => ({
+          text: typeof m.payload.text === 'string' ? m.payload.text : '',
+          score: m.score ?? 0,
+          source: typeof m.payload.source === 'string' ? m.payload.source : undefined,
+          createdAt: typeof m.payload.created_at === 'string' ? m.payload.created_at : undefined,
+        })),
+      });
+    }
+
     // Fold recalled memories into the single leading system message rather than injecting a second
     // `system` turn. Many chat templates (including the GGUFs we serve) enforce "System message must
     // be at the beginning" and hard-fail on a second one — merging keeps retrieval visible as a

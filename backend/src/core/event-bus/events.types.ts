@@ -189,6 +189,33 @@ export interface ImageGeneratedPayload {
   count: number;
 }
 
+/**
+ * One memory the auto-RAG step pulled out of the agent's Qdrant namespace and folded into its
+ * system prompt for this run. Mirrors a Qdrant point's payload, narrowed to what the operator needs
+ * to judge the recall.
+ */
+export interface RecalledMemory {
+  text: string;
+  /** Cosine similarity to the turn's query (0–1). */
+  score: number;
+  /** How the memory was written: `auto_turn` (passive transcript capture) or `remember` (deliberate). */
+  source?: string;
+  /** ISO timestamp the memory was stored. */
+  createdAt?: string;
+}
+
+/**
+ * An agent-run recalled memories and injected them into its prompt (`AgentRunner`, before inference).
+ * Emitted once per run — including each delegated sub-agent's — and only when the recall returned
+ * something, so the chat's "memories" badge appears exactly when memory actually shaped the answer.
+ */
+export interface MemoryRecallPayload {
+  ctx: EventContext;
+  /** The agent-run these memories were injected into (depth-0 turn, or a sub-agent's own run). */
+  runId: string;
+  memories: RecalledMemory[];
+}
+
 export interface ContextUsagePayload {
   ctx: EventContext;
   /** Prompt tokens on this inference pass — the current context size. */
@@ -354,6 +381,7 @@ export interface EventMap {
   'tool:execution_complete': ToolCompletePayload;
   'agent:ask_agent': AskAgentPayload;
   'agent:ask_agent_done': AskAgentDonePayload;
+  'agent:memory_recall': MemoryRecallPayload;
   'agent:context_usage': ContextUsagePayload;
   'agent:turn_truncated': TurnTruncatedPayload;
   'agent:ask_user': AskUserPayload;

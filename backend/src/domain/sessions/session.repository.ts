@@ -68,6 +68,7 @@ export const sessionRepository = {
       blocks?: unknown;
       reasoning?: string;
       trace?: unknown;
+      memories?: unknown;
       context_tokens?: number;
       context_window?: number;
       turn_id?: string;

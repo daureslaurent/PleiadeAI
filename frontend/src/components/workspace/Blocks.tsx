@@ -6,6 +6,7 @@ import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
 import { usePrefs } from '../../store/prefs';
 import { ScoreBadge } from '../ScoreBadge';
+import { MemoriesBadge } from '../MemoriesBadge';
 import type { Block } from '../../store/stream';
 
 type AgentBlock = Extract<Block, { kind: 'agent' }>;
@@ -239,6 +240,13 @@ function SubAgentBubble({ block }: { block: AgentBlock }) {
 
       {open && (
         <div className="px-3 pb-2.5">
+          {/* What this sub-agent recalled into its *own* prompt (it has its own memory silo). Lives in
+              the body, not the header row — that row is one big collapse button. */}
+          {block.memories && block.memories.length > 0 && (
+            <div className="mb-2 flex">
+              <MemoriesBadge memories={block.memories} />
+            </div>
+          )}
           {/* The delegated question, spelled out above the sub-agent's work. */}
           <div className="mb-2 rounded-md bg-black/20 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-400">
             <span className="mr-1 select-none text-slate-600">Q:</span>

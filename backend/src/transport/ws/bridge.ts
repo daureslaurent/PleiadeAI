@@ -127,6 +127,20 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  // Memories the auto-RAG step injected into this run's prompt — drives the chat's "memories" badge.
+  // Depth routes it like `context_usage`: a depth-0 recall belongs to the turn, a sub-agent's to its
+  // own bubble.
+  eventBus.on('agent:memory_recall', ({ ctx, runId, memories }) => {
+    io.to(ctx.sessionId).emit('memory_recall', {
+      type: 'memory_recall',
+      sessionId: ctx.sessionId,
+      agent: ctx.agentName,
+      depth: ctx.depth,
+      runId,
+      memories,
+    });
+  });
+
   eventBus.on('agent:context_usage', ({ ctx, promptTokens, completionTokens, totalTokens, contextWindow, phase }) => {
     io.to(ctx.sessionId).emit('context_usage', {
       type: 'context_usage',

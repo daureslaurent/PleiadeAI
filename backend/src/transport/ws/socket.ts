@@ -123,6 +123,7 @@ export function attachSocket(httpServer: HttpServer): Server {
                 blocks: turn.blocks,
                 reasoning: turn.reasoning || undefined,
                 trace: turn.trace,
+                memories: turn.memories,
                 context_tokens: turn.contextTokens,
                 context_window: turn.contextWindow,
                 turn_id: turnId,
@@ -135,6 +136,7 @@ export function attachSocket(httpServer: HttpServer): Server {
             answer,
             persisted: true,
             blocks: turn.blocks,
+            memories: turn.memories,
             turnId,
             runId,
           });
@@ -199,6 +201,7 @@ export function attachSocket(httpServer: HttpServer): Server {
                 blocks,
                 reasoning: turn.reasoning || undefined,
                 trace: turn.trace,
+                memories: turn.memories,
                 context_tokens: turn.contextTokens,
                 context_window: turn.contextWindow,
               })
@@ -215,6 +218,7 @@ export function attachSocket(httpServer: HttpServer): Server {
             error: message,
             persisted: hasPartial,
             blocks: hasPartial ? blocks : undefined,
+            memories: hasPartial ? turn.memories : undefined,
           });
         }
       } finally {

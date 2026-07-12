@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, ImagePlus, X, Play, Repeat, Pencil } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
-import { useStream, buildBlocks, type ContextUsage, type Turn, type TurnScore } from '../../store/stream';
+import { useStream, buildBlocks, type ContextUsage, type RecalledMemory, type Turn, type TurnScore } from '../../store/stream';
 import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
 import { ScoreBadge } from '../ScoreBadge';
+import { MemoriesBadge } from '../MemoriesBadge';
 import type { Agent } from '../../lib/api';
 
 /**
@@ -17,12 +18,15 @@ function MessageRow({
   role,
   agentName,
   score,
+  memories,
   children,
 }: {
   role: Turn['role'];
   agentName: string;
   /** Conversation Quality score for an assistant turn (renders a tiny badge next to the name). */
   score?: TurnScore;
+  /** Memories auto-recalled into this turn's prompt — an inspectable pill next to the name. */
+  memories?: RecalledMemory[];
   children: React.ReactNode;
 }) {
   if (role === 'user') {
@@ -50,6 +54,7 @@ function MessageRow({
           {agentName}
         </span>
         {score && <ScoreBadge score={score} size="xs" />}
+        {memories && memories.length > 0 && <MemoriesBadge memories={memories} />}
       </div>
       <div className="min-w-0 overflow-hidden break-words pl-9 text-sm text-slate-100">
         {children}
@@ -383,6 +388,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
                 role={t.role}
                 agentName={agentName}
                 score={t.role === 'assistant' ? t.score : undefined}
+                memories={t.role === 'assistant' ? t.memories : undefined}
               >
                 {t.role === 'user' ? (
                   <div className="space-y-1.5">
@@ -409,7 +415,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
               </MessageRow>
             ))}
             {streaming && (
-              <MessageRow role="assistant" agentName={agentName}>
+              <MessageRow role="assistant" agentName={agentName} memories={liveFrames.root?.memories}>
                 <Blocks blocks={liveBlocks} live />
                 {/* Root spinner: shows the top-level agent's live activity, but stays silent while a
                     delegated sub-agent owns the floor (its own bubble spins instead). */}
