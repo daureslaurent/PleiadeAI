@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, GitCommitHorizontal, Loader2, RefreshCw } from 'lucide-react';
 import { hostApi, type UpdateInfo } from '../lib/api';
+import { Button } from './ui/Controls';
 import { APP_VERSION } from '../version';
 
 /**
  * Update actions + status. Reads the host bridge directly (independent of the Settings
  * "Save" flow, which owns the enable toggle + interval). Shows the deployed version, a
  * "Check now" button, the commits the tracked branch is ahead, and an "Update app" button
- * that triggers the host rebuild and tails the log in a full-screen overlay until the
- * rebuilt stack answers again — then reloads.
+ * that triggers the host rebuild and hands off to `UpdateOverlay`, which tails the log until
+ * the rebuilt stack answers again — then reloads onto it.
  *
  * `enabled` mirrors the (possibly unsaved) toggle in the parent so the update button reflects
  * the operator's intent immediately; the backend still enforces the persisted setting.
@@ -149,15 +150,50 @@ export function UpdatePanel({ enabled }: { enabled: boolean }) {
   );
 }
 
+/** The steps `update_run.sh` prints, in order. The log markers are how we follow it from here. */
+const STEPS = [
+  { key: 'pull', label: 'Pull', marker: '==> Updating' },
+  { key: 'build', label: 'Build', marker: '==> Building' },
+  { key: 'swap', label: 'Swap', marker: '==> Swapping' },
+] as const;
+
+/** `update_run.sh` prints this once the swap succeeded and it's dumping `docker compose ps`. */
+const DONE_MARKER = '==> Done.';
+
+/** No log growth for this long, with the backend answering, means the host run died mid-flight. */
+const STALL_MS = 5 * 60_000;
+
 /**
- * Full-screen "Updating…" overlay. Triggers the host update, tails the log from the offset
- * captured at trigger time, and polls /health until the rebuilt stack answers — then reloads
- * the page onto the new build. If the update trigger itself fails, surfaces the error and lets
- * the operator dismiss.
+ * Is the stack serving? Caddy proxies `/health` to the backend and *stays up across the swap*, so a
+ * downed backend comes back as a 502 **response**, not a network error — a non-ok status has to
+ * count as "down" just like a throw does, or the outage is never seen. The SPA root is probed too:
+ * the frontend container is recreated as well, and reloading before nginx is back lands the operator
+ * on a browser error page.
+ */
+async function probeUp(): Promise<boolean> {
+  const ok = async (url: string, method: string) => {
+    try {
+      const res = await fetch(url, { method, cache: 'no-store' });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  };
+  return (await ok('/health', 'GET')) && (await ok('/', 'HEAD'));
+}
+
+/**
+ * Full-screen "Updating…" window. Triggers the host update, tails the log from the offset captured
+ * at trigger time, and reloads onto the new build once the rebuilt stack answers again.
+ *
+ * "Finished" is two independent signals, because either one alone misses a real case: an **outage**
+ * on the health probe (the container swap) covers a backend rebuild, and the log's `Done` **marker**
+ * covers an update that never takes the backend down (a frontend-only change, or a no-op rebuild) —
+ * which would otherwise tail forever. Either one, once the stack probes healthy again, means reload.
  */
 function UpdateOverlay({ onClose }: { onClose: () => void }) {
   const [logText, setLogText] = useState('');
-  const [phase, setPhase] = useState<'starting' | 'running' | 'waiting' | 'error'>('starting');
+  const [phase, setPhase] = useState<Phase>('starting');
   const [error, setError] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
   const startedRef = useRef(false);
@@ -168,35 +204,39 @@ function UpdateOverlay({ onClose }: { onClose: () => void }) {
 
     let cancelled = false;
     let offset = 0;
-    let backOnline = false;
+    let log = '';
+    let sawOutage = false;
+    let lastGrowth = Date.now();
 
     async function tailUntilBack() {
-      // Poll the log + health together. The container swap will drop this request mid-flight;
-      // once it answers 200 again we're on the new build → reload.
       while (!cancelled) {
         try {
           const chunk = await hostApi.updateLog(offset);
           if (chunk.text) {
             offset = chunk.offset;
-            setLogText((t) => t + chunk.text);
+            log += chunk.text;
+            lastGrowth = Date.now();
+            setLogText(log);
           }
         } catch {
-          // Backend momentarily gone during the swap — that's expected.
+          // Backend momentarily gone during the swap — expected; the health probe is the authority.
         }
-        // Health probe: a successful response after the swap means we're back.
-        try {
-          const res = await fetch('/health', { cache: 'no-store' });
-          if (res.ok) {
-            if (backOnline) {
-              window.location.reload();
-              return;
-            }
-            // First OK is the *old* backend still serving; flip to waiting and require a
-            // subsequent OK after an outage to confirm the swap completed.
-          }
-        } catch {
-          backOnline = true; // saw an outage → the swap is in progress
+
+        const up = await probeUp();
+        const done = log.includes(DONE_MARKER);
+
+        if (!up) {
+          sawOutage = true; // the swap is under way
           setPhase('waiting');
+        } else if (sawOutage || done) {
+          setPhase('done');
+          await sleep(600); // let the operator see it landed before the page goes
+          window.location.reload();
+          return;
+        } else {
+          // Still building on the old stack. A long-silent log with a healthy backend means the
+          // host run died (`set -e`) — say so instead of spinning forever.
+          setPhase(Date.now() - lastGrowth > STALL_MS ? 'stalled' : 'running');
         }
         await sleep(1500);
       }
@@ -224,44 +264,123 @@ function UpdateOverlay({ onClose }: { onClose: () => void }) {
     preRef.current?.scrollTo({ top: preRef.current.scrollHeight });
   }, [logText]);
 
+  const live = phase !== 'error' && phase !== 'stalled' && phase !== 'done';
+  const dismissable = phase === 'error' || phase === 'stalled';
+  const step = currentStep(logText, phase);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-surface shadow-xl">
-        <div className="flex items-center gap-3 border-b border-border px-5 py-3">
-          {phase === 'error' ? (
-            <AlertTriangle size={16} className="text-red-400" />
-          ) : (
-            <Loader2 size={16} className="animate-spin text-accent" />
-          )}
-          <div className="text-sm font-semibold text-slate-100">
-            {phase === 'error'
-              ? 'Update failed'
-              : phase === 'waiting'
-                ? 'Rebuilding — waiting for the stack to come back…'
-                : 'Updating PleiadesAI…'}
-          </div>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Updating PleiadesAI"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+    >
+      <div className="glass-card flex max-h-[80vh] w-full max-w-2xl animate-fade-up flex-col rounded-2xl border border-white/[0.09]">
+        {/* Header: a live status dot that breathes in the phase's colour, per DIRECT_ART §6. */}
+        <header className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5">
+          <StatusDot phase={phase} />
+          <h2 className={`text-sm font-semibold text-slate-100 ${live ? 'text-shimmer' : ''}`}>
+            {HEADLINE[phase]}
+          </h2>
+          <span className="ml-auto font-mono text-[10px] uppercase tracking-wide text-slate-500">
+            v{APP_VERSION}
+          </span>
+        </header>
+
+        {/* Stepper: pull → build → swap → back online, read off the host script's own log markers. */}
+        <div className="flex items-center gap-1.5 px-5 py-3">
+          {[...STEPS.map((s) => s.label), 'Back online'].map((label, i) => (
+            <Step key={label} label={label} state={i < step ? 'done' : i === step ? 'active' : 'todo'} />
+          ))}
         </div>
-        <div className="min-h-0 flex-1 overflow-hidden p-4">
-          {error && <div className="mb-2 text-xs text-red-400">{error}</div>}
+
+        <div className="min-h-0 flex-1 overflow-hidden px-5 pb-4">
+          {error && <p className="mb-2 text-xs text-red-400">{error}</p>}
+          {phase === 'stalled' && (
+            <p className="mb-2 flex items-start gap-1.5 text-xs text-amber-400">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              No output for {Math.round(STALL_MS / 60_000)} minutes and the stack is still serving the
+              old build — the host update likely failed. Check{' '}
+              <code className="rounded bg-black/30 px-1 font-mono">journalctl -u pleiades-update</code>.
+            </p>
+          )}
+          {/* Machine output → inset terminal well (DIRECT_ART §2, §7). */}
           <pre
             ref={preRef}
-            className="h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-panel p-3 font-mono text-[11px] leading-relaxed text-slate-300"
+            className="h-64 overflow-auto whitespace-pre-wrap rounded-xl border border-white/[0.06] bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-slate-300"
           >
             {logText || 'Starting…'}
           </pre>
-          <div className="mt-2 text-xs text-slate-500">
-            The page reloads automatically once the rebuilt stack is back online. Don't close this tab.
-          </div>
+          {live && (
+            <p className="mt-2.5 text-[11px] text-slate-500">
+              The page reloads itself once the rebuilt stack is back online. Don't close this tab.
+            </p>
+          )}
         </div>
-        {phase === 'error' && (
-          <div className="flex justify-end border-t border-border px-5 py-3">
-            <button onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm text-slate-200 hover:bg-panel">
+
+        {dismissable && (
+          <footer className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
+            <Button variant="ghost" onClick={onClose}>
               Close
-            </button>
-          </div>
+            </Button>
+            {phase === 'stalled' && (
+              <Button variant="primary" icon={<RefreshCw size={13} />} onClick={() => window.location.reload()}>
+                Reload anyway
+              </Button>
+            )}
+          </footer>
         )}
       </div>
     </div>
+  );
+}
+
+type Phase = 'starting' | 'running' | 'waiting' | 'done' | 'stalled' | 'error';
+
+const HEADLINE: Record<Phase, string> = {
+  starting: 'Starting the update…',
+  running: 'Updating PleiadesAI…',
+  waiting: 'Swapping containers — waiting for the stack…',
+  done: 'Updated. Reloading…',
+  stalled: 'Update may have failed',
+  error: 'Update failed',
+};
+
+/** Index into [pull, build, swap, back online] — which step the log says we're on. */
+function currentStep(log: string, phase: Phase): number {
+  if (phase === 'done') return 4;
+  if (phase === 'waiting' || log.includes(DONE_MARKER)) return 3;
+  const reached = STEPS.filter((s) => log.includes(s.marker)).length;
+  return Math.max(0, reached - 1);
+}
+
+/** Liveness in one glyph: a colour-coded dot that breathes while the update is actually moving. */
+function StatusDot({ phase }: { phase: Phase }) {
+  if (phase === 'error') return <AlertTriangle size={16} className="shrink-0 text-red-400" />;
+  if (phase === 'stalled') return <AlertTriangle size={16} className="shrink-0 text-amber-400" />;
+  if (phase === 'done') return <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />;
+  const color = phase === 'waiting' ? '#f59e0b' : '#3b82f6';
+  return (
+    <span
+      className="h-2 w-2 shrink-0 animate-glow-pulse rounded-full"
+      style={{ background: color, ['--glow' as string]: `${color}59` }}
+    />
+  );
+}
+
+function Step({ label, state }: { label: string; state: 'done' | 'active' | 'todo' }) {
+  const style =
+    state === 'done'
+      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400/90'
+      : state === 'active'
+        ? 'border-accent/40 bg-accent/15 text-accent'
+        : 'border-white/[0.06] bg-white/[0.03] text-slate-600';
+  return (
+    <span
+      className={`flex-1 rounded-full border px-2 py-1 text-center text-[10px] font-medium uppercase tracking-wide transition-colors ${style}`}
+    >
+      {label}
+    </span>
   );
 }
 
