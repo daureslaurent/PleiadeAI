@@ -7,8 +7,13 @@ import type { ChatMessage } from '../agents/jit-builder';
 
 const log = createLogger('interviewer');
 
-/** Cap the interviewer's reply: it must produce a question, never an essay. */
-const MAX_TOKENS = 400;
+/**
+ * Budget for one question. Generous not because the question is long — it must not be — but because a
+ * reasoning model spends this budget on its `<think>` block first: too small and the call is cut off
+ * mid-thought, leaving no content at all (`finish: length`, empty text) and no question to ask. The
+ * session titler carries the same scar.
+ */
+const MAX_TOKENS = 1200;
 /** Deliberately hot — the whole point is a wide, non-repetitive spread of questions. */
 const TEMPERATURE = 1.0;
 
@@ -149,7 +154,14 @@ export async function nextQuestion(input: InterviewerInput): Promise<string | nu
         fallbacks,
       ),
     );
-    return cleanQuestion(text, input.target.name) || null;
+    const question = cleanQuestion(text, input.target.name);
+    if (!question) {
+      // Nothing usable: either the model said nothing, or it was cut off inside its reasoning block
+      // and everything we got back was thought. Log the raw length so the cause is distinguishable.
+      log.warn({ rawChars: text.length, target: input.target.name }, 'interviewer produced no question');
+      return null;
+    }
+    return question;
   } catch (err) {
     log.warn({ err: String(err) }, 'interviewer question generation failed');
     return null;

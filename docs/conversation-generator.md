@@ -12,7 +12,7 @@ no extra plumbing.
 | --- | --- |
 | Question source | A **real PleiadesAI agent** is the interviewer. A seeded `Interviewer` agent is the default; any agent can be picked per row. |
 | Depth | **Multi-turn**, `turns` configurable per generator (interviewer reads the reply and follows up). |
-| Storage | Normal `sessions`/`messages`, flagged `origin: 'synthetic'`. |
+| Storage | Normal `sessions`/`messages`, flagged `origin: 'synthetic'`. They appear in the Workspace alongside the operator's own chats, with the interviewer named on the "user" side. |
 | Scoring | No dedicated hook — synthetic runs are normal runs, so the existing global `scoring_enabled` auto-scorer already covers them. |
 | Memory | **Suppressed.** Synthetic turns must not be distilled into the target's Qdrant namespace (recall still works, so the agent behaves normally). |
 | Model | The **interviewer** always runs on the fleet default endpoint+model. The **target** keeps its own configured model — otherwise we'd be generating data for the wrong model. |
@@ -60,8 +60,11 @@ leaked speaker labels, and any attempt to ventriloquise the agent's reply are st
   guards the `memoryDistiller.distillTurn` call. Recall is untouched.
 - **`domain/sessions/session.model.ts`** — new `origin: 'user' | 'synthetic'` (default `user`,
   indexed) and `generator_id`.
-- **`transport/http/routes/sessions.routes.ts`** — the per-agent list takes an `origin` filter so the
-  Workspace sidebar isn't flooded by thousands of generated threads (defaults to `user`).
+- **`transport/http/routes/sessions.routes.ts`** — the per-agent list takes an `origin` filter
+  (`user` | `synthetic` | `all`; defaults to `user` for API consumers). The Workspace asks for `all`:
+  a generated conversation is meant to be *read* like any other chat, so it sits in the session list
+  under its agent, marked with a mic. `ChatPanel` names and re-tints the right-hand bubbles as the
+  **Interviewer** in such a session, so they can never be mistaken for something the operator said.
 - **`autonomy/agenda.setup.ts`** — new `conversation:generate` job; `syncSchedules()` at boot
   re-registers every enabled generator; create/update/enable re-schedules, disable/delete cancels.
 - **`transport/http/routes/conversation-gen.routes.ts`** — CRUD on generators, `POST /:id/run-now`,

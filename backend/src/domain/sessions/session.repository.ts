@@ -14,9 +14,9 @@ function deriveTitle(text: string): string {
  */
 export const sessionRepository = {
   /**
-   * Sessions for one agent, newest first. `origin` defaults to `user` so the Workspace sidebar shows
-   * the operator's own chats only — a generator can produce thousands of `synthetic` sessions, which
-   * are listed on their own page instead. Pass `'all'` to list both.
+   * Sessions for one agent, newest first. `origin` narrows to the operator's own chats (`user`) or
+   * the Conversation Generator's (`synthetic`); the Workspace asks for `'all'` and marks the
+   * generated ones. Defaults to `user` so an API consumer never gets synthetic data unasked.
    */
   listByAgent(
     agentId: string | Types.ObjectId,

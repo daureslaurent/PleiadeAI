@@ -19,9 +19,9 @@ const SessionSchema = new Schema(
     /**
      * Who the "user" side of this conversation was. `synthetic` marks a session produced by the
      * Conversation Generator (an interviewer agent talking to this one to harvest training data —
-     * see `docs/conversation-generator.md`). The Workspace lists `user` sessions only, so thousands
-     * of generated threads never bury the operator's own chats; everything else (scoring, the
-     * fine-tune dataset builder) treats both alike.
+     * see `docs/conversation-generator.md`). The Workspace shows both, marking the generated ones so
+     * the interviewer's turns are never mistaken for the operator's; everything else (scoring, the
+     * fine-tune dataset builder) treats them alike.
      */
     origin: { type: String, enum: ['user', 'synthetic'], default: 'user', index: true },
     /** Synthetic only: the `conversation_generators` row that produced this session. */

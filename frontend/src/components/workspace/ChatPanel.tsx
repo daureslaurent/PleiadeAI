@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, ImagePlus, X, Play, Repeat, Pencil } from 'lucide-react';
+import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, ImagePlus, X, Play, Repeat, Pencil, Mic } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { useStream, buildBlocks, type ContextUsage, type RecalledMemory, type Turn, type TurnScore } from '../../store/stream';
@@ -13,12 +13,17 @@ import type { Agent } from '../../lib/api';
  * Hybrid message layout: the user speaks in a compact right-aligned gradient bubble; the agent
  * answers full-width, document-style (avatar + name header, then an open content column) so
  * tool cards, sub-agent bubbles, and code get the whole line to breathe.
+ *
+ * In a *generated* conversation the right-hand speaker isn't the operator but the Conversation
+ * Generator's interviewer, so the bubble is named and re-tinted — the layout is the same chat, but it
+ * must never read as something the operator said.
  */
 function MessageRow({
   role,
   agentName,
   score,
   memories,
+  generated,
   children,
 }: {
   role: Turn['role'];
@@ -27,12 +32,25 @@ function MessageRow({
   score?: TurnScore;
   /** Memories auto-recalled into this turn's prompt — an inspectable pill next to the name. */
   memories?: RecalledMemory[];
+  /** This session was produced by the Conversation Generator → the "user" turns are the interviewer. */
+  generated?: boolean;
   children: React.ReactNode;
 }) {
   if (role === 'user') {
     return (
-      <div className="flex animate-fade-up justify-end pl-10">
-        <div className="min-w-0 max-w-[78%] overflow-hidden break-words rounded-2xl rounded-br-md bg-gradient-to-br from-accent/90 via-accent/75 to-indigo-500/80 px-4 py-2.5 text-sm text-white shadow-[0_4px_20px_rgba(59,130,246,0.25)]">
+      <div className="flex animate-fade-up flex-col items-end pl-10">
+        {generated && (
+          <div className="mb-1 flex items-center gap-1 pr-1 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-300/80">
+            <Mic size={11} /> Interviewer
+          </div>
+        )}
+        <div
+          className={`min-w-0 max-w-[78%] overflow-hidden break-words rounded-2xl rounded-br-md px-4 py-2.5 text-sm text-white ${
+            generated
+              ? 'bg-gradient-to-br from-fuchsia-500/80 via-fuchsia-500/65 to-purple-500/70 shadow-[0_4px_20px_rgba(217,70,239,0.22)]'
+              : 'bg-gradient-to-br from-accent/90 via-accent/75 to-indigo-500/80 shadow-[0_4px_20px_rgba(59,130,246,0.25)]'
+          }`}
+        >
           {children}
         </div>
       </div>
@@ -66,6 +84,8 @@ function MessageRow({
 interface Props {
   agent: Agent | null;
   hasSession: boolean;
+  /** The open session was produced by the Conversation Generator (its "user" turns are the interviewer). */
+  generatedSession?: boolean;
   debuggerOpen: boolean;
   onToggleDebugger: () => void;
   onOpenVisual: () => void;
@@ -218,7 +238,7 @@ function AskUserPrompt({
 }
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
-export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, onOpenVisual, onSend }: Props) {
+export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, onOpenVisual, onSend }: Props) {
   const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
@@ -387,6 +407,7 @@ export function ChatPanel({ agent, hasSession, debuggerOpen, onToggleDebugger, o
                 key={i}
                 role={t.role}
                 agentName={agentName}
+                generated={generatedSession}
                 score={t.role === 'assistant' ? t.score : undefined}
                 memories={t.role === 'assistant' ? t.memories : undefined}
               >

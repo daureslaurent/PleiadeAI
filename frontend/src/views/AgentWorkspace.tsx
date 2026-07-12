@@ -174,6 +174,14 @@ export function AgentWorkspace() {
   const workingAgentNames = new Set(Object.keys(workingAgents));
   const workingSessionSet = new Set(workingSessions);
 
+  // A generated conversation (Conversation Generator) reads as a normal chat, except the right-hand
+  // speaker is the interviewer agent — never the operator. Found across the loaded agents' lists
+  // because a restored session may belong to an agent whose list is keyed elsewhere.
+  const activeSession = Object.values(sessionsByAgent)
+    .flat()
+    .find((s) => s._id === activeSessionId);
+  const generatedSession = activeSession?.origin === 'synthetic';
+
   return (
     <div className="flex h-full min-h-0">
       <WorkspaceNav
@@ -196,6 +204,7 @@ export function AgentWorkspace() {
       <ChatPanel
         agent={activeAgent}
         hasSession={!!activeSessionId}
+        generatedSession={generatedSession}
         debuggerOpen={drawer}
         onToggleDebugger={() => setDrawer((d) => !d)}
         onOpenVisual={() => setVisualOpen(true)}

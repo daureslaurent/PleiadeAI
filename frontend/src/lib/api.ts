@@ -613,8 +613,12 @@ export interface NewMessage {
 }
 
 export const sessionsApi = {
-  listByAgent: (agentId: string) =>
-    api.get<Session[]>('/sessions', { params: { agentId } }).then((r) => r.data),
+  /**
+   * Sessions for one agent. `origin` defaults to `all` — the Workspace shows generated conversations
+   * alongside the operator's own, marked as such (the Conversation Generator is meant to be read).
+   */
+  listByAgent: (agentId: string, origin: 'user' | 'synthetic' | 'all' = 'all') =>
+    api.get<Session[]>('/sessions', { params: { agentId, origin } }).then((r) => r.data),
   create: (agentId: string) => api.post<Session>('/sessions', { agentId }).then((r) => r.data),
   rename: (id: string, title: string) =>
     api.patch<Session>(`/sessions/${id}`, { title }).then((r) => r.data),
