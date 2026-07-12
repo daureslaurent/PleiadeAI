@@ -13,6 +13,7 @@ import type { ImageBlock } from '../../core/event-bus/events.types';
 import { attachBridge } from './bridge';
 import { askUserBroker } from './AskUserBroker';
 import { TurnRecorder, type Block } from './TurnRecorder';
+import { liveRuns } from './live-runs';
 
 const log = createLogger('ws');
 
@@ -57,14 +58,11 @@ export function attachSocket(httpServer: HttpServer): Server {
 
   attachBridge(io);
 
-  // Live runs keyed by session id, so a `chat:stop` (or a disconnect) can abort the in-flight
-  // agent turn — tearing down its inference stream and every sub-agent hop it spawned.
-  const runControllers = new Map<string, AbortController>();
-
-  // The `TurnRecorder` mirroring each live run, keyed by session id. Kept accessible outside the
-  // originating `chat:message` handler so a client that (re)subscribes mid-turn — after a reload or
-  // an in-app navigation — can be handed the in-flight turn's current state to resume from.
-  const runRecorders = new Map<string, TurnRecorder>();
+  // In-flight runs live in the shared `liveRuns` registry (see `live-runs.ts`), which the
+  // Conversation Generator also registers into — so `session:subscribe` can resume a turn that is
+  // already underway no matter who started it. It holds each run's `TurnRecorder` (to hand a
+  // mid-turn subscriber the turn so far) and, for operator-driven chats, the `AbortController` that
+  // `chat:stop` fires.
 
   io.on('connection', (socket: Socket) => {
     log.info({ id: socket.id }, 'client connected');
@@ -83,13 +81,12 @@ export function attachSocket(httpServer: HttpServer): Server {
       const lockKey = agent ? String(agent._id) : input.agentName;
 
       const controller = new AbortController();
-      runControllers.set(sessionId, controller);
 
       // Mirror the turn on the backend so its rich blocks (tools + sub-agent hops) can be persisted
       // even if the client is gone when the run ends — otherwise a reload keeps only plain text.
       const recorder = new TurnRecorder(sessionId, input.agentName);
       recorder.start();
-      runRecorders.set(sessionId, recorder);
+      liveRuns.start(sessionId, recorder, controller);
 
       sessionLock.acquireUserSession(lockKey);
       try {
@@ -223,8 +220,7 @@ export function attachSocket(httpServer: HttpServer): Server {
         }
       } finally {
         recorder.stop();
-        runRecorders.delete(sessionId);
-        runControllers.delete(sessionId);
+        liveRuns.end(sessionId);
         sessionLock.releaseUserSession(lockKey);
       }
     });
@@ -232,7 +228,7 @@ export function attachSocket(httpServer: HttpServer): Server {
     // Operator hit "stop" on a running turn: abort the inference/hop loop, and unblock any pending
     // `ask_user` for this session so a run parked on an operator prompt tears down too.
     socket.on('chat:stop', ({ sessionId }: { sessionId: string }) => {
-      const controller = runControllers.get(sessionId);
+      const controller = liveRuns.get(sessionId)?.controller;
       if (controller) {
         controller.abort();
         log.info({ sessionId }, 'stop requested');
@@ -240,22 +236,25 @@ export function attachSocket(httpServer: HttpServer): Server {
       askUserBroker.cancelSession(sessionId);
     });
 
-    // A (re)loaded client re-attaching to a session it already has on screen: join the room so it
-    // receives this session's live stream + terminal `chat:done`, and — if a run is still in flight
-    // (e.g. the user refreshed mid-turn) — tell it so the UI shows "working" instead of "stopped".
+    // A client attaching to a session whose run is already underway: join the room, then resume the
+    // turn in progress. Two ways to land here — the operator reloaded mid-turn, or they opened a
+    // generated conversation the Conversation Generator is driving right now (its runs register in
+    // the same `liveRuns` registry). Either way, without `chat:running` the client never turns its
+    // `streaming` flag on, and the tokens arriving in the room would accumulate invisibly until the
+    // turn completed.
     socket.on('session:subscribe', ({ sessionId }: { sessionId: string }) => {
       if (!sessionId) return;
       socket.join(sessionId);
       sessions.add(sessionId);
-      if (runControllers.has(sessionId)) {
+      const run = liveRuns.get(sessionId);
+      if (run) {
         socket.emit('chat:running', { sessionId });
         // Hand this client the in-flight turn as it stands right now (prose streamed so far, tool
         // calls, and any sub-agent hops — open or closed), so it rebuilds the full live turn instead
         // of only the tail that arrives after it reconnected. Snapshotting synchronously here (before
         // any further bus event can run) then emitting on this same socket keeps it ordered ahead of
         // subsequent room events, so the client adopts the base then appends the deltas.
-        const recorder = runRecorders.get(sessionId);
-        if (recorder) socket.emit('chat:snapshot', recorder.snapshot());
+        socket.emit('chat:snapshot', run.recorder.snapshot());
       }
     });
 

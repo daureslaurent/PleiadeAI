@@ -91,6 +91,15 @@ The agent's tokens need no new plumbing: the bridge is room-scoped by `sessionId
 already reaches whoever is watching. The error path emits `conversation:turn_complete` with empty
 blocks too — otherwise a failed run leaves the watching UI spinning forever.
 
+**Opening a conversation mid-turn.** The operator can only click a generated conversation *after* it
+exists, i.e. once a turn is already running — so the generator registers each run in the shared
+`transport/ws/live-runs.ts` registry that `socket.ts` also uses. `session:subscribe` then replays
+`chat:running` + a `chat:snapshot` of the turn so far, exactly as it does for a browser that reloaded
+mid-turn. This is load-bearing: the client only renders a live turn while its `streaming` flag is on,
+and that flag is set by `chat:running`. Miss that event and the tokens stream into an invisible
+buffer — the turn appears only when it *completes*, which reads as "it works, but only after the
+first turn finished".
+
 ## Where a conversation appears (and what a pulsing agent means)
 
 The session belongs to the **target** agent. If the target is a top-level orchestrator, it will

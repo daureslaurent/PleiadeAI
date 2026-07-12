@@ -3,6 +3,7 @@ import { eventBus } from '../../core/event-bus/EventBus';
 import type { EventContext } from '../../core/event-bus/events.types';
 import { sessionLock } from '../../core/session/SessionLock';
 import { agentRunner } from '../../orchestrator/AgentRunner';
+import { liveRuns } from '../../transport/ws/live-runs';
 import { TurnRecorder } from '../../transport/ws/TurnRecorder';
 import { agentRepository } from '../agents/agent.repository';
 import type { ChatMessage } from '../agents/jit-builder';
@@ -120,6 +121,11 @@ export const conversationGenService = {
         // the most valuable part of the training data.
         const recorder = new TurnRecorder(sessionId, target.name);
         recorder.start();
+        // Publish the run so an operator opening this conversation *mid-turn* — the normal case, since
+        // the session only appears once it starts — is handed `chat:running` + a snapshot of the turn
+        // so far on subscribe, and watches the rest stream in. No AbortController: a generated
+        // conversation has no stop button; it ends when the interview does.
+        liveRuns.start(sessionId, recorder);
         let answer = '';
         try {
           const result = await agentRunner.run({
@@ -188,6 +194,7 @@ export const conversationGenService = {
           break;
         } finally {
           recorder.stop();
+          liveRuns.end(sessionId);
         }
 
         exchanges.push({ question, answer });
