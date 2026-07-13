@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Check, Copy } from 'lucide-react';
+import { MermaidBlock } from './Mermaid';
 
 /** Extract the raw text out of a code block's children for copying. */
 function childrenToText(children: ReactNode): string {
@@ -74,7 +75,12 @@ const components: Components = {
         </code>
       );
     }
-    return <CodeBlock language={match?.[1] ?? ''} code={text.replace(/\n$/, '')} />;
+    const language = match?.[1] ?? '';
+    const code = text.replace(/\n$/, '');
+    if (language === 'mermaid') {
+      return <MermaidBlock code={code} fallback={<CodeBlock language="mermaid" code={code} />} />;
+    }
+    return <CodeBlock language={language} code={code} />;
   },
   a: ({ children, ...props }) => (
     <a
