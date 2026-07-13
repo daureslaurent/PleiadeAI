@@ -7,6 +7,13 @@ export default defineConfig({
   server: { port: 3000, host: true },
   // es2022 so top-level await (used by @novnc/novnc 1.7's WebCodecs probe) is supported, in both the
   // production build and the dev dep-optimizer.
-  build: { outDir: 'dist', target: 'es2022' },
+  build: {
+    outDir: 'dist',
+    target: 'es2022',
+    // Rollup fans out to 20 concurrent file transforms by default; with monaco/mermaid in the
+    // graph that peaks well past a small VPS's RAM. Trading a little build time for a flatter
+    // memory curve keeps `docker compose build` alive on a 2GB box.
+    rollupOptions: { maxParallelFileOps: 2 },
+  },
   optimizeDeps: { esbuildOptions: { target: 'es2022' } },
 });
