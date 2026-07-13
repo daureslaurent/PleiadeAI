@@ -5,14 +5,14 @@ import { Button } from './ui/Controls';
 import { APP_VERSION } from '../version';
 
 /**
- * Update actions + status. Reads the host bridge directly (independent of the Settings
- * "Save" flow, which owns the enable toggle + interval). Shows the deployed version, a
- * "Check now" button, the commits the tracked branch is ahead, and an "Update app" button
- * that triggers the host rebuild and hands off to `UpdateOverlay`, which tails the log until
- * the rebuilt stack answers again — then reloads onto it.
+ * Update actions + status. Reads the host bridge directly, independently of the settings doc that
+ * owns the enable toggle + interval. Shows the deployed version, a "Check now" button, the commits
+ * the tracked branch is ahead, and an "Update app" button that triggers the host rebuild and hands
+ * off to `UpdateOverlay`, which tails the log until the rebuilt stack answers again — then reloads
+ * onto it.
  *
- * `enabled` mirrors the (possibly unsaved) toggle in the parent so the update button reflects
- * the operator's intent immediately; the backend still enforces the persisted setting.
+ * `enabled` mirrors the toggle on the System settings page, which autosaves; the button reflects the
+ * operator's intent as soon as it's flipped, and the backend still enforces the persisted setting.
  */
 export function UpdatePanel({ enabled }: { enabled: boolean }) {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
@@ -127,7 +127,7 @@ export function UpdatePanel({ enabled }: { enabled: boolean }) {
           disabled={!enabled || !bridgeReady || behind === 0}
           title={
             !enabled
-              ? 'Enable app updates and Save first'
+              ? 'Turn on "Enable app updates" first'
               : behind === 0
                 ? 'No update available'
                 : 'Pull latest and rebuild the stack'
@@ -137,7 +137,7 @@ export function UpdatePanel({ enabled }: { enabled: boolean }) {
           <Download size={15} /> Update app
         </button>
         {!enabled && (
-          <span className="text-xs text-slate-500">Enable app updates and Save to unlock.</span>
+          <span className="text-xs text-slate-500">Turn on “Enable app updates” to unlock.</span>
         )}
       </div>
 

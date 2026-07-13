@@ -16,7 +16,8 @@ import { LLMDebugView } from './views/LLMDebugView';
 import { ScoringView } from './views/ScoringView';
 import { ConversationsView } from './views/ConversationsView';
 import { FineTuningView } from './views/FineTuningView';
-import { SettingsView } from './views/SettingsView';
+import { SettingsView, SettingsCategoryPage } from './views/settings/SettingsLayout';
+import { SettingsHome } from './views/settings/SettingsHome';
 import { VisualDesktopWindow } from './views/VisualDesktopWindow';
 
 function PageHeader() {
@@ -78,7 +79,13 @@ export default function App() {
           <Route path="/conversations" element={<ConversationsView />} />
           <Route path="/scoring" element={<ScoringView />} />
           <Route path="/finetuning" element={<FineTuningView />} />
-          <Route path="/settings" element={<SettingsView />} />
+          {/* Settings is a card index (`/settings`) over one page per category
+              (`/settings/inference`, …). The layout route owns the settings doc so switching
+              category never refetches — see views/settings/context.tsx. */}
+          <Route path="/settings" element={<SettingsView />}>
+            <Route index element={<SettingsHome />} />
+            <Route path=":category" element={<SettingsCategoryPage />} />
+          </Route>
           <Route path="*" element={<Navigate to="/workspace" replace />} />
         </Route>
       </Routes>
