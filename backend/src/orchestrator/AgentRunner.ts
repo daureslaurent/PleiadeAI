@@ -208,6 +208,12 @@ export class AgentRunner {
     const imagePool = new TurnImagePool(priorResources, 'tool');
     imagePool.addMany(attachedImages, 'attachment');
 
+    // Resolve the inference target before picking tools: whether the agent's own model is multimodal
+    // decides both what enters its context (raw pixels vs. a note) and whether it is granted
+    // `analyze_image` at all. (Failover chain resolved alongside.)
+    const inference = await resolveInference(agent);
+    const fallbacks = await resolveFallbacks(inference.url);
+
     // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides
     // whether we auto-grant the visual-desktop tools below, and the profile drives container boot.
     const iso = agent.isolation_id ? await isolationRepository.findById(agent.isolation_id) : null;
@@ -215,12 +221,18 @@ export class AgentRunner {
     // A visual image auto-grants the visual-desktop control tools (like the delegation tools below),
     // so the operator needn't list them in `tools_allowed`. The global kill-switch still applies.
     const visualTools = image?.visual ? [...VISUAL_TOOL_NAMES] : [];
-    // Auto-grant `analyze_image` so a (possibly text-only) agent can read an image via the Vision
-    // endpoint — either because an image is already in scope this turn (attached now / carried over),
-    // or because the agent can `read` one into the turn's image pool mid-run. Handles let it then
-    // reference that image by id without ever passing a path.
+    // `analyze_image` exists so a *text-only* agent can still read an image: it routes the pixels
+    // through the separate Vision endpoint and hands back a description. An agent whose own model is
+    // multimodal has no use for it — every image in its scope is fed to it as raw pixels (this turn's
+    // attachments and carried-over session images below; tool-acquired ones as they land) — so the
+    // tool is withheld rather than tempting the model into a pointless round-trip through a second,
+    // weaker model. Text-only agents keep it whenever an image is in scope now (attached / carried
+    // over) or could be `read` into the pool mid-run; handles let them then name it by id, never path.
     const canReadImages = agent.tools_allowed.includes(read.name);
-    const imageTools = attachedImages.length || canReadImages ? [analyzeImage.name] : [];
+    const imageTools =
+      !inference.supportsVision && (attachedImages.length || canReadImages)
+        ? [analyzeImage.name]
+        : [];
 
     // Top-level agents orchestrate, so they always get the delegation tools even if the operator
     // didn't tick them in `tools_allowed` (a subagent honours its explicit list as before). The
@@ -245,7 +257,12 @@ export class AgentRunner {
         guide.name,
         ...(input.caller ? [askParent.name] : []),
       ]),
-    ];
+    ].filter(
+      // A multimodal agent never gets `analyze_image` — not even if the operator ticked it in
+      // `tools_allowed`. It sees the pixels itself; the tool would only route them through the
+      // Vision endpoint's model and hand back a worse, second-hand description.
+      (name) => !(inference.supportsVision && name === analyzeImage.name),
+    );
     const tools = await resolveTools(effectiveTools);
     const toolMap = new Map(tools.map((t) => [t.name, t]));
     const toolSchemas: ToolSchema[] = tools.map((t) => ({
@@ -298,44 +315,59 @@ export class AgentRunner {
       systemMessage.content = `${systemMessage.content}\n\n${memoryMessage.content}`;
     }
 
-    // Resolve the inference target now: whether the agent's own model is multimodal decides whether
-    // the raw attached images go into its context. (Failover chain resolved alongside.)
-    const inference = await resolveInference(agent);
-    const fallbacks = await resolveFallbacks(inference.url);
-
-    // Tell the model, in the user turn, what images it can act on and how — otherwise a model that
-    // doesn't get the raw pixels has no signal an image exists and silently ignores it. Two cases:
-    //  - this turn's own attachments on a text-only model (multimodal gets the raw pixels instead);
-    //  - image(s) carried over from earlier in the session (never fed as raw pixels regardless of
-    //    modality, so the note is what makes them reachable via analyze_image / ask_agent).
+    // Tell the model, in the user turn, what images it can act on and how — otherwise it has no
+    // reliable signal an image exists and silently ignores it. What the note says depends on whether
+    // the agent can actually see:
+    //  - multimodal: every image in scope IS in its context (attachments and carried-over alike, see
+    //    userMessage below), so the note only says where they came from and how to forward them on;
+    //  - text-only: it gets no pixels at all, so the note is what makes an image reachable — by index,
+    //    through `analyze_image` (the Vision endpoint) or `ask_agent`.
     const idxRange = (n: number) => (n > 1 ? `..${n - 1}` : '');
+    const plural = (n: number) => (n > 1 ? 'them' : 'it');
     const userText = (() => {
-      if (currentImages.length && !inference.supportsVision) {
+      if (inference.supportsVision) {
+        // Carried-over images are re-fed to a multimodal agent, but they are NOT part of this message
+        // — say so, or the model reads a stale screenshot as the thing the user just sent.
+        if (currentImages.length === 0 && sessionImages.length) {
+          const n = sessionImages.length;
+          return `${input.userText}\n\n[The ${n} image${n > 1 ? 's' : ''} shown ${
+            n > 1 ? 'are' : 'is'
+          } from earlier in this conversation, not newly sent. You can see ${plural(
+            n,
+          )} — forward ${plural(n)} to another agent with \`ask_agent\` (include_image: true).]`;
+        }
+        return input.userText;
+      }
+      if (currentImages.length) {
         const n = currentImages.length;
-        return `${input.userText}\n\n[${n} image${n > 1 ? 's are' : ' is'} attached to this message. You cannot see ${
-          n > 1 ? 'them' : 'it'
-        } directly — call the \`analyze_image\` tool (index 0${idxRange(n)}) to read ${
+        return `${input.userText}\n\n[${n} image${n > 1 ? 's are' : ' is'} attached to this message. You cannot see ${plural(
+          n,
+        )} directly — call the \`analyze_image\` tool (index 0${idxRange(n)}) to read ${
           n > 1 ? 'each one' : 'it'
         } before answering.]`;
       }
-      if (currentImages.length === 0 && sessionImages.length) {
+      if (sessionImages.length) {
         const n = sessionImages.length;
         return `${input.userText}\n\n[${n} image${n > 1 ? 's' : ''} from earlier in this conversation ${
           n > 1 ? 'are' : 'is'
-        } available. You cannot see ${
-          n > 1 ? 'them' : 'it'
-        } directly — call \`analyze_image\` (index 0${idxRange(n)}) to read ${
-          n > 1 ? 'them' : 'it'
-        }, or forward ${n > 1 ? 'them' : 'it'} to another agent with \`ask_agent\` (include_image: true).]`;
+        } available. You cannot see ${plural(n)} directly — call \`analyze_image\` (index 0${idxRange(
+          n,
+        )}) to read ${plural(n)}, or forward ${plural(
+          n,
+        )} to another agent with \`ask_agent\` (include_image: true).]`;
       }
       return input.userText;
     })();
-    // Raw images enter the model context only for a multimodal agent, and only for THIS turn's own
-    // attachments — a text-only endpoint would choke on them, and re-feeding old session images every
-    // turn would bloat/confuse the context. Carried-over images stay reachable via the tools above.
+    // Raw images enter the model context only for a multimodal agent — a text-only endpoint would
+    // choke on them (it reaches an image via `analyze_image` instead). For a multimodal agent that is
+    // every image in scope: this turn's attachments, or, when the turn has none, the ones carried over
+    // from earlier in the session. Since such an agent is not granted `analyze_image`, feeding the
+    // carried-over set is the *only* thing that keeps an earlier image answerable — the note above
+    // marks them as old so they aren't mistaken for a fresh attachment. `attachedImages` is already
+    // "this turn's if any, else the session's", so old images are never re-fed alongside a new one.
     const userMessage = buildUserMessage(
       userText,
-      inference.supportsVision ? currentImages : undefined,
+      inference.supportsVision ? attachedImages : undefined,
     );
     const messages: ChatMessage[] = [systemMessage, ...(input.history ?? []), userMessage];
 
@@ -870,8 +902,13 @@ export class AgentRunner {
       if (pics.length) {
         const ids = pics.map((i) => i.id).filter(Boolean).join(', ');
         parts.push(
-          `${pics.length} image${pics.length > 1 ? 's' : ''} loaded as ${ids} — analyse with ` +
-            `\`analyze_image\` (image_id) or forward with \`ask_agent\` (image_ids).`,
+          delegation.supportsVision
+            ? // The pixels ride along in this very message, and a multimodal agent holds no
+              // `analyze_image` to be pointed at anyway.
+              `${pics.length} image${pics.length > 1 ? 's' : ''} loaded as ${ids} and shown here — ` +
+                `read ${pics.length > 1 ? 'them' : 'it'} yourself, or forward with \`ask_agent\` (image_ids).`
+            : `${pics.length} image${pics.length > 1 ? 's' : ''} loaded as ${ids} — analyse with ` +
+                `\`analyze_image\` (image_id) or forward with \`ask_agent\` (image_ids).`,
         );
       }
       if (blobs.length) {
