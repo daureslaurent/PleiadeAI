@@ -35,9 +35,18 @@ const IsolationSchema = new Schema(
      * `none`  — offline.
      * `vpn`   — route through this profile's dedicated gluetun (WireGuard) container; all traffic
      *           exits via the VPN and is kill-switched until the tunnel is up (see vpn_* below).
+     * `ssh`   — the container becomes a jump box: bash, the file tools and skills all execute on the
+     *           remote host below, over SSH, using this profile's SSH key. The agent never sees the
+     *           hop (see isolation/remote-ssh.ts). The container itself keeps a bridge netns.
      */
-    network: { type: String, enum: ['host', 'bridge', 'none', 'vpn'], default: 'host' },
+    network: { type: String, enum: ['host', 'bridge', 'none', 'vpn', 'ssh'], default: 'host' },
     idle_timeout_ms: { type: Number, default: 1_800_000 },
+
+    // Remote execution target, used only when `network === 'ssh'`. Not secret (the credentials are
+    // the SSH key below): the host/port/user of the machine every tool call is forwarded to.
+    ssh_remote_host: { type: String, default: '' },
+    ssh_remote_port: { type: Number, default: 22 },
+    ssh_remote_user: { type: String, default: '' },
 
     // VPN (gluetun / WireGuard) config, used only when `network === 'vpn'`. The operator uploads a
     // standard WireGuard `.conf` file; the backend parses it into gluetun's custom-provider env vars

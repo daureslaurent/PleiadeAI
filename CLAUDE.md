@@ -71,7 +71,11 @@ Key seams:
   `AgentExecutor` so `bash`/skills run *inside* the container instead of the backend. If the profile
   image isn't built it throws `IsolationNotReadyError` — isolated tools must surface the error, never
   fall back to the backend. Containers idle-stop on a timer; SSH keys are injected at runtime
-  (never baked into image layers) and encrypted at rest.
+  (never baked into image layers) and encrypted at rest. The profile's `network` mode also decides
+  *where* execution lands: `vpn` routes the container's netns through a per-profile gluetun, and
+  **`ssh`** (`isolation/remote-ssh.ts`, spec `SSH_ISOLATION_PLAN.md`) turns the container into a jump
+  box — `bash`, the file tools and skills all run on a remote host over SSH, invisibly to the agent,
+  since they all funnel through the single `AgentExecutor`.
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.
   Embeddings failures degrade gracefully (memory just skipped).

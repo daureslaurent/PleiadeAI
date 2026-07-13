@@ -14,8 +14,9 @@ ENV NODE_ENV=production
 
 # Install Python 3 + bash for dynamic skill execution and the `bash` terminal tool, plus the
 # Docker CLI so the backend can build per-agent isolation images and run/exec their containers
-# through the mounted host /var/run/docker.sock (see docker-compose.yml).
-RUN apk add --no-cache python3 make g++ bash docker-cli
+# through the mounted host /var/run/docker.sock (see docker-compose.yml). openssh-client backs the
+# Isolation page's "scan host key" / "test connection" actions for the `ssh` network mode.
+RUN apk add --no-cache python3 make g++ bash docker-cli openssh-client
 
 # Working directory used by the `bash` terminal tool (BASH_CWD).
 RUN mkdir -p /workspace

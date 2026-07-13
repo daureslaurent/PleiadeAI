@@ -59,6 +59,9 @@ export const isolationRepository = {
     idle_timeout_ms?: number;
     vpn_conf_enc?: string | null;
     sudo_password_enc?: string | null;
+    ssh_remote_host?: string;
+    ssh_remote_port?: number;
+    ssh_remote_user?: string;
   }): Promise<IsolationDoc> {
     return IsolationModel.create(input);
   },

@@ -9,8 +9,10 @@ export const DEFAULT_DOCKERFILE = `# Per-agent isolated runtime.
 FROM node:22-bookworm-slim
 
 # Core runtimes + common CLI tooling. Add whatever your agent needs below.
+# openssh-client is required by the "ssh" network mode (execution forwarded to a remote host) and by
+# any agent that git-clones or ssh's out.
 RUN apt-get update && apt-get install -y --no-install-recommends \\
-    bash python3 python3-pip git curl ca-certificates build-essential \\
+    bash python3 python3-pip git curl ca-certificates build-essential openssh-client \\
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { env } from '../config/env';
 import { createLogger } from '../config/logger';
@@ -22,6 +23,19 @@ import {
   VISUAL_PASS_FILE,
   VISUAL_VNC_SOCK,
 } from './visual.template';
+import {
+  controlDirScript,
+  explainSshFailure,
+  remoteEval,
+  remoteSessionScript,
+  remoteTargetOf,
+  remoteWriteFile,
+  sshArgv,
+  REMOTE_MKDIR,
+  REMOTE_NODE_RUNNER,
+  REMOTE_PY_RUNNER,
+  type RemoteTarget,
+} from './remote-ssh';
 import { imageRepository } from '../domain/images/image.repository';
 import { agentRepository } from '../domain/agents/agent.repository';
 import { isolationRepository } from '../domain/isolations/isolation.repository';
@@ -93,6 +107,10 @@ export interface IsolationProfile {
   memory: string;
   network: string;
   idle_timeout_ms: number;
+  /** Remote execution target — read only when `network === 'ssh'` (see remote-ssh.ts). */
+  ssh_remote_host?: string;
+  ssh_remote_port?: number;
+  ssh_remote_user?: string;
 }
 
 export interface ExecResult {
@@ -107,10 +125,21 @@ export interface ExecResult {
  * and skills run inside the container instead of the backend.
  */
 export class AgentExecutor {
-  constructor(private readonly container: string) {}
+  /**
+   * @param remote  Set only in `ssh` network mode: every command is forwarded to this host instead
+   *                of running in the container, which becomes a pure jump box. Invisible to the
+   *                agent — the tool surface is identical either way.
+   * @param controlPersistSec  How long the multiplexed SSH connection is kept warm between calls.
+   */
+  constructor(
+    private readonly container: string,
+    private readonly remote?: RemoteTarget,
+    private readonly controlPersistSec: number = 1_800,
+  ) {}
 
   /**
-   * Run a shell command in the container, streaming combined stdout/stderr through `onOutput`.
+   * Run a shell command in the agent's execution environment, streaming combined stdout/stderr
+   * through `onOutput`.
    *
    * Each call is a separate `docker exec`, but the container is long-lived, so we give the agent an
    * OpenCode-style *persistent session*: the working directory is carried across calls via a small
@@ -118,37 +147,88 @@ export class AgentExecutor {
    * there, and a `cmd &` / `nohup … &` background job keeps running under the container's PID 1 after
    * the exec returns (poll it later from a follow-up call). Env-var/`export` state does *not* persist
    * between calls — only the cwd — so agents should chain state-dependent steps into one command.
+   *
+   * In `ssh` mode the same contract holds on the *remote* host (cwd persisted in the remote
+   * `~/.pleiades/session/cwd`, background jobs surviving under the remote sshd).
    */
-  run(
+  async run(
     command: string,
     opts: { timeoutMs: number; onOutput?: (chunk: string) => void; stdin?: string },
   ): Promise<ExecResult> {
-    return dockerService.exec(this.container, ['bash', '-lc', wrapWithSession(command)], {
+    const argv = this.remote
+      ? sshArgv(this.remote, remoteEval(remoteSessionScript(command)), {
+          controlPersistSec: this.controlPersistSec,
+        })
+      : ['bash', '-lc', wrapWithSession(command)];
+
+    const res = await dockerService.exec(this.container, argv, {
       timeoutMs: opts.timeoutMs,
       onOutput: opts.onOutput,
       // Large payloads (e.g. writing a fetched blob to a file) arrive on stdin, not as an argv
-      // string — an arg that big overflows ARG_MAX (`E2BIG`).
+      // string — an arg that big overflows ARG_MAX (`E2BIG`). Over SSH, stdin is forwarded to the
+      // remote command (which is why the remote script is `eval`'d rather than piped into bash).
       stdin: opts.stdin,
     });
+    return this.remote ? this.explainTransportFailure(res) : res;
   }
 
   /**
    * Run a skill harness with a JSON payload on stdin (mirrors the backend sandbox protocol):
    * `python3 /opt/pleiades/py_runner.py` or `node /opt/pleiades/node_runner.cjs`. Returns the raw
    * stdout (the harness prints a `{ok,result|error}` JSON document) for the caller to parse.
+   *
+   * In `ssh` mode the harnesses were provisioned into the remote's `~/.pleiades/bin` at ensure time,
+   * and SSH forwards the JSON payload on stdin — so the protocol is byte-identical.
    */
-  runScript(
+  async runScript(
     interpreter: 'python3' | 'node',
     payload: unknown,
     opts: { timeoutMs: number },
   ): Promise<ExecResult> {
-    const script =
-      interpreter === 'python3' ? `${HARNESS_DIR}/py_runner.py` : `${HARNESS_DIR}/node_runner.cjs`;
-    return dockerService.exec(this.container, [interpreter, script], {
+    const argv = this.remote
+      ? sshArgv(
+          this.remote,
+          `${interpreter} "${interpreter === 'python3' ? REMOTE_PY_RUNNER : REMOTE_NODE_RUNNER}"`,
+          { controlPersistSec: this.controlPersistSec },
+        )
+      : [
+          interpreter,
+          interpreter === 'python3'
+            ? `${HARNESS_DIR}/py_runner.py`
+            : `${HARNESS_DIR}/node_runner.cjs`,
+        ];
+
+    const res = await dockerService.exec(this.container, argv, {
       stdin: JSON.stringify(payload),
       timeoutMs: opts.timeoutMs,
     });
+    if (!this.remote) return res;
+    // The remote login shell may source an rc file that prints to stdout, which would corrupt the
+    // harness's single JSON document. Keep only the JSON envelope; the caller parses it strictly.
+    return { ...this.explainTransportFailure(res), stdout: isolateJsonDocument(res.stdout) };
   }
+
+  /**
+   * SSH reports *its own* failures (auth, host key, unreachable) as exit 255 — indistinguishable to
+   * the caller from a remote command that happened to exit 255. Rewrite those into an actionable
+   * message so the agent (and the operator) see "host key not pinned", not "exit 255". A command
+   * that merely failed on the remote passes through untouched.
+   */
+  private explainTransportFailure(res: ExecResult): ExecResult {
+    if (!this.remote || res.exitCode !== 255) return res;
+    return { ...res, stderr: explainSshFailure(this.remote, res.stderr, res.exitCode) };
+  }
+}
+
+/**
+ * Slice out the single `{…}` document a skill harness prints, discarding any shell-rc chatter that a
+ * remote login shell may have emitted around it. Returns the input untouched when there's no object
+ * to find (the caller's parse error is then the honest one).
+ */
+function isolateJsonDocument(stdout: string): string {
+  const start = stdout.indexOf('{');
+  const end = stdout.lastIndexOf('}');
+  return start >= 0 && end > start ? stdout.slice(start, end + 1) : stdout;
 }
 
 /**
@@ -165,6 +245,12 @@ class AgentContainerManager {
   private readonly visualSessions = new Map<string, VisualEndpoint>();
   /** Serialises concurrent `ensureVisual` calls for the same agent. */
   private readonly visualInflight = new Map<string, Promise<VisualEndpoint>>();
+  /**
+   * Agents whose `ssh`-mode remote has been preflighted + harnessed for the current container. Reset
+   * whenever the container goes away (the SSH control sockets live inside it), so a fresh container
+   * re-verifies the hop instead of trusting a stale success.
+   */
+  private readonly remoteProvisioned = new Set<string>();
 
   private readonly harnessLocalDir = path.join(__dirname, 'harness');
 
@@ -204,6 +290,15 @@ class AgentContainerManager {
 
   private async doEnsureVisual(agentId: string): Promise<VisualEndpoint> {
     const container = agentContainerName(agentId);
+
+    // `ssh` mode: the agent's shell, files and skills live on the remote host, but the desktop would
+    // run in the container — the agent would be looking at one machine and typing into another. Refuse
+    // rather than hand it an incoherent view of "its" environment.
+    if (await this.isRemoteExecAgent(agentId)) {
+      throw new IsolationNotReadyError(
+        'The visual desktop is not available on an "ssh" isolation profile: this agent executes on a remote host, so a desktop in its container would show a different machine than its shell.',
+      );
+    }
 
     if ((await dockerService.containerState(container)) !== 'running') {
       throw new IsolationNotReadyError(
@@ -250,6 +345,14 @@ class AgentContainerManager {
     this.resetIdle(agentId, 0);
     log.info({ agentId, container }, 'visual desktop ready');
     return session;
+  }
+
+  /** Is this agent on an `ssh`-mode profile (i.e. executing on a remote host, not in its container)? */
+  private async isRemoteExecAgent(agentId: string): Promise<boolean> {
+    const agent = await agentRepository.findById(agentId);
+    if (!agent?.isolation_id) return false;
+    const iso = await isolationRepository.findById(agent.isolation_id);
+    return iso?.network === 'ssh';
   }
 
   /** Resolve the Xvfb geometry (`<w>x<h>x24`) from the agent's image resolution, else the default. */
@@ -316,15 +419,84 @@ class AgentContainerManager {
       }
     }
 
+    // `ssh` mode: the container is only a jump box (every command is forwarded to the remote), so it
+    // gets an ordinary NATed bridge netns — `ssh` is not a Docker network name.
+    const remote = iso.network === 'ssh' ? this.requireRemoteTarget(iso) : null;
+    if (remote) networkOverride = 'bridge';
+
     const state = await dockerService.containerState(container);
-    if (state === null) {
+    const created = state === null;
+    if (created) {
       await this.createAndProvision(agent, iso, agentId, image, networkOverride);
     } else if (state !== 'running') {
       await dockerService.startContainer(container);
     }
 
     this.resetIdle(agentId, iso.idle_timeout_ms);
-    return new AgentExecutor(container);
+    if (!remote) return new AgentExecutor(container);
+
+    // Preflight the hop and plant the skill harnesses on the remote. Any failure throws
+    // IsolationNotReadyError → tools surface it and never fall back to executing in the container.
+    await this.ensureRemote(container, agentId, remote, created);
+    return new AgentExecutor(
+      container,
+      remote,
+      Math.floor((iso.idle_timeout_ms || env.AGENT_CONTAINER_IDLE_MS) / 1000),
+    );
+  }
+
+  /** The profile is in `ssh` mode — its remote target must be fully configured to execute anything. */
+  private requireRemoteTarget(iso: IsolationProfile): RemoteTarget {
+    const remote = remoteTargetOf(iso);
+    if (!remote) {
+      throw new IsolationNotReadyError(
+        'This agent\'s isolation profile is in "ssh" network mode but has no remote target. Open the Isolation page and set the remote host and user.',
+      );
+    }
+    return remote;
+  }
+
+  /**
+   * Make the container's SSH hop usable: create the control-socket dir, then (once per container
+   * lifetime) verify the hop end-to-end and copy the skill harnesses to the remote's
+   * `~/.pleiades/bin`. The provisioning command *is* the connectivity preflight — if SSH can't
+   * authenticate, reach the host, or verify its key, this throws and the agent's tools hard-fail
+   * with an actionable message rather than silently running in the container.
+   */
+  private async ensureRemote(
+    container: string,
+    agentId: string,
+    remote: RemoteTarget,
+    containerWasCreated: boolean,
+  ): Promise<void> {
+    if (!containerWasCreated && this.remoteProvisioned.has(agentId)) return;
+
+    await dockerService.exec(container, controlDirScript()).catch(() => undefined);
+
+    const argv = (cmd: string) => sshArgv(remote, cmd, { controlPersistSec: 1_800 });
+    const check = await dockerService.exec(container, argv(REMOTE_MKDIR), { timeoutMs: 30_000 });
+    if (check.exitCode !== 0) {
+      throw new IsolationNotReadyError(explainSshFailure(remote, check.stderr, check.exitCode));
+    }
+
+    for (const [local, dest] of [
+      ['py_runner.py', REMOTE_PY_RUNNER],
+      ['node_runner.cjs', REMOTE_NODE_RUNNER],
+    ] as const) {
+      const source = await fs.readFile(path.join(this.harnessLocalDir, local), 'utf8');
+      const res = await dockerService.exec(container, argv(remoteWriteFile(dest)), {
+        stdin: source,
+        timeoutMs: 30_000,
+      });
+      if (res.exitCode !== 0) {
+        throw new IsolationNotReadyError(
+          `Could not install the skill harness on ${remote.user}@${remote.host}: ${res.stderr.trim() || `exit ${res.exitCode}`}`,
+        );
+      }
+    }
+
+    this.remoteProvisioned.add(agentId);
+    log.info({ agentId, host: remote.host, port: remote.port }, 'remote ssh execution ready');
   }
 
   /**
@@ -490,6 +662,7 @@ class AgentContainerManager {
     const timer = setTimeout(() => {
       this.idleTimers.delete(agentId);
       this.visualSessions.delete(agentId);
+      this.remoteProvisioned.delete(agentId);
       log.info({ agentId }, 'idle timeout — stopping container');
       void dockerService.stopContainer(agentContainerName(agentId)).catch((err) => {
         log.warn({ agentId, err: String(err) }, 'idle stop failed');
@@ -509,6 +682,7 @@ class AgentContainerManager {
   async stopAgent(agentId: string): Promise<void> {
     this.clearIdle(agentId);
     this.visualSessions.delete(agentId);
+    this.remoteProvisioned.delete(agentId);
     await dockerService.stopContainer(agentContainerName(agentId));
   }
 
@@ -516,6 +690,7 @@ class AgentContainerManager {
   async removeAgentContainer(agentId: string): Promise<void> {
     this.clearIdle(agentId);
     this.visualSessions.delete(agentId);
+    this.remoteProvisioned.delete(agentId);
     await dockerService.removeContainer(agentContainerName(agentId));
   }
 

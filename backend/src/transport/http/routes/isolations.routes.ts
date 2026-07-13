@@ -13,6 +13,8 @@ import {
 } from '../../../isolation/names';
 import { encryptSecret } from '../../../isolation/ssh.service';
 import { generateSshKeyPair } from '../../../isolation/ssh-keygen';
+import { scanHostKeys, testRemote } from '../../../isolation/ssh-probe';
+import { remoteTargetOf } from '../../../isolation/remote-ssh';
 import { parseWireguardConf } from '../../../isolation/vpn.service';
 import { createLogger } from '../../../config/logger';
 
@@ -316,7 +318,7 @@ isolationsRouter.patch('/:id', async (req, res) => {
   const id = String(iso._id);
   const body = req.body ?? {};
   const patch: Record<string, unknown> = {};
-  for (const key of ['name', 'description', 'image_id', 'cpus', 'memory', 'network', 'idle_timeout_ms', 'ssh_public_key', 'ssh_known_hosts'] as const) {
+  for (const key of ['name', 'description', 'image_id', 'cpus', 'memory', 'network', 'idle_timeout_ms', 'ssh_public_key', 'ssh_known_hosts', 'ssh_remote_host', 'ssh_remote_port', 'ssh_remote_user'] as const) {
     if (body[key] !== undefined) patch[key] = body[key];
   }
   // Empty image_id means "unassign the image".
@@ -380,7 +382,12 @@ isolationsRouter.patch('/:id', async (req, res) => {
     vpnChanged ||
     sudoChanged ||
     patch.ssh_public_key !== undefined ||
-    patch.ssh_known_hosts !== undefined;
+    patch.ssh_known_hosts !== undefined ||
+    // A moved remote target must not keep executing through a container still holding an SSH
+    // control socket to the *old* host.
+    patch.ssh_remote_host !== undefined ||
+    patch.ssh_remote_port !== undefined ||
+    patch.ssh_remote_user !== undefined;
   if (needsRecreate) {
     for (const agentId of await idsOf(id)) {
       await agentContainerManager.removeAgentContainer(agentId).catch(() => undefined);
@@ -417,6 +424,55 @@ isolationsRouter.post('/:id/ssh/generate', async (req, res) => {
   }
   log.info({ id, keyType: key.keyType }, 'generated ssh key for isolation profile');
   res.json({ ssh_public_key: key.publicKey, ssh_key_type: key.keyType });
+});
+
+/**
+ * Fetch the remote host's SSH host keys + fingerprints (`ssh-keyscan`) for the `ssh` network mode.
+ * Read-only on purpose: nothing is pinned here. The operator compares the fingerprint against the
+ * remote's own (`ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub`) and pins it with a normal PATCH of
+ * `ssh_known_hosts` — so a MITM sitting on this one scan can't silently become the trusted key.
+ *
+ * The target may be supplied in the body (to scan *before* saving the profile) or read from the
+ * already-saved profile.
+ */
+isolationsRouter.post('/:id/ssh/scan-host', async (req, res) => {
+  const iso = await isolationRepository.findById(req.params.id);
+  if (!iso) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  const host = String(req.body?.host ?? iso.ssh_remote_host ?? '').trim();
+  const port = Number(req.body?.port ?? iso.ssh_remote_port) || 22;
+  if (!host) {
+    res.status(400).json({ error: 'no remote host set' });
+    return;
+  }
+  try {
+    // `user` is irrelevant to a host-key scan; pass a placeholder to satisfy the shared target type.
+    const keys = await scanHostKeys({ host, port, user: 'x' });
+    res.json({ keys });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * End-to-end check of the `ssh`-mode execution hop: connect to the profile's remote with the
+ * profile's own key, verify the pinned host key, and run a harmless command. A pass here means the
+ * agent's `bash` / file tools / skills will land on the remote.
+ */
+isolationsRouter.post('/:id/ssh/test', async (req, res) => {
+  const iso = await isolationRepository.findById(req.params.id);
+  if (!iso) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  const target = remoteTargetOf({ ...iso.toObject(), network: 'ssh' });
+  if (!target) {
+    res.status(400).json({ error: 'set the remote host and user first' });
+    return;
+  }
+  res.json(await testRemote(String(iso._id), target));
 });
 
 /**

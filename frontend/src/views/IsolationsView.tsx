@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Save,
   Server,
+  Terminal,
   Trash2,
   Users,
 } from 'lucide-react';
@@ -63,6 +64,10 @@ interface Draft {
   ssh_known_hosts: string;
   /** Algorithm of the stored key ('' = legacy/unknown → ed25519). Drives the injected filename hint. */
   ssh_key_type: SshKeyType | '';
+  /** Remote execution target, used when `network === 'ssh'` (bash/files/skills run over there). */
+  ssh_remote_host: string;
+  ssh_remote_port: number;
+  ssh_remote_user: string;
   /** Write-only: typed here to set/replace the key; never loaded back from the server. */
   ssh_private_key: string;
   /** Write-only WireGuard `.conf` contents (uploaded file); never loaded back from the server. */
@@ -82,6 +87,9 @@ const blank = (): Draft => ({
   ssh_public_key: '',
   ssh_known_hosts: '',
   ssh_key_type: '',
+  ssh_remote_host: '',
+  ssh_remote_port: 22,
+  ssh_remote_user: '',
   ssh_private_key: '',
   vpn_conf: '',
   sudo_password: '',
@@ -99,6 +107,9 @@ const toDraft = (i: Isolation): Draft => ({
   ssh_public_key: i.ssh_public_key ?? '',
   ssh_known_hosts: i.ssh_known_hosts ?? '',
   ssh_key_type: i.ssh_key_type ?? '',
+  ssh_remote_host: i.ssh_remote_host ?? '',
+  ssh_remote_port: i.ssh_remote_port ?? 22,
+  ssh_remote_user: i.ssh_remote_user ?? '',
   ssh_private_key: '',
   vpn_conf: '',
   sudo_password: '',
@@ -119,6 +130,9 @@ export function IsolationsView() {
   const [genType, setGenType] = useState<SshKeyType>('ed25519');
   const [generatingKey, setGeneratingKey] = useState(false);
   const [pubKeyCopied, setPubKeyCopied] = useState(false);
+  // `ssh` network mode: host-key scan / connection test, and the last probe's outcome.
+  const [sshBusy, setSshBusy] = useState(false);
+  const [sshResult, setSshResult] = useState<{ ok: boolean; detail: string } | null>(null);
   const confirm = useConfirm();
 
   // Global managed-container overview (all profiles): shown in the detail pane instead of an editor.
@@ -219,6 +233,9 @@ export function IsolationsView() {
         idle_timeout_ms: draft.idle_timeout_ms,
         ssh_public_key: draft.ssh_public_key,
         ssh_known_hosts: draft.ssh_known_hosts,
+        ssh_remote_host: draft.ssh_remote_host.trim(),
+        ssh_remote_port: draft.ssh_remote_port,
+        ssh_remote_user: draft.ssh_remote_user.trim(),
       };
       // Only send write-only secrets when the operator actually supplied one. The uploaded `.conf`
       // and the SSH private key are both accepted directly on create and on update.
@@ -286,6 +303,58 @@ export function IsolationsView() {
     await navigator.clipboard.writeText(draft.ssh_public_key);
     setPubKeyCopied(true);
     setTimeout(() => setPubKeyCopied(false), 1500);
+  }
+
+  /**
+   * Scan the remote's SSH host keys and pin one after the operator has checked its fingerprint
+   * against the remote's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`). Pinning is what
+   * lets execution run with strict host-key checking instead of trusting whatever answers.
+   */
+  async function scanHostKey() {
+    if (!draft?._id) return;
+    setSshBusy(true);
+    setSshResult(null);
+    try {
+      const keys = await isolationsApi.scanHostKey(
+        draft._id,
+        draft.ssh_remote_host.trim(),
+        draft.ssh_remote_port,
+      );
+      const ok = await confirm({
+        title: `Pin this host key for ${draft.ssh_remote_host}?`,
+        body:
+          `Verify the fingerprint matches the remote before pinning:\n\n` +
+          keys.map((k) => `${k.type}\n${k.fingerprint}`).join('\n\n'),
+        confirmLabel: 'Pin host key',
+      });
+      if (!ok) return;
+      const known_hosts = `${keys.map((k) => k.line).join('\n')}\n`;
+      await isolationsApi.update(draft._id, { ssh_known_hosts: known_hosts });
+      setDraft({ ...draft, ssh_known_hosts: known_hosts });
+      setSshResult({ ok: true, detail: `Pinned ${keys.length} host key(s) for ${draft.ssh_remote_host}.` });
+      await loadStatus(draft._id);
+    } catch (e) {
+      setSshResult({ ok: false, detail: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSshBusy(false);
+    }
+  }
+
+  /** Dress rehearsal of the execution hop, with this profile's key and pinned host key. */
+  async function testSsh() {
+    if (!draft?._id) return;
+    setSshBusy(true);
+    setSshResult(null);
+    try {
+      const r = await isolationsApi.testSsh(draft._id);
+      setSshResult(
+        r.ok ? { ok: true, detail: `Connected. Remote says:\n${r.detail}` } : { ok: false, detail: r.detail },
+      );
+    } catch (e) {
+      setSshResult({ ok: false, detail: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSshBusy(false);
+    }
   }
 
   async function clearVpnConf() {
@@ -481,6 +550,7 @@ export function IsolationsView() {
                   <option value="bridge">bridge (NAT)</option>
                   <option value="none">none (offline)</option>
                   <option value="vpn">vpn (gluetun)</option>
+                  <option value="ssh">ssh (run on a remote host)</option>
                 </Select>
               </Field>
               <Field label="Idle stop (min)">
@@ -495,6 +565,97 @@ export function IsolationsView() {
               </Field>
             </div>
           </Section>
+
+          {/* Remote SSH execution — only relevant in `ssh` network mode */}
+          {draft.network === 'ssh' && (
+            <Section
+              title="Remote execution (SSH)"
+              icon={<Terminal size={13} />}
+              right={
+                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wider">
+                  {draft.ssh_known_hosts.trim() ? (
+                    <span className="text-emerald-400">host key pinned</span>
+                  ) : (
+                    <span className="text-amber-400">host key not pinned</span>
+                  )}
+                </span>
+              }
+            >
+              <div className="space-y-2.5">
+                <Hint>
+                  The agent&apos;s container becomes a jump box: its <code>bash</code> terminal, file
+                  tools and skills all execute <strong>on the remote host</strong> over SSH, in the SSH
+                  user&apos;s home directory. The agent never sees the hop — it just runs commands.
+                  Authentication uses this profile&apos;s SSH key below (add its public key to the
+                  remote&apos;s <code>authorized_keys</code>), and the remote&apos;s host key must be
+                  pinned — an unverified host is refused rather than trusted on first use. The remote
+                  needs <code>python3</code> / <code>node</code> for Python / TS skills, and the image
+                  below needs <code>openssh-client</code>. The visual desktop is unavailable in this
+                  mode.
+                </Hint>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <Field label="Remote host">
+                    <Input
+                      value={draft.ssh_remote_host}
+                      onChange={(e) => setDraft({ ...draft, ssh_remote_host: e.target.value })}
+                      placeholder="10.13.13.5"
+                      className="py-1.5 text-xs"
+                    />
+                  </Field>
+                  <Field label="Port">
+                    <Input
+                      type="number"
+                      value={draft.ssh_remote_port}
+                      onChange={(e) =>
+                        setDraft({ ...draft, ssh_remote_port: Number(e.target.value) || 22 })
+                      }
+                      className="py-1.5 text-xs"
+                    />
+                  </Field>
+                  <Field label="User">
+                    <Input
+                      value={draft.ssh_remote_user}
+                      onChange={(e) => setDraft({ ...draft, ssh_remote_user: e.target.value })}
+                      placeholder="root"
+                      className="py-1.5 text-xs"
+                    />
+                  </Field>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={scanHostKey}
+                    disabled={!draft._id || !draft.ssh_remote_host.trim() || sshBusy}
+                    className="rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06] disabled:opacity-40"
+                  >
+                    {sshBusy ? 'Working…' : 'Scan host key'}
+                  </button>
+                  <button
+                    onClick={testSsh}
+                    disabled={!draft._id || !draft.ssh_remote_host.trim() || !draft.ssh_remote_user.trim() || sshBusy}
+                    className="rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06] disabled:opacity-40"
+                  >
+                    Test connection
+                  </button>
+                  {!draft._id && (
+                    <span className="text-[10px] text-slate-500">save the profile first</span>
+                  )}
+                </div>
+
+                {sshResult && (
+                  <p
+                    className={`whitespace-pre-wrap rounded-lg px-2.5 py-2 text-[11px] ring-1 ${
+                      sshResult.ok
+                        ? 'text-emerald-300 ring-emerald-400/20'
+                        : 'text-red-300 ring-red-400/20'
+                    }`}
+                  >
+                    {sshResult.detail}
+                  </p>
+                )}
+              </div>
+            </Section>
+          )}
 
           {/* VPN (gluetun / WireGuard) — only relevant in `vpn` network mode */}
           {draft.network === 'vpn' && (

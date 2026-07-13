@@ -136,15 +136,28 @@ export interface Isolation {
   image_id: string | null;
   cpus: string;
   memory: string;
-  network: 'host' | 'bridge' | 'none' | 'vpn';
+  network: 'host' | 'bridge' | 'none' | 'vpn' | 'ssh';
   idle_timeout_ms: number;
   /** Public key + known_hosts are returned as-is (not secret); the private key never is. */
   ssh_public_key: string;
   ssh_known_hosts: string;
   /** Algorithm of the stored key ('' = legacy/unknown → treated as ed25519). */
   ssh_key_type: SshKeyType | '';
+  // Remote execution target, used when `network === 'ssh'`: the agent's bash, file tools and skills
+  // all run on this host over SSH (the agent never sees the hop). Not secret — the credential is the
+  // SSH key above.
+  ssh_remote_host: string;
+  ssh_remote_port: number;
+  ssh_remote_user: string;
   // VPN (gluetun / WireGuard) config, used when `network === 'vpn'`, is supplied as an uploaded
   // WireGuard `.conf` (write-only, see IsolationPatch). It is secret and never returned.
+}
+
+/** One host key returned by a `ssh-keyscan` of the remote, for the operator to review and pin. */
+export interface ScannedHostKey {
+  line: string;
+  type: string;
+  fingerprint: string;
 }
 
 export type NewIsolation = Pick<
@@ -158,6 +171,9 @@ export type NewIsolation = Pick<
   | 'idle_timeout_ms'
   | 'ssh_public_key'
   | 'ssh_known_hosts'
+  | 'ssh_remote_host'
+  | 'ssh_remote_port'
+  | 'ssh_remote_user'
 > & {
   /** WireGuard `.conf` contents to upload at create time (write-only). */
   vpn_conf?: string;
@@ -541,6 +557,19 @@ export const isolationsApi = {
       .post<{ ssh_public_key: string; ssh_key_type: SshKeyType }>(`/isolations/${id}/ssh/generate`, {
         type,
       })
+      .then((r) => r.data),
+  /**
+   * Fetch the remote's SSH host keys + fingerprints (`ssh` network mode). Nothing is pinned here —
+   * the operator reviews the fingerprint and saves it via `update({ ssh_known_hosts })`.
+   */
+  scanHostKey: (id: string, host?: string, port?: number) =>
+    api
+      .post<{ keys: ScannedHostKey[] }>(`/isolations/${id}/ssh/scan-host`, { host, port })
+      .then((r) => r.data.keys),
+  /** End-to-end check of the `ssh`-mode hop: connect with this profile's key and run a command. */
+  testSsh: (id: string) =>
+    api
+      .post<{ ok: boolean; detail: string }>(`/isolations/${id}/ssh/test`, {})
       .then((r) => r.data),
   remove: (id: string) => api.delete(`/isolations/${id}`).then((r) => r.data),
 
