@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Cpu, Database, Gauge, LogOut, MessagesSquare, Mic, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Terminal, Users, Wrench, Blocks } from 'lucide-react';
+import { Bot, Box, Bug, Cpu, Database, Gauge, LogOut, MessagesSquare, Mic, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Wrench, Blocks } from 'lucide-react';
+import { PleiadesMark } from './PleiadesMark';
 import { useAuth } from '../store/auth';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { hostApi } from '../lib/api';
@@ -153,8 +154,9 @@ export function Sidebar() {
     >
       {/* Brand + collapse toggle */}
       <div className={`flex items-center py-4 ${collapsed ? 'justify-center px-2' : 'gap-2.5 px-4'}`}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent ring-1 ring-inset ring-accent/20">
-          <Terminal size={18} />
+        {/* Brand mark: the cluster itself. The tile is a scrap of night sky, not an accent chip. */}
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#0d1424] to-[#0a0d13] ring-1 ring-inset ring-accent/25">
+          <PleiadesMark size={20} />
         </div>
         {!collapsed && (
           <div className="min-w-0 leading-tight">
