@@ -29,7 +29,7 @@ export function AgentWorkspace() {
   // sub-agent blocks) instead of dropping the operator back onto an empty workspace.
   const [activeAgentId, setActiveAgentId] = usePersistentState<string | null>('workspace:activeAgentId', null);
   const [activeSessionId, setActiveSessionId] = usePersistentState<string | null>('workspace:activeSessionId', null);
-  const [drawer, setDrawer] = useState(true);
+  const [drawer, setDrawer] = usePersistentState('workspace:debuggerOpen', true);
   const [visualOpen, setVisualOpen] = useState(false);
   // Sessions whose auto-title is currently being generated → render a spinner beside the name.
   const [titlingSessionIds, setTitlingSessionIds] = useState<Set<string>>(new Set());
