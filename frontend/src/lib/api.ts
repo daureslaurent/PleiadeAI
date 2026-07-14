@@ -810,15 +810,19 @@ export interface AutonomyJob {
   data: { agentName: string; prompt: string; alert?: boolean };
   nextRunAt: string | null;
   lastRunAt: string | null;
-  repeatInterval: string | null;
+  /** The 5-field cron expression (recurring: live schedule; one-shot: informational). */
+  cron: string | null;
+  once: boolean;
+  /** IANA timezone the cron is evaluated in (server SCHEDULE_TZ). */
+  timezone: string;
 }
 
-/** Fields the create/edit form submits; `interval` (recurring) or `when` (one-off), not both. */
+/** Fields the create/edit form submits. Cron-only: `once` runs a single time at the next match. */
 export interface AutonomyJobInput {
   agentName: string;
   prompt: string;
-  interval?: string;
-  when?: string;
+  cron: string;
+  once: boolean;
   alert?: boolean;
 }
 

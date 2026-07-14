@@ -41,6 +41,13 @@ export interface AutonomousJobData {
    * jobs scheduled by an agent via `schedule_task`; operator-created (UI) jobs leave it unset.
    */
   ownerAgent?: string;
+  /**
+   * One-shot jobs only: the cron expression the run time was computed from (recurring jobs carry
+   * theirs in Agenda's `repeatInterval`). Purely informational — the concrete `nextRunAt` is what
+   * fires. `once: true` marks the job as a single-run schedule in list/describe output.
+   */
+  cron?: string;
+  once?: boolean;
 }
 
 /** How long a queued cron job waits for a live user session before re-queuing itself. */

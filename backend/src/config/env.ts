@@ -34,6 +34,22 @@ const EnvSchema = z.object({
   EMBEDDING_API_KEY: z.string().default('sk-no-key-required'),
   EMBEDDING_MODEL: z.string().default('embedding-model'),
 
+  // Autonomy — IANA timezone every scheduled-task cron expression is evaluated in (tool + UI).
+  SCHEDULE_TZ: z
+    .string()
+    .default('Europe/Paris')
+    .refine(
+      (tz) => {
+        try {
+          new Intl.DateTimeFormat('en', { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'SCHEDULE_TZ must be a valid IANA timezone (e.g. Europe/Paris)' },
+    ),
+
   // Auth
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   JWT_EXPIRES_IN: z.string().default('12h'),

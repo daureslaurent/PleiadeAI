@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { getAgenda, AUTONOMOUS_RUN_JOB } from '../../../autonomy/agenda.setup';
+import { parseCron, applyCron } from '../../../autonomy/cron';
+import { env } from '../../../config/env';
 import { runResultRepository } from '../../../domain/autonomy/run-result.repository';
 
 /** Autonomy control board: schedule, list, cancel, and the global kill switch. */
@@ -14,26 +16,31 @@ autonomyRouter.get('/jobs', async (_req, res) => {
       data: j.attrs.data,
       nextRunAt: j.attrs.nextRunAt,
       lastRunAt: j.attrs.lastRunAt,
-      repeatInterval: j.attrs.repeatInterval,
+      cron: j.attrs.repeatInterval ?? j.attrs.data.cron ?? null,
+      once: !j.attrs.repeatInterval,
+      timezone: env.SCHEDULE_TZ,
     })),
   );
 });
 
 /**
- * Schedule an autonomous run. `interval` (e.g. "0 * * * *" or "30 minutes") creates a repeating
- * job; otherwise `when` (e.g. "in 10 minutes") schedules a one-off.
+ * Schedule an autonomous run. Cron-only, same semantics as the agent's `schedule_task` tool:
+ * `cron` is a strict 5-field expression evaluated in SCHEDULE_TZ; `once: true` runs a single time
+ * at the next occurrence, otherwise the job repeats.
  */
 autonomyRouter.post('/jobs', async (req, res) => {
-  const { agentName, prompt, interval, when, alert } = req.body ?? {};
-  if (!agentName || !prompt) {
-    res.status(400).json({ error: 'agentName and prompt are required' });
+  const { agentName, prompt, cron, once, alert } = req.body ?? {};
+  if (!agentName || !prompt || !cron) {
+    res.status(400).json({ error: 'agentName, prompt and cron are required' });
     return;
   }
-  const agenda = getAgenda();
-  const data = { agentName, prompt, alert };
-  const job = interval
-    ? agenda.create(AUTONOMOUS_RUN_JOB, data).repeatEvery(interval)
-    : agenda.create(AUTONOMOUS_RUN_JOB, data).schedule(when ?? 'in 1 minute');
+  const parsed = parseCron(String(cron).trim());
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const job = getAgenda().create(AUTONOMOUS_RUN_JOB, { agentName, prompt, alert });
+  applyCron(job, String(cron).trim(), Boolean(once), parsed.value.next);
   await job.save();
   // Stamp the schedule id into the payload so every run (scheduled or run-now) groups its results.
   job.attrs.data.scheduleId = String(job.attrs._id);
@@ -57,12 +64,12 @@ autonomyRouter.get('/jobs/:id/results', async (req, res) => {
 });
 
 /**
- * Update an existing scheduled job in place: prompt, alert flag, and either a repeating `interval`
- * or a one-off `when`. Switching from repeating to one-off (or vice-versa) is handled by clearing
- * the opposite scheduling field before re-applying.
+ * Update an existing scheduled job in place: prompt, alert flag, and/or the schedule itself
+ * (`cron` + `once`, same cron-only semantics as create — `once` defaults to the job's current
+ * mode when omitted).
  */
 autonomyRouter.put('/jobs/:id', async (req, res) => {
-  const { agentName, prompt, interval, when, alert } = req.body ?? {};
+  const { agentName, prompt, cron, once, alert } = req.body ?? {};
   const [job] = await getAgenda().jobs({
     _id: new Types.ObjectId(req.params.id),
     name: AUTONOMOUS_RUN_JOB,
@@ -73,18 +80,21 @@ autonomyRouter.put('/jobs/:id', async (req, res) => {
   }
 
   job.attrs.data = {
+    ...job.attrs.data,
     agentName: agentName ?? job.attrs.data.agentName,
     prompt: prompt ?? job.attrs.data.prompt,
     alert: alert ?? job.attrs.data.alert,
     scheduleId: job.attrs.data.scheduleId ?? String(job.attrs._id),
   };
 
-  if (interval) {
-    job.attrs.nextRunAt = null;
-    job.repeatEvery(interval);
-  } else if (when) {
-    job.attrs.repeatInterval = undefined;
-    job.schedule(when);
+  if (cron) {
+    const parsed = parseCron(String(cron).trim());
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const effectiveOnce = once === undefined ? !job.attrs.repeatInterval : Boolean(once);
+    applyCron(job, String(cron).trim(), effectiveOnce, parsed.value.next);
   }
 
   await job.save();

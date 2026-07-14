@@ -157,6 +157,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text-v1.5}
       LLAMA_FALLBACK_URL: http://llama-fallback:8080
       LLAMA_FALLBACK_MODEL: lfm2.5-230m
+      # Timezone all scheduled-task cron expressions are evaluated in (schedule_task + Autonomy UI).
+      SCHEDULE_TZ: ${SCHEDULE_TZ:-Europe/Paris}
       # Primary inference — hosted endpoint (REQUIRED; the LAN default is gone).
       LLAMA_API_URL: ${LLAMA_API_URL:?set LLAMA_API_URL in .env (hosted inference endpoint)}
       LLAMA_API_KEY: ${LLAMA_API_KEY:-sk-no-key-required}

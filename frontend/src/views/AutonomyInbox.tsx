@@ -16,8 +16,7 @@ interface FormState {
   agentName: string;
   prompt: string;
   mode: ScheduleMode;
-  interval: string;
-  when: string;
+  cron: string;
   alert: boolean;
 }
 
@@ -26,8 +25,7 @@ const EMPTY_FORM: FormState = {
   agentName: '',
   prompt: '',
   mode: 'recurring',
-  interval: '1 hour',
-  when: 'in 10 minutes',
+  cron: '0 * * * *',
   alert: true,
 };
 
@@ -44,6 +42,7 @@ export function AutonomyInbox() {
   const [jobs, setJobs] = useState<AutonomyJob[]>([]);
   const [notes, setNotes] = useState<Notification[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -75,35 +74,39 @@ export function AutonomyInbox() {
 
   function resetForm() {
     setForm(EMPTY_FORM);
+    setFormError(null);
   }
 
   function editJob(j: AutonomyJob) {
-    const recurring = Boolean(j.repeatInterval);
     setForm({
       editingId: j.id,
       agentName: j.data.agentName,
       prompt: j.data.prompt,
-      mode: recurring ? 'recurring' : 'oneoff',
-      interval: j.repeatInterval ?? EMPTY_FORM.interval,
-      when: EMPTY_FORM.when,
+      mode: j.once ? 'oneoff' : 'recurring',
+      cron: j.cron ?? EMPTY_FORM.cron,
       alert: j.data.alert ?? true,
     });
   }
 
   async function submit() {
-    if (!form.agentName.trim() || !form.prompt.trim()) return;
+    if (!form.agentName.trim() || !form.prompt.trim() || !form.cron.trim()) return;
     setBusy(true);
     const input: AutonomyJobInput = {
       agentName: form.agentName.trim(),
       prompt: form.prompt.trim(),
       alert: form.alert,
-      ...(form.mode === 'recurring' ? { interval: form.interval.trim() } : { when: form.when.trim() }),
+      cron: form.cron.trim(),
+      once: form.mode === 'oneoff',
     };
     try {
       if (form.editingId) await autonomyApi.update(form.editingId, input);
       else await autonomyApi.create(input);
+      setFormError(null);
       resetForm();
       refresh();
+    } catch (err: any) {
+      // Typically a 400 for an invalid cron expression — show the server's message inline.
+      setFormError(err?.response?.data?.error ?? 'failed to save schedule');
     } finally {
       setBusy(false);
     }
@@ -136,7 +139,7 @@ export function AutonomyInbox() {
     setNotes((n) => n.map((x) => (x._id === id ? { ...x, status: 'read' } : x)));
   }
 
-  const canSubmit = form.agentName.trim() && form.prompt.trim() && !busy;
+  const canSubmit = form.agentName.trim() && form.prompt.trim() && form.cron.trim() && !busy;
   const selectedJob = jobs.find((j) => j.id === selectedId) ?? null;
 
   return (
@@ -180,22 +183,18 @@ export function AutonomyInbox() {
               <option value="recurring">Recurring</option>
               <option value="oneoff">One-off</option>
             </select>
-            {form.mode === 'recurring' ? (
-              <input
-                value={form.interval}
-                onChange={(e) => setForm((f) => ({ ...f, interval: e.target.value }))}
-                placeholder='cron or "30 minutes"'
-                className="flex-1 rounded border border-border bg-panel px-2 py-1 text-slate-200 outline-none focus:border-accent"
-              />
-            ) : (
-              <input
-                value={form.when}
-                onChange={(e) => setForm((f) => ({ ...f, when: e.target.value }))}
-                placeholder='"in 10 minutes" or ISO date'
-                className="flex-1 rounded border border-border bg-panel px-2 py-1 text-slate-200 outline-none focus:border-accent"
-              />
-            )}
+            <input
+              value={form.cron}
+              onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))}
+              placeholder='cron, e.g. "0 9 * * *"'
+              className="flex-1 rounded border border-border bg-panel px-2 py-1 font-mono text-slate-200 outline-none focus:border-accent"
+            />
           </div>
+          <p className="text-slate-600">
+            5-field cron ({jobs[0]?.timezone ?? 'server'} time).
+            {form.mode === 'oneoff' && ' One-off runs once at the next matching time.'}
+          </p>
+          {formError && <p className="text-red-400">{formError}</p>}
           <label className="flex items-center gap-2 text-slate-400">
             <input
               type="checkbox"
@@ -236,8 +235,8 @@ export function AutonomyInbox() {
               >
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-slate-200">{j.data.agentName}</span>
-                  <span className="rounded bg-panel px-1.5 py-0.5 text-[10px] uppercase text-slate-400">
-                    {j.repeatInterval ? `every ${j.repeatInterval}` : 'one-off'}
+                  <span className="rounded bg-panel px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+                    {j.once ? 'once' : 'cron'} {j.cron ?? ''}
                   </span>
                   {j.data.alert === false && (
                     <span className="text-[10px] uppercase text-slate-500">silent</span>
