@@ -246,7 +246,17 @@ export class TurnRecorder {
     } else {
       this.items.push({ kind, frameId: this.top, text: p.content });
     }
-    if (p.isReasoning) this.reasoning += p.content;
+    if (!p.isReasoning) return;
+    this.reasoning += p.content;
+    // Thread the thinking into the trace *at the point it happened*, so a think → tool → think
+    // sequence reads in that order. Consecutive reasoning chunks coalesce into the entry at the tail;
+    // a tool/hop entry landing in between closes it off, and the next chunk opens a fresh one.
+    const tail = this.trace[this.trace.length - 1];
+    if (tail?.kind === 'reasoning') {
+      tail.detail = (tail.detail ?? '') + p.content;
+    } else {
+      this.trace.push({ kind: 'reasoning', label: '<think>', detail: p.content, depth: p.ctx.depth });
+    }
   }
 
   private handleToolInvoke(p: ToolInvokePayload): void {
@@ -435,13 +445,13 @@ export class TurnRecorder {
   build(answer: string): RecordedTurn {
     const built = this.buildBlocks('root');
     const blocks = built.length ? built : [{ kind: 'text' as const, text: answer }];
-    const trace = this.reasoning
-      ? [...this.trace, { kind: 'reasoning' as const, label: '<think>', detail: this.reasoning }]
-      : this.trace;
+    // Reasoning is already interleaved into `trace` chronologically by `handleChunk` — appending the
+    // flat accumulator here too would duplicate it, and pin it to the end. `reasoning` stays as the
+    // turn's whole-thinking projection (the message's `reasoning` field).
     return {
       blocks,
       reasoning: this.reasoning,
-      trace,
+      trace: [...this.trace],
       contextTokens: this.contextTokens,
       contextWindow: this.contextWindow,
       memories: this.frames.get('root')?.memories,

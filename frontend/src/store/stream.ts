@@ -431,10 +431,21 @@ export const useStream = create<StreamState>((set, get) => ({
         } else {
           items.push({ kind, id: nextId(), frameId: top, text: e.content });
         }
-        // Keep the flat global reasoning string too — the debugger drawer's Trace tab renders it.
-        return e.is_reasoning
-          ? { liveItems: items, liveReasoning: s.liveReasoning + e.content }
-          : { liveItems: items };
+        if (!e.is_reasoning) return { liveItems: items };
+        // Thread the thinking into the trace *at the point it happened*, so a think → tool → think
+        // sequence reads in that order rather than collapsing into one block at the end. Consecutive
+        // reasoning chunks coalesce into the entry at the tail; a tool/hop entry landing in between
+        // closes it off, and the next chunk opens a fresh one. Mirrors the backend's TurnRecorder, so
+        // a reloaded session's persisted trace looks identical to the live one.
+        const trace = [...s.trace];
+        const tail = trace[trace.length - 1];
+        if (tail?.kind === 'reasoning') {
+          trace[trace.length - 1] = { ...tail, detail: (tail.detail ?? '') + e.content };
+        } else {
+          trace.push({ kind: 'reasoning', label: '<think>', detail: e.content, depth: s.frameStack.length - 1 });
+        }
+        // The flat string stays as the turn's whole-thinking projection (persisted `reasoning`).
+        return { liveItems: items, liveReasoning: s.liveReasoning + e.content, trace };
       });
     });
 
@@ -791,9 +802,9 @@ export const useStream = create<StreamState>((set, get) => ({
         const hasContent = persisted
           ? blocks.length > 0
           : s.liveItems.length > 0 || answer.trim().length > 0;
-        const trace = s.liveReasoning
-          ? [...s.trace, { kind: 'reasoning' as const, label: '<think>', detail: s.liveReasoning }]
-          : s.trace;
+        // Reasoning is already interleaved into `s.trace` chronologically as it streamed — appending
+        // the flat accumulator here too would duplicate it, and pin it to the end.
+        const trace = s.trace;
         // The top-level run's recall lives on the root frame (or comes back with a server-persisted
         // turn); it settles onto the turn so the badge stays with the message.
         const memories = persisted ? serverMemories : s.liveFrames.root?.memories;
