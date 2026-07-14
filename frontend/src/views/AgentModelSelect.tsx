@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Cpu } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { agentsApi, endpointsApi, settingsApi, type Endpoint, type InferenceSettings } from '../lib/api';
+import { agentsApi, endpointsApi, endpointVision, settingsApi, type Endpoint, type InferenceSettings } from '../lib/api';
 
 /**
  * Assigns an agent's inference target: which endpoint + model it runs on (or the fleet default
@@ -71,7 +71,8 @@ export function AgentModelSelect({
   const visionEp = settings?.vision_endpoint_id
     ? endpoints.find((e) => e._id === settings.vision_endpoint_id)
     : undefined;
-  const visionWarning = visual && Boolean(settings) && !visionEp?.supports_vision;
+  const visionWarning =
+    visual && Boolean(settings) && !endpointVision(visionEp, settings?.vision_model);
 
   return (
     <div className="space-y-3 rounded-md border border-border bg-panel p-4">
@@ -112,6 +113,7 @@ export function AgentModelSelect({
             {models.map((m) => (
               <option key={m} value={m}>
                 {m}
+                {effectiveEp?.model_vision?.[m] === true ? ' — vision' : ''}
               </option>
             ))}
             {/* Preserve a model that isn't in the (possibly stale) discovered list. */}

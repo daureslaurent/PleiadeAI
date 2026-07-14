@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Plus, RefreshCw, Server, Star, Trash2 } from 'lucide-react';
+import { Eye, Plus, RefreshCw, Server, Star, Trash2 } from 'lucide-react';
 import { Button, Callout, Checkbox, Input, Row, Select, useConfirm } from '../../../components/ui';
-import { endpointsApi, type Endpoint, type EndpointPatch } from '../../../lib/api';
+import { endpointsApi, endpointVision, type Endpoint, type EndpointPatch } from '../../../lib/api';
 import { useSettings } from '../context';
 
 /**
@@ -80,6 +80,14 @@ export function EndpointsManager() {
                 <Server size={11} /> local
               </span>
             )}
+            {endpointVision(e) && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded-md border border-sky-500/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-sky-400"
+                title="The default model is multimodal — images are attached to inference."
+              >
+                <Eye size={11} /> vision
+              </span>
+            )}
             {e.is_default ? (
               <span className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-400">
                 <Star size={11} /> default
@@ -154,6 +162,7 @@ export function EndpointsManager() {
               {e.models.map((m) => (
                 <option key={m} value={m}>
                   {m}
+                  {e.model_vision?.[m] === true ? ' — vision' : ''}
                 </option>
               ))}
               {e.default_model && !e.models.includes(e.default_model) && (
@@ -180,17 +189,7 @@ export function EndpointsManager() {
             <span className="text-[11px] text-slate-500">0 = off</span>
           </label>
 
-          {/* Vision marker: multimodality can't be autodiscovered from /v1/models, so the operator
-              declares it. Visual agents warn when paired with an endpoint that isn't ticked here. */}
-          <Checkbox
-            checked={Boolean(e.supports_vision)}
-            onChange={(v) => void patch(e._id, { supports_vision: v })}
-          >
-            <span>Model supports vision (multimodal)</span>
-            <span className="text-slate-500">
-              — llama.cpp launched with <code>--mmproj</code>, or a vision model
-            </span>
-          </Checkbox>
+          <VisionControl endpoint={e} onPatch={(p) => void patch(e._id, p)} />
         </Row>
       ))}
 
@@ -222,6 +221,44 @@ export function EndpointsManager() {
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Vision (multimodal) control. When "Refresh models" produced a confident reading for the default
+ * model (`--mmproj` seen or provably absent in the server's launch args, or `/props` modalities),
+ * that reading is authoritative — shown read-only as "auto-detected", no checkbox. The manual
+ * checkbox only appears for servers we can't probe (vLLM, Ollama, older llama.cpp builds).
+ */
+function VisionControl({ endpoint: e, onPatch }: { endpoint: Endpoint; onPatch: (p: EndpointPatch) => void }) {
+  const model = e.default_model || e.models[0] || '';
+  const detected = model ? e.model_vision?.[model] : undefined;
+
+  if (typeof detected === 'boolean') {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-slate-400">
+        <Eye size={13} className={detected ? 'text-sky-400' : 'text-slate-600'} />
+        {detected ? (
+          <span>
+            <span className="text-sky-400">Vision auto-detected</span> — server launched with{' '}
+            <code>--mmproj</code>
+          </span>
+        ) : (
+          <span>
+            Text-only (auto-detected) — relaunch the server with <code>--mmproj</code> for vision
+          </span>
+        )}
+      </p>
+    );
+  }
+
+  return (
+    <Checkbox checked={Boolean(e.supports_vision)} onChange={(v) => onPatch({ supports_vision: v })}>
+      <span>Model supports vision (multimodal)</span>
+      <span className="text-slate-500">
+        — couldn't auto-detect from this server; tick it for a vision-capable model
+      </span>
+    </Checkbox>
   );
 }
 

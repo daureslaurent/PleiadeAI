@@ -2,6 +2,19 @@ import { createLogger } from '../config/logger';
 
 const log = createLogger('llama-introspect');
 
+/** What the introspection probe learned about the models an endpoint serves. */
+export interface ModelIntrospection {
+  /** Real context size (`n_ctx`) per model id. */
+  contexts: Record<string, number>;
+  /**
+   * Vision (multimodal) capability per model id. `true`/`false` are *confident* readings
+   * (`--mmproj` seen / provably absent from the launch args, or `/props` `modalities.vision`);
+   * a model absent from the map means the server exposes nothing we can decide from
+   * (vLLM, Ollama, older llama.cpp) and the caller should fall back to the manual flag.
+   */
+  vision: Record<string, boolean>;
+}
+
 /** Strip a trailing slash so we can append server paths cleanly. */
 function root(url: string): string {
   return url.replace(/\/$/, '');
@@ -50,34 +63,57 @@ function ctxFromArgs(args: unknown): number | undefined {
 }
 
 /**
- * Probe an OpenAI-compatible (llama.cpp) server for the real context size of each model it serves.
+ * Vision capability from a router entry's launch args: `--mmproj <path>` means the model was
+ * started with a multimodal projector, i.e. it accepts images. Args being present *without* the
+ * flag is a confident "text-only"; no args at all means we can't tell (returns `undefined`).
+ */
+function visionFromArgs(args: unknown): boolean | undefined {
+  if (!Array.isArray(args) || args.length === 0) return undefined;
+  return args.some((a) => a === '--mmproj' || (typeof a === 'string' && a.startsWith('--mmproj=')));
+}
+
+/**
+ * Vision capability from a model entry's `architecture.input_modalities` (recent llama.cpp routers
+ * report the *launched* modalities — the same GGUF shows `["text"]` without `--mmproj` and
+ * `["text","image"]` with it). Missing/empty means the build doesn't expose it.
+ */
+function visionFromModalities(modalities: unknown): boolean | undefined {
+  if (!Array.isArray(modalities) || modalities.length === 0) return undefined;
+  return modalities.includes('image');
+}
+
+/**
+ * Probe an OpenAI-compatible (llama.cpp) server for the real context size and vision capability of
+ * each model it serves.
  *
  * Per model, in priority order:
- *   1. `GET /v1/models` → `data[].status.args` `--ctx-size` — the exact size the model was launched
- *      with. Authoritative on a llama.cpp model-router (llama-swap / `--models`), which is the common
- *      multi-model case and where `/props` is useless (see below).
+ *   1. `GET /v1/models` → `data[].status.args` — the exact launch command (`--ctx-size`, `--mmproj`)
+ *      — and `data[].architecture.input_modalities` for vision. Authoritative on a llama.cpp
+ *      model-router (llama-swap / `--models`), which is the common multi-model case and where
+ *      `/props` is useless (see below).
  *   2. `GET /v1/models` → `data[].meta.n_ctx_train` — the model's trained max, when a build exposes it.
- *   3. `GET /props` → `default_generation_settings.n_ctx` — the running slot's real n_ctx on a plain
- *      single-model server. Skipped on a router, which reports `role: "router"` and `n_ctx: 0`.
+ *   3. `GET /props` → `default_generation_settings.n_ctx` + `modalities.vision` — the running slot's
+ *      real readings on a plain single-model server. Skipped on a router, which reports
+ *      `role: "router"` and `n_ctx: 0`.
  *
- * Returns a `{ modelId: n_ctx }` map. Best-effort: an unreachable server or one exposing none of the
- * above yields `{}`, and the caller falls back to the configured `context_window`.
+ * Best-effort: an unreachable server or one exposing none of the above yields empty maps, and the
+ * caller falls back to the configured `context_window` / manual `supports_vision` flag.
  */
-export async function fetchModelContexts(
-  baseUrl: string,
-  apiKey: string,
-): Promise<Record<string, number>> {
+export async function introspectModels(baseUrl: string, apiKey: string): Promise<ModelIntrospection> {
   const base = root(baseUrl);
-  const out: Record<string, number> = {};
+  const contexts: Record<string, number> = {};
+  const vision: Record<string, boolean> = {};
 
   // /v1/models: the OpenAI SDK strips the llama.cpp-specific fields, so fetch raw. A router entry
-  // carries `status.args` (the launch command, incl. `--ctx-size`); some builds also carry `meta`.
+  // carries `status.args` (the launch command, incl. `--ctx-size`/`--mmproj`); some builds also
+  // carry `meta`.
   const models = (await getJson(`${base}/v1/models`, apiKey)) as
     | {
         data?: Array<{
           id?: string;
           meta?: { n_ctx_train?: number };
           status?: { args?: string[] };
+          architecture?: { input_modalities?: string[] };
         }>;
       }
     | null;
@@ -87,33 +123,38 @@ export async function fetchModelContexts(
       // The real launched `--ctx-size` wins; the trained max is only a fallback (it's the number that
       // reads as "262k" while the model actually runs at 64k).
       const v = ctxFromArgs(m.status?.args) ?? firstCtx(m.meta?.n_ctx_train);
-      if (v) out[m.id] = v;
+      if (v) contexts[m.id] = v;
+      const vis = visionFromArgs(m.status?.args) ?? visionFromModalities(m.architecture?.input_modalities);
+      if (vis !== undefined) vision[m.id] = vis;
     }
   }
 
   // /props: only meaningful on a plain single-model server (a router reports n_ctx 0). Fill in the
-  // running model when /v1/models gave us nothing for it; never override an explicit `--ctx-size`.
+  // running model when /v1/models gave us nothing for it; never override an explicit launch arg.
   const props = (await getJson(`${base}/props`, apiKey)) as
     | {
         role?: string;
         default_generation_settings?: { n_ctx?: number; model?: string };
         n_ctx?: number;
         model_path?: string;
+        modalities?: { vision?: boolean };
       }
     | null;
   if (props && props.role !== 'router') {
+    // Resolve which discovered model id the running slot corresponds to (the loaded GGUF path
+    // usually ends with the id); on a bare single-model server with no /v1/models data, fall back
+    // to the file name.
+    const loadedPath = props.default_generation_settings?.model ?? props.model_path ?? '';
+    const ids = Object.keys(contexts);
+    let target = ids.find((id) => loadedPath.endsWith(id) || loadedPath.includes(id));
+    if (!target && ids.length === 0) target = loadedPath.split('/').pop() || undefined;
+
     const runtime = firstCtx(props.default_generation_settings?.n_ctx, props.n_ctx);
-    if (runtime) {
-      const loadedPath = props.default_generation_settings?.model ?? props.model_path ?? '';
-      const ids = Object.keys(out);
-      const matched = ids.find((id) => loadedPath.endsWith(id) || loadedPath.includes(id));
-      if (matched && !out[matched]) out[matched] = runtime;
-      else if (ids.length === 0) {
-        const name = loadedPath.split('/').pop() || loadedPath;
-        if (name) out[name] = runtime;
-      }
+    if (runtime && target && !contexts[target]) contexts[target] = runtime;
+    if (typeof props.modalities?.vision === 'boolean' && target && vision[target] === undefined) {
+      vision[target] = props.modalities.vision;
     }
   }
 
-  return out;
+  return { contexts, vision };
 }

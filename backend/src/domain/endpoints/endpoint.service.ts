@@ -3,9 +3,9 @@ import { Types } from 'mongoose';
 import { env } from '../../config/env';
 import { createLogger } from '../../config/logger';
 import { endpointRepository } from './endpoint.repository';
-import { EndpointModel, type EndpointDoc } from './endpoint.model';
+import { EndpointModel, effectiveVision, type EndpointDoc } from './endpoint.model';
 import { agentRepository } from '../agents/agent.repository';
-import { fetchModelContexts } from '../../inference/llama-introspect';
+import { introspectModels } from '../../inference/llama-introspect';
 
 const log = createLogger('endpoint-service');
 
@@ -21,6 +21,8 @@ export interface EndpointHealth {
   latency_ms: number | null;
   /** Model the server is serving right now ('' when down or none discovered). */
   model: string;
+  /** The reported `model` is vision-capable (auto-detected `--mmproj`, else the manual flag). */
+  vision: boolean;
   is_default: boolean;
   fallback_order: number;
   managed: boolean;
@@ -49,14 +51,20 @@ export const endpointService = {
     const client = new OpenAI({ baseURL: openAiBase(ep.base_url), apiKey: ep.api_key });
     const res = await client.models.list();
     const models = res.data.map((m) => m.id).filter(Boolean).sort();
-    // Probe each model's real context size (runtime n_ctx from /props, else trained n_ctx_train) so
-    // the context meter renders against the honest ceiling instead of a manually-typed number.
-    const modelContexts = await fetchModelContexts(ep.base_url, ep.api_key);
+    // Probe each model's real context size (runtime n_ctx from /props, else trained n_ctx_train) and
+    // vision capability (--mmproj in the launch args / props modalities) so the context meter renders
+    // against the honest ceiling and vision turns on without a manual tick.
+    const probed = await introspectModels(ep.base_url, ep.api_key);
     log.info(
-      { endpoint: ep.name, count: models.length, contexts: Object.keys(modelContexts).length },
+      {
+        endpoint: ep.name,
+        count: models.length,
+        contexts: Object.keys(probed.contexts).length,
+        vision: Object.keys(probed.vision).length,
+      },
       'discovered models',
     );
-    await endpointRepository.setModels(id, models, modelContexts);
+    await endpointRepository.setModels(id, models, probed.contexts, probed.vision);
     // Seed a default model on first discovery (or if the previous default vanished) so agents
     // using this endpoint always resolve to something without an extra manual step.
     let defaultModel = ep.default_model;
@@ -99,15 +107,17 @@ export const endpointService = {
         const mine = agents.filter((a) =>
           a.endpoint_id ? a.endpoint_id.toString() === epId : epId === defaultId,
         );
+        const model =
+          ep.default_model && served.includes(ep.default_model)
+            ? ep.default_model
+            : (served[0] ?? ep.default_model ?? '');
         return {
           _id: epId,
           name: ep.name,
           up,
           latency_ms: up ? latency : null,
-          model:
-            ep.default_model && served.includes(ep.default_model)
-              ? ep.default_model
-              : (served[0] ?? ep.default_model ?? ''),
+          model,
+          vision: effectiveVision(ep, model),
           is_default: ep.is_default,
           fallback_order: ep.fallback_order,
           managed: ep.managed,

@@ -1018,10 +1018,28 @@ export interface Endpoint {
   /** System-managed built-in local docker fallback: read-only name/URL, cannot be deleted. */
   managed: boolean;
   /**
-   * Operator marker: this endpoint's model is multimodal (vision). Advisory — used to warn when a
-   * visual agent is paired with a text-only endpoint (its screenshots would be silently ignored).
+   * Manual vision (multimodal) marker — the fallback when nothing was auto-detected. A probed
+   * `model_vision` reading always wins; resolve via `endpointVision()`, don't read this directly.
    */
   supports_vision: boolean;
+  /**
+   * Auto-detected vision capability per model id, probed at "Refresh models" (`--mmproj` in the
+   * server's launch args / `/props` modalities). `true`/`false` are confident readings; a model
+   * absent from the map is undetectable and falls back to `supports_vision`.
+   */
+  model_vision?: Record<string, boolean>;
+}
+
+/**
+ * Whether `model` on this endpoint is vision-capable: the auto-detected reading when the probe
+ * produced one, else the manual `supports_vision` flag. Omit `model` to check the endpoint's
+ * effective default model. Mirrors the backend's `effectiveVision()`.
+ */
+export function endpointVision(e: Endpoint | undefined | null, model?: string): boolean {
+  if (!e) return false;
+  const m = model || e.default_model || e.models[0] || '';
+  const detected = m ? e.model_vision?.[m] : undefined;
+  return typeof detected === 'boolean' ? detected : Boolean(e.supports_vision);
 }
 
 /** Live reachability snapshot of one endpoint (from `GET /endpoints/health`), for the header badge. */
@@ -1033,6 +1051,8 @@ export interface EndpointHealth {
   latency_ms: number | null;
   /** Model the server is serving right now ('' when down or none discovered). */
   model: string;
+  /** The reported `model` is vision-capable (auto-detected `--mmproj`, else the manual flag). */
+  vision: boolean;
   is_default: boolean;
   fallback_order: number;
   managed: boolean;

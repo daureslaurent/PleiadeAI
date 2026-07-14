@@ -2,7 +2,7 @@ import { useRef, type ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Field, Input, Select, Textarea, Toggle } from '../../components/ui';
 import { useSettings } from './context';
-import type { InferenceSettings } from '../../lib/api';
+import { endpointVision, type InferenceSettings } from '../../lib/api';
 
 /**
  * Self-saving settings fields (DIRECT_ART §2/§3 — inset wells on glass, no legacy greys).
@@ -263,7 +263,7 @@ export function EndpointModelPicker({
           {endpoints.map((e) => (
             <option key={e._id} value={e._id}>
               {e.name}
-              {warnUnlessVision && !e.supports_vision ? ' — not marked vision' : ''}
+              {warnUnlessVision ? (endpointVision(e) ? ' — vision' : ' — no vision') : ''}
             </option>
           ))}
         </Select>
@@ -277,18 +277,20 @@ export function EndpointModelPicker({
             {(selected?.models ?? []).map((m) => (
               <option key={m} value={m}>
                 {m}
+                {selected?.model_vision?.[m] === true ? ' — vision' : ''}
               </option>
             ))}
           </Select>
         )}
       </div>
-      {warnUnlessVision && selected && !selected.supports_vision && (
+      {warnUnlessVision && selected && !endpointVision(selected, form[modelField]) && (
         <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-400">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
           <span>
-            This endpoint isn't marked <span className="font-medium">Model supports vision</span> on the
-            Endpoints card — screenshots may not be interpreted. Tick it once you've launched the server
-            with a vision model + <code>--mmproj</code>.
+            This model isn't vision-capable — screenshots may not be interpreted. Launch the server
+            with a vision model + <code>--mmproj</code> and hit{' '}
+            <span className="font-medium">Refresh models</span> (or tick the manual vision flag on the
+            Endpoints card if it can't be auto-detected).
           </span>
         </p>
       )}

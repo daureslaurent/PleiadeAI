@@ -1,7 +1,7 @@
 import type { Types } from 'mongoose';
 import { endpointRepository } from '../domain/endpoints/endpoint.repository';
 import { settingsService } from '../domain/settings/settings.service';
-import type { EndpointDoc } from '../domain/endpoints/endpoint.model';
+import { effectiveVision, type EndpointDoc } from '../domain/endpoints/endpoint.model';
 
 /**
  * The probed real context size for a specific model on this endpoint (`n_ctx`), or `0` if we never
@@ -44,7 +44,10 @@ export interface ResolvedInference {
   maxTokens: number;
   temperature: number;
   topP: number;
-  /** Operator-declared: this endpoint's model is multimodal (vision). Advisory only. */
+  /**
+   * The resolved model is multimodal (vision): auto-detected at model discovery (`--mmproj` in the
+   * server's launch args), falling back to the endpoint's manual flag. Gates image attachment.
+   */
   supportsVision: boolean;
   /** Fleet default per-turn tool-round ceiling; applies when the agent doesn't override it. */
   maxToolIterations: number;
@@ -88,7 +91,7 @@ export async function resolveInference(agent: InferenceTarget): Promise<Resolved
     maxTokens: settings.max_tokens,
     temperature: settings.temperature,
     topP: settings.top_p,
-    supportsVision: Boolean(endpoint?.supports_vision),
+    supportsVision: effectiveVision(endpoint, model),
     maxToolIterations: settings.max_tool_iterations,
   };
 }
@@ -115,7 +118,7 @@ export async function resolveForEndpoint(
     maxTokens: settings.max_tokens,
     temperature: settings.temperature,
     topP: settings.top_p,
-    supportsVision: Boolean(endpoint.supports_vision),
+    supportsVision: effectiveVision(endpoint, model),
     maxToolIterations: settings.max_tool_iterations,
   };
 }
@@ -146,7 +149,7 @@ export async function resolveFallbacks(excludeUrl?: string): Promise<ResolvedInf
         maxTokens: settings.max_tokens,
         temperature: settings.temperature,
         topP: settings.top_p,
-        supportsVision: Boolean(ep.supports_vision),
+        supportsVision: effectiveVision(ep, model),
         maxToolIterations: settings.max_tool_iterations,
       };
     });

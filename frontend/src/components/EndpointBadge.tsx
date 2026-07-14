@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Eye } from 'lucide-react';
 import { endpointsApi, type EndpointHealth } from '../lib/api';
 import { agentColor } from '../lib/agentColor';
 
@@ -27,14 +28,33 @@ const DOT: Record<FleetState, string> = {
 };
 
 /** The fleet-level reading: the default's health, else the first live fallback, else offline. */
-function summarize(list: EndpointHealth[]): { state: FleetState; label: string; model: string } {
+function summarize(list: EndpointHealth[]): {
+  state: FleetState;
+  label: string;
+  model: string;
+  vision: boolean;
+} {
   const def = list.find((e) => e.is_default);
-  if (def?.up) return { state: 'ok', label: def.name, model: def.model };
+  if (def?.up) return { state: 'ok', label: def.name, model: def.model, vision: def.vision };
   const fallback = list
     .filter((e) => e.fallback_order > 0 && e.up)
     .sort((a, b) => a.fallback_order - b.fallback_order)[0];
-  if (fallback) return { state: 'degraded', label: fallback.name, model: fallback.model };
-  return { state: 'down', label: 'LLM offline', model: '' };
+  if (fallback) {
+    return { state: 'degraded', label: fallback.name, model: fallback.model, vision: fallback.vision };
+  }
+  return { state: 'down', label: 'LLM offline', model: '', vision: false };
+}
+
+/** Sky "eye" pin marking a vision-capable (multimodal) model. */
+function VisionPin({ className = '' }: { className?: string }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center text-sky-400 ${className}`}
+      title="Vision-capable model — images are attached to inference"
+    >
+      <Eye size={11} aria-label="vision-capable" />
+    </span>
+  );
 }
 
 function Latency({ ms }: { ms: number | null }) {
@@ -74,7 +94,12 @@ function EndpointRow({ ep }: { ep: EndpointHealth }) {
       </div>
       <div className="mt-1 pl-3.5">
         {ep.up ? (
-          ep.model && <p className="truncate font-mono text-[10px] text-slate-500">{ep.model}</p>
+          ep.model && (
+            <p className="flex items-center gap-1 font-mono text-[10px] text-slate-500">
+              <span className="truncate">{ep.model}</span>
+              {ep.vision && <VisionPin />}
+            </p>
+          )
         ) : (
           <p className="text-[10px] text-red-400/80">unreachable</p>
         )}
@@ -144,7 +169,9 @@ export function EndpointBadge() {
 
   if (health !== null && health.length === 0) return null;
 
-  const s = health ? summarize(health) : { state: 'unknown' as FleetState, label: 'LLM', model: '' };
+  const s = health
+    ? summarize(health)
+    : { state: 'unknown' as FleetState, label: 'LLM', model: '', vision: false };
 
   return (
     <div ref={ref} className="relative">
@@ -188,6 +215,7 @@ export function EndpointBadge() {
             {s.model}
           </span>
         )}
+        {s.vision && <VisionPin className="hidden sm:inline-flex" />}
       </button>
 
       {open && health && (

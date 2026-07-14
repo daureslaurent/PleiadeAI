@@ -47,13 +47,22 @@ const EndpointSchema = new Schema(
     /** Exactly one endpoint is the default (used by agents that don't pick one). Enforced on write. */
     is_default: { type: Boolean, default: false },
     /**
-     * Operator marker: this endpoint's model is multimodal (vision), i.e. its llama.cpp was launched
-     * with `--mmproj` (or it's a vision-capable vLLM/Ollama model). We can't autodiscover this from
-     * `/v1/models`, so it's a manual flag. Used to warn when a *visual* agent (one whose isolation
-     * image has the visual layer) is paired with a text-only endpoint — its screenshots would be
-     * silently ignored. Purely advisory; it does not gate inference.
+     * Manual vision (multimodal) marker — the *fallback* when nothing was auto-detected. On llama.cpp
+     * the probe reads `--mmproj` from the launch args (see `model_vision` below) and wins; this flag
+     * only decides for servers that expose nothing decidable (vLLM, Ollama, older builds). The
+     * effective reading gates whether images are attached to inference and drives the visual-agent
+     * pairing warnings — resolve it via `effectiveVision()`, never read this field directly.
      */
     supports_vision: { type: Boolean, default: false },
+    /**
+     * Per-model auto-detected vision capability, keyed by model id, probed at model discovery
+     * alongside `model_contexts` (`--mmproj` in `/v1/models` `status.args` on a router, `/props`
+     * `modalities.vision` on a single-model server). `true`/`false` are confident readings that
+     * override the manual `supports_vision`; a model absent from the map means "undetectable" and
+     * falls back to the manual flag. Plain object (not a Mongoose `Map`) for the same dotted-model-id
+     * reason as `model_contexts`.
+     */
+    model_vision: { type: Schema.Types.Mixed, default: {} },
     /**
      * Runtime failover position. `0` means this endpoint is *not* part of the fallback chain.
      * Endpoints with `fallback_order > 0` form the ordered chain the inference client walks (ascending)
@@ -72,5 +81,17 @@ const EndpointSchema = new Schema(
 
 export type Endpoint = InferSchemaType<typeof EndpointSchema>;
 export type EndpointDoc = HydratedDocument<Endpoint>;
+
+/**
+ * Whether `model` on this endpoint is vision-capable (multimodal): the auto-detected per-model
+ * reading when the probe produced one, else the operator's manual `supports_vision` flag. This is
+ * the single source of truth for "can I send images here" — the resolver, the health probe and the
+ * UI all agree through it.
+ */
+export function effectiveVision(endpoint: Pick<Endpoint, 'model_vision' | 'supports_vision'> | null, model: string): boolean {
+  if (!endpoint) return false;
+  const detected = model ? (endpoint.model_vision as Record<string, unknown> | undefined)?.[model] : undefined;
+  return typeof detected === 'boolean' ? detected : Boolean(endpoint.supports_vision);
+}
 
 export const EndpointModel = model('Endpoint', EndpointSchema);

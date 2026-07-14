@@ -69,16 +69,18 @@ export const endpointRepository = {
     return EndpointModel.findByIdAndUpdate(id, { $set: patch }, { new: true }).exec();
   },
 
-  /** Cache the discovered model list (and probed per-model context sizes) on the endpoint. */
+  /** Cache the discovered model list (and probed per-model context sizes / vision flags) on the endpoint. */
   setModels(
     id: string | Types.ObjectId,
     models: string[],
     modelContexts?: Record<string, number>,
+    modelVision?: Record<string, boolean>,
   ): Promise<EndpointDoc | null> {
     const set: Record<string, unknown> = { models, models_updated_at: new Date() };
-    // Only overwrite the probed contexts when we actually got some, so a transient probe failure
+    // Only overwrite the probed maps when we actually got readings, so a transient probe failure
     // doesn't wipe a previously-discovered map.
     if (modelContexts && Object.keys(modelContexts).length) set.model_contexts = modelContexts;
+    if (modelVision && Object.keys(modelVision).length) set.model_vision = modelVision;
     return EndpointModel.findByIdAndUpdate(id, { $set: set }, { new: true }).exec();
   },
 
