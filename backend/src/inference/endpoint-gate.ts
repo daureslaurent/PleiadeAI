@@ -1,4 +1,6 @@
 import { createLogger } from '../config/logger';
+import type { LlamaCallSource } from '../core/event-bus/events.types';
+import { getCaptureContext } from './capture-context';
 import type { TokenUsage } from './LlamaClient';
 
 const log = createLogger('endpoint-gate');
@@ -16,6 +18,17 @@ const log = createLogger('endpoint-gate');
  * The gate is also the single source of truth for the LLM activity page: it tallies calls, errors,
  * tokens and durations per endpoint and per model, plus the live active/queued depth.
  */
+
+/** Identity of one call passing through the gate — who is (or will be) talking to the endpoint. */
+export interface GateCall {
+  model: string;
+  /** Agent making the call (null for side tasks with no agent, e.g. the interviewer). */
+  agentName: string | null;
+  /** What kind of call it is (chat-turn, title-gen, vision, …) from the capture context. */
+  source: LlamaCallSource;
+  /** When the call entered the gate (queuedAt) / took the lock (startedAt). */
+  at: number;
+}
 
 /** Rolling counters for one model served by an endpoint. */
 export interface ModelStat {
@@ -36,6 +49,10 @@ export interface EndpointStat {
   active: number;
   /** Calls parked waiting for the lock. */
   queued: number;
+  /** The call holding the lock right now (`at` = when it started streaming), or null when idle. */
+  current: GateCall | null;
+  /** Calls parked behind `current`, FIFO (`at` = when each entered the queue). */
+  waiting: GateCall[];
   calls: number;
   errors: number;
   promptTokens: number;
@@ -68,6 +85,8 @@ class EndpointGate {
         url,
         active: 0,
         queued: 0,
+        current: null,
+        waiting: [],
         calls: 0,
         errors: 0,
         promptTokens: 0,
@@ -99,6 +118,15 @@ class EndpointGate {
   async acquire(rawUrl: string, model: string): Promise<CallHandle> {
     const url = norm(rawUrl);
     const s = this.stat(url);
+    // Who this call is for — read here (not after `await prev`) so the queue entry is identified
+    // the moment it parks. AsyncLocalStorage carries the caller's session/agent/source.
+    const cc = getCaptureContext();
+    const entry: GateCall = {
+      model,
+      agentName: cc?.agentName ?? null,
+      source: cc?.source ?? 'chat-turn',
+      at: Date.now(),
+    };
 
     const prev = this.tails.get(url) ?? Promise.resolve();
     let release!: () => void;
@@ -111,16 +139,20 @@ class EndpointGate {
     );
 
     s.queued++;
+    s.waiting.push(entry);
     await prev;
     s.queued--;
+    s.waiting.splice(s.waiting.indexOf(entry), 1);
     s.active++;
     const started = Date.now();
+    s.current = { ...entry, at: started };
 
     let done = false;
     const finish = (usage: TokenUsage | null | undefined, ok: boolean): void => {
       if (done) return;
       done = true;
       s.active--;
+      s.current = null;
       s.calls++;
       s.lastCallAt = Date.now();
       s.lastModel = model;
@@ -155,6 +187,7 @@ class EndpointGate {
   snapshot(): EndpointStat[] {
     return [...this.stats.values()].map((s) => ({
       ...s,
+      waiting: [...s.waiting],
       models: new Map(s.models),
     }));
   }

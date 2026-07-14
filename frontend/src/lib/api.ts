@@ -1042,6 +1042,17 @@ export function endpointVision(e: Endpoint | undefined | null, model?: string): 
   return typeof detected === 'boolean' ? detected : Boolean(e.supports_vision);
 }
 
+/** One LLM call at an endpoint's gate: streaming now (`running`) or parked behind it (`queue`). */
+export interface EndpointCall {
+  /** Agent making the call (null for agent-less side tasks like the interviewer). */
+  agent: string | null;
+  /** Kind of call: chat-turn, title-gen, vision, judge, … */
+  source: string;
+  model: string;
+  /** How long it has been streaming (running) / waiting (queued), in ms — computed server-side. */
+  elapsed_ms: number;
+}
+
 /** Live reachability snapshot of one endpoint (from `GET /endpoints/health`), for the header badge. */
 export interface EndpointHealth {
   _id: string;
@@ -1058,6 +1069,10 @@ export interface EndpointHealth {
   managed: boolean;
   /** Agents targeting this endpoint; agents with no explicit endpoint count on the default. */
   agents: Array<{ name: string; color: number | null }>;
+  /** LLM call streaming on this endpoint right now (backend's endpoint gate), if any. */
+  running: EndpointCall | null;
+  /** Calls parked behind `running`, FIFO. Empty when nothing is queued. */
+  queue: EndpointCall[];
 }
 
 export type NewEndpoint = Pick<Endpoint, 'name' | 'base_url' | 'api_key' | 'context_window'>;

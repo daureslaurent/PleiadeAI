@@ -6,6 +6,7 @@ import { endpointRepository } from './endpoint.repository';
 import { EndpointModel, effectiveVision, type EndpointDoc } from './endpoint.model';
 import { agentRepository } from '../agents/agent.repository';
 import { introspectModels } from '../../inference/llama-introspect';
+import { endpointGate, type GateCall } from '../../inference/endpoint-gate';
 
 const log = createLogger('endpoint-service');
 
@@ -28,6 +29,26 @@ export interface EndpointHealth {
   managed: boolean;
   /** Agents targeting this endpoint; agents with no explicit endpoint count on the default. */
   agents: Array<{ name: string; color: number | null }>;
+  /** LLM call streaming on this endpoint right now (from the in-process endpoint gate), if any. */
+  running: EndpointCall | null;
+  /** Calls parked behind `running`, FIFO. Empty when nothing is queued. */
+  queue: EndpointCall[];
+}
+
+/** One LLM call at the endpoint gate, as reported to the UI. */
+export interface EndpointCall {
+  /** Agent making the call (null for agent-less side tasks). */
+  agent: string | null;
+  /** Kind of call: chat-turn, title-gen, vision, judge, … */
+  source: string;
+  model: string;
+  /** How long it has been streaming (running) / waiting (queued), in ms — computed server-side. */
+  elapsed_ms: number;
+}
+
+/** Map a gate entry to the wire shape, converting its timestamp to an elapsed duration. */
+function toEndpointCall(c: GateCall): EndpointCall {
+  return { agent: c.agentName, source: c.source, model: c.model, elapsed_ms: Date.now() - c.at };
 }
 
 /** Display name of the built-in, system-managed local docker fallback endpoint. */
@@ -83,6 +104,8 @@ export const endpointService = {
   async probeHealth(): Promise<EndpointHealth[]> {
     const [endpoints, agents] = await Promise.all([endpointRepository.list(), agentRepository.list()]);
     const defaultId = endpoints.find((e) => e.is_default)?._id.toString();
+    // Live gate activity, keyed the same way the gate keys its lock (normalized base URL).
+    const activity = new Map(endpointGate.snapshot().map((s) => [s.url, s]));
     return Promise.all(
       endpoints.map(async (ep): Promise<EndpointHealth> => {
         const started = Date.now();
@@ -111,6 +134,7 @@ export const endpointService = {
           ep.default_model && served.includes(ep.default_model)
             ? ep.default_model
             : (served[0] ?? ep.default_model ?? '');
+        const gate = activity.get(ep.base_url.replace(/\/$/, ''));
         return {
           _id: epId,
           name: ep.name,
@@ -122,6 +146,8 @@ export const endpointService = {
           fallback_order: ep.fallback_order,
           managed: ep.managed,
           agents: mine.map((a) => ({ name: a.name, color: a.color ?? null })),
+          running: gate?.current ? toEndpointCall(gate.current) : null,
+          queue: (gate?.waiting ?? []).map(toEndpointCall),
         };
       }),
     );

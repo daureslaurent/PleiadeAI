@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Eye } from 'lucide-react';
-import { endpointsApi, type EndpointHealth } from '../lib/api';
+import { endpointsApi, type EndpointCall, type EndpointHealth } from '../lib/api';
 import { agentColor } from '../lib/agentColor';
 
 /**
@@ -15,8 +15,21 @@ import { agentColor } from '../lib/agentColor';
  */
 
 const POLL_MS = 30_000;
+/** Poll cadence while the popover is open — near-live activity (running call / queue). */
+const OPEN_POLL_MS = 3_000;
+/** Poll cadence while closed but a call is streaming/queued, so the pill's pulse doesn't go stale. */
+const BUSY_POLL_MS = 5_000;
 /** Above this the probe round-trip reads as "slow" and the latency figure tints amber. */
 const SLOW_MS = 1500;
+
+/** Amber glow for the "streaming" pulse (DIRECT_ART: liveness breathes via --glow). */
+const AMBER_GLOW = { '--glow': 'rgba(245,158,11,0.45)' } as CSSProperties;
+
+/** Compact elapsed/wait time: `8s`, then `1:23` past a minute. */
+function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
 
 type FleetState = 'ok' | 'degraded' | 'down' | 'unknown';
 
@@ -69,6 +82,38 @@ function Latency({ ms }: { ms: number | null }) {
   );
 }
 
+/**
+ * One gate call: the streaming one gets the pulsing amber dot, queued ones their FIFO position.
+ * The agent renders in its identity color; agent-less side tasks fall back to their source label.
+ */
+function CallLine({ call, position, agents }: { call: EndpointCall; position?: number; agents: EndpointHealth['agents'] }) {
+  const running = position === undefined;
+  const c = call.agent ? agentColor(call.agent, agents.find((a) => a.name === call.agent)?.color ?? null) : null;
+  return (
+    <div className="flex items-center gap-1.5 text-[10px]" title={`${call.model} — ${call.source}`}>
+      {running ? (
+        <span className="h-1.5 w-1.5 shrink-0 animate-glow-pulse rounded-full bg-amber-400" style={AMBER_GLOW} />
+      ) : (
+        <span className="w-1.5 shrink-0 text-center font-mono text-slate-600">{position}</span>
+      )}
+      <span className="truncate" style={c ? { color: c.accent } : undefined}>
+        {call.agent ?? <span className="text-slate-400">{call.source}</span>}
+      </span>
+      {call.agent && (
+        <span className="rounded bg-white/[0.06] px-1 py-px font-mono text-[9px] uppercase tracking-wide text-slate-500">
+          {call.source}
+        </span>
+      )}
+      <span
+        className={`ml-auto shrink-0 font-mono tabular-nums ${running ? 'text-amber-400/80' : 'text-slate-600'}`}
+        title={running ? 'Streaming for' : 'Waiting for'}
+      >
+        {fmtElapsed(call.elapsed_ms)}
+      </span>
+    </div>
+  );
+}
+
 function EndpointRow({ ep }: { ep: EndpointHealth }) {
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2">
@@ -102,6 +147,14 @@ function EndpointRow({ ep }: { ep: EndpointHealth }) {
           )
         ) : (
           <p className="text-[10px] text-red-400/80">unreachable</p>
+        )}
+        {(ep.running || ep.queue.length > 0) && (
+          <div className="mt-1 space-y-0.5">
+            {ep.running && <CallLine call={ep.running} agents={ep.agents} />}
+            {ep.queue.map((q, i) => (
+              <CallLine key={i} call={q} position={i + 1} agents={ep.agents} />
+            ))}
+          </div>
         )}
         {ep.agents.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -139,11 +192,19 @@ export function EndpointBadge() {
       });
   }, []);
 
+  const runningCount = health?.filter((e) => e.running).length ?? 0;
+  const queuedCount = health?.reduce((n, e) => n + e.queue.length, 0) ?? 0;
+  const busy = runningCount > 0 || queuedCount > 0;
+
+  // Adaptive cadence: near-live while the popover is open, a bit faster while a call is streaming
+  // (so the pill's pulse and the elapsed times don't go stale), lazy 30s otherwise.
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, POLL_MS);
-    return () => clearInterval(t);
   }, [refresh]);
+  useEffect(() => {
+    const t = setInterval(refresh, open ? OPEN_POLL_MS : busy ? BUSY_POLL_MS : POLL_MS);
+    return () => clearInterval(t);
+  }, [refresh, open, busy]);
 
   // Opening the popover is "the operator wants to know now" — don't serve a 30s-stale reading.
   useEffect(() => {
@@ -216,6 +277,17 @@ export function EndpointBadge() {
           </span>
         )}
         {s.vision && <VisionPin className="hidden sm:inline-flex" />}
+        {runningCount > 0 && (
+          <span
+            className="flex items-center gap-1"
+            title={`${runningCount} LLM call${runningCount > 1 ? 's' : ''} streaming${queuedCount ? `, ${queuedCount} queued` : ''}`}
+          >
+            <span className="h-1.5 w-1.5 shrink-0 animate-glow-pulse rounded-full bg-amber-400" style={AMBER_GLOW} />
+            {queuedCount > 0 && (
+              <span className="font-mono text-[10px] tabular-nums text-amber-400/90">+{queuedCount}</span>
+            )}
+          </span>
+        )}
       </button>
 
       {open && health && (
