@@ -93,6 +93,16 @@ const SettingsSchema = new Schema(
     public_base_url: { type: String, default: '' },
     google_client_id: { type: String, default: '' },
     google_client_secret: { type: String, default: '' },
+    /**
+     * Shared Google Cloud **API key** (Settings → Connections → Google APIs) — distinct from the
+     * OAuth client above (which is only for linking mailboxes). One key, restricted to the
+     * Custom Search / YouTube Data v3 / Geocoding / Places / Directions APIs, powers the
+     * `web_search` google provider and the `youtube` / `google_maps` tools. Scrubbed from
+     * API-key responses by `redact.ts` (`api_key`).
+     */
+    google_api_key: { type: String, default: '' },
+    /** Programmable Search Engine ID (`cx`) for the Custom Search API (web_search google provider). */
+    google_cse_id: { type: String, default: '' },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

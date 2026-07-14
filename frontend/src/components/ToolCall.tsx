@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { AlertTriangle, ChevronRight, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { AlertTriangle, ChevronRight, Clock, Eye, ImagePlus, Loader2, Magnet, MapPin, MousePointerClick, Navigation, Search, Star, TerminalSquare, ThumbsUp, Youtube, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
 import { describeTool, visualActDetail } from '../lib/toolSummary';
 
@@ -12,6 +12,9 @@ export function ToolCall({ block }: { block: ToolBlock }) {
   if (block.tool === 'visual_screenshot' || block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
   if (block.tool === 'generate_image' || block.imageGen) return <ImageGenBlock block={block} />;
+  if (block.tool === 'web_search') return <WebSearchBlock block={block} />;
+  if (block.tool === 'youtube') return <YouTubeBlock block={block} />;
+  if (block.tool === 'google_maps') return <MapsBlock block={block} />;
   return <GenericToolBlock block={block} />;
 }
 
@@ -329,6 +332,339 @@ function ImageGenBlock({ block }: { block: ToolBlock }) {
         )}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Rich cards for the Google-backed tools (web_search / youtube / google_maps): render the tool's
+ * structured result as scannable content — result lists, video thumbnails, place cards — instead of
+ * raw JSON. Errors and odd payloads fall back to GenericToolBlock so nothing is ever hidden.
+ * ------------------------------------------------------------------------------------------------ */
+
+/** Shared card shell: header row (icon, tool name, chips, status) + a bordered content area. */
+function RichToolCard({
+  block,
+  icon,
+  chips,
+  children,
+  runningLabel,
+}: {
+  block: ToolBlock;
+  icon: ReactNode;
+  chips?: ReactNode;
+  children: ReactNode;
+  runningLabel: string;
+}) {
+  return (
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        {icon}
+        <span className="shrink-0 font-medium text-slate-200">{block.tool}</span>
+        {chips}
+        <span className="ml-auto">
+          <StatusIcon status={block.status} />
+        </span>
+      </div>
+      <div className="border-t border-white/[0.06] p-3">
+        {block.status === 'running' ? <div className="text-shimmer text-slate-400">{runningLabel}</div> : children}
+      </div>
+    </div>
+  );
+}
+
+/** Faint monospace header chip (query, provider, action…). */
+function HeaderChip({ children, title }: { children: ReactNode; title?: string }) {
+  return (
+    <span title={title} className="min-w-0 truncate rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+      {children}
+    </span>
+  );
+}
+
+/** The `{ ok, … }` result payload of a Google-backed tool, or null when it isn't one. */
+function okResult(block: ToolBlock): Record<string, unknown> | null {
+  const r = block.result;
+  if (r && typeof r === 'object' && (r as { ok?: unknown }).ok === true) return r as Record<string, unknown>;
+  return null;
+}
+
+/** Compact count: 1234 → 1.2k, 4567890 → 4.6M. */
+function fmtCount(v: number): string {
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(v);
+}
+
+/** Search-result list for `web_search`: linked titles, host, snippet — instead of a JSON dump. */
+function WebSearchBlock({ block }: { block: ToolBlock }) {
+  const r = okResult(block);
+  const results = (r?.results ?? null) as Array<{ title?: string; url?: string; snippet?: string }> | null;
+  if (block.status !== 'running' && !results) return <GenericToolBlock block={block} />;
+
+  const provider = r ? String(r.provider ?? '') : '';
+  const query = String(block.args?.query ?? '');
+  const host = (url: string) => {
+    try {
+      return new URL(url).host.replace(/^www\./, '');
+    } catch {
+      return url;
+    }
+  };
+
+  return (
+    <RichToolCard
+      block={block}
+      icon={<Search size={13} className="shrink-0 text-accent" />}
+      runningLabel={`Searching the web for “${query}”…`}
+      chips={
+        <>
+          {query && <HeaderChip title={query}>“{query}”</HeaderChip>}
+          {provider && <HeaderChip>{provider}</HeaderChip>}
+        </>
+      }
+    >
+      {results && results.length > 0 ? (
+        <ol className="space-y-2">
+          {results.map((hit, i) => (
+            <li key={i} className="min-w-0">
+              <a
+                href={hit.url}
+                target="_blank"
+                rel="noreferrer"
+                className="block truncate font-medium text-accent hover:underline"
+                title={hit.url}
+              >
+                {hit.title || hit.url}
+              </a>
+              <div className="truncate font-mono text-[10px] text-slate-500">{host(hit.url ?? '')}</div>
+              {hit.snippet && <p className="mt-0.5 line-clamp-2 leading-snug text-slate-400">{hit.snippet}</p>}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="text-slate-500">No results.</div>
+      )}
+    </RichToolCard>
+  );
+}
+
+interface VideoHit {
+  video_id?: string;
+  url?: string;
+  title?: string;
+  channel?: string;
+  published_at?: string;
+  description?: string;
+  thumbnail?: string;
+  duration?: string;
+  views?: number;
+  likes?: number;
+  tags?: string[];
+}
+
+/** One YouTube video row: thumbnail + linked title + channel/date (+ stats chips for details). */
+function VideoRow({ v, detailed }: { v: VideoHit; detailed?: boolean }) {
+  const date = v.published_at ? new Date(v.published_at).toLocaleDateString() : '';
+  return (
+    <div className="flex min-w-0 gap-2.5">
+      {v.thumbnail && (
+        <a href={v.url} target="_blank" rel="noreferrer" className="shrink-0" title="Open on YouTube">
+          <span className="relative block">
+            <img src={v.thumbnail} alt={v.title ?? 'video'} className="aspect-video w-32 rounded-lg border border-white/[0.07] object-cover" />
+            {v.duration && (
+              <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-px font-mono text-[9px] text-slate-200">
+                {v.duration}
+              </span>
+            )}
+          </span>
+        </a>
+      )}
+      <div className="min-w-0 flex-1">
+        <a href={v.url} target="_blank" rel="noreferrer" className="line-clamp-2 font-medium leading-snug text-slate-200 hover:text-accent hover:underline">
+          {v.title || v.url}
+        </a>
+        <div className="mt-0.5 truncate text-[10px] text-slate-500">
+          {v.channel}
+          {date && <span> · {date}</span>}
+        </div>
+        {detailed && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {v.views != null && v.views > 0 && (
+              <span className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+                <Eye size={10} /> {fmtCount(v.views)}
+              </span>
+            )}
+            {v.likes != null && v.likes > 0 && (
+              <span className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+                <ThumbsUp size={10} /> {fmtCount(v.likes)}
+              </span>
+            )}
+          </div>
+        )}
+        {detailed && v.description && <p className="mt-1.5 line-clamp-3 leading-snug text-slate-400">{v.description}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** Video cards for `youtube`: search → thumbnail list; video → one detailed card with stats. */
+function YouTubeBlock({ block }: { block: ToolBlock }) {
+  const r = okResult(block);
+  const action = String(block.args?.action ?? (r ? String(r.action ?? '') : ''));
+  const results = (r?.results ?? null) as VideoHit[] | null;
+  const video = (r?.video ?? null) as VideoHit | null;
+  if (block.status !== 'running' && !results && !video) return <GenericToolBlock block={block} />;
+
+  const query = String(block.args?.query ?? '');
+  return (
+    <RichToolCard
+      block={block}
+      icon={<Youtube size={13} className="shrink-0 text-red-400" />}
+      runningLabel={action === 'video' ? 'Fetching video details…' : `Searching YouTube for “${query}”…`}
+      chips={
+        <>
+          {action && <HeaderChip>{action}</HeaderChip>}
+          {query && <HeaderChip title={query}>“{query}”</HeaderChip>}
+        </>
+      }
+    >
+      {video ? (
+        <VideoRow v={video} detailed />
+      ) : results && results.length > 0 ? (
+        <div className="space-y-2.5">
+          {results.map((v, i) => (
+            <VideoRow key={v.video_id ?? i} v={v} />
+          ))}
+        </div>
+      ) : (
+        <div className="text-slate-500">No videos found.</div>
+      )}
+    </RichToolCard>
+  );
+}
+
+interface PlaceHit {
+  name?: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  rating?: number | null;
+  ratings_count?: number;
+  open_now?: boolean | null;
+  url?: string;
+}
+
+/** Place cards / geocode rows / a route summary for `google_maps`, depending on the action. */
+function MapsBlock({ block }: { block: ToolBlock }) {
+  const [stepsOpen, setStepsOpen] = useState(false);
+  const r = okResult(block);
+  const action = String(block.args?.action ?? (r ? String(r.action ?? '') : ''));
+  const results = (r?.results ?? null) as PlaceHit[] | Array<{ address?: string; lat?: number; lng?: number }> | null;
+  const route = (r?.route ?? null) as {
+    summary?: string;
+    mode?: string;
+    origin?: string;
+    destination?: string;
+    distance?: string;
+    duration?: string;
+    steps?: Array<{ instruction?: string; distance?: string }>;
+  } | null;
+  if (block.status !== 'running' && !results && !route) return <GenericToolBlock block={block} />;
+
+  const query = String(block.args?.query ?? block.args?.location ?? '');
+  const chip =
+    action === 'directions' ? `${String(block.args?.origin ?? '')} → ${String(block.args?.destination ?? '')}` : query;
+
+  return (
+    <RichToolCard
+      block={block}
+      icon={<MapPin size={13} className="shrink-0 text-emerald-400" />}
+      runningLabel={action === 'directions' ? 'Computing the route…' : `Searching Maps for “${query}”…`}
+      chips={
+        <>
+          {action && <HeaderChip>{action}</HeaderChip>}
+          {chip && <HeaderChip title={chip}>{chip}</HeaderChip>}
+        </>
+      }
+    >
+      {route ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-300">
+              <Navigation size={10} className="text-emerald-400" /> {route.distance}
+            </span>
+            <span className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-300">
+              <Clock size={10} /> {route.duration}
+            </span>
+            {route.mode && <HeaderChip>{route.mode}</HeaderChip>}
+            {route.summary && <span className="text-[10px] text-slate-500">via {route.summary}</span>}
+          </div>
+          <div className="truncate text-[11px] text-slate-400" title={`${route.origin} → ${route.destination}`}>
+            {route.origin} <span className="text-slate-600">→</span> {route.destination}
+          </div>
+          {route.steps && route.steps.length > 0 && (
+            <div>
+              <button
+                onClick={() => setStepsOpen((o) => !o)}
+                className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500 hover:text-slate-300"
+              >
+                <ChevronRight size={11} className={`transition-transform ${stepsOpen ? 'rotate-90' : ''}`} />
+                {route.steps.length} steps
+              </button>
+              {stepsOpen && (
+                <ol className="mt-1.5 space-y-1 pl-1">
+                  {route.steps.map((s, i) => (
+                    <li key={i} className="flex gap-2 leading-snug">
+                      <span className="w-4 shrink-0 text-right font-mono text-[10px] text-slate-600">{i + 1}</span>
+                      <span className="min-w-0 flex-1 text-slate-400">{s.instruction}</span>
+                      {s.distance && <span className="shrink-0 font-mono text-[10px] text-slate-600">{s.distance}</span>}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          )}
+        </div>
+      ) : results && results.length > 0 ? (
+        <div className="space-y-2">
+          {results.map((p, i) => {
+            const place = p as PlaceHit;
+            const mapsUrl = place.url ?? `https://www.google.com/maps?q=${place.lat},${place.lng}`;
+            return (
+              <div key={i} className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                  <a href={mapsUrl} target="_blank" rel="noreferrer" className="truncate font-medium text-slate-200 hover:text-accent hover:underline">
+                    {place.name || place.address || `${place.lat}, ${place.lng}`}
+                  </a>
+                  {typeof place.rating === 'number' && (
+                    <span className="flex shrink-0 items-center gap-0.5 font-mono text-[10px] text-amber-400" title={`${place.rating} (${place.ratings_count ?? 0} ratings)`}>
+                      <Star size={10} className="fill-amber-400" /> {place.rating}
+                      {place.ratings_count ? <span className="text-slate-500"> ({fmtCount(place.ratings_count)})</span> : null}
+                    </span>
+                  )}
+                  {place.open_now === true && (
+                    <span className="shrink-0 rounded bg-emerald-500/10 px-1 py-px text-[9px] uppercase tracking-wide text-emerald-400">open</span>
+                  )}
+                  {place.open_now === false && (
+                    <span className="shrink-0 rounded bg-white/[0.06] px-1 py-px text-[9px] uppercase tracking-wide text-slate-500">closed</span>
+                  )}
+                </div>
+                {(place.name ? place.address : null) && (
+                  <div className="truncate text-[10px] text-slate-500">{place.address}</div>
+                )}
+                {place.lat != null && place.lng != null && !place.name && (
+                  <div className="font-mono text-[10px] text-slate-500">
+                    {place.lat.toFixed(6)}, {place.lng.toFixed(6)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-slate-500">No results.</div>
+      )}
+    </RichToolCard>
   );
 }
 

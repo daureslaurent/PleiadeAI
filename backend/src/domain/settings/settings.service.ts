@@ -63,6 +63,10 @@ export interface EffectiveSettings {
   /** Google Cloud OAuth client for linking Gmail mailboxes ('' → mail linking unconfigured). */
   google_client_id: string;
   google_client_secret: string;
+  /** Shared Google Cloud API key for Custom Search / YouTube / Maps ('' → those tools unconfigured). */
+  google_api_key: string;
+  /** Programmable Search Engine ID (cx) for the web_search google provider. */
+  google_cse_id: string;
 }
 
 const KEY = 'global';
@@ -115,6 +119,8 @@ export const settingsService = {
       public_base_url: doc?.public_base_url ?? '',
       google_client_id: doc?.google_client_id ?? '',
       google_client_secret: doc?.google_client_secret ?? '',
+      google_api_key: doc?.google_api_key ?? '',
+      google_cse_id: doc?.google_cse_id ?? '',
     };
   },
 

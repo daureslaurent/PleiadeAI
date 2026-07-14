@@ -13,8 +13,10 @@ import {
   FolderOpen,
   Globe,
   type LucideIcon,
+  MapPin,
   MousePointerClick,
   Search,
+  Youtube,
   Settings2,
   Wrench,
 } from 'lucide-react';
@@ -172,6 +174,33 @@ export function describeTool(
         value: quote(str(args.query)),
         title: str(args.query),
         hint: done && count != null ? `${count} ${count === 1 ? 'result' : 'results'}` : undefined,
+      };
+    }
+    case 'youtube': {
+      const action = str(args.action);
+      const count = n(r.count);
+      const value = action === 'video' ? str(args.video) : quote(str(args.query));
+      return {
+        Icon: Youtube,
+        value: truncate(value, 44),
+        title: value,
+        hint: done ? (action === 'video' ? 'details' : count != null ? `${count} video${count === 1 ? '' : 's'}` : undefined) : undefined,
+      };
+    }
+    case 'google_maps': {
+      const action = str(args.action);
+      const count = n(r.count);
+      const value =
+        action === 'directions'
+          ? `${str(args.origin)} → ${str(args.destination)}`
+          : action === 'geocode'
+            ? str(args.location)
+            : quote(str(args.query));
+      return {
+        Icon: MapPin,
+        value: truncate(value, 44),
+        title: value,
+        hint: done && count != null ? `${count} result${count === 1 ? '' : 's'}` : done && action === 'directions' ? 'route' : undefined,
       };
     }
     case 'webfetch': {

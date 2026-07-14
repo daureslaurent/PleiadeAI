@@ -1,18 +1,47 @@
 import { useState } from 'react';
-import { Check, Copy, KeySquare, Mail } from 'lucide-react';
+import { Check, Copy, KeySquare, Mail, Blocks } from 'lucide-react';
 import { Section } from '../../../components/ui';
 import { SettingText } from '../controls';
 import { MailAccountsManager } from '../managers/MailAccountsManager';
 import { useSettings } from '../context';
 
 /**
- * `/settings/connections` — external services agents can reach. For now: Gmail, read-only.
- * One-time setup: create an OAuth client in the Google Cloud console (type "Web application"),
- * register the redirect URI shown here, paste the client ID/secret, then link mailboxes below.
+ * `/settings/connections` — external services agents can reach: the Google APIs key powering the
+ * `web_search` google provider + the `youtube` / `google_maps` tools, and read-only Gmail (which
+ * needs its own OAuth client — a different credential type than the API key).
  */
 export function ConnectionsPanel() {
   return (
     <div className="animate-fade-up space-y-5">
+      <Section title="Google APIs" icon={<Blocks size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          One Google Cloud <span className="text-slate-400">API key</span> (APIs &amp; Services →
+          Credentials → “API key”) unlocks three agent tools — enable the matching APIs on the key's
+          project: <span className="font-mono">Custom Search API</span> (the{' '}
+          <span className="font-mono">web_search</span> google provider),{' '}
+          <span className="font-mono">YouTube Data API v3</span> (the{' '}
+          <span className="font-mono">youtube</span> tool) and{' '}
+          <span className="font-mono">Places / Geocoding / Directions</span> (the{' '}
+          <span className="font-mono">google_maps</span> tool). Grant the tools per agent via its
+          toolset; result caps live on the Tools page.
+        </p>
+        <div className="space-y-4">
+          <SettingText
+            field="google_api_key"
+            label="Google API key"
+            password
+            placeholder="AIzaSy…"
+            hint="Shared by web_search (google provider), youtube and google_maps. Scrubbed from API-key responses."
+          />
+          <SettingText
+            field="google_cse_id"
+            label="Custom Search engine ID (cx)"
+            placeholder="a1b2c3d4e5f6g7h8i"
+            hint="From programmablesearchengine.google.com — required only for the web_search google provider."
+          />
+        </div>
+      </Section>
+
       <Section title="Google OAuth client" icon={<KeySquare size={13} />}>
         <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
           Linking a mailbox needs a Google Cloud OAuth client (APIs &amp; Services → Credentials →
