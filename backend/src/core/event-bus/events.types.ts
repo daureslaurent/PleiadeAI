@@ -299,6 +299,13 @@ export interface LlamaRequestCapture {
 /** The assembled response for one call (independent of raw streamed chunks). */
 export interface LlamaResponseCapture {
   text: string;
+  /**
+   * The turn's thinking, when the server split it onto its own channel (`reasoning_content`) or it
+   * was parsed out of inline `<think>` tags. Kept SEPARATE from `text`, never concatenated into it:
+   * `text` is the assistant's actual content and is what feeds back into history, while this is the
+   * hidden deliberation. Persisted so the SFT export can decide whether to train on it.
+   */
+  reasoning?: string;
   toolCalls: { id: string; name: string; argsJson: string }[];
   finishReason: string | null;
 }

@@ -97,7 +97,12 @@ class CallCapture {
   readonly id = randomUUID();
   private readonly startedAt = Date.now();
   private firstTokenMs: number | null = null;
+  /** Content deltas only — reasoning is kept out so `raw_chunks` stays an untagged-but-unambiguous
+   * replay of the assistant's answer (see {@link reasoningChunks}). */
   private readonly rawChunks: string[] = [];
+  /** Thinking deltas, accumulated separately: the two channels interleave on the wire, so merging
+   * them into one array would make it impossible to tell answer from deliberation after the fact. */
+  private readonly reasoningChunks: string[] = [];
   /**
    * How many messages were in the request AT SEND TIME. The caller (AgentRunner) reuses and *appends*
    * to the same `messages` array across a turn's tool loop, and the request is serialized to Mongo
@@ -140,8 +145,13 @@ class CallCapture {
   /** Record + relay one streamed text delta. */
   pushChunk(delta: string, isReasoning: boolean): void {
     if (this.firstTokenMs === null) this.firstTokenMs = Date.now() - this.startedAt;
-    this.rawChunks.push(delta);
+    (isReasoning ? this.reasoningChunks : this.rawChunks).push(delta);
     safe(() => eventBus.emit('llama:call_delta', { id: this.id, delta, isReasoning }));
+  }
+
+  /** The turn's accumulated thinking, or undefined if the model didn't emit any. */
+  get reasoning(): string | undefined {
+    return this.reasoningChunks.length ? this.reasoningChunks.join('') : undefined;
   }
 
   /** Emit `llama:call_end` with the assembled response + usage. */
@@ -581,13 +591,13 @@ export class LlamaClient {
         'stream complete',
       );
       call.success(usage);
-      capture.end({ text, toolCalls, finishReason }, usage, 'success');
+      capture.end({ text, reasoning: capture.reasoning, toolCalls, finishReason }, usage, 'success');
       return { text, toolCalls, finishReason, usage };
     } catch (err) {
       call.fail();
       // Record whatever streamed before the failure/abort so the LLM Debug page shows the partial call.
       capture.end(
-        { text, toolCalls: buildToolCalls(), finishReason },
+        { text, reasoning: capture.reasoning, toolCalls: buildToolCalls(), finishReason },
         usage,
         'error',
         err instanceof Error ? err.message : String(err),

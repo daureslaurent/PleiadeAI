@@ -88,6 +88,25 @@ interface RunExample {
   tools: unknown[];
 }
 
+type CallResponse = {
+  text?: string;
+  reasoning?: string;
+  toolCalls?: { id: string; name: string; argsJson: string }[];
+};
+
+/**
+ * Re-inline a call's thinking as a `<think>` block ahead of its content — the format Qwen3 /
+ * DeepSeek-R1 chat templates expect an assistant turn to be trained in.
+ *
+ * The live prompt never carries reasoning (`AgentRunner`'s message array is the very array sent to
+ * llama, and the server strips `<think>` from history anyway), so it has to be stitched back in here
+ * from the per-call record. Empty reasoning → content unchanged, so non-thinking models are untouched.
+ */
+function withThink(content: string, reasoning?: string): string {
+  const think = reasoning?.trim();
+  return think ? `<think>\n${think}\n</think>\n\n${content}` : content;
+}
+
 /** Reconstruct one agent-run as an OpenAI training example: full messages + the tools offered. */
 function runToExample(runId: string, records: LlamaLogDoc[]): RunExample | null {
   if (records.length === 0) return null;
@@ -97,13 +116,27 @@ function runToExample(runId: string, records: LlamaLogDoc[]): RunExample | null 
   const req = last.request as { messages?: Msg[]; tools?: unknown[] };
   const messages: Msg[] = Array.isArray(req.messages) ? [...req.messages] : [];
 
+  // Restore the thinking on the tool-loop's INTERMEDIATE assistant turns. A reasoning model thinks
+  // before every tool call, not just before the final answer — train those turns with an empty head
+  // and you teach it to skip straight to the call. Each loop iteration pushed exactly one assistant
+  // message and produced exactly one record, in order, so the run's own assistant turns are the last
+  // `records.length - 1` assistant messages in the array; anything before those belongs to a PRIOR
+  // conversation round and stays stripped (matching the chat templates). Counting from the end keeps
+  // this correct even when the narration-retry path injects an extra `user` nudge mid-loop.
+  const assistantIdx = messages.flatMap((m, i) => (m.role === 'assistant' ? [i] : []));
+  const ownTurns = assistantIdx.slice(-Math.max(records.length - 1, 0));
+  ownTurns.forEach((msgIdx, k) => {
+    const rec = records[k];
+    if (!rec) return;
+    const m = messages[msgIdx]!;
+    const { reasoning } = rec.response as CallResponse;
+    messages[msgIdx] = { ...m, content: withThink(String(m.content ?? ''), reasoning) };
+  });
+
   // Append the final assistant output so the example includes the model's answer/tool call, not just
-  // the context that preceded it.
-  const resp = last.response as {
-    text?: string;
-    toolCalls?: { id: string; name: string; argsJson: string }[];
-  };
-  const assistant: Msg = { role: 'assistant', content: resp.text ?? '' };
+  // the context that preceded it. This is the example's actual target, thinking included.
+  const resp = last.response as CallResponse;
+  const assistant: Msg = { role: 'assistant', content: withThink(resp.text ?? '', resp.reasoning) };
   if (resp.toolCalls?.length) {
     assistant.tool_calls = resp.toolCalls.map((c) => ({
       id: c.id,
