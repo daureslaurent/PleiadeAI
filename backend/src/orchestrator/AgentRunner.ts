@@ -731,6 +731,11 @@ export class AgentRunner {
                 });
               }
             },
+            // Server-split thinking (llama-server's default `--reasoning-format deepseek`): already
+            // tagged as reasoning by the server, so it bypasses the `<think>`-tag parser entirely.
+            onReasoning: (delta) => {
+              eventBus.emit('agent:stream_chunk', { ctx, content: delta, isReasoning: true });
+            },
           },
           signal,
           undefined,

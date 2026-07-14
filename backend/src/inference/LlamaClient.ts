@@ -40,6 +40,17 @@ export interface AssembledToolCall {
 export interface StreamCallbacks {
   /** Fires for each text delta (already excludes tool-call deltas). */
   onToken: (delta: string) => void;
+  /**
+   * Fires for each *reasoning* delta, when the server splits thinking off into its own channel.
+   * llama-server's default `--reasoning-format deepseek` strips `<think>…</think>` out of `content`
+   * and streams the thoughts in `delta.reasoning_content` instead — so a caller that only watches
+   * `onToken` sees no reasoning at all. Callers that don't care may omit this; the reasoning is then
+   * simply not surfaced (it is never part of the assistant `content` either way).
+   *
+   * Under `--reasoning-format none` (or a model that just writes literal tags) the thoughts stay
+   * inline in `content` and reach `onToken` instead — hence both paths exist.
+   */
+  onReasoning?: (delta: string) => void;
 }
 
 /** Token accounting for one inference pass, as reported by the server's `usage` object. */
@@ -414,10 +425,16 @@ export class LlamaClient {
       // Once a token reaches the caller we've committed to this endpoint — the UI has already
       // streamed partial text, so we can't silently restart elsewhere. Track that to gate failover.
       let emitted = false;
+      // Reasoning counts as emitted too: the drawer has already rendered it, so a silent restart on
+      // another endpoint would duplicate the thinking block.
       const guarded: StreamCallbacks = {
         onToken: (delta) => {
           emitted = true;
           callbacks.onToken(delta);
+        },
+        onReasoning: (delta) => {
+          emitted = true;
+          callbacks.onReasoning?.(delta);
         },
       };
       try {
@@ -531,6 +548,16 @@ export class LlamaClient {
         if (!choice) continue;
         const { delta, finish_reason } = choice;
         if (finish_reason) finishReason = finish_reason;
+
+        // Thinking channel. Outside the OpenAI schema, so it isn't on the SDK's delta type: llama-server
+        // (`--reasoning-format deepseek`, its default) pulls the `<think>` block out of `content` and
+        // streams it here. Deliberately NOT appended to `text` — reasoning is not assistant content and
+        // must not be echoed back into the next turn's history.
+        const reasoning = (delta as { reasoning_content?: unknown } | undefined)?.reasoning_content;
+        if (typeof reasoning === 'string' && reasoning) {
+          callbacks.onReasoning?.(reasoning);
+          capture.pushChunk(reasoning, true);
+        }
 
         if (delta?.content) {
           text += delta.content;
