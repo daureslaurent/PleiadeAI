@@ -27,8 +27,11 @@ function PageHeader() {
   // collide — `/llm-debug` must not resolve to the `/llm` header.
   const current = NAV_ITEMS.find((n) => pathname === n.to || pathname.startsWith(`${n.to}/`));
   const Icon = current?.icon;
+  // z-20: .glass's backdrop-filter makes the header a stacking context, so its popovers
+  // (EndpointBadge) can't out-stack later page content unless the header itself is lifted.
+  // Full-screen modals are fixed z-50 and still cover it.
   return (
-    <header className="glass flex h-14 shrink-0 items-center gap-2 border-b px-6">
+    <header className="glass relative z-20 flex h-14 shrink-0 items-center gap-2 border-b px-6">
       {Icon && <Icon size={18} className="text-slate-400" />}
       <h1 className="text-sm font-semibold text-slate-100">{current?.label ?? 'PleiadesAI'}</h1>
       <div className="ml-auto">
