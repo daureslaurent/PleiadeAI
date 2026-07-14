@@ -1,6 +1,5 @@
 import { createLogger } from '../../config/logger';
 import { toolConfigService } from '../../domain/tools/tool-config.service';
-import { googleCredentials, googleGet, NO_KEY_ERROR } from './google-api';
 import type { Tool, ToolConfigField } from '../types';
 
 const log = createLogger('tool:web_search');
@@ -13,9 +12,9 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     key: 'provider',
     label: 'Provider',
     type: 'select',
-    options: ['duckduckgo', 'searxng', 'tavily', 'google'],
+    options: ['duckduckgo', 'searxng', 'tavily'],
     default: 'duckduckgo',
-    hint: 'duckduckgo = free, no key required; searxng = self-hosted; tavily = hosted API (needs a key); google = Custom Search API (key + engine id from Settings → Connections → Google APIs).',
+    hint: 'duckduckgo = free, no key required; searxng = self-hosted; tavily = hosted API (needs a key).',
   },
   {
     key: 'endpoint',
@@ -187,40 +186,9 @@ async function searchTavily(
 }
 
 /**
- * Google Custom Search JSON API. Unlike the other providers, its credentials are the *shared*
- * Google APIs connection (Settings → Connections), not this tool's config — one key serves
- * web_search, youtube and google_maps. The API caps `num` at 10 per request.
- */
-async function searchGoogle(query: string, safeSearch: boolean, limit: number): Promise<SearchHit[]> {
-  const { apiKey, cseId } = await googleCredentials();
-  if (!apiKey) throw new Error(NO_KEY_ERROR);
-  if (!cseId) {
-    throw new Error(
-      'Google Custom Search engine id (cx) not configured — set it in Settings → Connections → Google APIs',
-    );
-  }
-  const params = new URLSearchParams({
-    key: apiKey,
-    cx: cseId,
-    q: query,
-    num: String(Math.min(limit, 10)),
-    safe: safeSearch ? 'active' : 'off',
-  });
-  const data = (await googleGet(`https://www.googleapis.com/customsearch/v1?${params}`)) as {
-    items?: Array<{ title?: string; link?: string; snippet?: string }>;
-  };
-  return (data.items ?? []).slice(0, limit).map((r) => ({
-    title: r.title ?? '',
-    url: r.link ?? '',
-    snippet: r.snippet ?? '',
-  }));
-}
-
-/**
  * `web_search` — queries the web through an operator-configured provider (self-hosted SearXNG by
- * default, hosted Tavily, or the Google Custom Search API). Provider, endpoint, API key and result
- * count are all set from the Tools page and read fresh on every call, so retuning never needs a
- * redeploy (the google provider's credentials live in Settings → Connections instead).
+ * default, or hosted Tavily). Provider, endpoint, API key and result count are all set from the
+ * Tools page and read fresh on every call, so retuning never needs a redeploy.
  */
 export const webSearch: Tool = {
   name: 'web_search',
@@ -254,8 +222,7 @@ export const webSearch: Tool = {
 
     try {
       let results: SearchHit[];
-      if (provider === 'google') results = await searchGoogle(query, Boolean(config.safe_search), limit);
-      else if (provider === 'tavily') results = await searchTavily(query, config, limit);
+      if (provider === 'tavily') results = await searchTavily(query, config, limit);
       else if (provider === 'searxng') results = await searchSearxng(query, config, limit);
       else results = await searchDuckDuckGo(query, config, limit);
       return { result: { ok: true, provider, query, count: results.length, results } };

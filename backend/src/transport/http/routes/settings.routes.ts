@@ -68,9 +68,6 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.public_base_url === 'string') patch.public_base_url = b.public_base_url.trim().replace(/\/+$/, '');
   if (typeof b.google_client_id === 'string') patch.google_client_id = b.google_client_id.trim();
   if (typeof b.google_client_secret === 'string') patch.google_client_secret = b.google_client_secret.trim();
-  // Google APIs (Settings → Connections): shared API key + Programmable Search Engine id.
-  if (typeof b.google_api_key === 'string') patch.google_api_key = b.google_api_key.trim();
-  if (typeof b.google_cse_id === 'string') patch.google_cse_id = b.google_cse_id.trim();
 
   const updated = await settingsService.update(patch);
   // (Re)arm or stop the periodic host update check to match the new settings.

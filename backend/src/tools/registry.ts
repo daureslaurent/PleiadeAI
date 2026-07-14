@@ -19,8 +19,6 @@ import { analyzeImage } from './core/analyzeImage';
 import { generateImage } from './core/generateImage';
 import { data } from './core/data';
 import { listMail, readMail } from './core/mail';
-import { youtube } from './core/youtube';
-import { googleMaps } from './core/googleMaps';
 import { guide } from './core/guide';
 import { read } from './core/fs/read';
 import { write } from './core/fs/write';
@@ -65,9 +63,6 @@ const CORE_TOOLS: Record<string, Tool> = {
   // Read-only Gmail (opt-in via tools_allowed + a per-agent mailbox grant on the Agents page).
   [listMail.name]: listMail,
   [readMail.name]: readMail,
-  // Google APIs (opt-in via tools_allowed; shared key from Settings → Connections → Google APIs).
-  [youtube.name]: youtube,
-  [googleMaps.name]: googleMaps,
   // Session resource pool (list/save/store) — auto-granted to every agent (see AgentRunner).
   [data.name]: data,
   // Man-style tool/workflow guides — auto-granted to every agent (see AgentRunner).

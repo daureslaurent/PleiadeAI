@@ -911,10 +911,6 @@ export interface InferenceSettings {
   /** Google Cloud OAuth client for linking Gmail mailboxes ('' → mail linking unconfigured). */
   google_client_id: string;
   google_client_secret: string;
-  /** Shared Google Cloud API key for Custom Search / YouTube / Maps ('' → those tools unconfigured). */
-  google_api_key: string;
-  /** Programmable Search Engine ID (cx) for the web_search google provider. */
-  google_cse_id: string;
 }
 
 export const settingsApi = {
