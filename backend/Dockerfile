@@ -16,7 +16,8 @@ ENV NODE_ENV=production
 # Docker CLI so the backend can build per-agent isolation images and run/exec their containers
 # through the mounted host /var/run/docker.sock (see docker-compose.yml). openssh-client backs the
 # Isolation page's "scan host key" / "test connection" actions for the `ssh` network mode.
-RUN apk add --no-cache python3 make g++ bash docker-cli openssh-client
+# tzdata gives Python's zoneinfo the IANA database (skills doing timezone math need it).
+RUN apk add --no-cache python3 make g++ bash docker-cli openssh-client tzdata
 
 # Working directory used by the `bash` terminal tool (BASH_CWD).
 RUN mkdir -p /workspace
