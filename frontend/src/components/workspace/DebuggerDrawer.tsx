@@ -31,7 +31,15 @@ function TraceCard({ entry }: { entry: TraceEntry }) {
         )}
       </div>
       {entry.detail && (
-        <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words pl-5 font-mono text-[11px] leading-relaxed text-slate-500">
+        <pre
+          className={`mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words pl-5 font-mono text-[11px] leading-relaxed ${
+            // Thinking is long-form prose, not a short arg/result dump — keep it on the reasoning
+            // tint (as the old dedicated panel had it) so it stays readable at this size.
+            entry.kind === 'reasoning' && entry.status !== 'error'
+              ? 'text-purple-300/80'
+              : 'text-slate-500'
+          }`}
+        >
           {entry.detail}
         </pre>
       )}
@@ -53,15 +61,15 @@ type Tab = 'trace' | 'isolation' | 'data';
  * persisted resources — tool-read images and fetched binary blobs, by handle).
  */
 export function DebuggerDrawer({ onClose, agent }: Props) {
-  const { trace, liveReasoning, streaming } = useStream();
+  const { trace, streaming } = useStream();
   const [tab, setTab] = useState<Tab>('trace');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (tab === 'trace') bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [trace, liveReasoning, tab]);
+  }, [trace, tab]);
 
-  const empty = !trace.length && !liveReasoning;
+  const empty = !trace.length;
 
   return (
     <aside className="glass flex w-96 shrink-0 flex-col border-l">
@@ -90,22 +98,11 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
         <DataPanel />
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+        {/* Reasoning is threaded into `trace` in call order as it streams, so each thinking span
+            renders as its own card between the tools it sits between — no trailing catch-all block. */}
         {trace.map((e, i) => (
           <TraceCard key={i} entry={e} />
         ))}
-
-        {/* Live reasoning for the in-flight turn (persisted into the trace once the turn ends). */}
-        {liveReasoning && (
-          <div className="animate-fade-up rounded-xl bg-black/25 px-3 py-2 backdrop-blur-sm ring-1 ring-purple-500/20">
-            <div className="flex items-center gap-2">
-              <Brain size={13} className="text-reasoning" />
-              <span className="font-mono text-xs text-reasoning">&lt;think&gt;</span>
-            </div>
-            <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words pl-5 font-mono text-[11px] leading-relaxed text-purple-300/80">
-              {liveReasoning}
-            </pre>
-          </div>
-        )}
 
         {empty && (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-slate-600">

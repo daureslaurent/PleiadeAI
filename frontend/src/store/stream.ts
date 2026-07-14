@@ -442,7 +442,10 @@ export const useStream = create<StreamState>((set, get) => ({
         if (tail?.kind === 'reasoning') {
           trace[trace.length - 1] = { ...tail, detail: (tail.detail ?? '') + e.content };
         } else {
-          trace.push({ kind: 'reasoning', label: '<think>', detail: e.content, depth: s.frameStack.length - 1 });
+          // `depth` marks sub-agent nesting, so only carry it when the thinking belongs to a
+          // delegated frame — tagging every top-level span "depth 0" is just noise.
+          const depth = s.frameStack.length - 1;
+          trace.push({ kind: 'reasoning', label: '<think>', detail: e.content, ...(depth > 0 ? { depth } : {}) });
         }
         // The flat string stays as the turn's whole-thinking projection (persisted `reasoning`).
         return { liveItems: items, liveReasoning: s.liveReasoning + e.content, trace };

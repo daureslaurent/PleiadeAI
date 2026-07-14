@@ -255,7 +255,14 @@ export class TurnRecorder {
     if (tail?.kind === 'reasoning') {
       tail.detail = (tail.detail ?? '') + p.content;
     } else {
-      this.trace.push({ kind: 'reasoning', label: '<think>', detail: p.content, depth: p.ctx.depth });
+      // `depth` marks sub-agent nesting, so only carry it when the thinking belongs to a delegated
+      // frame — tagging every top-level span "depth 0" is just noise.
+      this.trace.push({
+        kind: 'reasoning',
+        label: '<think>',
+        detail: p.content,
+        ...(p.ctx.depth > 0 ? { depth: p.ctx.depth } : {}),
+      });
     }
   }
 
