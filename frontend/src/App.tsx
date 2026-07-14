@@ -1,6 +1,7 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './store/auth';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
+import { EndpointBadge } from './components/EndpointBadge';
 import { ConfirmProvider } from './components/ui';
 import { AuthGuard } from './views/AuthGuard';
 import { AgentWorkspace } from './views/AgentWorkspace';
@@ -30,6 +31,9 @@ function PageHeader() {
     <header className="glass flex h-14 shrink-0 items-center gap-2 border-b px-6">
       {Icon && <Icon size={18} className="text-slate-400" />}
       <h1 className="text-sm font-semibold text-slate-100">{current?.label ?? 'PleiadesAI'}</h1>
+      <div className="ml-auto">
+        <EndpointBadge />
+      </div>
     </header>
   );
 }

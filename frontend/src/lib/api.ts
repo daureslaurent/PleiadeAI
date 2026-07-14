@@ -1024,6 +1024,22 @@ export interface Endpoint {
   supports_vision: boolean;
 }
 
+/** Live reachability snapshot of one endpoint (from `GET /endpoints/health`), for the header badge. */
+export interface EndpointHealth {
+  _id: string;
+  name: string;
+  up: boolean;
+  /** Probe round-trip in ms (null when down). */
+  latency_ms: number | null;
+  /** Model the server is serving right now ('' when down or none discovered). */
+  model: string;
+  is_default: boolean;
+  fallback_order: number;
+  managed: boolean;
+  /** Agents targeting this endpoint; agents with no explicit endpoint count on the default. */
+  agents: Array<{ name: string; color: number | null }>;
+}
+
 export type NewEndpoint = Pick<Endpoint, 'name' | 'base_url' | 'api_key' | 'context_window'>;
 export type EndpointPatch = Partial<
   Pick<
@@ -1228,6 +1244,7 @@ export const scoringApi = {
 
 export const endpointsApi = {
   list: () => api.get<Endpoint[]>('/endpoints').then((r) => r.data),
+  health: () => api.get<EndpointHealth[]>('/endpoints/health').then((r) => r.data),
   create: (body: NewEndpoint) => api.post<Endpoint>('/endpoints', body).then((r) => r.data),
   update: (id: string, patch: EndpointPatch) =>
     api.patch<Endpoint>(`/endpoints/${id}`, patch).then((r) => r.data),

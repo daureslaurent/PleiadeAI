@@ -12,6 +12,11 @@ endpointsRouter.get('/', async (_req, res) => {
   res.json(await endpointRepository.list());
 });
 
+/** Live reachability probe of every endpoint (header badge). Never 5xx: down endpoints report `up: false`. */
+endpointsRouter.get('/health', async (_req, res) => {
+  res.json(await endpointService.probeHealth());
+});
+
 endpointsRouter.post('/', async (req, res) => {
   const b = req.body ?? {};
   if (typeof b.name !== 'string' || !b.name.trim() || typeof b.base_url !== 'string' || !b.base_url.trim()) {
