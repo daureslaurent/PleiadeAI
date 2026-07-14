@@ -88,18 +88,19 @@ services:
   # ----------------------------------------
   # 2b. FALLBACK INFERENCE (CPU llama.cpp — last-resort chat model)
   # ----------------------------------------
-  # Always up: a small CPU Qwen2.5-1.5B (Q4) served with --jinja so native tool-calls work. The backend
-  # fails over to it (base_url http://llama-fallback:8080, model id `qwen2.5-1.5b-instruct`) only when a
+  # Always up: a tiny CPU LFM2.5-230M served with --jinja so native tool-calls work. Q8_0 on purpose:
+  # at 230M params quantization loss is disproportionate and the file is only ~250MB anyway. The backend
+  # fails over to it (base_url http://llama-fallback:8080, model id `lfm2.5-230m`) only when a
   # primary endpoint is unreachable. Note: plain llama-server keeps the model resident while running.
   llama-fallback:
     image: ghcr.io/ggml-org/llama.cpp:server
     container_name: pleiades_llama_fallback
     restart: unless-stopped
     command: >
-      -hf bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M
-      --alias qwen2.5-1.5b-instruct
+      -hf LiquidAI/LFM2.5-230M-GGUF:Q8_0
+      --alias lfm2.5-230m
       --jinja
-      --ctx-size 8192
+      --ctx-size 16384
       --host 0.0.0.0 --port 8080
     volumes:
       - pleiades_fallback_models:/root/.cache/huggingface
@@ -108,7 +109,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      # First boot pulls a ~2GB GGUF; report "starting" (not "unhealthy") until it's served.
+      # First boot pulls a ~250MB GGUF; report "starting" (not "unhealthy") until it's served.
       start_period: 600s
     logging: *default-logging
     networks:
@@ -155,7 +156,7 @@ services:
       EMBEDDING_API_URL: http://embeddings:8080
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text-v1.5}
       LLAMA_FALLBACK_URL: http://llama-fallback:8080
-      LLAMA_FALLBACK_MODEL: qwen2.5-1.5b-instruct
+      LLAMA_FALLBACK_MODEL: lfm2.5-230m
       # Primary inference — hosted endpoint (REQUIRED; the LAN default is gone).
       LLAMA_API_URL: ${LLAMA_API_URL:?set LLAMA_API_URL in .env (hosted inference endpoint)}
       LLAMA_API_KEY: ${LLAMA_API_KEY:-sk-no-key-required}

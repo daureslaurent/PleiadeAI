@@ -26,7 +26,7 @@ const EnvSchema = z.object({
   // system-managed endpoint pointing here at boot and auto-discovers its model. The URL is the
   // docker-network hostname (reachable from the backend container, not the operator's browser).
   LLAMA_FALLBACK_URL: z.string().url('LLAMA_FALLBACK_URL must be a valid URL').default('http://llama-fallback:8080'),
-  LLAMA_FALLBACK_MODEL: z.string().default('qwen2.5-1.5b-instruct'),
+  LLAMA_FALLBACK_MODEL: z.string().default('lfm2.5-230m'),
 
   // Embeddings — a separate (CPU) llama.cpp server started with --embedding. Powers Qdrant
   // vector memory; if unreachable the agent loop degrades gracefully (memory read/write skipped).
