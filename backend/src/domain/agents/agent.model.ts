@@ -78,6 +78,13 @@ const AgentSchema = new Schema(
      */
     color: { type: Number, default: null },
     icon: { type: String, default: '' },
+    /**
+     * Ids of the linked Gmail mailboxes (`mail_accounts` collection) this agent may read via the
+     * `list_mail`/`read_mail` tools. Operator-granted on the Agents page; an empty list means the
+     * mail tools refuse even if they appear in `tools_allowed`. Read access only — the tools are
+     * built on the `gmail.readonly` scope and never alter read-state.
+     */
+    mail_accounts: { type: [String], default: [] },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

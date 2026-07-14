@@ -18,6 +18,7 @@ import { visualScreenshot, visualAct, visualClick, visualWindows } from './core/
 import { analyzeImage } from './core/analyzeImage';
 import { generateImage } from './core/generateImage';
 import { data } from './core/data';
+import { listMail, readMail } from './core/mail';
 import { guide } from './core/guide';
 import { read } from './core/fs/read';
 import { write } from './core/fs/write';
@@ -59,6 +60,9 @@ const CORE_TOOLS: Record<string, Tool> = {
   [analyzeImage.name]: analyzeImage,
   // Text-to-image generation via the configured Image endpoint (opt-in per agent via tools_allowed).
   [generateImage.name]: generateImage,
+  // Read-only Gmail (opt-in via tools_allowed + a per-agent mailbox grant on the Agents page).
+  [listMail.name]: listMail,
+  [readMail.name]: readMail,
   // Session resource pool (list/save/store) — auto-granted to every agent (see AgentRunner).
   [data.name]: data,
   // Man-style tool/workflow guides — auto-granted to every agent (see AgentRunner).

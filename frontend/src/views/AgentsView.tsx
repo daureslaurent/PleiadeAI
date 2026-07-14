@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Box, Cpu, FileLock2, NotebookPen, Save, Sparkles, Trash2, Loader2 } from 'lucide-react';
-import { agentsApi, settingsApi, skillsApi, toolsApi, type Agent, type Skill, type ToolInfo } from '../lib/api';
+import { Box, Cpu, FileLock2, Mail, NotebookPen, Save, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import {
+  agentsApi,
+  mailApi,
+  settingsApi,
+  skillsApi,
+  toolsApi,
+  type Agent,
+  type MailAccount,
+  type Skill,
+  type ToolInfo,
+} from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
 import { AgentIsolationSelect } from './AgentIsolationSelect';
 import { AgentModelSelect } from './AgentModelSelect';
@@ -50,6 +60,8 @@ interface Draft {
   max_tool_iterations: number | null;
   color: number | null;
   icon: string;
+  /** Linked mailbox ids this agent may read via the mail tools (granted here, linked in Settings). */
+  mail_accounts: string[];
   /** Server-computed: agent's isolation image has the visual layer. Drives the vision-endpoint warning. */
   visual: boolean;
 }
@@ -71,6 +83,7 @@ const blank = (): Draft => ({
   max_tool_iterations: null,
   color: null,
   icon: '',
+  mail_accounts: [],
   visual: false,
 });
 
@@ -79,6 +92,7 @@ export function AgentsView() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [coreTools, setCoreTools] = useState<ToolInfo[]>([]);
+  const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
   // Global fleet default for the tool-round ceiling, shown as the placeholder when an agent inherits.
   const [globalMaxToolIters, setGlobalMaxToolIters] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -100,16 +114,18 @@ export function AgentsView() {
   );
 
   async function refresh() {
-    const [a, s, t, settings] = await Promise.all([
+    const [a, s, t, settings, mail] = await Promise.all([
       agentsApi.list(),
       skillsApi.list(),
       toolsApi.list(),
       settingsApi.get(),
+      mailApi.list(),
     ]);
     registerAgentIdentities(a);
     setAgents(a);
     setSkills(s);
     setCoreTools(t);
+    setMailAccounts(mail);
     setGlobalMaxToolIters(settings.max_tool_iterations);
     return a;
   }
@@ -137,8 +153,22 @@ export function AgentsView() {
       max_tool_iterations: a.max_tool_iterations ?? null,
       color: a.color ?? null,
       icon: a.icon ?? '',
+      mail_accounts: a.mail_accounts ?? [],
       visual: Boolean(a.visual),
     });
+  }
+
+  function toggleMailbox(id: string) {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            mail_accounts: d.mail_accounts.includes(id)
+              ? d.mail_accounts.filter((m) => m !== id)
+              : [...d.mail_accounts, id],
+          }
+        : d,
+    );
   }
 
   function toggleTool(name: string) {
@@ -173,6 +203,7 @@ export function AgentsView() {
         max_tool_iterations: draft.max_tool_iterations,
         color: draft.color,
         icon: draft.icon,
+        mail_accounts: draft.mail_accounts,
       });
       await refresh();
       select(created);
@@ -186,6 +217,7 @@ export function AgentsView() {
         max_tool_iterations: draft.max_tool_iterations,
         color: draft.color,
         icon: draft.icon,
+        mail_accounts: draft.mail_accounts,
       });
       await agentsApi.setAgentsMd(draft._id!, draft.agents_md);
       await agentsApi.setNotebook(draft._id!, draft.notebook);
@@ -450,6 +482,44 @@ export function AgentsView() {
               );
             })}
           </div>
+
+          {mailAccounts.length > 0 && (
+            <>
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <Mail size={13} /> Mailboxes
+                  <span className="normal-case text-slate-600">
+                    — linked Gmail accounts this agent may read via <code>list_mail</code> /{' '}
+                    <code>read_mail</code> (read-only; never marks mail as read)
+                  </span>
+                </span>
+              </FieldLabel>
+              <div className="space-y-1 rounded-md border border-border bg-panel p-3">
+                {mailAccounts.map((m) => (
+                  <label key={m._id} className="flex items-center gap-2 text-sm text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={draft.mail_accounts.includes(m._id)}
+                      onChange={() => toggleMailbox(m._id)}
+                      className="accent-accent"
+                    />
+                    <span className="font-mono text-xs">{m.email}</span>
+                    {m.status === 'error' && (
+                      <span className="text-[10px] uppercase text-red-400" title={m.last_error}>
+                        auth error
+                      </span>
+                    )}
+                  </label>
+                ))}
+                {!draft.tools_allowed.includes('list_mail') && draft.mail_accounts.length > 0 && (
+                  <p className="pt-1 text-xs text-amber-400">
+                    Also enable the <code>list_mail</code> / <code>read_mail</code> tools above for
+                    this grant to take effect.
+                  </p>
+                )}
+              </div>
+            </>
+          )}
 
           <FieldLabel>Local parameters</FieldLabel>
           <div className="space-y-1 rounded-md border border-border bg-panel p-3">

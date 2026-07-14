@@ -58,6 +58,11 @@ export interface EffectiveSettings {
    */
   memory_distill_enabled: boolean;
   memory_max_tokens: number;
+  /** How this instance is reached from a browser (e.g. `https://pleiades.example.com`) — the base of the OAuth redirect URI. */
+  public_base_url: string;
+  /** Google Cloud OAuth client for linking Gmail mailboxes ('' → mail linking unconfigured). */
+  google_client_id: string;
+  google_client_secret: string;
 }
 
 const KEY = 'global';
@@ -107,6 +112,9 @@ export const settingsService = {
       agents_md: doc?.agents_md ?? '',
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,
+      public_base_url: doc?.public_base_url ?? '',
+      google_client_id: doc?.google_client_id ?? '',
+      google_client_secret: doc?.google_client_secret ?? '',
     };
   },
 

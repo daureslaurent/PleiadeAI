@@ -327,6 +327,8 @@ export interface Agent {
   color: number | null;
   /** Operator-chosen lucide icon key (see `agentIcons`). `''` = unset → initial letter. */
   icon: string;
+  /** Linked mailbox ids this agent may read via `list_mail`/`read_mail` (Settings → Connections). */
+  mail_accounts: string[];
 }
 
 export interface Skill {
@@ -372,6 +374,7 @@ export const agentsApi = {
         | 'max_tool_iterations'
         | 'color'
         | 'icon'
+        | 'mail_accounts'
       >
     >,
   ) =>
@@ -899,6 +902,11 @@ export interface InferenceSettings {
   memory_distill_enabled: boolean;
   /** Token budget for the distillation reply (a small JSON object). */
   memory_max_tokens: number;
+  /** How this instance is reached from a browser — the base of the Gmail OAuth redirect URI. */
+  public_base_url: string;
+  /** Google Cloud OAuth client for linking Gmail mailboxes ('' → mail linking unconfigured). */
+  google_client_id: string;
+  google_client_secret: string;
 }
 
 export const settingsApi = {
@@ -962,6 +970,27 @@ export const hostApi = {
   updateLog: (since: number) =>
     api.get<UpdateLogChunk>('/host/update/log', { params: { since } }).then((r) => r.data),
   getVersion: () => api.get<BackendVersion>('/host/version').then((r) => r.data),
+};
+
+/** One linked Gmail mailbox (Settings → Connections). Tokens never leave the backend. */
+export interface MailAccount {
+  _id: string;
+  email: string;
+  provider: 'google';
+  /** OAuth scopes granted at consent (space-separated). */
+  scopes: string;
+  /** `error` = the last Gmail call failed to authenticate (revoked consent…) — re-link to fix. */
+  status: 'linked' | 'error';
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const mailApi = {
+  list: () => api.get<MailAccount[]>('/mail/accounts').then((r) => r.data),
+  remove: (id: string) => api.delete(`/mail/accounts/${id}`).then((r) => r.data),
+  /** Start an OAuth link flow; navigate the browser to the returned Google consent URL. */
+  oauthStart: () => api.post<{ url: string }>('/mail/oauth/start').then((r) => r.data),
 };
 
 /** One OpenAI-compatible inference endpoint with its autodiscovered model list. */

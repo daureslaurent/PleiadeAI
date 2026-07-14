@@ -2,10 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import {
   endpointsApi,
   finetuneServersApi,
+  mailApi,
   settingsApi,
   type Endpoint,
   type FinetuneServer,
   type InferenceSettings,
+  type MailAccount,
 } from '../../lib/api';
 
 /**
@@ -40,6 +42,8 @@ interface SettingsContextValue {
   reloadEndpoints: () => Promise<void>;
   finetuneServers: FinetuneServer[];
   reloadFinetuneServers: () => Promise<void>;
+  mailAccounts: MailAccount[];
+  reloadMailAccounts: () => Promise<void>;
 }
 
 const Ctx = createContext<SettingsContextValue | null>(null);
@@ -61,6 +65,7 @@ export function SettingsProvider({
   const [form, setForm] = useState<InferenceSettings | null>(null);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [finetuneServers, setFinetuneServers] = useState<FinetuneServer[]>([]);
+  const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
   const [save, setSave] = useState<SaveState>('idle');
 
   /** Keys edited but not yet PUT. Held in a ref so the debounce timer always flushes the latest. */
@@ -71,12 +76,14 @@ export function SettingsProvider({
 
   const reloadEndpoints = useCallback(() => endpointsApi.list().then(setEndpoints), []);
   const reloadFinetuneServers = useCallback(() => finetuneServersApi.list().then(setFinetuneServers), []);
+  const reloadMailAccounts = useCallback(() => mailApi.list().then(setMailAccounts), []);
 
   useEffect(() => {
     void settingsApi.get().then(setForm);
     void reloadEndpoints();
     void reloadFinetuneServers();
-  }, [reloadEndpoints, reloadFinetuneServers]);
+    void reloadMailAccounts();
+  }, [reloadEndpoints, reloadFinetuneServers, reloadMailAccounts]);
 
   const flush = useCallback(async () => {
     const patch = pending.current;
@@ -124,7 +131,18 @@ export function SettingsProvider({
 
   return (
     <Ctx.Provider
-      value={{ form, edit, commit, save, endpoints, reloadEndpoints, finetuneServers, reloadFinetuneServers }}
+      value={{
+        form,
+        edit,
+        commit,
+        save,
+        endpoints,
+        reloadEndpoints,
+        finetuneServers,
+        reloadFinetuneServers,
+        mailAccounts,
+        reloadMailAccounts,
+      }}
     >
       {children}
     </Ctx.Provider>

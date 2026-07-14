@@ -1,5 +1,6 @@
 import {
   Brain,
+  Cable,
   KeyRound,
   MonitorCog,
   RefreshCcwDot,
@@ -9,7 +10,7 @@ import {
 } from 'lucide-react';
 
 /**
- * The six settings categories — the cards on `/settings`, one page each at `/settings/<slug>`.
+ * The settings categories — the cards on `/settings`, one page each at `/settings/<slug>`.
  *
  * Grouped by *what the operator is tuning*, not by which collection backs it: everything about
  * talking to a model server is Inference; everything the whole fleet inherits is Fleet; anything
@@ -48,6 +49,13 @@ export const CATEGORIES: SettingsCategory[] = [
     blurb: 'Standing rules and services every agent inherits.',
     contains: ['House rules (AGENTS.md)', 'Quality scorer', 'Fine-tune servers'],
     icon: Users,
+  },
+  {
+    slug: 'connections',
+    title: 'Connections',
+    blurb: 'External services agents can reach — starting with Gmail.',
+    contains: ['Google OAuth client', 'Linked mailboxes'],
+    icon: Cable,
   },
   {
     slug: 'interface',

@@ -7,6 +7,7 @@ import { SettingsProvider, useSettings, type SaveState } from './context';
 import { InferencePanel } from './panels/InferencePanel';
 import { MemoryPanel } from './panels/MemoryPanel';
 import { FleetPanel } from './panels/FleetPanel';
+import { ConnectionsPanel } from './panels/ConnectionsPanel';
 import { InterfacePanel } from './panels/InterfacePanel';
 import { SystemPanel } from './panels/SystemPanel';
 import { AccessPanel } from './panels/AccessPanel';
@@ -27,6 +28,7 @@ const PANELS: Record<string, () => ReactNode> = {
   inference: InferencePanel,
   memory: MemoryPanel,
   fleet: FleetPanel,
+  connections: ConnectionsPanel,
   interface: InterfacePanel,
   system: SystemPanel,
   access: AccessPanel,

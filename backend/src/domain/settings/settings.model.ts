@@ -84,6 +84,15 @@ const SettingsSchema = new Schema(
     memory_distill_enabled: { type: Boolean, default: true },
     /** Token budget for that distillation call. The reply is a small JSON object. */
     memory_max_tokens: { type: Number, default: 800 },
+    /**
+     * Google OAuth client for linking Gmail mailboxes (Settings → Connections; `GMAIL_TOOL_PLAN.md`).
+     * The operator creates the OAuth client once in the Google Cloud console and registers
+     * `<public_base_url>/api/mail/oauth/callback` as its redirect URI — the UI shows that exact
+     * string. `google_client_secret` is scrubbed from API-key responses by `redact.ts` (`secret$`).
+     */
+    public_base_url: { type: String, default: '' },
+    google_client_id: { type: String, default: '' },
+    google_client_secret: { type: String, default: '' },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

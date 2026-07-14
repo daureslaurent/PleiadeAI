@@ -64,6 +64,10 @@ settingsRouter.put('/', async (req, res) => {
     patch.memory_distill_enabled = Boolean(b.memory_distill_enabled);
   if (b.memory_max_tokens !== undefined)
     patch.memory_max_tokens = Math.max(128, Number(b.memory_max_tokens) || 800);
+  // Gmail linking (Settings → Connections): OAuth client + the public base the redirect URI hangs off.
+  if (typeof b.public_base_url === 'string') patch.public_base_url = b.public_base_url.trim().replace(/\/+$/, '');
+  if (typeof b.google_client_id === 'string') patch.google_client_id = b.google_client_id.trim();
+  if (typeof b.google_client_secret === 'string') patch.google_client_secret = b.google_client_secret.trim();
 
   const updated = await settingsService.update(patch);
   // (Re)arm or stop the periodic host update check to match the new settings.

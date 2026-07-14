@@ -36,6 +36,7 @@ import { resourcesRouter } from './transport/http/routes/resources.routes';
 import { transferRouter } from './transport/http/routes/transfer.routes';
 import { hostRouter } from './transport/http/routes/host.routes';
 import { maintenanceRouter } from './transport/http/routes/maintenance.routes';
+import { mailRouter, mailOauthCallbackRouter } from './transport/http/routes/mail.routes';
 import { scheduleUpdateCheck } from './host';
 import { settingsService } from './domain/settings/settings.service';
 import { telegramBot } from './telegram/TelegramBot';
@@ -103,6 +104,10 @@ async function main(): Promise<void> {
   app.use('/api/transfer', requireAuth, transferRouter);
   app.use('/api/host', requireAuth, hostRouter);
   app.use('/api/maintenance', requireAuth, maintenanceRouter);
+  // The Gmail OAuth callback is a browser redirect *from Google* — it can't carry a JWT, so it is
+  // mounted openly (before the authed router grabs the prefix) and guarded by its signed state token.
+  app.use('/api/mail/oauth/callback', mailOauthCallbackRouter);
+  app.use('/api/mail', requireAuth, mailRouter);
 
   const httpServer = http.createServer(app);
   attachSocket(httpServer);
