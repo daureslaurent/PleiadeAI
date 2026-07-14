@@ -4,7 +4,7 @@ import { Bot, Box, Bug, Cpu, Database, Gauge, LogOut, MessagesSquare, Mic, Packa
 import { PleiadesMark } from './PleiadesMark';
 import { useAuth } from '../store/auth';
 import { usePersistentState } from '../hooks/usePersistentState';
-import { hostApi } from '../lib/api';
+import { hostApi, inboxApi } from '../lib/api';
 import { APP_VERSION } from '../version';
 
 export interface NavItem {
@@ -80,6 +80,24 @@ export function Sidebar() {
     };
   }, []);
 
+  // Unread notifications badge on the Autonomy item — completed headless tasks land in the inbox
+  // whether or not the page is open, so surface the count from the nav.
+  const [inboxUnread, setInboxUnread] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const poll = () =>
+      inboxApi
+        .unreadCount()
+        .then((c) => alive && setInboxUnread(c))
+        .catch(() => undefined);
+    poll();
+    const id = setInterval(poll, 60 * 1000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
   // Poll the host bridge so the "update available" pin survives reloads and refreshes while the
   // app is open. No-op unless updates are enabled + the watcher has written a status.
   useEffect(() => {
@@ -114,6 +132,7 @@ export function Sidebar() {
     >
       {({ isActive }) => {
         const showPin = to === '/settings' && updateCount > 0;
+        const showInbox = to === '/autonomy' && inboxUnread > 0;
         return (
           <>
             {/* 2px inset accent rail on the active item (DIRECT_ART §7 nav treatment). */}
@@ -130,6 +149,9 @@ export function Sidebar() {
               {showPin && collapsed && (
                 <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#161b22]" />
               )}
+              {showInbox && collapsed && (
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-[#161b22]" />
+              )}
             </span>
             {!collapsed && <span className="truncate">{label}</span>}
             {showPin && !collapsed && (
@@ -138,6 +160,14 @@ export function Sidebar() {
                 className="ml-auto rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400"
               >
                 {updateCount}
+              </span>
+            )}
+            {showInbox && !collapsed && (
+              <span
+                title={`${inboxUnread} unread notification${inboxUnread === 1 ? '' : 's'}`}
+                className="ml-auto rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent"
+              >
+                {inboxUnread}
               </span>
             )}
           </>

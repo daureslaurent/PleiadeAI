@@ -12,6 +12,7 @@ import {
   type InlineButton,
   type TelegramUpdate,
 } from './TelegramClient';
+import { telegramChatIds } from './telegram-config';
 
 const log = createLogger('telegram-bot');
 
@@ -39,15 +40,11 @@ class TelegramBot {
   private running = false;
   private offset = 0;
   private allowed: Set<string> = new Set();
+  /** The active poll loop — awaited by `restart` so two loops never run concurrently. */
+  private loop: Promise<void> | null = null;
 
   private computeAllowlist(): Set<string> {
-    const raw = env.TELEGRAM_ALLOWED_CHAT_IDS ?? env.TELEGRAM_CHAT_ID ?? '';
-    return new Set(
-      raw
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    );
+    return new Set(telegramChatIds());
   }
 
   private isAllowed(chatId: number): boolean {
@@ -55,7 +52,12 @@ class TelegramBot {
     return this.allowed.size === 0 || this.allowed.has(String(chatId));
   }
 
+  isRunning(): boolean {
+    return this.running;
+  }
+
   async start(): Promise<void> {
+    if (this.running) return;
     if (!telegramClient.isConfigured()) {
       log.debug('telegram bot not configured; skipping');
       return;
@@ -76,11 +78,23 @@ class TelegramBot {
       { username: me.username, restricted: this.allowed.size > 0 },
       'telegram bot started',
     );
-    void this.pollLoop();
+    this.loop = this.pollLoop();
   }
 
   stop(): void {
     this.running = false;
+  }
+
+  /**
+   * Re-apply the runtime Telegram config (settings save): stop, let the in-flight long-poll
+   * unwind (up to ~40s), then start again against the new token/allowlist. `start` no-ops if the
+   * token was removed. Fire-and-forget from the settings route.
+   */
+  async restart(): Promise<void> {
+    this.stop();
+    await this.loop;
+    this.loop = null;
+    await this.start();
   }
 
   private async pollLoop(): Promise<void> {
@@ -112,7 +126,7 @@ class TelegramBot {
     if (!this.isAllowed(chatId)) {
       await telegramClient.sendMessage(
         chatId,
-        `⛔ Not authorized.\nAsk the operator to add chat id \`${chatId}\` to TELEGRAM_ALLOWED_CHAT_IDS.`,
+        `⛔ Not authorized.\nAsk the operator to add chat id \`${chatId}\` to the Telegram chat ids (Autonomy page, or TELEGRAM_ALLOWED_CHAT_IDS).`,
       );
       log.warn({ chatId, username: message.from?.username }, 'rejected unauthorized chat');
       return;

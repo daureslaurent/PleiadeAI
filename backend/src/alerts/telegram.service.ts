@@ -1,6 +1,6 @@
-import { env } from '../config/env';
 import { createLogger } from '../config/logger';
 import { telegramClient } from '../telegram/TelegramClient';
+import { telegramChatIds } from '../telegram/telegram-config';
 
 const log = createLogger('telegram');
 
@@ -15,13 +15,9 @@ export const telegramService = {
     return telegramClient.isConfigured() && this.targets().length > 0;
   },
 
-  /** Chats that receive alerts: the allowlist if set, else the single TELEGRAM_CHAT_ID. */
+  /** Chats that receive alerts — the runtime config (DB settings, env fallback). */
   targets(): string[] {
-    const raw = env.TELEGRAM_ALLOWED_CHAT_IDS ?? env.TELEGRAM_CHAT_ID ?? '';
-    return raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    return telegramChatIds();
   },
 
   async send(title: string, content: string): Promise<void> {

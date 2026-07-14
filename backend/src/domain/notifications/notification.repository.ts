@@ -42,4 +42,17 @@ export const notificationRepository = {
       .exec()
       .then((r) => r.modifiedCount);
   },
+
+  remove(id: string | Types.ObjectId): Promise<NotificationDoc | null> {
+    return NotificationModel.findByIdAndDelete(id).exec();
+  },
+
+  /** Bulk-delete every already-read notification (inbox housekeeping). */
+  clearRead(agentId?: string | Types.ObjectId): Promise<number> {
+    const filter: Record<string, unknown> = { status: 'read' };
+    if (agentId) filter.agent_id = agentId;
+    return NotificationModel.deleteMany(filter)
+      .exec()
+      .then((r) => r.deletedCount ?? 0);
+  },
 };

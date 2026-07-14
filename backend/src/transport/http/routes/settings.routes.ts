@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { settingsService, type EffectiveSettings } from '../../../domain/settings/settings.service';
 import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
+import { applyTelegramConfig } from '../../../telegram/telegram-config';
+import { telegramBot } from '../../../telegram/TelegramBot';
+import { createLogger } from '../../../config/logger';
+
+const log = createLogger('settings-routes');
 
 /** Runtime inference settings (llama.cpp options) for the Settings page. */
 export const settingsRouter = Router();
@@ -68,10 +73,20 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.public_base_url === 'string') patch.public_base_url = b.public_base_url.trim().replace(/\/+$/, '');
   if (typeof b.google_client_id === 'string') patch.google_client_id = b.google_client_id.trim();
   if (typeof b.google_client_secret === 'string') patch.google_client_secret = b.google_client_secret.trim();
+  // Telegram bot (Autonomy page): token + comma list of chat ids. '' → fall back to env.
+  if (typeof b.telegram_bot_token === 'string') patch.telegram_bot_token = b.telegram_bot_token.trim();
+  if (typeof b.telegram_chat_ids === 'string') patch.telegram_chat_ids = b.telegram_chat_ids.trim();
 
   const updated = await settingsService.update(patch);
   // (Re)arm or stop the periodic host update check to match the new settings.
   if (updated.update_enabled) scheduleUpdateCheck(updated.update_check_interval_hours);
   else stopUpdateCheck();
+  // Push the (possibly unchanged) telegram config into the runtime and bounce the interactive bot
+  // so a new token/allowlist takes effect without a redeploy. Fire-and-forget: the restart waits
+  // for the in-flight long-poll (≤ ~40s) to unwind.
+  if (patch.telegram_bot_token !== undefined || patch.telegram_chat_ids !== undefined) {
+    applyTelegramConfig(updated);
+    void telegramBot.restart().catch((err) => log.error({ err }, 'telegram bot restart failed'));
+  }
   res.json(updated);
 });

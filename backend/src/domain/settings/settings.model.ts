@@ -93,6 +93,14 @@ const SettingsSchema = new Schema(
     public_base_url: { type: String, default: '' },
     google_client_id: { type: String, default: '' },
     google_client_secret: { type: String, default: '' },
+    /**
+     * Telegram bot for outbound alerts + the interactive operator bot (Autonomy page). '' → fall
+     * back to the TELEGRAM_* env vars. `telegram_chat_ids` is a comma list of chat ids that both
+     * receive alerts and are allowed to talk to the bot. Token is scrubbed from API-key responses
+     * by `redact.ts` (`token$`).
+     */
+    telegram_bot_token: { type: String, default: '' },
+    telegram_chat_ids: { type: String, default: '' },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

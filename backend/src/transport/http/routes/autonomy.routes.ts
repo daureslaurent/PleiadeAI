@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { getAgenda, AUTONOMOUS_RUN_JOB } from '../../../autonomy/agenda.setup';
-import { parseCron, applyCron } from '../../../autonomy/cron';
+import { parseCron, applyCron, previewCron } from '../../../autonomy/cron';
 import { env } from '../../../config/env';
 import { runResultRepository } from '../../../domain/autonomy/run-result.repository';
 
@@ -10,8 +10,19 @@ export const autonomyRouter = Router();
 
 autonomyRouter.get('/jobs', async (_req, res) => {
   const jobs = await getAgenda().jobs({ name: AUTONOMOUS_RUN_JOB });
+  // Run-now / busy-requeue create ad-hoc *clones* of a schedule (same `data.scheduleId`, different
+  // `_id`). They are executions, not schedules: hide them from the list, but fold their liveness
+  // (Agenda's `lockedAt`) back into the schedule they belong to.
+  const runningSchedules = new Set(
+    jobs
+      .filter((j) => j.attrs.lockedAt)
+      .map((j) => String(j.attrs.data.scheduleId ?? j.attrs._id)),
+  );
+  const schedules = jobs.filter(
+    (j) => !j.attrs.data.scheduleId || j.attrs.data.scheduleId === String(j.attrs._id),
+  );
   res.json(
-    jobs.map((j) => ({
+    schedules.map((j) => ({
       id: String(j.attrs._id),
       data: j.attrs.data,
       nextRunAt: j.attrs.nextRunAt,
@@ -19,8 +30,19 @@ autonomyRouter.get('/jobs', async (_req, res) => {
       cron: j.attrs.repeatInterval ?? j.attrs.data.cron ?? null,
       once: !j.attrs.repeatInterval,
       timezone: env.SCHEDULE_TZ,
+      running: runningSchedules.has(String(j.attrs._id)),
     })),
   );
+});
+
+/** Cron helper for the schedule form: validity + the next occurrences in SCHEDULE_TZ. */
+autonomyRouter.get('/cron/preview', (req, res) => {
+  const expr = typeof req.query.expr === 'string' ? req.query.expr.trim() : '';
+  if (!expr) {
+    res.status(400).json({ error: 'expr query parameter is required' });
+    return;
+  }
+  res.json(previewCron(expr));
 });
 
 /**

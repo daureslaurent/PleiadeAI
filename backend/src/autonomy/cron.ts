@@ -32,6 +32,26 @@ export function parseCron(expr: string): { ok: true; value: ParsedCron } | { ok:
 }
 
 /**
+ * Preview a cron expression for the UI helper: validity plus the next `count` occurrences in
+ * SCHEDULE_TZ. Same parser (and thus exactly the same acceptance) as `parseCron`.
+ */
+export function previewCron(
+  expr: string,
+  count = 3,
+): { valid: boolean; error: string | null; next: Date[]; timezone: string } {
+  const timezone = env.SCHEDULE_TZ;
+  try {
+    const interval = parseExpression(expr, { tz: timezone });
+    const next: Date[] = [];
+    for (let i = 0; i < count; i++) next.push(interval.next().toDate());
+    return { valid: true, error: null, next, timezone };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { valid: false, error: message, next: [], timezone };
+  }
+}
+
+/**
  * Stamp a validated cron onto an autonomous-run job. Recurring keeps the expression in Agenda's
  * `repeatInterval` (evaluated by Agenda itself in SCHEDULE_TZ); one-shot schedules the concrete
  * next occurrence, so Agenda runs it once and completes it — the expression is kept in `data.cron`

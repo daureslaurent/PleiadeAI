@@ -40,6 +40,8 @@ import { mailRouter, mailOauthCallbackRouter } from './transport/http/routes/mai
 import { scheduleUpdateCheck } from './host';
 import { settingsService } from './domain/settings/settings.service';
 import { telegramBot } from './telegram/TelegramBot';
+import { applyTelegramConfig } from './telegram/telegram-config';
+import { telegramRouter } from './transport/http/routes/telegram.routes';
 
 /**
  * Composition root. Boot order matters: Mongo must connect before Agenda (which stores jobs in
@@ -89,6 +91,7 @@ async function main(): Promise<void> {
   app.use('/api/memory', requireAuth, memoryRouter);
   app.use('/api/inbox', requireAuth, inboxRouter);
   app.use('/api/autonomy', requireAuth, autonomyRouter);
+  app.use('/api/telegram', requireAuth, telegramRouter);
   app.use('/api/conversation-gen', requireAuth, conversationGenRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
   app.use('/api/endpoints', requireAuth, endpointsRouter);
@@ -113,8 +116,16 @@ async function main(): Promise<void> {
   attachSocket(httpServer);
   attachVisualProxy(httpServer);
   await setupAgenda();
-  // Interactive Telegram bot (long-poll). Best-effort: a Telegram outage never blocks boot.
-  telegramBot.start().catch((err) => rootLogger.error({ err }, 'telegram bot failed to start'));
+  // Interactive Telegram bot (long-poll). The DB-backed settings (env fallback) are pushed into
+  // the runtime config first so a token saved from the UI survives restarts. Best-effort: a
+  // Telegram outage never blocks boot.
+  settingsService
+    .get()
+    .then((s) => {
+      applyTelegramConfig(s);
+      return telegramBot.start();
+    })
+    .catch((err) => rootLogger.error({ err }, 'telegram bot failed to start'));
 
   // Periodic host update check (only actually runs when update_enabled is on — see runUpdateCheck).
   settingsService

@@ -344,7 +344,8 @@ export interface Skill {
 
 export interface Notification {
   _id: string;
-  agent_id: string;
+  /** Owning agent, or null for system-level notifications (e.g. a fine-tune finishing). */
+  agent_id: string | null;
   title: string;
   content: string;
   status: 'unread' | 'read';
@@ -751,8 +752,17 @@ export const memoryApi = {
 };
 
 export const inboxApi = {
-  list: () => api.get<Notification[]>('/inbox').then((r) => r.data),
+  list: (unreadOnly = false) =>
+    api
+      .get<Notification[]>('/inbox', { params: unreadOnly ? { unread: 'true' } : {} })
+      .then((r) => r.data),
+  unreadCount: () =>
+    api.get<{ count: number }>('/inbox/unread-count').then((r) => r.data.count),
   markRead: (id: string) => api.post(`/inbox/${id}/read`).then((r) => r.data),
+  readAll: () => api.post<{ updated: number }>('/inbox/read-all').then((r) => r.data),
+  remove: (id: string) => api.delete(`/inbox/${id}`).then((r) => r.data),
+  /** Bulk-delete every already-read notification. */
+  clearRead: () => api.post<{ deleted: number }>('/inbox/clear-read').then((r) => r.data),
 };
 
 /**
@@ -807,13 +817,29 @@ export const conversationGenApi = {
 
 export interface AutonomyJob {
   id: string;
-  data: { agentName: string; prompt: string; alert?: boolean };
+  data: {
+    agentName: string;
+    prompt: string;
+    alert?: boolean;
+    /** Set when an agent created the schedule itself via the `schedule_task` tool. */
+    ownerAgent?: string;
+  };
   nextRunAt: string | null;
   lastRunAt: string | null;
   /** The 5-field cron expression (recurring: live schedule; one-shot: informational). */
   cron: string | null;
   once: boolean;
   /** IANA timezone the cron is evaluated in (server SCHEDULE_TZ). */
+  timezone: string;
+  /** True while an Agenda worker is executing this job right now (liveness signal). */
+  running: boolean;
+}
+
+/** Cron helper reply: validity + the next occurrences in the server's SCHEDULE_TZ. */
+export interface CronPreview {
+  valid: boolean;
+  error: string | null;
+  next: string[];
   timezone: string;
 }
 
@@ -847,6 +873,25 @@ export const autonomyApi = {
   results: (id: string) =>
     api.get<AutonomyRunResult[]>(`/autonomy/jobs/${id}/results`).then((r) => r.data),
   kill: () => api.post('/autonomy/kill').then((r) => r.data),
+  cronPreview: (expr: string) =>
+    api.get<CronPreview>('/autonomy/cron/preview', { params: { expr } }).then((r) => r.data),
+};
+
+/** Effective Telegram state for the Autonomy page (config itself lives in settings). */
+export interface TelegramStatus {
+  configured: boolean;
+  /** Live bot identity (getMe). null with `configured` ⇒ invalid token / Telegram outage. */
+  bot: { id: number; username: string | null } | null;
+  targets: string[];
+  /** Whether the interactive long-poll bot is enabled (TELEGRAM_POLLING env). */
+  polling: boolean;
+  running: boolean;
+}
+
+export const telegramApi = {
+  status: () => api.get<TelegramStatus>('/telegram/status').then((r) => r.data),
+  test: (message?: string) =>
+    api.post<{ ok: boolean; targets: string[] }>('/telegram/test', { message }).then((r) => r.data),
 };
 
 export interface InferenceSettings {
@@ -911,6 +956,10 @@ export interface InferenceSettings {
   /** Google Cloud OAuth client for linking Gmail mailboxes ('' → mail linking unconfigured). */
   google_client_id: string;
   google_client_secret: string;
+  /** Telegram bot token for alerts + the interactive bot ('' → TELEGRAM_BOT_TOKEN env fallback). */
+  telegram_bot_token: string;
+  /** Comma list of chat ids that receive alerts / may talk to the bot ('' → env fallback). */
+  telegram_chat_ids: string;
 }
 
 export const settingsApi = {

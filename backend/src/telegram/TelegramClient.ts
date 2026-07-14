@@ -1,5 +1,5 @@
-import { env } from '../config/env';
 import { createLogger } from '../config/logger';
+import { telegramToken } from './telegram-config';
 
 const log = createLogger('telegram-client');
 
@@ -43,7 +43,7 @@ export interface TelegramUpdate {
  */
 class TelegramClient {
   isConfigured(): boolean {
-    return Boolean(env.TELEGRAM_BOT_TOKEN);
+    return Boolean(telegramToken());
   }
 
   private async call<T = unknown>(
@@ -52,7 +52,7 @@ class TelegramClient {
     { timeoutMs }: { timeoutMs?: number } = {},
   ): Promise<T | null> {
     if (!this.isConfigured()) return null;
-    const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
+    const url = `https://api.telegram.org/bot${telegramToken()}/${method}`;
     const controller = timeoutMs ? new AbortController() : undefined;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
     try {

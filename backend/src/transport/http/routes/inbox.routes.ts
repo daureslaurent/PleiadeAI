@@ -28,3 +28,18 @@ inboxRouter.post('/read-all', async (req, res) => {
   const agentId = typeof req.body?.agentId === 'string' ? req.body.agentId : undefined;
   res.json({ updated: await notificationRepository.markAllRead(agentId) });
 });
+
+/** Bulk-delete every already-read notification (inbox housekeeping). */
+inboxRouter.post('/clear-read', async (req, res) => {
+  const agentId = typeof req.body?.agentId === 'string' ? req.body.agentId : undefined;
+  res.json({ deleted: await notificationRepository.clearRead(agentId) });
+});
+
+inboxRouter.delete('/:id', async (req, res) => {
+  const n = await notificationRepository.remove(req.params.id);
+  if (!n) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  res.json({ ok: true });
+});

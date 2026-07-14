@@ -63,6 +63,10 @@ export interface EffectiveSettings {
   /** Google Cloud OAuth client for linking Gmail mailboxes ('' → mail linking unconfigured). */
   google_client_id: string;
   google_client_secret: string;
+  /** Telegram bot token for alerts + the interactive bot ('' in DB → TELEGRAM_BOT_TOKEN env). */
+  telegram_bot_token: string;
+  /** Comma list of chat ids that receive alerts / may talk to the bot ('' in DB → env). */
+  telegram_chat_ids: string;
 }
 
 const KEY = 'global';
@@ -115,6 +119,10 @@ export const settingsService = {
       public_base_url: doc?.public_base_url ?? '',
       google_client_id: doc?.google_client_id ?? '',
       google_client_secret: doc?.google_client_secret ?? '',
+      // `||` (not `??`): an empty DB string means "unset" and falls back to the env defaults.
+      telegram_bot_token: doc?.telegram_bot_token || env.TELEGRAM_BOT_TOKEN || '',
+      telegram_chat_ids:
+        doc?.telegram_chat_ids || env.TELEGRAM_ALLOWED_CHAT_IDS || env.TELEGRAM_CHAT_ID || '',
     };
   },
 
