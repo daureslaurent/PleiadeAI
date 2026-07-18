@@ -5,6 +5,7 @@ import { monitorTargetRepository } from '../../../domain/monitor/monitor-target.
 import { MonitorTargetError, monitorService } from '../../../domain/monitor/monitor.service';
 import { monitorPoller } from '../../../domain/monitor/monitor.poller';
 import { forget } from '../../../domain/monitor/monitor.alerts';
+import { settingsService } from '../../../domain/settings/settings.service';
 import type { MonitorTargetDoc } from '../../../domain/monitor/monitor-target.model';
 
 const log = createLogger('monitor-routes');
@@ -149,6 +150,15 @@ monitorRouter.post('/targets/:id/test', async (req, res) => {
 /** Every enabled target's newest snapshot — the fleet grid. */
 monitorRouter.get('/live', (_req, res) => {
   res.json(monitorPoller.live());
+});
+
+/**
+ * What the in-RAM history buffer currently holds and costs. Backs the Settings → Monitor readout, so
+ * the operator can see the price of a deeper buffer before raising the cap.
+ */
+monitorRouter.get('/stats', async (_req, res) => {
+  const settings = await settingsService.get();
+  res.json(monitorPoller.stats(settings.monitor_history_samples));
 });
 
 /**

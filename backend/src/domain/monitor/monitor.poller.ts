@@ -23,8 +23,17 @@ const log = createLogger('monitor-poller');
  * service timeout, and serial polling would let one dead machine delay every healthy one behind it.
  */
 
-/** ~2h at the default 10s poll. The cap is on *samples*, so a faster poll simply buys less history. */
-const MAX_SAMPLES = 720;
+/**
+ * Bounds on the operator's history depth (`monitor_history_samples`, default 720 ≈ 2h at 10s). The
+ * cap is on *samples*, not wall time, so a faster poll buys proportionally less history.
+ *
+ * The ceiling exists because this buffer is unswappable process memory: at ~200 bytes a sample,
+ * 100k samples × a handful of machines is still only tens of MB, which is a defensible worst case
+ * for a box also running inference. Anything past that wants a real time-series store, not RAM.
+ */
+const MIN_HISTORY_SAMPLES = 60;
+const MAX_HISTORY_SAMPLES = 100_000;
+const DEFAULT_HISTORY_SAMPLES = 720;
 /** Floor on the poll interval — a misconfigured 0/1s would hammer every box in the fleet. */
 const MIN_POLL_SECONDS = 5;
 
@@ -38,6 +47,30 @@ let timer: NodeJS.Timeout | null = null;
 let running = false;
 /** Interval the current timer was armed with, so a settings change can re-arm it. */
 let armedSeconds = 0;
+
+/** Clamp the configured depth into the supported range; a blank/garbage setting falls back to the default. */
+function historyCap(configured: number | undefined): number {
+  const wanted = Number.isFinite(configured) && (configured ?? 0) > 0 ? Number(configured) : DEFAULT_HISTORY_SAMPLES;
+  return Math.min(MAX_HISTORY_SAMPLES, Math.max(MIN_HISTORY_SAMPLES, Math.round(wanted)));
+}
+
+/**
+ * Approximate heap cost of one sample, in bytes.
+ *
+ * This is an **estimate, not a measurement** — V8 gives no per-object retained size, and walking the
+ * heap to find out would cost far more than the buffer itself. The model: a plain object with 9
+ * properties runs roughly 120 bytes of header + slots, plus three arrays that each carry ~40 bytes
+ * of overhead and 8 bytes per element. Nulls in those arrays may box rather than pack, so real usage
+ * skews slightly *above* this figure; it is reported to the operator as an order-of-magnitude guide
+ * for choosing a depth, not as an accounting number.
+ */
+const SAMPLE_BASE_BYTES = 120;
+const ARRAY_BASE_BYTES = 40;
+const ARRAY_ELEMENT_BYTES = 8;
+
+function estimateSampleBytes(gpuCount: number): number {
+  return SAMPLE_BASE_BYTES + 3 * (ARRAY_BASE_BYTES + gpuCount * ARRAY_ELEMENT_BYTES);
+}
 
 /** Reduce a full snapshot to the handful of series the drill-down actually graphs. */
 function toSample(snapshot: MonitorSnapshot): MonitorSample {
@@ -89,9 +122,12 @@ async function pollTarget(
     live.last_ok_at = new Date().toISOString();
     live.breaches = evaluate(snapshot, settings);
 
+    const cap = historyCap(settings.monitor_history_samples);
     const history = previous?.history ?? [];
     history.push(toSample(snapshot));
-    if (history.length > MAX_SAMPLES) history.splice(0, history.length - MAX_SAMPLES);
+    // Trims on every append, so lowering the setting takes effect on the next poll rather than
+    // leaving the old buffer resident until a restart.
+    if (history.length > cap) history.splice(0, history.length - cap);
     state.set(id, { live, history });
   } catch (err) {
     live.error = err instanceof Error ? err.message : String(err);
@@ -169,6 +205,39 @@ export const monitorPoller = {
 
   history(targetId: string): MonitorSample[] {
     return state.get(targetId)?.history ?? [];
+  },
+
+  /**
+   * What the in-RAM history currently costs, per target and in total — the readout behind the
+   * history-depth setting, so the operator can see the price of a deeper buffer before raising it.
+   *
+   * `bytes` is an estimate (see {@link estimateSampleBytes}); `oldest`/`newest` are what actually
+   * answers "how far back can I look", which the sample count alone doesn't say once a machine has
+   * been offline for a while and left gaps.
+   */
+  stats(cap: number): {
+    cap: number;
+    total_samples: number;
+    total_bytes: number;
+    targets: { target_id: string; name: string; samples: number; bytes: number; oldest: number | null; newest: number | null }[];
+  } {
+    const targets = [...state.values()].map((s) => {
+      const gpuCount = s.history.length ? (s.history[s.history.length - 1]?.gpu_util.length ?? 0) : 0;
+      return {
+        target_id: s.live.target_id,
+        name: s.live.name,
+        samples: s.history.length,
+        bytes: s.history.length * estimateSampleBytes(gpuCount),
+        oldest: s.history[0]?.t ?? null,
+        newest: s.history[s.history.length - 1]?.t ?? null,
+      };
+    });
+    return {
+      cap: historyCap(cap),
+      total_samples: targets.reduce((n, t) => n + t.samples, 0),
+      total_bytes: targets.reduce((n, t) => n + t.bytes, 0),
+      targets: targets.sort((a, b) => a.name.localeCompare(b.name)),
+    };
   },
 
   /**

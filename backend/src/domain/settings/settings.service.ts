@@ -69,6 +69,8 @@ export interface EffectiveSettings {
   telegram_chat_ids: string;
   /** How often the Monitor poller reads every enabled target, seconds. */
   monitor_poll_seconds: number;
+  /** Samples of history kept per machine in RAM (clamped 60…100000). 720 ≈ 2h at a 10s poll. */
+  monitor_history_samples: number;
   /** Whether breached monitor thresholds fan out to the inbox + Telegram (the dashboard tints regardless). */
   monitor_alerts_enabled: boolean;
   /** Monitor thresholds, percent (memory/vram/disk) or °C (temps). `warn` = amber, `critical` = red. */
@@ -141,6 +143,7 @@ export const settingsService = {
       telegram_chat_ids:
         doc?.telegram_chat_ids || env.TELEGRAM_ALLOWED_CHAT_IDS || env.TELEGRAM_CHAT_ID || '',
       monitor_poll_seconds: doc?.monitor_poll_seconds ?? 10,
+      monitor_history_samples: doc?.monitor_history_samples ?? 720,
       monitor_alerts_enabled: doc?.monitor_alerts_enabled ?? true,
       monitor_cpu_temp_warn: doc?.monitor_cpu_temp_warn ?? 80,
       monitor_cpu_temp_critical: doc?.monitor_cpu_temp_critical ?? 90,

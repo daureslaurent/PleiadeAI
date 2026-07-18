@@ -114,6 +114,12 @@ const SettingsSchema = new Schema(
      * consumer cards throttle in the 83-93°C range).
      */
     monitor_poll_seconds: { type: Number, default: 10 },
+    /**
+     * How many samples of history are kept per machine, in RAM (clamped to 60…100000 by the poller).
+     * 720 ≈ 2h at the default 10s poll. The cost is roughly 200 bytes per sample per machine —
+     * Settings → Monitor shows the live figure.
+     */
+    monitor_history_samples: { type: Number, default: 720 },
     monitor_alerts_enabled: { type: Boolean, default: true },
     monitor_cpu_temp_warn: { type: Number, default: 80 },
     monitor_cpu_temp_critical: { type: Number, default: 90 },

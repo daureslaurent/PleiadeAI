@@ -65,3 +65,11 @@ output, motion only for liveness (a polling card shimmers; a stale one does not)
 - [x] Frontend: API client, Monitor view, cards, drill-down, sparklines
 - [x] Sidebar + route
 - [x] Typecheck both apps
+- [x] Configurable history depth (`monitor_history_samples`, clamped 60…100,000) + a live RAM
+      readout in Settings → Monitor (`GET /monitor/stats`)
+
+### Note
+
+The settings `PUT` whitelists keys (`settings.routes.ts`). Any new `monitor_*` setting must be added
+there too, or it silently never persists — that bug shipped in the first commit and cost the whole
+panel; it is fixed and worth remembering for the next key added here.

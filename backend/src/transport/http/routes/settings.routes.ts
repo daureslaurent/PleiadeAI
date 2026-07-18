@@ -77,6 +77,34 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.telegram_bot_token === 'string') patch.telegram_bot_token = b.telegram_bot_token.trim();
   if (typeof b.telegram_chat_ids === 'string') patch.telegram_chat_ids = b.telegram_chat_ids.trim();
 
+  // Fleet monitoring (Monitor page). The poller re-reads these every tick, so a change takes effect
+  // on the next poll with no restart. Floors here mirror the poller's own clamps; the thresholds are
+  // free-form because "what counts as too hot" is the operator's call, not ours.
+  if (b.monitor_poll_seconds !== undefined)
+    patch.monitor_poll_seconds = Math.max(5, Number(b.monitor_poll_seconds) || 10);
+  if (b.monitor_history_samples !== undefined)
+    patch.monitor_history_samples = Math.min(100_000, Math.max(60, Number(b.monitor_history_samples) || 720));
+  if (b.monitor_alerts_enabled !== undefined) patch.monitor_alerts_enabled = Boolean(b.monitor_alerts_enabled);
+  if (b.monitor_alert_cooldown_minutes !== undefined)
+    patch.monitor_alert_cooldown_minutes = Math.max(0, Number(b.monitor_alert_cooldown_minutes) || 0);
+  for (const key of [
+    'monitor_cpu_temp_warn',
+    'monitor_cpu_temp_critical',
+    'monitor_gpu_temp_warn',
+    'monitor_gpu_temp_critical',
+    'monitor_memory_warn',
+    'monitor_memory_critical',
+    'monitor_vram_warn',
+    'monitor_vram_critical',
+    'monitor_disk_warn',
+    'monitor_disk_critical',
+  ] as const) {
+    if (b[key] === undefined) continue;
+    const v = Number(b[key]);
+    // 0 disables a rule (see `grade()` in monitor.alerts), so it is a legal value — but NaN isn't.
+    if (Number.isFinite(v)) patch[key] = Math.max(0, v);
+  }
+
   const updated = await settingsService.update(patch);
   // (Re)arm or stop the periodic host update check to match the new settings.
   if (updated.update_enabled) scheduleUpdateCheck(updated.update_check_interval_hours);

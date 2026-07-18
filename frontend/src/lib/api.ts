@@ -962,6 +962,8 @@ export interface InferenceSettings {
   telegram_chat_ids: string;
   /** How often the backend polls every monitored machine, seconds (floor 5). */
   monitor_poll_seconds: number;
+  /** History samples kept per machine in RAM (clamped 60…100000 by the poller). 720 ≈ 2h at a 10s poll. */
+  monitor_history_samples: number;
   /** Whether breached monitor thresholds fan out to the inbox + Telegram (the dashboard tints regardless). */
   monitor_alerts_enabled: boolean;
   /** Fleet-wide monitor thresholds: °C for temps, percent for the rest. warn = amber, critical = red. */
@@ -1761,6 +1763,26 @@ export interface MonitorTestResult {
   error?: string;
 }
 
+/**
+ * What the backend's in-RAM history buffer holds and costs. `bytes` figures are *estimates* — V8
+ * exposes no per-object retained size — intended as an order-of-magnitude guide for picking a depth.
+ */
+export interface MonitorStats {
+  /** The effective cap after clamping, which may differ from the number typed in settings. */
+  cap: number;
+  total_samples: number;
+  total_bytes: number;
+  targets: {
+    target_id: string;
+    name: string;
+    samples: number;
+    bytes: number;
+    /** Epoch ms of the oldest/newest retained sample — how far back the graphs actually reach. */
+    oldest: number | null;
+    newest: number | null;
+  }[];
+}
+
 export const monitorApi = {
   listTargets: () => api.get<MonitorTarget[]>('/monitor/targets').then((r) => r.data),
   createTarget: (body: MonitorTargetPatch & { name: string; base_url: string }) =>
@@ -1775,4 +1797,6 @@ export const monitorApi = {
   /** `since` (epoch ms) fetches only newer samples, so a polling page doesn't re-download the buffer. */
   history: (id: string, since?: number) =>
     api.get<MonitorSample[]>(`/monitor/targets/${id}/history`, { params: { since } }).then((r) => r.data),
+  /** Live size of the history buffer, for the Settings → Monitor readout. */
+  stats: () => api.get<MonitorStats>('/monitor/stats').then((r) => r.data),
 };

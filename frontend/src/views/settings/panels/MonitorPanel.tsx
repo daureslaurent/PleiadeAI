@@ -2,6 +2,7 @@ import { BellRing, MonitorDot, Thermometer } from 'lucide-react';
 import { Section } from '../../../components/ui';
 import { MonitorTargetsManager } from '../managers/MonitorTargetsManager';
 import { SettingNumber, SettingToggle } from '../controls';
+import { HistoryUsage } from '../HistoryUsage';
 
 /** `/settings/monitor` — which machines are watched, how often, and what counts as too hot or too full. */
 export function MonitorPanel() {
@@ -23,8 +24,16 @@ export function MonitorPanel() {
             field="monitor_poll_seconds"
             label="Poll interval (seconds)"
             min={5}
-            hint="How often every enabled machine is read. Minimum 5s. History holds the last 720 samples per machine (2h at 10s), in memory — it resets when the backend restarts."
+            hint="How often every enabled machine is read. Minimum 5s."
           />
+          <SettingNumber
+            field="monitor_history_samples"
+            label="History depth (samples per machine)"
+            min={60}
+            step={60}
+            hint="How many readings each machine keeps for the drill-down graphs. 720 ≈ 2h at a 10s poll; 8640 ≈ 24h. Allowed range 60–100,000. History lives in backend RAM and is lost on restart."
+          />
+          <HistoryUsage />
           <SettingToggle
             field="monitor_alerts_enabled"
             label="Send threshold alerts"
