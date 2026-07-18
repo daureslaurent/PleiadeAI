@@ -1,10 +1,14 @@
 /**
- * The read-only surface of the PleiadesAI API, described once and consumed twice: the MCP server
- * turns each entry into a tool (`pleiades_<name>`), and `scripts/prod.mjs` turns each into a
- * subcommand. Adding a capability means adding one entry here.
+ * The surface of the PleiadesAI API, described once and consumed twice: the MCP server turns each
+ * entry into a tool (`pleiades_<name>`), and `scripts/prod.mjs` turns each into a subcommand.
+ * Adding a capability means adding one entry here.
  *
  * `args` is a flat map of argument name → { type, description, required? }. `resolve(args)` returns
- * `{ path, query }` for `apiGet`.
+ * `{ path, query?, body? }`, sent with the entry's `method` (default `GET`).
+ *
+ * Entries with a non-GET method need an API key carrying the matching write scope — see
+ * `WRITE_SCOPES` in the backend's `middleware/auth.ts`. They are marked `write: true` so both
+ * front-ends can flag them.
  */
 export const ENDPOINTS = [
   {
@@ -122,6 +126,38 @@ export const ENDPOINTS = [
     },
     resolve: (a) => ({ path: a.path, query: a.query ?? {} }),
   },
+
+  // --- Writes. Each needs an API key with the matching scope. ---
+  {
+    name: 'create_agent',
+    description:
+      'Create an agent. Body is the full agent document: name, description, system_prompt, tools_allowed[], qdrant_namespace, subagent, agents_md, notebook, isolation_id, isolation_volume_mode, max_tool_iterations, color, icon. Needs the "agents:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { body: { type: 'object', description: 'The agent document', required: true } },
+    resolve: (a) => ({ path: '/api/agents', body: a.body }),
+  },
+  {
+    name: 'update_agent',
+    description:
+      'Patch an existing agent. Body holds only the fields to change. Needs the "agents:write" scope.',
+    method: 'PATCH',
+    write: true,
+    args: {
+      id: { type: 'string', description: 'Agent _id', required: true },
+      body: { type: 'object', description: 'Partial agent document', required: true },
+    },
+    resolve: (a) => ({ path: `/api/agents/${a.id}`, body: a.body }),
+  },
+  {
+    name: 'create_isolation',
+    description:
+      'Create an isolation profile (Docker execution policy agents are assigned to). Body: name, description, image_id, network (host|bridge|none|vpn|ssh), cpus, memory, idle_timeout_ms. Needs the "isolations:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { body: { type: 'object', description: 'The isolation document', required: true } },
+    resolve: (a) => ({ path: '/api/isolations', body: a.body }),
+  },
 ];
 
 /** Build the JSON Schema an MCP client needs to call a tool. */
@@ -130,6 +166,8 @@ export function inputSchemaOf(endpoint) {
   const required = [];
   for (const [name, spec] of Object.entries(endpoint.args)) {
     properties[name] = { type: spec.type, description: spec.description };
+    // Free-form documents (agent/isolation bodies) — the server validates the shape, not us.
+    if (spec.type === 'object') properties[name].additionalProperties = true;
     if (spec.required) required.push(name);
   }
   return { type: 'object', properties, required, additionalProperties: false };

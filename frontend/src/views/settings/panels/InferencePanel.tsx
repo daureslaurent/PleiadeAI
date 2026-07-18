@@ -50,6 +50,13 @@ export function InferencePanel() {
             hint="Fleet default for how many tool round-trips an agent may take before a turn is cut off. Each agent can override this on its own page."
             min={1}
           />
+          <SettingNumber
+            field="max_agent_hops"
+            label="Max agent delegation depth"
+            hint="How deep an ask_agent chain may go. The agent you talk to is depth 0, so 3 allows orchestrator → worker → helper. Raise it when a flow legitimately delegates further (a researcher that must also consult a verifier already spends two). Takes effect on the next delegation — no restart."
+            min={1}
+            max={10}
+          />
           <SettingSlider field="temperature" label="Temperature" min={0} max={2} step={0.05} />
           <SettingSlider field="top_p" label="Top P" min={0} max={1} step={0.01} />
           <SettingToggle

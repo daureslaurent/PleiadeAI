@@ -809,7 +809,7 @@ export class AgentRunner {
     }
 
     // Only expose cross-agent hops (delegation + asking the caller back) while a hop remains (§4).
-    const canSpawn = hopGuard.canHop(ctx.depth + 1);
+    const canSpawn = await hopGuard.canHop(ctx.depth + 1);
     const toolCtx: ToolContext = {
       sessionId: ctx.sessionId,
       agentId: ctx.agentId,
@@ -999,8 +999,8 @@ export class AgentRunner {
     >,
   ): Promise<RunResult> {
     const childDepth = fromCtx.depth + 1;
-    if (!hopGuard.canHop(childDepth)) {
-      throw new Error(`max agent hop depth (${hopGuard.max}) exceeded`);
+    if (!(await hopGuard.canHop(childDepth))) {
+      throw new Error(`max agent hop depth (${await hopGuard.max()}) exceeded`);
     }
     log.info(
       { from: fromCtx.agentName, to: targetAgentName, depth: childDepth },

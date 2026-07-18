@@ -62,8 +62,11 @@ const EnvSchema = z.object({
   SKILL_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(3),
   SKILL_WORKER_POOL_SIZE: z.coerce.number().int().positive().default(4),
 
-  // Multi-agent recursion guard
-  MAX_AGENT_HOPS: z.coerce.number().int().positive().default(3),
+  // Multi-agent recursion guard — the *fallback* only: the effective ceiling is the `max_agent_hops`
+  // runtime setting (Settings → Inference), which falls back here when the operator hasn't set one.
+  // 5 rather than 3 so a delegated research turn still has room: an orchestrator → researcher →
+  // research_critic chain already spends two hops before the researcher can consult anyone.
+  MAX_AGENT_HOPS: z.coerce.number().int().positive().default(5),
 
   // Working directory for the `bash` terminal tool (inside the container).
   BASH_CWD: z.string().default('/workspace'),

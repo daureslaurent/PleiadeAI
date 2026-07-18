@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Ban, Check, Copy, Plus, Trash2 } from 'lucide-react';
 import { Button, Callout, Checkbox, Input, Row, useConfirm } from '../../../components/ui';
-import { apiKeysApi, type ApiKey } from '../../../lib/api';
+import { API_KEY_SCOPES, apiKeysApi, type ApiKey, type ApiKeyScope } from '../../../lib/api';
 
 /** "never" / "3m ago" / "2d ago" — coarse enough that we never need to re-render on a timer. */
 function relativeTime(iso: string | null | undefined): string {
@@ -33,7 +33,7 @@ export function ApiKeysManager() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
-  const [agentsWrite, setAgentsWrite] = useState(false);
+  const [scopes, setScopes] = useState<ApiKeyScope[]>([]);
   const [issued, setIssued] = useState<{ name: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,11 +48,11 @@ export function ApiKeysManager() {
     if (!name.trim()) return;
     setError(null);
     try {
-      const key = await apiKeysApi.create(name.trim(), agentsWrite ? ['agents:write'] : []);
+      const key = await apiKeysApi.create(name.trim(), scopes);
       setIssued({ name: key.name, key: key.key });
       setCopied(false);
       setName('');
-      setAgentsWrite(false);
+      setScopes([]);
       setAdding(false);
       await reload();
     } catch {
@@ -135,14 +135,15 @@ export function ApiKeysManager() {
                   revoked
                 </span>
               )}
-              {k.scopes?.includes('agents:write') && (
+              {API_KEY_SCOPES.filter((s) => k.scopes?.includes(s.scope)).map((s) => (
                 <span
-                  title="This key can create, edit and delete agents"
+                  key={s.scope}
+                  title={`This key can ${s.label}`}
                   className="shrink-0 rounded-md border border-amber-500/30 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-amber-400"
                 >
-                  agents:write
+                  {s.scope}
                 </span>
-              )}
+              ))}
             </div>
             <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-slate-500">
               <span className="font-mono">plk_{k.prefix}…</span>
@@ -186,18 +187,27 @@ export function ApiKeysManager() {
             onKeyDown={(e) => e.key === 'Enter' && void create()}
             placeholder="Name (e.g. claude-code)"
           />
-          <Checkbox checked={agentsWrite} onChange={setAgentsWrite}>
-            <span>
-              Allow this key to <span className="text-slate-200">create, edit and delete agents</span> (
-              <span className="font-mono">agents:write</span>). Leave off for a read-only key.
-            </span>
-          </Checkbox>
+          {API_KEY_SCOPES.map((s) => (
+            <Checkbox
+              key={s.scope}
+              checked={scopes.includes(s.scope)}
+              onChange={(on) =>
+                setScopes((prev) => (on ? [...prev, s.scope] : prev.filter((x) => x !== s.scope)))
+              }
+            >
+              <span>
+                Allow this key to <span className="text-slate-200">{s.label}</span> (
+                <span className="font-mono">{s.scope}</span>).
+              </span>
+            </Checkbox>
+          ))}
+          <p className="text-[11px] text-slate-500">Grant nothing for a read-only key.</p>
           <div className="flex justify-end gap-2">
             <Button
               onClick={() => {
                 setAdding(false);
                 setName('');
-                setAgentsWrite(false);
+                setScopes([]);
               }}
             >
               Cancel

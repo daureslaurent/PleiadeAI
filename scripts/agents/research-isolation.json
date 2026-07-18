@@ -1,0 +1,9 @@
+{
+  "name": "research",
+  "description": "Bridge-networked container for the researcher / research_critic pair. Persistent /workspace holds research reports and source logs.",
+  "image_id": "6a4fe6e0bb1c9da17d7f6850",
+  "network": "bridge",
+  "cpus": "2",
+  "memory": "2g",
+  "idle_timeout_ms": 1800000
+}

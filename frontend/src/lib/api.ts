@@ -941,6 +941,8 @@ export interface InferenceSettings {
   scoring_max_tokens: number;
   /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
   max_tool_iterations: number;
+  /** Ceiling on `ask_agent` delegation depth (depth 0 = the directly-addressed agent). Clamped 1–10. */
+  max_agent_hops: number;
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
   /**
@@ -1547,8 +1549,16 @@ export const finetuneJobsApi = {
  * A read-only API key (Settings → API Keys). The secret itself is never returned by the backend —
  * only `prefix`, the public handle printed in the UI. See `IssuedApiKey` for the one exception.
  */
-/** Write capabilities a key can be granted. A key with no scopes is read-only. */
-export type ApiKeyScope = 'agents:write';
+/**
+ * Write capabilities a key can be granted. A key with no scopes is read-only. Mirrors
+ * `API_KEY_SCOPES` in the backend's `api-key.model.ts` — keep the two lists in step.
+ */
+export const API_KEY_SCOPES = [
+  { scope: 'agents:write', label: 'create, edit and delete agents' },
+  { scope: 'isolations:write', label: 'create and edit isolation profiles' },
+] as const;
+
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number]['scope'];
 
 export interface ApiKey {
   _id: string;

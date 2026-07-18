@@ -49,6 +49,8 @@ export interface EffectiveSettings {
   scoring_max_tokens: number;
   /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
   max_tool_iterations: number;
+  /** Ceiling on `ask_agent` delegation depth (depth 0 = the directly-addressed agent). */
+  max_agent_hops: number;
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
   /**
@@ -132,6 +134,7 @@ export const settingsService = {
       scoring_model: doc?.scoring_model ?? '',
       scoring_max_tokens: doc?.scoring_max_tokens ?? 1024,
       max_tool_iterations: doc?.max_tool_iterations ?? 50,
+      max_agent_hops: doc?.max_agent_hops ?? env.MAX_AGENT_HOPS,
       agents_md: doc?.agents_md ?? '',
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,

@@ -62,6 +62,10 @@ settingsRouter.put('/', async (req, res) => {
   // Per-turn tool-round ceiling; at least 1 round.
   if (b.max_tool_iterations !== undefined)
     patch.max_tool_iterations = Math.max(1, Number(b.max_tool_iterations) || 50);
+  // Delegation-depth ceiling. Floor of 1 (0 would forbid delegation entirely, which is what the
+  // per-agent tool list is for); capped at 10 so a mistyped value can't turn into runaway recursion.
+  if (b.max_agent_hops !== undefined)
+    patch.max_agent_hops = Math.min(10, Math.max(1, Number(b.max_agent_hops) || 5));
   // Fleet-wide AGENTS.md house rules. Operator-only — agents read this block, no tool writes it.
   if (typeof b.agents_md === 'string') patch.agents_md = b.agents_md;
   // Post-turn memory distillation (docs/memory-souvenirs.md).

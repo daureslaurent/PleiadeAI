@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * PleiadesAI MCP server — read-only access to a deployed instance via an API key.
+ * PleiadesAI MCP server — access to a deployed instance via an API key. Reads are always available;
+ * the write tools (`pleiades_create_agent`, …) only work if the key carries the matching scope.
  *
  * Speaks MCP over stdio: newline-delimited JSON-RPC 2.0 on stdin/stdout. Implemented by hand
  * against the three methods a tools-only server needs (`initialize`, `tools/list`, `tools/call`)
@@ -11,7 +12,7 @@
  * Config: PLEIADES_API_URL + PLEIADES_API_KEY, from the environment or the repo's `.env.prod`.
  */
 import readline from 'node:readline';
-import { apiGet, loadConfig, PleiadesError } from './client.mjs';
+import { apiSend, loadConfig, PleiadesError } from './client.mjs';
 import { ENDPOINTS, inputSchemaOf } from './endpoints.mjs';
 
 const PROTOCOL_VERSION = '2024-11-05';
@@ -47,8 +48,8 @@ async function callTool(name, args) {
   }
 
   try {
-    const { path, query } = endpoint.resolve(args ?? {});
-    const data = await apiGet(path, query);
+    const { path, query, body } = endpoint.resolve(args ?? {});
+    const data = await apiSend(endpoint.method ?? 'GET', path, { query, body });
     return toolResult(JSON.stringify(data, null, 2));
   } catch (err) {
     // Surface the instance's own explanation (403 read-only, 404, auth) rather than a stack trace.
@@ -98,7 +99,7 @@ function main() {
   // silently broken server just sees every tool call error.
   try {
     const { baseUrl } = loadConfig();
-    process.stderr.write(`[pleiades-mcp] read-only, pointed at ${baseUrl}\n`);
+    process.stderr.write(`[pleiades-mcp] pointed at ${baseUrl}\n`);
   } catch (err) {
     process.stderr.write(`[pleiades-mcp] ${err.message}\n`);
     process.exit(1);

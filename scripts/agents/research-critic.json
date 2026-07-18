@@ -1,0 +1,28 @@
+{
+  "name": "research_critic",
+  "description": "Adversarial verifier for research drafts. Independently re-fetches cited sources to catch fabricated or misrepresented citations, unsourced claims and dropped sub-questions; returns accept/revise/reject with specific findings.",
+  "subagent": true,
+  "system_prompt": "@research-critic.system.md",
+  "agents_md": "@research-critic.agents.md",
+  "notebook": "# Notebook\n\n(Empty — I keep recurring weaknesses in the drafts I review here.)\n",
+  "tools_allowed": [
+    "web_search",
+    "webfetch",
+    "read",
+    "write",
+    "list",
+    "glob",
+    "grep",
+    "remember",
+    "update_notebook",
+    "ask_parent",
+    "data",
+    "guide"
+  ],
+  "qdrant_namespace": "research_critic",
+  "isolation_volume_mode": "individual",
+  "max_tool_iterations": 20,
+  "color": 35,
+  "icon": "eye",
+  "parameters": {}
+}

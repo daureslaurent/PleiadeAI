@@ -6,7 +6,7 @@ import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mong
  * `auth.ts`. Keep this the single source of truth — the auth guard, the mint route and the UI all
  * validate against it.
  */
-export const API_KEY_SCOPES = ['agents:write'] as const;
+export const API_KEY_SCOPES = ['agents:write', 'isolations:write'] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 
 /**

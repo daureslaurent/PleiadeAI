@@ -70,6 +70,14 @@ const SettingsSchema = new Schema(
     // `max_tool_iterations`; when the agent leaves that blank this value applies. Guards tool loops.
     max_tool_iterations: { type: Number, default: 50 },
     /**
+     * Fleet-wide ceiling on `ask_agent` delegation depth (spec §4). The directly-addressed agent runs
+     * at depth 0, so N allows a chain N hops deep. Guards against runaway recursion between agents;
+     * raise it when a flow legitimately needs a longer chain (an orchestrator delegating to a worker
+     * that in turn consults a verifier already spends two). Falls back to the `MAX_AGENT_HOPS` env
+     * var when unset.
+     */
+    max_agent_hops: { type: Number, default: null },
+    /**
      * Fleet-wide AGENTS.md — house rules injected into *every* agent's system prompt (subagents
      * included) as a read-only block. Operator-owned: no tool writes it. Per-agent standing
      * instructions live in `agent.agents_md`; the agent's own writable doc is `agent.notebook`.

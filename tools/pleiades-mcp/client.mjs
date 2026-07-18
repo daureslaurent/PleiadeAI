@@ -61,12 +61,13 @@ export class PleiadesError extends Error {
 }
 
 /**
- * GET `path` (which must start with `/api/`) with the API key attached.
+ * Send `method path` (which must start with `/api/`) with the API key attached.
  *
- * Keys are read-only server-side; we don't expose any other verb here so a bug in a caller can't
- * turn into a write. `query` values that are `undefined`/`null`/`''` are dropped.
+ * Writes only land if the key carries the matching scope (`agents:write`, `isolations:write`, …);
+ * an unscoped key gets a 403 from the server, which we surface verbatim. `query` values that are
+ * `undefined`/`null`/`''` are dropped; `body` is JSON-encoded when present.
  */
-export async function apiGet(pathname, query = {}, { timeoutMs = 30_000 } = {}) {
+export async function apiSend(method, pathname, { query = {}, body, timeoutMs = 30_000 } = {}) {
   const { baseUrl, apiKey } = loadConfig();
 
   const url = new URL(pathname.startsWith('/') ? pathname : `/${pathname}`, baseUrl);
@@ -74,33 +75,47 @@ export async function apiGet(pathname, query = {}, { timeoutMs = 30_000 } = {}) 
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
   }
 
+  const headers = { 'X-API-Key': apiKey };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res;
   try {
-    res = await fetch(url, { headers: { 'X-API-Key': apiKey }, signal: controller.signal });
+    res = await fetch(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
   } catch (err) {
-    if (err.name === 'AbortError') throw new PleiadesError(`GET ${url.pathname} timed out after ${timeoutMs}ms`);
-    throw new PleiadesError(`GET ${url.pathname} failed: ${err.message}`);
+    if (err.name === 'AbortError')
+      throw new PleiadesError(`${method} ${url.pathname} timed out after ${timeoutMs}ms`);
+    throw new PleiadesError(`${method} ${url.pathname} failed: ${err.message}`);
   } finally {
     clearTimeout(timer);
   }
 
-  const body = await res.text();
+  const text = await res.text();
   if (!res.ok) {
     // The backend answers with `{ error: … }`; fall back to the raw body for proxies/edge errors.
-    let detail = body.slice(0, 500);
+    let detail = text.slice(0, 500);
     try {
-      detail = JSON.parse(body).error ?? detail;
+      detail = JSON.parse(text).error ?? detail;
     } catch {
       /* not JSON — keep the raw snippet */
     }
-    throw new PleiadesError(`GET ${url.pathname} → ${res.status}: ${detail}`, res.status);
+    throw new PleiadesError(`${method} ${url.pathname} → ${res.status}: ${detail}`, res.status);
   }
 
   try {
-    return JSON.parse(body);
+    return JSON.parse(text);
   } catch {
-    return body; // e.g. the JSONL dataset download
+    return text; // e.g. the JSONL dataset download
   }
+}
+
+/** GET `path`. Thin wrapper kept for the many read-only callers. */
+export async function apiGet(pathname, query = {}, options = {}) {
+  return apiSend('GET', pathname, { ...options, query });
 }

@@ -95,12 +95,14 @@ export function SettingNumber({
   label,
   hint,
   min,
+  max,
   step = 1,
 }: {
   field: Of<number>;
   label: string;
   hint?: ReactNode;
   min?: number;
+  max?: number;
   step?: number;
 }) {
   const { form, edit } = useSettings();
@@ -112,6 +114,7 @@ export function SettingNumber({
         type="number"
         value={value}
         min={min}
+        max={max}
         step={step}
         onChange={(e) => edit({ [field]: Number(e.target.value) } as Partial<S>)}
         {...persist}
