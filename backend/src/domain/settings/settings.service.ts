@@ -67,6 +67,23 @@ export interface EffectiveSettings {
   telegram_bot_token: string;
   /** Comma list of chat ids that receive alerts / may talk to the bot ('' in DB → env). */
   telegram_chat_ids: string;
+  /** How often the Monitor poller reads every enabled target, seconds. */
+  monitor_poll_seconds: number;
+  /** Whether breached monitor thresholds fan out to the inbox + Telegram (the dashboard tints regardless). */
+  monitor_alerts_enabled: boolean;
+  /** Monitor thresholds, percent (memory/vram/disk) or °C (temps). `warn` = amber, `critical` = red. */
+  monitor_cpu_temp_warn: number;
+  monitor_cpu_temp_critical: number;
+  monitor_gpu_temp_warn: number;
+  monitor_gpu_temp_critical: number;
+  monitor_memory_warn: number;
+  monitor_memory_critical: number;
+  monitor_vram_warn: number;
+  monitor_vram_critical: number;
+  monitor_disk_warn: number;
+  monitor_disk_critical: number;
+  /** Minutes before the same breach on the same target may alert again. */
+  monitor_alert_cooldown_minutes: number;
 }
 
 const KEY = 'global';
@@ -123,6 +140,19 @@ export const settingsService = {
       telegram_bot_token: doc?.telegram_bot_token || env.TELEGRAM_BOT_TOKEN || '',
       telegram_chat_ids:
         doc?.telegram_chat_ids || env.TELEGRAM_ALLOWED_CHAT_IDS || env.TELEGRAM_CHAT_ID || '',
+      monitor_poll_seconds: doc?.monitor_poll_seconds ?? 10,
+      monitor_alerts_enabled: doc?.monitor_alerts_enabled ?? true,
+      monitor_cpu_temp_warn: doc?.monitor_cpu_temp_warn ?? 80,
+      monitor_cpu_temp_critical: doc?.monitor_cpu_temp_critical ?? 90,
+      monitor_gpu_temp_warn: doc?.monitor_gpu_temp_warn ?? 80,
+      monitor_gpu_temp_critical: doc?.monitor_gpu_temp_critical ?? 88,
+      monitor_memory_warn: doc?.monitor_memory_warn ?? 85,
+      monitor_memory_critical: doc?.monitor_memory_critical ?? 95,
+      monitor_vram_warn: doc?.monitor_vram_warn ?? 90,
+      monitor_vram_critical: doc?.monitor_vram_critical ?? 97,
+      monitor_disk_warn: doc?.monitor_disk_warn ?? 85,
+      monitor_disk_critical: doc?.monitor_disk_critical ?? 95,
+      monitor_alert_cooldown_minutes: doc?.monitor_alert_cooldown_minutes ?? 30,
     };
   },
 

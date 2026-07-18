@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Cpu, Database, Gauge, LogOut, MessagesSquare, Mic, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Wrench, Blocks } from 'lucide-react';
+import { Bot, Box, Bug, Cpu, Database, Gauge, LogOut, MessagesSquare, Mic, MonitorDot, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Wrench, Blocks } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
 import { useAuth } from '../store/auth';
 import { usePersistentState } from '../hooks/usePersistentState';
@@ -38,6 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/images', label: 'Images', icon: Package },
       { to: '/isolation', label: 'Isolation', icon: Box },
+      { to: '/monitor', label: 'Monitor', icon: MonitorDot },
       { to: '/memory', label: 'Memory Vault', icon: Database },
       { to: '/autonomy', label: 'Autonomy', icon: Bot },
     ],

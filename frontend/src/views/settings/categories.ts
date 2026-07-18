@@ -3,6 +3,7 @@ import {
   Cable,
   KeyRound,
   MonitorCog,
+  MonitorDot,
   RefreshCcwDot,
   Server,
   Users,
@@ -56,6 +57,13 @@ export const CATEGORIES: SettingsCategory[] = [
     blurb: 'External services agents can reach — starting with Gmail.',
     contains: ['Google OAuth client', 'Linked mailboxes'],
     icon: Cable,
+  },
+  {
+    slug: 'monitor',
+    title: 'Monitor',
+    blurb: 'The machines watched on the Monitor page, and what counts as too hot or too full.',
+    contains: ['Monitored machines', 'Polling & alerts', 'Thresholds'],
+    icon: MonitorDot,
   },
   {
     slug: 'interface',

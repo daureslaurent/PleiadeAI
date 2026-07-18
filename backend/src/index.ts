@@ -28,6 +28,8 @@ import { reconcileScoringIndexes } from './domain/scoring/conversation-score.rep
 import { finetuneServersRouter } from './transport/http/routes/finetune-servers.routes';
 import { finetuneJobsRouter } from './transport/http/routes/finetune-jobs.routes';
 import { startFinetunePoller } from './finetune/poller';
+import { monitorRouter } from './transport/http/routes/monitor.routes';
+import { monitorPoller } from './domain/monitor/monitor.poller';
 import { endpointService } from './domain/endpoints/endpoint.service';
 import { toolsRouter } from './transport/http/routes/tools.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
@@ -69,6 +71,10 @@ async function main(): Promise<void> {
   // Idle when nothing is training: only non-terminal jobs are fetched.
   startFinetunePoller();
 
+  // Poll monitored machines (`monitor-client`) for the Monitor dashboard's live meters, in-memory
+  // history and threshold alerts. Idle when no targets are configured.
+  monitorPoller.start();
+
   const app = express();
   // Don't advertise Express in the `X-Powered-By` header (Caddy also strips it at the edge). Removes a
   // free software-fingerprint that eases targeted CVE lookups.
@@ -105,6 +111,7 @@ async function main(): Promise<void> {
   app.use('/api/images', requireAuth, imagesRouter);
   app.use('/api/resources', requireAuth, resourcesRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
+  app.use('/api/monitor', requireAuth, monitorRouter);
   app.use('/api/host', requireAuth, hostRouter);
   app.use('/api/maintenance', requireAuth, maintenanceRouter);
   // The Gmail OAuth callback is a browser redirect *from Google* — it can't carry a JWT, so it is

@@ -101,6 +101,32 @@ const SettingsSchema = new Schema(
      */
     telegram_bot_token: { type: String, default: '' },
     telegram_chat_ids: { type: String, default: '' },
+
+    /**
+     * Fleet monitoring (Monitor page, `domain/monitor/`). The poller reads every enabled
+     * `monitor_targets` doc on `monitor_poll_seconds`; the thresholds below decide when a reading
+     * turns amber (warn) or red (critical) on the dashboard and — when `monitor_alerts_enabled` —
+     * fires into the inbox + Telegram.
+     *
+     * One set of thresholds for the whole fleet, not per target: the point is a single glanceable
+     * "is anything hot/full" rule, and per-box tuning is a config surface nobody maintains. The
+     * defaults are conservative for consumer hardware (an Intel package sits ~82°C `high`, NVIDIA
+     * consumer cards throttle in the 83-93°C range).
+     */
+    monitor_poll_seconds: { type: Number, default: 10 },
+    monitor_alerts_enabled: { type: Boolean, default: true },
+    monitor_cpu_temp_warn: { type: Number, default: 80 },
+    monitor_cpu_temp_critical: { type: Number, default: 90 },
+    monitor_gpu_temp_warn: { type: Number, default: 80 },
+    monitor_gpu_temp_critical: { type: Number, default: 88 },
+    monitor_memory_warn: { type: Number, default: 85 },
+    monitor_memory_critical: { type: Number, default: 95 },
+    monitor_vram_warn: { type: Number, default: 90 },
+    monitor_vram_critical: { type: Number, default: 97 },
+    monitor_disk_warn: { type: Number, default: 85 },
+    monitor_disk_critical: { type: Number, default: 95 },
+    /** Minutes before the same breach on the same target may alert again (0 = every evaluation). */
+    monitor_alert_cooldown_minutes: { type: Number, default: 30 },
   },
   { collection: 'settings', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

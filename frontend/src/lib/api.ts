@@ -960,6 +960,23 @@ export interface InferenceSettings {
   telegram_bot_token: string;
   /** Comma list of chat ids that receive alerts / may talk to the bot ('' → env fallback). */
   telegram_chat_ids: string;
+  /** How often the backend polls every monitored machine, seconds (floor 5). */
+  monitor_poll_seconds: number;
+  /** Whether breached monitor thresholds fan out to the inbox + Telegram (the dashboard tints regardless). */
+  monitor_alerts_enabled: boolean;
+  /** Fleet-wide monitor thresholds: °C for temps, percent for the rest. warn = amber, critical = red. */
+  monitor_cpu_temp_warn: number;
+  monitor_cpu_temp_critical: number;
+  monitor_gpu_temp_warn: number;
+  monitor_gpu_temp_critical: number;
+  monitor_memory_warn: number;
+  monitor_memory_critical: number;
+  monitor_vram_warn: number;
+  monitor_vram_critical: number;
+  monitor_disk_warn: number;
+  monitor_disk_critical: number;
+  /** Minutes before the same breach on the same machine may alert again. */
+  monitor_alert_cooldown_minutes: number;
 }
 
 export const settingsApi = {
@@ -1580,4 +1597,182 @@ export const maintenanceApi = {
       .then((r) => r.data as Blob),
   clear: (categories: ResetCategory[]) =>
     api.post<ClearSummary>('/maintenance/clear', { categories, confirm: 'CLEAR' }).then((r) => r.data),
+};
+
+// --- Monitor (fleet machine telemetry; backend `domain/monitor/`) ---
+
+/**
+ * Wire shape of one `monitor-client` snapshot, mirroring `backend/src/domain/monitor/monitor.types.ts`.
+ * Every field is nullable and every array may be empty: the client degrades one section at a time
+ * (no fan chip, no GPU, no `nvidia-smi`), so the UI must render around gaps rather than assume them away.
+ */
+export interface MonitorSnapshot {
+  collected_at: string;
+  host: { hostname: string | null; os: string | null; kernel: string | null; uptime_sec: number | null };
+  cpu: {
+    model: string | null;
+    sockets: number | null;
+    cores: number | null;
+    threads: number | null;
+    usage_percent: number | null;
+    per_core_percent: (number | null)[];
+    frequencies_mhz: (number | null)[];
+    temperature_celsius: number | null;
+    load_average: { '1m': number | null; '5m': number | null; '15m': number | null };
+  };
+  memory: {
+    total_bytes: number | null;
+    available_bytes: number | null;
+    used_bytes: number | null;
+    used_percent: number | null;
+    cached_bytes: number | null;
+    swap_total_bytes: number | null;
+    swap_used_bytes: number | null;
+  } | null;
+  gpus: MonitorGpu[];
+  temperatures: MonitorTemperature[];
+  fans: MonitorFan[];
+  disks: MonitorDisk[];
+  network: Record<string, MonitorNic>;
+  warnings: string[];
+}
+
+export interface MonitorGpu {
+  index: number | null;
+  name: string | null;
+  uuid: string | null;
+  temperature_celsius: number | null;
+  utilization_percent: number | null;
+  memory_utilization_percent: number | null;
+  memory_total_bytes: number | null;
+  memory_used_bytes: number | null;
+  memory_used_percent: number | null;
+  /** Null on passively cooled cards — no fan, rather than a failed reading. */
+  fan_percent: number | null;
+  power_draw_watts: number | null;
+  power_limit_watts: number | null;
+  clock_sm_mhz: number | null;
+  clock_mem_mhz: number | null;
+  pstate: string | null;
+}
+
+export interface MonitorTemperature {
+  chip: string;
+  label: string;
+  celsius: number | null;
+  high_celsius: number | null;
+  critical_celsius: number | null;
+}
+
+export interface MonitorFan {
+  chip: string;
+  label: string;
+  rpm: number | null;
+  duty_percent: number | null;
+}
+
+export interface MonitorDisk {
+  label: string;
+  total_bytes?: number | null;
+  used_bytes?: number | null;
+  available_bytes?: number | null;
+  used_percent?: number | null;
+  error?: string;
+}
+
+export interface MonitorNic {
+  rx_bytes: number | null;
+  tx_bytes: number | null;
+  rx_bytes_per_sec: number | null;
+  tx_bytes_per_sec: number | null;
+  rx_errors: number | null;
+  tx_errors: number | null;
+}
+
+/** A threshold rule currently exceeded. `severity` maps straight to the DIRECT_ART amber/red scale. */
+export interface MonitorBreach {
+  key: string;
+  rule: 'cpu_temp' | 'gpu_temp' | 'memory' | 'vram' | 'disk' | 'offline';
+  label: string;
+  value: number | null;
+  limit: number | null;
+  severity: 'warn' | 'critical';
+}
+
+/** One target's newest state, as held by the backend poller. */
+export interface MonitorLive {
+  target_id: string;
+  name: string;
+  base_url: string;
+  endpoint_id: string | null;
+  note: string;
+  online: boolean;
+  error: string | null;
+  last_ok_at: string | null;
+  latency_ms: number | null;
+  /** Last known snapshot — kept while offline, so a dark card still shows what it looked like. */
+  snapshot: MonitorSnapshot | null;
+  breaches: MonitorBreach[];
+}
+
+/** One point of reduced history (`t` = epoch ms). GPU arrays are index-aligned with the snapshot. */
+export interface MonitorSample {
+  t: number;
+  cpu: number | null;
+  cpu_temp: number | null;
+  mem: number | null;
+  gpu_util: (number | null)[];
+  gpu_vram: (number | null)[];
+  gpu_temp: (number | null)[];
+  rx: number | null;
+  tx: number | null;
+}
+
+/** A configured machine (Settings → Monitor). The API key is write-only — reads report only `has_api_key`. */
+export interface MonitorTarget {
+  _id: string;
+  name: string;
+  base_url: string;
+  endpoint_id: string | null;
+  enabled: boolean;
+  note: string;
+  has_api_key: boolean;
+}
+
+export interface MonitorTargetPatch {
+  name?: string;
+  base_url?: string;
+  /** Omit to keep the stored key; `''` clears it. */
+  api_key?: string;
+  endpoint_id?: string | null;
+  enabled?: boolean;
+  note?: string;
+}
+
+/** Result of the settings form's "Test" button — a live probe, with the target's own error verbatim. */
+export interface MonitorTestResult {
+  ok: boolean;
+  latency_ms?: number;
+  hostname?: string | null;
+  os?: string | null;
+  cpu?: string | null;
+  gpus?: (string | null)[];
+  warnings?: string[];
+  error?: string;
+}
+
+export const monitorApi = {
+  listTargets: () => api.get<MonitorTarget[]>('/monitor/targets').then((r) => r.data),
+  createTarget: (body: MonitorTargetPatch & { name: string; base_url: string }) =>
+    api.post<MonitorTarget>('/monitor/targets', body).then((r) => r.data),
+  updateTarget: (id: string, patch: MonitorTargetPatch) =>
+    api.patch<MonitorTarget>(`/monitor/targets/${id}`, patch).then((r) => r.data),
+  removeTarget: (id: string) => api.delete(`/monitor/targets/${id}`).then((r) => r.data),
+  test: (id: string) => api.post<MonitorTestResult>(`/monitor/targets/${id}/test`).then((r) => r.data),
+
+  /** Newest snapshot per target, served from the backend poller's memory (no upstream call). */
+  live: () => api.get<MonitorLive[]>('/monitor/live').then((r) => r.data),
+  /** `since` (epoch ms) fetches only newer samples, so a polling page doesn't re-download the buffer. */
+  history: (id: string, since?: number) =>
+    api.get<MonitorSample[]>(`/monitor/targets/${id}/history`, { params: { since } }).then((r) => r.data),
 };

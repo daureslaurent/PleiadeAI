@@ -11,6 +11,7 @@ import { ToolsView } from './views/ToolsView';
 import { IsolationsView } from './views/IsolationsView';
 import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
+import { MonitorView } from './views/MonitorView';
 import { AutonomyView } from './views/autonomy/AutonomyView';
 import { LLMView } from './views/LLMView';
 import { LLMDebugView } from './views/LLMDebugView';
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="/images" element={<ImagesView />} />
           <Route path="/isolation" element={<IsolationsView />} />
           <Route path="/memory" element={<MemoryVault />} />
+          <Route path="/monitor" element={<MonitorView />} />
           <Route path="/autonomy" element={<AutonomyView />} />
           <Route path="/llm" element={<LLMView />} />
           <Route path="/llm-debug" element={<LLMDebugView />} />
