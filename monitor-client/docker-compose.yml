@@ -1,0 +1,37 @@
+# monitor-client — read-only machine metrics API for one host (Ubuntu + Intel CPU + NVIDIA GPU).
+#
+# host networking: /proc/net/dev inside a bridge network would only show the container's veth pair, so
+# the service joins the host netns to report the real NICs — and listens on MONITOR_PORT directly.
+#
+# The container is read-only and unprivileged; every host mount below is :ro. It reads sensors, nothing else.
+
+services:
+  monitor-client:
+    build: .
+    container_name: monitor_client
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    # nvidia-smi comes from the host via the NVIDIA container toolkit. On a box without it (or without a
+    # GPU), comment `runtime` out — the API still serves everything else and reports the gap in `warnings`.
+    runtime: nvidia
+    env_file:
+      - .env
+    volumes:
+      # Temperatures and fan RPMs. Docker already mounts a read-only /sys, but be explicit about the intent.
+      - /sys:/sys:ro
+      # The host's real identity, rather than the container hostname Docker assigns.
+      - /etc/hostname:/host/hostname:ro
+      - /etc/os-release:/host/os-release:ro
+      # Root filesystem usage. See MONITOR_DISKS in .env.example to add more mount points.
+      - /:/host/rootfs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.MONITOR_PORT||9101)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
