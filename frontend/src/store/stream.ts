@@ -15,6 +15,8 @@ import type {
   TruncatedEvent,
   TurnScoredEvent,
   MemoryRecallEvent,
+  TodoUpdateEvent,
+  TodoItem,
   RecalledMemory,
   VisionEvent,
   ImageGenEvent,
@@ -117,6 +119,8 @@ export type Block =
       score?: TurnScore;
       /** Memories auto-recalled into this sub-agent's own prompt (its bubble gets its own badge). */
       memories?: RecalledMemory[];
+      /** This sub-agent's own task list, rendered inside its bubble rather than the pinned panel. */
+      todos?: TodoItem[];
       children: Block[];
     };
 
@@ -163,6 +167,8 @@ interface LiveFrame {
   runId?: string;
   /** Memories the auto-RAG step injected into this frame's prompt, if any. */
   memories?: RecalledMemory[];
+  /** The checklist this sub-agent wrote during its run, if any. */
+  todos?: TodoItem[];
 }
 
 /**
@@ -228,6 +234,7 @@ export function buildBlocks(
         contextWindow: f.contextWindow,
         runId: f.runId,
         memories: f.memories,
+        todos: f.todos,
         children: buildBlocks(it.refFrameId, items, frames),
       });
     }
@@ -309,6 +316,12 @@ interface StreamState {
    * ghost tick (which sits at `contextUsage`, the prior total).
    */
   liveContext: ContextUsage | null;
+  /**
+   * The session agent's working checklist (`todowrite`), driving the pinned task panel. A sub-agent's
+   * list is *not* here — it rides its own bubble via `LiveFrame.todos`, so a delegate's plan can
+   * never replace the one you are watching. Empty when no list has been written this session.
+   */
+  todos: TodoItem[];
   /** An agent is blocking on `ask_user`; drives the operator prompt modal. Null when nothing waits. */
   pendingAsk: { requestId: string; agent: string; question: string } | null;
   /**
@@ -339,7 +352,7 @@ interface StreamState {
   turnTraceStart: number;
   wire: () => void;
   /** Load a persisted session's messages into the panel (reconstructs chat + debugger). */
-  hydrate: (sessionId: string, messages: StoredMessage[]) => void;
+  hydrate: (sessionId: string, messages: StoredMessage[], agentId: string) => void;
   clearActive: () => void;
   send: (agentName: string, content: string, sessionId: string, images?: string[]) => void;
   /** Ask the backend to stop the in-flight run for the active session (the "stop" button). */
@@ -394,6 +407,7 @@ export const useStream = create<StreamState>((set, get) => ({
   trace: [],
   contextUsage: null,
   liveContext: null,
+  todos: [],
   pendingAsk: null,
   lastVisualAct: null,
   lastTurnTruncated: false,
@@ -664,6 +678,25 @@ export const useStream = create<StreamState>((set, get) => ({
       });
     });
 
+    // An agent rewrote its checklist. Depth 0 is the session agent's plan and drives the pinned
+    // panel; a delegated sub-agent's lands on its own frame so it renders inside its bubble instead
+    // of clobbering the list you are watching. Every write carries the full list, so this replaces.
+    socket.on('todo_update', (e: TodoUpdateEvent) => {
+      if (e.sessionId !== get().activeSessionId) return;
+      if (e.depth === 0) {
+        set({ todos: e.items });
+        return;
+      }
+      set((s) => {
+        const frameId = s.frameStack[s.frameStack.length - 1];
+        const frame = frameId ? s.liveFrames[frameId] : undefined;
+        // A sub-agent writes while its own frame is the open one; if the stack has already moved on,
+        // drop the update rather than attributing a plan to the wrong agent.
+        if (!frameId || !frame || frame.agent !== e.agent) return {};
+        return { liveFrames: { ...s.liveFrames, [frameId]: { ...frame, todos: e.items } } };
+      });
+    });
+
     socket.on('context_usage', (e: ContextUsageEvent) => {
       // Only reflect the on-screen session; background runs update their own persisted messages.
       if (e.sessionId !== get().activeSessionId) return;
@@ -889,7 +922,7 @@ export const useStream = create<StreamState>((set, get) => ({
     set({ wired: true });
   },
 
-  hydrate: (sessionId, messages) => {
+  hydrate: (sessionId, messages, agentId) => {
     // Re-attach to this session's room so a run still in flight (e.g. started before a refresh)
     // keeps streaming here and its terminal `chat:done` lands — the backend replies `chat:running`
     // if it's still going. `wire()` (called on boot) has already registered the listeners.
@@ -937,6 +970,17 @@ export const useStream = create<StreamState>((set, get) => ({
         }));
       })
       .catch(() => {});
+    // Restore the pinned checklist. Without this a reload (or a refresh mid-turn) blanks the panel
+    // until the agent happens to write again, which for a long-running step could be minutes.
+    void sessionsApi
+      .todos(sessionId)
+      .then((lists) => {
+        if (get().activeSessionId !== sessionId) return;
+        // Only the session agent's own list is pinned; sub-agent lists belong to their bubbles.
+        const own = lists.find((l) => l.agentId === agentId);
+        set({ todos: own?.items ?? [] });
+      })
+      .catch(() => {});
     // Restore the context meter from the most recent assistant turn that recorded it.
     const lastCtx = [...messages]
       .reverse()
@@ -950,6 +994,7 @@ export const useStream = create<StreamState>((set, get) => ({
           ? { promptTokens: lastCtx.context_tokens, contextWindow: lastCtx.context_window ?? 0 }
           : null,
       liveContext: null,
+      todos: [],
       liveItems: [],
       liveFrames: {},
       frameStack: ['root'],

@@ -160,6 +160,20 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  // The agent's checklist changed. Depth routes it like `memory_recall`: a depth-0 list is the turn's
+  // (and drives the pinned panel), a sub-agent's belongs to its own bubble.
+  eventBus.on('agent:todo_update', ({ ctx, callId, items }) => {
+    io.to(ctx.sessionId).emit('todo_update', {
+      type: 'todo_update',
+      sessionId: ctx.sessionId,
+      agent: ctx.agentName,
+      agentId: ctx.agentId,
+      depth: ctx.depth,
+      callId,
+      items,
+    });
+  });
+
   // Memories the auto-RAG step injected into this run's prompt — drives the chat's "memories" badge.
   // Depth routes it like `context_usage`: a depth-0 recall belongs to the turn, a sub-agent's to its
   // own bubble.

@@ -24,6 +24,8 @@ import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
 import { data } from '../tools/core/data';
 import { guide } from '../tools/core/guide';
+import { todoWrite } from '../tools/core/todo';
+import { todoRepository } from '../domain/todos/todo.repository';
 import { remember } from '../tools/core/remember';
 import { forget } from '../tools/core/forget';
 import { read } from '../tools/core/fs/read';
@@ -255,6 +257,7 @@ export class AgentRunner {
         askUser.name,
         data.name,
         guide.name,
+        todoWrite.name,
         ...(input.caller ? [askParent.name] : []),
       ]),
     ].filter(
@@ -306,7 +309,11 @@ export class AgentRunner {
     // agent's own charter (see `buildSystemMessage`). Read per turn so an edit on the Settings page
     // binds every agent on its next turn without a restart.
     const { agents_md: houseRules } = await settingsService.get();
-    const systemMessage = buildSystemMessage(agent, houseRules);
+    // The agent's own checklist rides into the prompt too. Read per turn (not cached with the agent
+    // doc) because `todowrite` mutates it mid-turn — and because an item left `in_progress` when the
+    // last turn ended is exactly what this block exists to put back in front of the model.
+    const todos = await todoRepository.get(ctx.sessionId, ctx.agentId);
+    const systemMessage = buildSystemMessage(agent, houseRules, todos);
     if (
       memoryMessage &&
       typeof systemMessage.content === 'string' &&
@@ -838,6 +845,7 @@ export class AgentRunner {
         eventBus.emit('tool:visual_act', { ctx, callId: call.id, ...payload }),
       emitImageGen: (payload) =>
         eventBus.emit('agent:image_generated', { ctx, callId: call.id, ...payload }),
+      emitTodo: (items) => eventBus.emit('agent:todo_update', { ctx, callId: call.id, items }),
       attachedImages: delegation.pool.all(),
       availableTools: [...toolMap.values()].map((t) => ({
         name: t.name,

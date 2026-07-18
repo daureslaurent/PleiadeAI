@@ -100,6 +100,12 @@ export interface ToolContext {
     count: number;
   }) => void;
   /**
+   * Publish the agent's updated checklist to the UI for the current tool call, so the pinned todo
+   * panel ticks over live mid-turn instead of only at the end. Used by `todowrite`; the list itself
+   * is already persisted by the time this fires, so a dropped event costs display freshness only.
+   */
+  emitTodo?: (items: { id: string; content: string; status: string }[]) => void;
+  /**
    * The turn's live image pool (data URLs, each with a stable `id` handle): the user/parent
    * attachments plus any images tools/skills have acquired so far this turn (e.g. a picture read via
    * `read`). Available to `analyze_image` (describe one by `image_id`) and forwardable to a subagent

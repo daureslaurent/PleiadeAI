@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuth } from '../store/auth';
+import type { TodoItem } from './ws-events.types';
 
 /**
  * Base for API/asset URLs. Empty VITE_API_URL → same-origin relative (e.g. `/api`), which is how the
@@ -657,6 +658,13 @@ export const sessionsApi = {
     api.patch<Session>(`/sessions/${id}`, { title }).then((r) => r.data),
   remove: (id: string) => api.delete(`/sessions/${id}`).then((r) => r.data),
   messages: (id: string) => api.get<StoredMessage[]>(`/sessions/${id}/messages`).then((r) => r.data),
+  /** Every agent's task list in the session, so a reload restores the pinned checklist. */
+  todos: (id: string) =>
+    api
+      .get<{ agentId: string; agent: string; items: TodoItem[]; updatedAt: string }[]>(
+        `/sessions/${id}/todos`,
+      )
+      .then((r) => r.data),
   addMessage: (id: string, body: NewMessage) =>
     api.post<StoredMessage>(`/sessions/${id}/messages`, body).then((r) => r.data),
 };

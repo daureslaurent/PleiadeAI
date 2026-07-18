@@ -49,7 +49,7 @@ export function AgentWorkspace() {
       setActiveAgentId(agent._id);
       setActiveSessionId(session._id);
       const msgs = await sessionsApi.messages(session._id);
-      hydrate(session._id, msgs);
+      hydrate(session._id, msgs, agent._id);
     },
     [hydrate, setActiveAgentId, setActiveSessionId],
   );
@@ -83,7 +83,7 @@ export function AgentWorkspace() {
         setExpanded(new Set([restoreAgent._id]));
         void loadSessions(restoreAgent._id);
         const msgs = await sessionsApi.messages(activeSessionId).catch(() => []);
-        hydrate(activeSessionId, msgs);
+        hydrate(activeSessionId, msgs, restoreAgent._id);
       } else if (list[0]) {
         setExpanded(new Set([list[0]._id]));
         void loadSessions(list[0]._id);
@@ -174,7 +174,7 @@ export function AgentWorkspace() {
     setExpanded((prev) => new Set(prev).add(agent._id));
     setActiveAgentId(agent._id);
     setActiveSessionId(sn._id);
-    hydrate(sn._id, []);
+    hydrate(sn._id, [], agent._id);
   }
 
   async function deleteSession(agent: Agent, sn: Session) {
@@ -199,7 +199,7 @@ export function AgentWorkspace() {
         [activeAgent._id]: [sn, ...(prev[activeAgent._id] ?? [])],
       }));
       setActiveSessionId(sn._id);
-      hydrate(sn._id, []);
+      hydrate(sn._id, [], activeAgent._id);
       sid = sn._id;
     }
     send(activeAgent.name, text, sid, images);

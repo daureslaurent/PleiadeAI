@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, ImagePlus, X, Play, Repeat, Pencil, Mic } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
+import { TodoPanel } from './TodoPanel';
 import { useStream, buildBlocks, type ContextUsage, type RecalledMemory, type Turn, type TurnScore } from '../../store/stream';
 import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
@@ -239,7 +240,7 @@ function AskUserPrompt({
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
 export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, onOpenVisual, onSend }: Props) {
-  const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, answerAsk, stop } =
+  const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, todos, activeSessionId, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -452,6 +453,9 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
           </div>
         )}
       </div>
+
+      {/* The agent's live plan, pinned so steps stay visible while the turn runs */}
+      {activeSessionId && <TodoPanel items={todos} sessionId={activeSessionId} />}
 
       {/* Human-in-the-loop prompt (an agent called ask_user) */}
       {pendingAsk && (

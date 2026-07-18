@@ -1,6 +1,7 @@
 import type { AgentDoc } from './agent.model';
 import type { ImageBlock } from '../../core/event-bus/events.types';
 import type { MemoryKind, RecalledMemory } from '../memory/memory.types';
+import type { TodoItem } from '../todos/todo.repository';
 
 /**
  * OpenAI-compatible chat message shapes for llama.cpp (`/v1/chat/completions`).
@@ -79,6 +80,42 @@ export function renderNotebookBlock(notebook: string | undefined): string {
   return `## Notebook\nYour own notes, written by you on earlier turns. Keep them current with \`update_notebook\`.\n\n${body}`;
 }
 
+const TODO_STATUS_MARK: Record<string, string> = {
+  completed: '[x]',
+  in_progress: '[~]',
+  pending: '[ ]',
+};
+
+/**
+ * Render the agent's working checklist (`todowrite`) plus how to use it.
+ *
+ * This block is the mechanism behind "don't lose a step mid-flight". The list is session-scoped and
+ * survives turn boundaries, so an agent that ended a turn with an item still `in_progress` opens the
+ * next one looking at exactly that — no separate `todoread` tool and no end-of-turn interrogation
+ * needed, because the state is simply always in front of it.
+ *
+ * Injected after the notebook: it is the agent's own working state, not instruction.
+ */
+export function renderTodoBlock(items: TodoItem[] = []): string {
+  const usage =
+    'Use `todowrite` for multi-step work (~3+ steps) so you do not drop a step: write the plan ' +
+    'before you start, keep exactly one item `in_progress`, and mark each done as you finish it — ' +
+    'not in a batch at the end. Send the complete list on every call; it replaces the previous one. ' +
+    'Skip it for simple one-shot requests.';
+
+  if (!items.length) return `## Task list\n_(empty.)_ ${usage}`;
+
+  const lines = items.map((it) => `${TODO_STATUS_MARK[it.status] ?? '[ ]'} ${it.content}`).join('\n');
+  const unfinished = items.filter((it) => it.status !== 'completed').length;
+  // Name the leftover explicitly rather than trusting the model to diff the marks itself — an
+  // unfinished item is precisely what a turn boundary tends to bury.
+  const carry = unfinished
+    ? `\n\n${unfinished} item(s) still open. Continue from the first one that is not \`[x]\`, and update the list as you go.`
+    : '\n\nAll items are complete. Start a fresh list if new multi-step work comes up.';
+
+  return `## Task list\nYour current plan for this session, written by you.\n\n${lines}${carry}\n\n${usage}`;
+}
+
 /**
  * Directive injected for top-level agents (`subagent === false`). It turns the agent into an
  * orchestrator: it must survey the `annuaire` and route work to specialised subagents rather than
@@ -150,7 +187,7 @@ export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date()):
  *
  *   environment · parameters · house rules · AGENTS.md · [orchestration] · tool use
  *   --- authored system_prompt ---
- *   notebook
+ *   notebook · task list
  *
  * Everything before the authored prompt is operator-owned and read-only to the agent; the notebook
  * — the only document the agent can write — comes *after* it, so the agent's own notes can never be
@@ -160,7 +197,7 @@ export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date()):
  * `houseRules` is the fleet-wide `settings.agents_md`; the caller supplies it since settings are
  * fetched async (see `AgentRunner`).
  */
-export function buildSystemMessage(agent: AgentDoc, houseRules?: string): ChatMessage {
+export function buildSystemMessage(agent: AgentDoc, houseRules?: string, todos: TodoItem[] = []): ChatMessage {
   const before = [
     renderEnvironmentBlock(agent),
     renderParameterBlock(agent.parameters as Map<string, string>),
@@ -169,10 +206,13 @@ export function buildSystemMessage(agent: AgentDoc, houseRules?: string): ChatMe
     agent.subagent ? '' : renderOrchestrationBlock(),
     renderToolUseBlock(),
   ].filter(Boolean);
-  const notebookBlock = renderNotebookBlock(agent.notebook as string | undefined);
+  const after = [
+    renderNotebookBlock(agent.notebook as string | undefined),
+    renderTodoBlock(todos),
+  ].join('\n\n');
   return {
     role: 'system',
-    content: `${before.join('\n\n')}\n\n---\n\n${agent.system_prompt}\n\n---\n\n${notebookBlock}`,
+    content: `${before.join('\n\n')}\n\n---\n\n${agent.system_prompt}\n\n---\n\n${after}`,
   };
 }
 

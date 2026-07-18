@@ -231,6 +231,25 @@ export interface MemoryRecallPayload {
   memories: RecalledMemory[];
 }
 
+/** One item of an agent's working checklist (`todowrite`). */
+export interface TodoItemPayload {
+  id: string;
+  content: string;
+  status: string;
+}
+
+/**
+ * An agent rewrote its task list (`todowrite`). Emitted on every write so the pinned checklist in the
+ * chat ticks over live rather than only once the turn settles. Carries `ctx.depth`, so a delegated
+ * sub-agent's list is routed to its own bubble instead of replacing the orchestrator's.
+ */
+export interface TodoUpdatePayload {
+  ctx: EventContext;
+  /** Tool call that wrote it, so the UI can tie the update to its inline marker. */
+  callId: string;
+  items: TodoItemPayload[];
+}
+
 export interface ContextUsagePayload {
   ctx: EventContext;
   /** Prompt tokens on this inference pass — the current context size. */
@@ -443,6 +462,7 @@ export interface EventMap {
   'agent:ask_agent': AskAgentPayload;
   'agent:ask_agent_done': AskAgentDonePayload;
   'agent:memory_recall': MemoryRecallPayload;
+  'agent:todo_update': TodoUpdatePayload;
   'agent:context_usage': ContextUsagePayload;
   'agent:turn_truncated': TurnTruncatedPayload;
   'agent:ask_user': AskUserPayload;

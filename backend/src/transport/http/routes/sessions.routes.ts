@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { sessionRepository } from '../../../domain/sessions/session.repository';
 import { agentRepository } from '../../../domain/agents/agent.repository';
+import { todoRepository } from '../../../domain/todos/todo.repository';
 
 /** CRUD for conversation sessions + their message history (backs the Workspace). */
 export const sessionsRouter = Router();
@@ -48,6 +49,22 @@ sessionsRouter.delete('/:id', async (req, res) => {
     return;
   }
   res.status(204).end();
+});
+
+/**
+ * Every agent's task list in this session (`todowrite`). Read on session load so a reload — or a
+ * refresh mid-turn — restores the pinned checklist instead of blanking it until the next write.
+ */
+sessionsRouter.get('/:id/todos', async (req, res) => {
+  const lists = await todoRepository.listBySession(req.params.id);
+  res.json(
+    lists.map((l) => ({
+      agentId: l.agent_id,
+      agent: l.agent_name,
+      items: l.items,
+      updatedAt: l.updated_at,
+    })),
+  );
 });
 
 sessionsRouter.get('/:id/messages', async (req, res) => {

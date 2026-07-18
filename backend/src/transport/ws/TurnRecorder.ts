@@ -4,6 +4,8 @@ import type {
   AskAgentPayload,
   ContextUsagePayload,
   MemoryRecallPayload,
+  TodoUpdatePayload,
+  TodoItemPayload,
   RecalledMemory,
   StreamChunkPayload,
   ToolCompletePayload,
@@ -51,6 +53,8 @@ export type Block =
       runId?: string;
       /** Memories auto-recalled into this sub-agent's prompt, if any. */
       memories?: RecalledMemory[];
+      /** The checklist this sub-agent wrote during its run, if any. */
+      todos?: TodoItemPayload[];
       children: Block[];
     };
 
@@ -92,6 +96,8 @@ interface Frame {
   runId?: string;
   /** Memories the auto-RAG step injected into this frame's prompt. */
   memories?: RecalledMemory[];
+  /** The checklist this frame's agent wrote (`todowrite`), so a mid-turn reload keeps its bubble. */
+  todos?: TodoItemPayload[];
 }
 
 /** Pull a human-readable output string out of a tool result (mirrors the frontend helper). */
@@ -186,6 +192,7 @@ export class TurnRecorder {
   private readonly onHopDone = (p: AskAgentDonePayload) => this.handleHopDone(p);
   private readonly onContext = (p: ContextUsagePayload) => this.handleContext(p);
   private readonly onMemory = (p: MemoryRecallPayload) => this.handleMemory(p);
+  private readonly onTodo = (p: TodoUpdatePayload) => this.handleTodo(p);
 
   constructor(
     private readonly sessionId: string,
@@ -213,6 +220,7 @@ export class TurnRecorder {
     eventBus.on('agent:ask_agent_done', this.onHopDone);
     eventBus.on('agent:context_usage', this.onContext);
     eventBus.on('agent:memory_recall', this.onMemory);
+    eventBus.on('agent:todo_update', this.onTodo);
   }
 
   stop(): void {
@@ -226,6 +234,7 @@ export class TurnRecorder {
     eventBus.off('agent:ask_agent_done', this.onHopDone);
     eventBus.off('agent:context_usage', this.onContext);
     eventBus.off('agent:memory_recall', this.onMemory);
+    eventBus.off('agent:todo_update', this.onTodo);
   }
 
   /** Only events belonging to this run's session are ours (the bus is process-global). */
@@ -367,6 +376,19 @@ export class TurnRecorder {
     frame.memories = p.memories;
   }
 
+  /**
+   * Mirror a `todowrite` onto its frame, so a reconnect mid-turn restores a sub-agent's checklist
+   * along with the rest of its bubble. The depth-0 list needs no mirroring here — it is persisted by
+   * the tool itself and refetched over `GET /api/sessions/:id/todos`.
+   */
+  private handleTodo(p: TodoUpdatePayload): void {
+    if (!this.mine(p.ctx.sessionId)) return;
+    const frame = p.ctx.depth === 0 ? this.frames.get('root') : this.frames.get(this.top);
+    if (!frame) return;
+    if (p.ctx.depth > 0 && frame.agent !== p.ctx.agentName) return;
+    frame.todos = p.items;
+  }
+
   /** Fold the flat log for `frameId` into the nested Block tree (mirrors the frontend `buildBlocks`). */
   private buildBlocks(frameId: string): Block[] {
     const out: Block[] = [];
@@ -400,6 +422,7 @@ export class TurnRecorder {
           contextWindow: f.contextWindow,
           runId: f.runId,
           memories: f.memories,
+          todos: f.todos,
           children: this.buildBlocks(it.refFrameId),
         });
       }

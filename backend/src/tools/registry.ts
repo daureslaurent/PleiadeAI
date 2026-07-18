@@ -20,6 +20,7 @@ import { generateImage } from './core/generateImage';
 import { data } from './core/data';
 import { listMail, readMail } from './core/mail';
 import { guide } from './core/guide';
+import { todoWrite } from './core/todo';
 import { read } from './core/fs/read';
 import { write } from './core/fs/write';
 import { edit } from './core/fs/edit';
@@ -67,6 +68,8 @@ const CORE_TOOLS: Record<string, Tool> = {
   [data.name]: data,
   // Man-style tool/workflow guides — auto-granted to every agent (see AgentRunner).
   [guide.name]: guide,
+  // The agent's own working checklist — auto-granted to every agent (see AgentRunner).
+  [todoWrite.name]: todoWrite,
   // OpenCode-compatible file tools (opt-in per agent via tools_allowed).
   [read.name]: read,
   [write.name]: write,

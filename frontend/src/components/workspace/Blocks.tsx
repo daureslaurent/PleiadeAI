@@ -7,6 +7,7 @@ import { iconFor } from '../../lib/agentIcons';
 import { usePrefs } from '../../store/prefs';
 import { ScoreBadge } from '../ScoreBadge';
 import { MemoriesBadge } from '../MemoriesBadge';
+import { TodoList } from './TodoPanel';
 import type { Block } from '../../store/stream';
 
 type AgentBlock = Extract<Block, { kind: 'agent' }>;
@@ -245,6 +246,13 @@ function SubAgentBubble({ block }: { block: AgentBlock }) {
           {block.memories && block.memories.length > 0 && (
             <div className="mb-2 flex">
               <MemoriesBadge memories={block.memories} />
+            </div>
+          )}
+          {/* This sub-agent's own plan. Kept in its bubble rather than the pinned panel so a
+              delegate's checklist never displaces the one the operator is tracking. */}
+          {block.todos && block.todos.length > 0 && (
+            <div className="mb-2">
+              <TodoList items={block.todos} />
             </div>
           )}
           {/* The delegated question, spelled out above the sub-agent's work. */}

@@ -179,6 +179,28 @@ export interface MemoryRecallEvent {
   memories: RecalledMemory[];
 }
 
+/** One item of an agent's working checklist. */
+export interface TodoItem {
+  id: string;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+/**
+ * An agent rewrote its task list (`todowrite`). Routed by depth like `memory_recall`: `depth === 0`
+ * is the session agent's list (drives the pinned checklist), `depth > 0` belongs to the delegated
+ * sub-agent's own bubble. Every write sends the complete list, so this replaces rather than patches.
+ */
+export interface TodoUpdateEvent {
+  type: 'todo_update';
+  sessionId: string;
+  agent: string;
+  agentId: string;
+  depth: number;
+  callId: string;
+  items: TodoItem[];
+}
+
 /**
  * Context size (prompt tokens) reported after an agent run. `depth === 0` is the session's
  * user-facing agent (drives the chat header meter); `depth > 0` is a delegated sub-agent run, whose
@@ -278,6 +300,7 @@ export type WsEvent =
   | TruncatedEvent
   | ContextUsageEvent
   | MemoryRecallEvent
+  | TodoUpdateEvent
   | LlamaCallStartEvent
   | LlamaCallDeltaEvent
   | LlamaCallEndEvent

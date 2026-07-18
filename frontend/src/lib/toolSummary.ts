@@ -13,6 +13,7 @@ import {
   FolderOpen,
   Globe,
   type LucideIcon,
+  ListChecks,
   MousePointerClick,
   Search,
   Settings2,
@@ -202,6 +203,20 @@ export function describeTool(
     case 'annuaire': {
       const v = str(args.agent);
       return { Icon: BookUser, value: v, title: v };
+    }
+    case 'todowrite': {
+      // The full checklist already renders in the pinned panel, so the inline card only has to say
+      // that the plan moved and how far along it is — expanding it shows the raw list as usual.
+      const todos = Array.isArray(args.todos) ? (args.todos as { content?: unknown; status?: unknown }[]) : [];
+      const done = todos.filter((t) => t?.status === 'completed').length;
+      const active = todos.find((t) => t?.status === 'in_progress');
+      const current = active ? str(active.content) : '';
+      return {
+        Icon: ListChecks,
+        value: current ? truncate(current, 44) : `${todos.length} items`,
+        title: todos.map((t) => `${t?.status === 'completed' ? '[x]' : t?.status === 'in_progress' ? '[~]' : '[ ]'} ${str(t?.content)}`).join('\n'),
+        hint: todos.length ? `${done}/${todos.length}` : undefined,
+      };
     }
     case 'guide': {
       const topic = str(args.topic);
