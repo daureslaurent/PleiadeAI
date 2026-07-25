@@ -98,7 +98,7 @@ services:
     restart: unless-stopped
       # -hf LiquidAI/LFM2.5-230M-GGUF:Q8_0
     command: >
-      -hf prism-ml/Bonsai-27B-gguf:Q1_0
+      -hf GnLOLot/MiniCPM5-1B-Claude-Opus-Fable5-V2-Thinking-GGUF:Q8_0
       --alias lfm2.5-230m
       --jinja
       --ctx-size 16384
