@@ -15,6 +15,7 @@ import { annuaire } from './core/annuaire';
 import { bash } from './core/bash';
 import { scheduleTask } from './core/scheduleTask';
 import { visualScreenshot, visualAct, visualClick, visualWindows } from './core/visual';
+import { androidUi, androidScreenshot, androidAct, androidApp } from './core/android';
 import { analyzeImage } from './core/analyzeImage';
 import { generateImage } from './core/generateImage';
 import { data } from './core/data';
@@ -39,6 +40,13 @@ const log = createLogger('tool-registry');
  */
 export const VISUAL_TOOL_NAMES = ['visual_screenshot', 'visual_act', 'visual_click', 'visual_windows'] as const;
 
+/**
+ * Names of the Android control tools. Auto-added to an agent's toolset by `AgentRunner` when the
+ * agent's isolation image is flagged `android`, exactly as `VISUAL_TOOL_NAMES` are for a visual
+ * image. The global kill-switch in `resolveTools` still applies.
+ */
+export const ANDROID_TOOL_NAMES = ['android_ui', 'android_screenshot', 'android_act', 'android_app'] as const;
+
 /** Static core tools every agent implicitly gets, keyed by name. */
 const CORE_TOOLS: Record<string, Tool> = {
   [setAgentParameter.name]: setAgentParameter,
@@ -58,6 +66,11 @@ const CORE_TOOLS: Record<string, Tool> = {
   [visualAct.name]: visualAct,
   [visualClick.name]: visualClick,
   [visualWindows.name]: visualWindows,
+  // Android control over adb — auto-granted to agents on an android isolation image (see AgentRunner).
+  [androidUi.name]: androidUi,
+  [androidScreenshot.name]: androidScreenshot,
+  [androidAct.name]: androidAct,
+  [androidApp.name]: androidApp,
   [analyzeImage.name]: analyzeImage,
   // Text-to-image generation via the configured Image endpoint (opt-in per agent via tools_allowed).
   [generateImage.name]: generateImage,

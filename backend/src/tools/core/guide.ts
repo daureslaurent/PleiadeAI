@@ -80,6 +80,15 @@ Captures the agent's live desktop and a vision model answers about it. Two modes
 Submit button?") for pixel coordinates you pass to \`visual_act\`. To *click* a described element,
 prefer \`visual_click\` (locate + click in one step). See the \`visual\` topic guide.`,
 
+  android_ui: `# android_ui — find things on the Android screen
+
+Returns the current screen's widgets straight from Android's own view hierarchy: \`text\`,
+\`resource_id\`, \`content_desc\`, \`clickable\`, exact \`bounds\` and \`center\`. Because the coordinates
+come from the system, they are exact — this, not \`android_screenshot\`, is how you locate anything
+you intend to tap. \`filter\` matches text / content-desc / resource-id. Often you can skip it
+entirely: \`android_act({action:'tap', target:'…'})\` runs this same lookup for you. See the
+\`android\` topic guide.`,
+
   generate_image: `# generate_image — text-to-image
 
 \`generate_image({prompt})\` creates an image from a description using the configured Image endpoint
@@ -166,6 +175,27 @@ Loop: \`visual_screenshot\` (READ to understand the screen, or LOCATE to get coo
 locates + clicks a described element in one step (more reliable than hand-passing coords);
 \`visual_windows\` gives exact window geometry for focus/close/move instead of pixel-hunting the title
 bar. Coordinates are screen pixels from the top-left.`,
+  },
+  android: {
+    title: 'Driving the Android device',
+    blurb: 'Locate with the view hierarchy, act, verify.',
+    tools: ['android_ui', 'android_screenshot', 'android_act', 'android_app'],
+    body: `# Android
+
+**Do not locate things from screenshots.** Unlike the desktop, Android publishes its own view
+hierarchy, so coordinates are exact rather than estimated. Loop: \`android_ui\` (find the widget, get
+its \`center\`) → \`android_act\` → verify.
+
+The short form is usually all you need: \`android_act({action:'tap', target:'Sign in'})\` resolves the
+description against that same hierarchy and taps the exact centre — no coordinates in your hands at
+all. If the target isn't found you get the visible widgets back, so pick from those rather than
+guessing again.
+
+\`android_screenshot\` is for *reading* a screen (what does this message say, did it work) — never for
+finding a tap coordinate. To type: tap the field first (or pass \`target\`), then
+\`action:'type'\`. To scroll, \`action:'swipe'\` from lower on the screen to higher.
+\`android_app\` launches an app by package name, which is far more reliable than hunting for its
+launcher icon.`,
   },
 };
 

@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Smartphone,
   Terminal,
   Trash2,
   Users,
@@ -61,6 +62,12 @@ interface Draft {
   /** Visual desktop resolution; null → boot default (1280×800). */
   visual_width: number | null;
   visual_height: number | null;
+  /** Android image: Dockerfile carries the adb client; agents get the android_* tools. */
+  android: boolean;
+  /** adb serial the android_* tools address; empty → the loopback default (127.0.0.1:5555). */
+  android_adb_serial: string;
+  /** AVD baked into this image and launched in-container; empty → the device lives elsewhere. */
+  android_emulator_avd: string;
 }
 
 /**
@@ -86,11 +93,79 @@ function withVisualLayer(dockerfile: string): string {
   return `${dockerfile.replace(/\s*$/, '')}\n\n${VISUAL_SNIPPET}\n`;
 }
 
-/** Strip the appended visual layer (everything from its marker to the end — we always append last). */
-function withoutVisualLayer(dockerfile: string): string {
-  const idx = dockerfile.indexOf(VISUAL_MARKER);
-  return idx === -1 ? dockerfile : `${dockerfile.slice(0, idx).replace(/\s*$/, '')}\n`;
+/**
+ * Strip one appended layer: everything from its marker up to whichever *other* layer marker comes
+ * next, or the end. Layers are appended in toggle order, so any of them can sit last — cutting to
+ * end-of-file would silently delete the ones that happen to follow.
+ */
+function stripLayer(dockerfile: string, marker: string): string {
+  const idx = dockerfile.indexOf(marker);
+  if (idx === -1) return dockerfile;
+  const next = [VISUAL_MARKER, ANDROID_MARKER, EMULATOR_MARKER]
+    .filter((m) => m !== marker)
+    .map((m) => dockerfile.indexOf(m, idx + marker.length))
+    .filter((i) => i !== -1)
+    .sort((a, b) => a - b)[0];
+  const rest = next === undefined ? '' : dockerfile.slice(next);
+  return `${dockerfile.slice(0, idx).replace(/\s*$/, '')}\n${rest ? `\n${rest}` : ''}`;
 }
+
+const withoutVisualLayer = (d: string): string => stripLayer(d, VISUAL_MARKER);
+
+/**
+ * Android layer appended when the "Android" toggle is on. Mirrors the backend source of truth
+ * `ANDROID_DOCKERFILE_SNIPPET` (isolation/android.template.ts) — kept in sync by hand since the
+ * frontend can't import backend modules. Only the adb *client* (a few MB): the device itself runs
+ * outside the container, so no SDK or emulator is installed here.
+ */
+const ANDROID_MARKER = '# --- PleiadesAI android layer';
+const ANDROID_SNIPPET = `# --- PleiadesAI android layer (adb control of an emulator / redroid / physical device) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+      adb scrcpy \\
+      python3 python3-pil \\
+    && rm -rf /var/lib/apt/lists/*`;
+
+/** Append the android layer once (no-op if already present). */
+function withAndroidLayer(dockerfile: string): string {
+  if (dockerfile.includes(ANDROID_MARKER)) return dockerfile;
+  return `${dockerfile.replace(/\s*$/, '')}\n\n${ANDROID_SNIPPET}\n`;
+}
+
+const withoutAndroidLayer = (d: string): string => stripLayer(d, ANDROID_MARKER);
+
+/**
+ * All-in-one emulator layer: the AVD lives in the agent's own container, so no separate device host
+ * is needed. Mirrors `ANDROID_EMULATOR_DOCKERFILE_SNIPPET` (isolation/android.template.ts). Adds
+ * ~10 GB to the built image and needs "Hardware acceleration" on the isolation profile.
+ */
+const EMULATOR_MARKER = '# --- PleiadesAI android emulator';
+const EMULATOR_SNIPPET = `# --- PleiadesAI android emulator (in-container AVD; needs /dev/kvm on the isolation profile) ---
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \\
+    ANDROID_AVD_HOME=/opt/android-sdk/.avd \\
+    PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:\${PATH}
+ARG ANDROID_API=34
+ARG ANDROID_IMAGE=system-images;android-34;google_apis;x86_64
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+      openjdk-17-jdk-headless unzip curl libpulse0 libgl1 libnss3 libxcursor1 libxi6 \\
+    && rm -rf /var/lib/apt/lists/* \\
+    && mkdir -p "\${ANDROID_SDK_ROOT}/cmdline-tools" \\
+    && curl -fsSL -o /tmp/cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \\
+    && unzip -q /tmp/cmdline.zip -d /tmp/cmdline && rm /tmp/cmdline.zip \\
+    && mv /tmp/cmdline/cmdline-tools "\${ANDROID_SDK_ROOT}/cmdline-tools/latest" \\
+    && yes | sdkmanager --licenses >/dev/null \\
+    && sdkmanager --install "platform-tools" "emulator" "\${ANDROID_IMAGE}" >/dev/null \\
+    && echo no | avdmanager create avd -n pleiades -k "\${ANDROID_IMAGE}" --force`;
+
+/** The AVD name the snippet creates — prefilled when the emulator layer is added. */
+const DEFAULT_AVD = 'pleiades';
+
+/** Append the emulator layer once (no-op if already present). */
+function withEmulatorLayer(dockerfile: string): string {
+  if (dockerfile.includes(EMULATOR_MARKER)) return dockerfile;
+  return `${dockerfile.replace(/\s*$/, '')}\n\n${EMULATOR_SNIPPET}\n`;
+}
+
+const withoutEmulatorLayer = (d: string): string => stripLayer(d, EMULATOR_MARKER);
 
 const DEFAULT_DOCKERFILE = `# Docker image for isolated agent runtimes.
 # Requirements: bash, python3, and node must remain available for the terminal tool and skills.
@@ -116,6 +191,9 @@ const blank = (): Draft => ({
   visual: false,
   visual_width: null,
   visual_height: null,
+  android: false,
+  android_adb_serial: '',
+  android_emulator_avd: '',
 });
 
 const toDraft = (i: Image): Draft => ({
@@ -130,6 +208,9 @@ const toDraft = (i: Image): Draft => ({
   visual: Boolean(i.visual),
   visual_width: i.visual_width ?? null,
   visual_height: i.visual_height ?? null,
+  android: Boolean(i.android),
+  android_adb_serial: i.android_adb_serial ?? '',
+  android_emulator_avd: i.android_emulator_avd ?? '',
 });
 
 /**
@@ -245,6 +326,9 @@ export function ImagesView() {
         visual: draft.visual,
         visual_width: draft.visual_width,
         visual_height: draft.visual_height,
+        android: draft.android,
+        android_adb_serial: draft.android_adb_serial,
+        android_emulator_avd: draft.android_emulator_avd,
         // Minutes → ms; blank/invalid clears the override (server default applies).
         build_timeout_ms: draft.build_timeout_min.trim()
           ? Math.max(1, Number(draft.build_timeout_min) || 0) * 60000
@@ -418,6 +502,82 @@ export function ImagesView() {
                   calibration={items.find((i) => i._id === draft._id)?.visual_calibration ?? null}
                   onCleared={refresh}
                 />
+              )}
+            </div>
+          </Section>
+
+          <Section title="Android" icon={<Smartphone size={13} />}>
+            <div className="space-y-4">
+              <AndroidToggle
+                android={draft.android}
+                onToggle={(on) =>
+                  setDraft({
+                    ...draft,
+                    android: on,
+                    dockerfile: on
+                      ? withAndroidLayer(draft.dockerfile)
+                      : withoutAndroidLayer(draft.dockerfile),
+                  })
+                }
+              />
+
+              {draft.android && (
+                <div className="space-y-1.5">
+                  <Checkbox
+                    checked={Boolean(draft.android_emulator_avd)}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        android_emulator_avd: v ? DEFAULT_AVD : '',
+                        dockerfile: v
+                          ? withEmulatorLayer(draft.dockerfile)
+                          : withoutEmulatorLayer(draft.dockerfile),
+                      })
+                    }
+                  >
+                    <span>Run the emulator in this container</span>
+                  </Checkbox>
+                  <Hint>
+                    Bakes an Android SDK + AVD into the image, so no separate device is needed —
+                    adds roughly 10 GB to the build. On the isolation profile using this image,
+                    enable <strong>Hardware acceleration</strong> and raise its limits: the defaults
+                    (1 CPU / 1g) will not boot an emulator — give it at least 4 CPUs and 4g. Leave
+                    this off to point the tools at a device running elsewhere.
+                  </Hint>
+                </div>
+              )}
+
+              {draft.android && draft.android_emulator_avd && (
+                <Field label="AVD name">
+                  <Input
+                    value={draft.android_emulator_avd}
+                    onChange={(e) => setDraft({ ...draft, android_emulator_avd: e.target.value })}
+                    placeholder={DEFAULT_AVD}
+                    className="font-mono text-[11px]"
+                  />
+                  <Hint>
+                    Must match an AVD created in the Dockerfile (the snippet creates{' '}
+                    <span className="font-mono">{DEFAULT_AVD}</span>). Launched on demand — the
+                    container's entrypoint is nulled, so the image can't start it itself.
+                  </Hint>
+                </Field>
+              )}
+
+              {draft.android && !draft.android_emulator_avd && (
+                <Field label="adb serial">
+                  <Input
+                    value={draft.android_adb_serial}
+                    onChange={(e) => setDraft({ ...draft, android_adb_serial: e.target.value })}
+                    placeholder="127.0.0.1:5555"
+                    className="font-mono text-[11px]"
+                  />
+                  <Hint>
+                    Where the device answers, as seen <em>from inside the agent container</em>. A{' '}
+                    <span className="font-mono">host:port</span> serial is connected on demand; leave
+                    empty for the default <span className="font-mono">127.0.0.1:5555</span>, which
+                    assumes the container shares the device container's network namespace.
+                  </Hint>
+                </Field>
               )}
             </div>
           </Section>
@@ -648,6 +808,36 @@ function VisualToggle({ visual, onToggle }: { visual: boolean; onToggle: (on: bo
         </p>
       </div>
       <Toggle checked={visual} onChange={onToggle} />
+    </div>
+  );
+}
+
+/**
+ * "Android" toggle. Injects the adb client layer into the Dockerfile and flags the image so agents
+ * on a profile using it are auto-granted the android_* tools. Note this provisions the *client*
+ * only — the device itself (a redroid container, an emulator, or a physical phone) runs elsewhere
+ * and is addressed by the adb serial.
+ */
+function AndroidToggle({ android, onToggle }: { android: boolean; onToggle: (on: boolean) => void }) {
+  return (
+    <div
+      className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+        android ? 'border-accent/40 bg-accent/[0.07]' : 'border-white/[0.06] bg-black/25'
+      }`}
+    >
+      <Smartphone size={16} className={`mt-0.5 shrink-0 ${android ? 'text-accent' : 'text-slate-500'}`} />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-slate-200">Android control</div>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+          Adds the <span className="font-mono text-slate-400">adb</span> client so agents can drive an
+          Android device, and auto-grants{' '}
+          <span className="font-mono text-slate-400">android_ui</span> /{' '}
+          <span className="font-mono text-slate-400">android_act</span> to agents using this image.
+          Unlike the visual desktop, taps are resolved from Android's own view hierarchy — exact
+          coordinates, no vision guessing.
+        </p>
+      </div>
+      <Toggle checked={android} onChange={onToggle} />
     </div>
   );
 }

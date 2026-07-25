@@ -42,6 +42,15 @@ const IsolationSchema = new Schema(
     network: { type: String, enum: ['host', 'bridge', 'none', 'vpn', 'ssh'], default: 'host' },
     idle_timeout_ms: { type: Number, default: 1_800_000 },
 
+    /**
+     * Expose the host's `/dev/kvm` to this profile's containers (`--device`). Needed only to run a
+     * hardware-accelerated VM *inside* the container — in practice, an Android emulator on an image
+     * with the Android layer. Off by default: it hands the container the host's virtualization
+     * device, and `docker create` fails outright if the host has no `/dev/kvm` (a VPS without nested
+     * virtualization typically doesn't).
+     */
+    kvm: { type: Boolean, default: false },
+
     // Remote execution target, used only when `network === 'ssh'`. Not secret (the credentials are
     // the SSH key below): the host/port/user of the machine every tool call is forwarded to.
     ssh_remote_host: { type: String, default: '' },

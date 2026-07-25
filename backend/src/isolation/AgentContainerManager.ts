@@ -107,6 +107,8 @@ export interface IsolationProfile {
   memory: string;
   network: string;
   idle_timeout_ms: number;
+  /** Expose the host's `/dev/kvm` to this profile's containers (an in-container Android emulator). */
+  kvm?: boolean;
   /** Remote execution target — read only when `network === 'ssh'` (see remote-ssh.ts). */
   ssh_remote_host?: string;
   ssh_remote_port?: number;
@@ -574,6 +576,8 @@ class AgentContainerManager {
       network: networkOverride || iso.network || env.AGENT_CONTAINER_NETWORK,
       agentId,
       env: sudoPassword ? { SUDO_ASKPASS: SUDO_ASKPASS_FILE } : undefined,
+      // Hardware acceleration for an in-container VM (an Android emulator, in practice).
+      devices: iso.kvm ? ['/dev/kvm'] : undefined,
     });
     await dockerService.startContainer(agentContainerName(agentId));
 
