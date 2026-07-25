@@ -28,6 +28,15 @@ const EnvSchema = z.object({
   LLAMA_FALLBACK_URL: z.string().url('LLAMA_FALLBACK_URL must be a valid URL').default('http://llama-fallback:8080'),
   LLAMA_FALLBACK_MODEL: z.string().default('lfm2.5-230m'),
 
+  // Time-to-first-token budget for one inference attempt. An unreachable endpoint that black-holes
+  // the TCP connect (host down / firewalled, no fast ECONNREFUSED) otherwise hangs until the SDK's
+  // 10-min default, so the failover chain never fires on its own and the operator has to hit "stop"
+  // — which is a *user* abort and deliberately skips failover. This bounds each attempt: if no token
+  // (nor a connection) arrives within the budget, that attempt is aborted and the next endpoint in
+  // the fallback chain is tried. Cleared once the first token streams, so a slow-but-alive server is
+  // never killed mid-generation.
+  INFERENCE_FIRST_TOKEN_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
+
   // Embeddings — a separate (CPU) llama.cpp server started with --embedding. Powers Qdrant
   // vector memory; if unreachable the agent loop degrades gracefully (memory read/write skipped).
   EMBEDDING_API_URL: z.string().url('EMBEDDING_API_URL must be a valid URL').default('http://embeddings:8080'),

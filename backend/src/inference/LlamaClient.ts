@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
+import { env } from '../config/env';
 import { createLogger } from '../config/logger';
 import { settingsService } from '../domain/settings/settings.service';
 import { endpointGate } from './endpoint-gate';
@@ -527,6 +528,23 @@ export class LlamaClient {
       [...partials.values()]
         .filter((p) => p.name)
         .map((p) => ({ id: p.id, name: p.name, argsJson: p.args || '{}' }));
+
+    // Time-to-first-token guard. An unreachable endpoint that black-holes the TCP connect hangs until
+    // the SDK's 10-min default; without this the failover chain never fires on its own and the operator
+    // has to hit "stop" (a user abort, which deliberately skips failover). We abort *this attempt only*
+    // via an internal controller if no token arrives in time, then let the outer loop fail over. The
+    // caller's own `signal` stays untouched, so a genuine user stop is still distinguishable upstream.
+    const ttftCtrl = new AbortController();
+    let timedOut = false;
+    let ttftCleared = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ttftCtrl.abort();
+    }, env.INFERENCE_FIRST_TOKEN_TIMEOUT_MS);
+    // Combine the caller's stop signal with our per-attempt timeout: whichever fires first tears down
+    // the request. (Node ≥18.17 / 20 `AbortSignal.any`; this backend runs Node ≥22.)
+    const attemptSignal = signal ? AbortSignal.any([signal, ttftCtrl.signal]) : ttftCtrl.signal;
+
     try {
       const stream = await client.chat.completions.create(
         {
@@ -540,12 +558,19 @@ export class LlamaClient {
           stream_options: { include_usage: true },
           tools: wireTools,
         },
-        // Passing the abort signal lets a user "stop" tear down the in-flight inference request
-        // promptly instead of waiting for the model to finish generating.
-        { signal },
+        // The combined signal: a user "stop" or the first-token timeout tears down the in-flight
+        // request promptly instead of waiting for the model (or a dead endpoint) to respond.
+        { signal: attemptSignal },
       );
 
       for await (const chunk of stream) {
+        // First real activity from the server — cancel the time-to-first-token guard so a slow but
+        // alive generation is never killed mid-stream. (Reaching here means the connection is live and
+        // the server has started streaming chunks, even if this one is usage-only.)
+        if (!ttftCleared) {
+          clearTimeout(timer);
+          ttftCleared = true;
+        }
         // The usage-only chunk carries no choices; capture and move on.
         if (chunk.usage) {
           usage = {
@@ -595,14 +620,28 @@ export class LlamaClient {
       return { text, toolCalls, finishReason, usage };
     } catch (err) {
       call.fail();
+      // When our own first-token timeout fired, the SDK surfaces a generic abort ("Request was
+      // aborted."). Re-tag it so it reads as an endpoint reachability failure both in the LLM Debug
+      // page and in the failover log, rather than looking like a user stop.
+      const reason =
+        timedOut && !signal?.aborted
+          ? `endpoint unreachable — no token within ${env.INFERENCE_FIRST_TOKEN_TIMEOUT_MS}ms`
+          : err instanceof Error
+            ? err.message
+            : String(err);
       // Record whatever streamed before the failure/abort so the LLM Debug page shows the partial call.
       capture.end(
         { text, reasoning: capture.reasoning, toolCalls: buildToolCalls(), finishReason },
         usage,
         'error',
-        err instanceof Error ? err.message : String(err),
+        reason,
       );
+      // Surface a timeout as a normal (failover-eligible) error, not an abort: the outer loop keys off
+      // the *caller's* signal, which is untouched here, so it will correctly move to the next endpoint.
+      if (timedOut && !signal?.aborted) throw new Error(reason);
       throw err;
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
