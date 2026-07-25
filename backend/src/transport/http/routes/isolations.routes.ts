@@ -318,7 +318,7 @@ isolationsRouter.patch('/:id', async (req, res) => {
   const id = String(iso._id);
   const body = req.body ?? {};
   const patch: Record<string, unknown> = {};
-  for (const key of ['name', 'description', 'image_id', 'cpus', 'memory', 'network', 'idle_timeout_ms', 'kvm', 'ssh_public_key', 'ssh_known_hosts', 'ssh_remote_host', 'ssh_remote_port', 'ssh_remote_user'] as const) {
+  for (const key of ['name', 'description', 'image_id', 'cpus', 'memory', 'network', 'idle_timeout_ms', 'ssh_public_key', 'ssh_known_hosts', 'ssh_remote_host', 'ssh_remote_port', 'ssh_remote_user'] as const) {
     if (body[key] !== undefined) patch[key] = body[key];
   }
   // Empty image_id means "unassign the image".
@@ -378,9 +378,6 @@ isolationsRouter.patch('/:id', async (req, res) => {
     patch.cpus !== undefined ||
     patch.memory !== undefined ||
     patch.network !== undefined ||
-    // Device passthrough is a `docker create` flag, so an existing container can never gain or lose
-    // /dev/kvm — it has to be rebuilt.
-    patch.kvm !== undefined ||
     sshChanged ||
     vpnChanged ||
     sudoChanged ||

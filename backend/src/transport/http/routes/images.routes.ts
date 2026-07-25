@@ -6,7 +6,6 @@ import { buildManager } from '../../../isolation/build.manager';
 import { imgImageName } from '../../../isolation/names';
 import { assertRuntimes } from '../../../isolation/dockerfile.template';
 import { assertVisualLayer } from '../../../isolation/visual.template';
-import { assertAndroidLayer } from '../../../isolation/android.template';
 import { createLogger } from '../../../config/logger';
 
 const log = createLogger('images-routes');
@@ -32,11 +31,6 @@ function pickImageFields(body: Record<string, unknown>): Record<string, unknown>
       if (Number.isFinite(n) && n >= 480 && n <= 3840) patch[key] = Math.floor(n);
     }
   }
-  if (body.android !== undefined) patch.android = Boolean(body.android);
-  // adb serial the android_* tools address ('' → the loopback default).
-  if (body.android_adb_serial !== undefined) patch.android_adb_serial = String(body.android_adb_serial ?? '').trim();
-  // AVD baked into the image and launched in-container ('' = external device).
-  if (body.android_emulator_avd !== undefined) patch.android_emulator_avd = String(body.android_emulator_avd ?? '').trim();
   // Build timeout: a positive number sets it; null/'' clears it (→ server default). A non-numeric
   // or non-positive value is ignored so a bad input can't disable the timeout entirely.
   if (body.build_timeout_ms !== undefined) {
@@ -102,12 +96,10 @@ imagesRouter.get('/:id/status', async (req, res) => {
     last_build_error: image.last_build_error,
     build_active: job?.status === 'queued' || job?.status === 'running',
     // Base runtime lint always applies; a visual image additionally lints for the visual layer so a
-    // missing Xvfb/x11vnc/socat is surfaced before the desktop fails to boot, and an android image
-    // for a missing adb client before the android_* tools fail.
+    // missing Xvfb/x11vnc/socat is surfaced before the desktop fails to boot.
     warnings: [
       ...assertRuntimes(image.dockerfile ?? ''),
       ...(image.visual ? assertVisualLayer(image.dockerfile ?? '') : []),
-      ...(image.android ? assertAndroidLayer(image.dockerfile ?? '') : []),
     ],
     referenced_by: profiles.map((p) => ({ _id: String(p._id), name: p.name })),
   });

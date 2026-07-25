@@ -13,13 +13,10 @@ import {
   FolderOpen,
   Globe,
   type LucideIcon,
-  LayoutList,
   ListChecks,
   MousePointerClick,
-  Package,
   Search,
   Settings2,
-  Smartphone,
   Wrench,
 } from 'lucide-react';
 
@@ -83,17 +80,6 @@ export function visualActDetail(args: Args): string {
     const dir = str(args.direction);
     const amt = str(args.amount);
     return [dir, amt].filter(Boolean).join(' ');
-  }
-  return '';
-}
-
-/** Human-readable detail for an `android_act` call: the typed text, key name, or swipe destination. */
-export function androidActDetail(args: Args): string {
-  const action = str(args.action);
-  if (action === 'type') return quote(str(args.text));
-  if (action === 'key') return str(args.text);
-  if (action === 'swipe' && args.to_x != null && args.to_y != null) {
-    return `→ ${str(args.to_x)},${str(args.to_y)}`;
   }
   return '';
 }
@@ -259,42 +245,8 @@ export function describeTool(
       return { Icon: CalendarClock, value: truncate(str(args.query ?? args.prompt), 44) };
     }
     case 'analyze_image':
-    case 'visual_screenshot':
-    case 'android_screenshot': {
+    case 'visual_screenshot': {
       return { Icon: Eye, value: quote(str(args.question), 44), title: str(args.question) };
-    }
-    case 'android_ui': {
-      const filter = str(args.filter);
-      const count = n(r.count);
-      return {
-        Icon: LayoutList,
-        value: filter ? quote(filter, 44) : 'screen',
-        title: filter,
-        hint: done && count != null ? `${count} widget${count === 1 ? '' : 's'}` : undefined,
-      };
-    }
-    case 'android_act': {
-      // A described target is what the operator cares about; coordinates are the fallback.
-      const target = str(args.target);
-      const at = target || (args.x != null && args.y != null ? `${str(args.x)},${str(args.y)}` : '');
-      const action = str(args.action);
-      return {
-        Icon: Smartphone,
-        value: truncate([action, at].filter(Boolean).join(' '), 44),
-        title: target || action,
-        hint: androidActDetail(args) || undefined,
-      };
-    }
-    case 'android_app': {
-      const act = str(args.action) || 'list';
-      const pkg = str(args.package) || str(args.path);
-      const count = n(r.count);
-      return {
-        Icon: Package,
-        value: truncate([act, pkg].filter(Boolean).join(' '), 44),
-        title: pkg || act,
-        hint: done && act === 'list' && count != null ? `${count} package${count === 1 ? '' : 's'}` : undefined,
-      };
     }
     default: {
       // Unknown skill/tool: surface the first recognisable argument.

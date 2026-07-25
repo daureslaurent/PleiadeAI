@@ -18,7 +18,7 @@ import { resolveInference, resolveFallbacks, type ResolvedInference } from '../i
 import { runWithCaptureContext } from '../inference/capture-context';
 import { ReasoningParser } from './streaming/ReasoningParser';
 import { parseFallbackToolCalls, detectNarratedTools } from './streaming/ToolCallFallbackParser';
-import { resolveTools, VISUAL_TOOL_NAMES, ANDROID_TOOL_NAMES } from '../tools/registry';
+import { resolveTools, VISUAL_TOOL_NAMES } from '../tools/registry';
 import { annuaire } from '../tools/core/annuaire';
 import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
@@ -223,8 +223,6 @@ export class AgentRunner {
     // A visual image auto-grants the visual-desktop control tools (like the delegation tools below),
     // so the operator needn't list them in `tools_allowed`. The global kill-switch still applies.
     const visualTools = image?.visual ? [...VISUAL_TOOL_NAMES] : [];
-    // Likewise an android image auto-grants the adb-backed Android control tools.
-    const androidTools = image?.android ? [...ANDROID_TOOL_NAMES] : [];
     // `analyze_image` exists so a *text-only* agent can still read an image: it routes the pixels
     // through the separate Vision endpoint and hands back a description. An agent whose own model is
     // multimodal has no use for it — every image in its scope is fed to it as raw pixels (this turn's
@@ -242,8 +240,8 @@ export class AgentRunner {
     // didn't tick them in `tools_allowed` (a subagent honours its explicit list as before). The
     // global kill-switch in resolveTools still wins if either tool is disabled fleet-wide.
     const orchestrationTools = agent.subagent
-      ? [...agent.tools_allowed, ...visualTools, ...androidTools, ...imageTools]
-      : [...agent.tools_allowed, annuaire.name, askAgent.name, ...visualTools, ...androidTools, ...imageTools];
+      ? [...agent.tools_allowed, ...visualTools, ...imageTools]
+      : [...agent.tools_allowed, annuaire.name, askAgent.name, ...visualTools, ...imageTools];
     // An agent that can write memory must be able to retire one: without `forget`, a memory that
     // turns out to be wrong is recalled forever alongside its own correction, and the model is handed
     // the contradiction with no way to resolve it. Granted with `remember`, never on its own.

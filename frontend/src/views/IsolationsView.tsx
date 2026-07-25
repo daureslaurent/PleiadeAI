@@ -34,7 +34,6 @@ import { MasterDetail, ListRow, ListDivider } from '../components/MasterDetail';
 import {
   Button,
   Callout,
-  Checkbox,
   Chip,
   EmptyState,
   Field,
@@ -61,8 +60,6 @@ interface Draft {
   memory: string;
   network: Isolation['network'];
   idle_timeout_ms: number;
-  /** Expose the host's /dev/kvm to this profile's containers (in-container Android emulator). */
-  kvm: boolean;
   ssh_public_key: string;
   ssh_known_hosts: string;
   /** Algorithm of the stored key ('' = legacy/unknown → ed25519). Drives the injected filename hint. */
@@ -87,7 +84,6 @@ const blank = (): Draft => ({
   memory: '1g',
   network: 'host',
   idle_timeout_ms: 1_800_000,
-  kvm: false,
   ssh_public_key: '',
   ssh_known_hosts: '',
   ssh_key_type: '',
@@ -108,7 +104,6 @@ const toDraft = (i: Isolation): Draft => ({
   memory: i.memory,
   network: i.network,
   idle_timeout_ms: i.idle_timeout_ms,
-  kvm: Boolean(i.kvm),
   ssh_public_key: i.ssh_public_key ?? '',
   ssh_known_hosts: i.ssh_known_hosts ?? '',
   ssh_key_type: i.ssh_key_type ?? '',
@@ -236,7 +231,6 @@ export function IsolationsView() {
         memory: draft.memory,
         network: draft.network,
         idle_timeout_ms: draft.idle_timeout_ms,
-        kvm: draft.kvm,
         ssh_public_key: draft.ssh_public_key,
         ssh_known_hosts: draft.ssh_known_hosts,
         ssh_remote_host: draft.ssh_remote_host.trim(),
@@ -569,19 +563,6 @@ export function IsolationsView() {
                   className="py-1.5 text-xs"
                 />
               </Field>
-            </div>
-
-            <div className="mt-3 space-y-1.5">
-              <Checkbox checked={draft.kvm} onChange={(v) => setDraft({ ...draft, kvm: v })}>
-                <span>Hardware acceleration</span>
-                <span className="font-mono text-slate-500">(--device /dev/kvm)</span>
-              </Checkbox>
-              <Hint>
-                Passes the host's virtualization device into this profile's containers, so an Android
-                emulator baked into the image can run at usable speed. Leave off unless you need it:
-                if the host has no <span className="font-mono">/dev/kvm</span> — most VPSes don't
-                expose nested virtualization — containers will fail to start at all.
-              </Hint>
             </div>
           </Section>
 

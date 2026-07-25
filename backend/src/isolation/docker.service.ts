@@ -299,8 +299,6 @@ class DockerService {
     network: string;
     agentId: string;
     env?: Record<string, string>;
-    /** Host devices to expose (e.g. `/dev/kvm` for an in-container Android emulator). */
-    devices?: string[];
   }): Promise<void> {
     const argv = [
       'create',
@@ -314,10 +312,6 @@ class DockerService {
     ];
     // Non-secret env only (e.g. SUDO_ASKPASS path). Passed as argv, never a shell string.
     for (const [k, v] of Object.entries(opts.env ?? {})) argv.push('--env', `${k}=${v}`);
-    // Device passthrough (e.g. /dev/kvm). Requested per isolation profile; a device the host doesn't
-    // have makes `docker create` fail loudly, which is the right outcome — silently running an
-    // emulator without acceleration would look like a hang, not a misconfiguration.
-    for (const dev of opts.devices ?? []) argv.push('--device', `${dev}:${dev}`);
     if (opts.network && opts.network !== 'bridge') argv.push('--network', opts.network);
     argv.push(opts.image, 'sh', '-c', 'tail -f /dev/null');
 

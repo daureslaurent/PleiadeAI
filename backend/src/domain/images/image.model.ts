@@ -75,35 +75,6 @@ const ImageSchema = new Schema(
     /** Click calibration for this visual image's desktop (null until measured; cleared on rebuild). */
     visual_calibration: { type: VisualCalibrationSchema, default: null },
 
-    /**
-     * Android-control image: the Dockerfile is expected to include the Android layer (`adb`, see
-     * `android.template.ts`). Set from the "Android" toggle on the Images page. Agents whose isolation
-     * profile references an android image are auto-granted the `android_ui` / `android_screenshot` /
-     * `android_act` / `android_app` core tools (see `AgentRunner`), and the Dockerfile lint adds the
-     * android-layer check. Purely declarative — the connect script's preflight remains authoritative.
-     *
-     * Note this flags the *client* only: the device itself (a redroid sidecar, a KVM emulator, or a
-     * physical phone) lives outside the container and is addressed by the serial below.
-     */
-    android: { type: Boolean, default: false },
-
-    /**
-     * adb serial the android tools talk to — a TCP `host:port` (which is `adb connect`-ed on demand)
-     * or a bare device serial. Empty → the `ANDROID_DEFAULT_SERIAL` loopback default, which assumes
-     * the agent container shares the device container's network namespace.
-     */
-    android_adb_serial: { type: String, default: '' },
-
-    /**
-     * Name of an AVD baked into this image to launch *inside* the agent container ('' = none, i.e.
-     * the device lives elsewhere and `android_adb_serial` addresses it). Set this for an all-in-one
-     * emulator image; the container's entrypoint is nulled at create time, so the emulator has to be
-     * started on demand by `androidEmulatorScript` rather than by the image's own ENTRYPOINT.
-     *
-     * Requires `kvm` on the isolation profile — without `/dev/kvm` the emulator is unusably slow.
-     */
-    android_emulator_avd: { type: String, default: '' },
-
     // Build options, forwarded to `docker build`.
     build_args: { type: [BuildArgSchema], default: [] },
     /** `--no-cache`: ignore the layer cache for a clean rebuild. */

@@ -83,15 +83,6 @@ export interface Image {
   visual_height: number | null;
   /** Stored click calibration for this visual image's desktop (null until measured). */
   visual_calibration: VisualCalibration | null;
-  /**
-   * Android image: its Dockerfile carries the adb client. Agents on a profile that references it are
-   * auto-granted the android_* tools. The device itself lives outside the container.
-   */
-  android: boolean;
-  /** adb serial those tools address; '' → the loopback default (127.0.0.1:5555). */
-  android_adb_serial: string;
-  /** AVD baked into this image, launched inside the agent container; '' → device lives elsewhere. */
-  android_emulator_avd: string;
   image_status: ImageStatus;
   image_built_at: string | null;
   last_build_error: string | null;
@@ -118,19 +109,7 @@ export interface VisualCalibration {
 
 export type NewImage = Pick<Image, 'name' | 'description' | 'dockerfile'> &
   Partial<
-    Pick<
-      Image,
-      | 'build_args'
-      | 'no_cache'
-      | 'pull'
-      | 'build_timeout_ms'
-      | 'visual'
-      | 'visual_width'
-      | 'visual_height'
-      | 'android'
-      | 'android_adb_serial'
-      | 'android_emulator_avd'
-    >
+    Pick<Image, 'build_args' | 'no_cache' | 'pull' | 'build_timeout_ms' | 'visual' | 'visual_width' | 'visual_height'>
   >;
 export type ImagePatch = Partial<NewImage>;
 
@@ -160,8 +139,6 @@ export interface Isolation {
   memory: string;
   network: 'host' | 'bridge' | 'none' | 'vpn' | 'ssh';
   idle_timeout_ms: number;
-  /** Expose the host's /dev/kvm to this profile's containers (in-container Android emulator). */
-  kvm: boolean;
   /** Public key + known_hosts are returned as-is (not secret); the private key never is. */
   ssh_public_key: string;
   ssh_known_hosts: string;
@@ -193,7 +170,6 @@ export type NewIsolation = Pick<
   | 'memory'
   | 'network'
   | 'idle_timeout_ms'
-  | 'kvm'
   | 'ssh_public_key'
   | 'ssh_known_hosts'
   | 'ssh_remote_host'
