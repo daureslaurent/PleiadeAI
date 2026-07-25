@@ -12,6 +12,14 @@ export interface EffectiveSettings {
   context_window_auto: boolean;
   temperature: number;
   top_p: number;
+  /** Per-attempt time-to-first-token budget (ms); on timeout the turn fails over to the next endpoint. */
+  inference_first_token_timeout_ms: number;
+  /** How often the background health breaker probes every endpoint (ms). */
+  inference_health_poll_interval_ms: number;
+  /** Consecutive failures before an endpoint is parked down and skipped by routing. */
+  inference_health_failure_threshold: number;
+  /** How long a down endpoint stays excluded before one trial request may re-check it (ms). */
+  inference_health_cooldown_ms: number;
   embedding_url: string;
   embedding_model: string;
   embedding_api_key: string;
@@ -108,6 +116,14 @@ export const settingsService = {
       context_window_auto: doc?.context_window_auto ?? true,
       temperature: doc?.temperature ?? 0.7,
       top_p: doc?.top_p ?? 0.95,
+      inference_first_token_timeout_ms:
+        doc?.inference_first_token_timeout_ms ?? env.INFERENCE_FIRST_TOKEN_TIMEOUT_MS,
+      inference_health_poll_interval_ms:
+        doc?.inference_health_poll_interval_ms ?? env.INFERENCE_HEALTH_POLL_INTERVAL_MS,
+      inference_health_failure_threshold:
+        doc?.inference_health_failure_threshold ?? env.INFERENCE_HEALTH_FAILURE_THRESHOLD,
+      inference_health_cooldown_ms:
+        doc?.inference_health_cooldown_ms ?? env.INFERENCE_HEALTH_COOLDOWN_MS,
       embedding_url: doc?.embedding_url || env.EMBEDDING_API_URL,
       embedding_model: doc?.embedding_model || env.EMBEDDING_MODEL,
       embedding_api_key: doc?.embedding_api_key || env.EMBEDDING_API_KEY,

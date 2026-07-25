@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
-import { env } from '../config/env';
 import { createLogger } from '../config/logger';
 import { settingsService } from '../domain/settings/settings.service';
 import { endpointGate } from './endpoint-gate';
+import { endpointHealth } from './endpoint-health';
+import { inferenceRuntime } from './runtime-config';
 import { eventBus } from '../core/event-bus/EventBus';
 import { getCaptureContext } from './capture-context';
 import { truncateRequestImages } from './truncate-images';
@@ -428,7 +429,21 @@ export class LlamaClient {
         } as ResolvedInference;
       })());
 
-    const candidates = [target, ...(fallbacks ?? [])];
+    // Order of preference: the agent's target, then the fallback chain. Endpoints the health breaker
+    // has parked as *down* are dropped up front so a turn never even attempts (and waits on) a box we
+    // already know is unreachable — it goes straight to the first available endpoint in fallback order.
+    // If every candidate is marked down we keep the full list rather than fail outright: the breaker
+    // may be stale (e.g. just after boot), so a real attempt is better than refusing to try.
+    const all = [target, ...(fallbacks ?? [])].filter((c): c is ResolvedInference => Boolean(c));
+    const available = all.filter((c) => endpointHealth.isAvailable(c.url));
+    const candidates = available.length ? available : all;
+    if (available.length < all.length) {
+      log.info(
+        { skipped: all.length - available.length, using: candidates[0]?.url },
+        'skipping endpoint(s) marked down by the health breaker',
+      );
+    }
+
     let lastErr: unknown;
     for (let i = 0; i < candidates.length; i++) {
       const cand = candidates[i];
@@ -449,10 +464,18 @@ export class LlamaClient {
         },
       };
       try {
-        return await this.attemptStream(cand, messages, tools, guarded, overrides, signal);
+        const result = await this.attemptStream(cand, messages, tools, guarded, overrides, signal);
+        // Reachable and streamed cleanly — clear any failure state so a recovered endpoint returns to
+        // rotation immediately (also the reactive complement to the background poller).
+        endpointHealth.reportSuccess(cand.url);
+        return result;
       } catch (err) {
-        // A user "stop" aborts on purpose — surface it, never mistake it for an endpoint failure.
+        // A user "stop" aborts on purpose — surface it, never mistake it for an endpoint failure and
+        // never let it trip the breaker.
         if (signal?.aborted) throw err;
+        // A genuine failure (timeout / unreachable / HTTP error) feeds the breaker so subsequent turns
+        // skip this endpoint once it crosses the failure threshold.
+        endpointHealth.reportFailure(cand.url, err instanceof Error ? err.message : String(err));
         const next = candidates[i + 1];
         if (emitted || !next) throw err;
         lastErr = err;
@@ -535,12 +558,13 @@ export class LlamaClient {
     // via an internal controller if no token arrives in time, then let the outer loop fail over. The
     // caller's own `signal` stays untouched, so a genuine user stop is still distinguishable upstream.
     const ttftCtrl = new AbortController();
+    const ttftBudget = inferenceRuntime.firstTokenTimeoutMs;
     let timedOut = false;
     let ttftCleared = false;
     const timer = setTimeout(() => {
       timedOut = true;
       ttftCtrl.abort();
-    }, env.INFERENCE_FIRST_TOKEN_TIMEOUT_MS);
+    }, ttftBudget);
     // Combine the caller's stop signal with our per-attempt timeout: whichever fires first tears down
     // the request. (Node ≥18.17 / 20 `AbortSignal.any`; this backend runs Node ≥22.)
     const attemptSignal = signal ? AbortSignal.any([signal, ttftCtrl.signal]) : ttftCtrl.signal;
@@ -625,7 +649,7 @@ export class LlamaClient {
       // page and in the failover log, rather than looking like a user stop.
       const reason =
         timedOut && !signal?.aborted
-          ? `endpoint unreachable — no token within ${env.INFERENCE_FIRST_TOKEN_TIMEOUT_MS}ms`
+          ? `endpoint unreachable — no token within ${ttftBudget}ms`
           : err instanceof Error
             ? err.message
             : String(err);

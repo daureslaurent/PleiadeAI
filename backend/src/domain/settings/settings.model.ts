@@ -21,6 +21,19 @@ const SettingsSchema = new Schema(
     context_window_auto: { type: Boolean, default: true },
     temperature: { type: Number, default: 0.7 },
     top_p: { type: Number, default: 0.95 },
+    /**
+     * Inference reliability / failover tunables (Settings → Inference). All `null` → fall back to the
+     * INFERENCE_* env defaults (see settings.service). Mirrored into `inferenceRuntime` so the hot
+     * routing paths read them synchronously; a save takes effect without a restart.
+     * - first-token timeout: per-attempt budget before failover moves to the next endpoint.
+     * - health poll interval: how often the background breaker probes every endpoint.
+     * - failure threshold: consecutive failures before an endpoint is parked as down.
+     * - cooldown: how long a down endpoint stays skipped before one trial re-checks it.
+     */
+    inference_first_token_timeout_ms: { type: Number, default: null },
+    inference_health_poll_interval_ms: { type: Number, default: null },
+    inference_health_failure_threshold: { type: Number, default: null },
+    inference_health_cooldown_ms: { type: Number, default: null },
     // Separate embeddings endpoint (CPU llama.cpp) backing Qdrant vector memory.
     embedding_url: { type: String, default: '' },
     embedding_model: { type: String, default: '' },

@@ -1,4 +1,4 @@
-import { Eye, Image, Server, SlidersHorizontal } from 'lucide-react';
+import { Eye, HeartPulse, Image, Server, SlidersHorizontal } from 'lucide-react';
 import { Field, Section } from '../../../components/ui';
 import { EndpointsManager } from '../managers/EndpointsManager';
 import { useSettings } from '../context';
@@ -86,6 +86,43 @@ export function InferencePanel() {
             label="Title max tokens"
             hint="Token budget for the title call. Reasoning models spend tokens on a <think> block first, so keep this generous (≥256) — too low truncates mid-reasoning and produces no title."
             min={32}
+          />
+        </div>
+      </Section>
+
+      <Section title="Reliability & failover" icon={<HeartPulse size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          How the fleet reacts when an endpoint goes unreachable. A background probe marks a dead
+          endpoint down so chat turns skip it and route straight to the next one in fallback order —
+          without waiting on it. Changes take effect immediately, no restart.
+        </p>
+        <div className="space-y-4">
+          <SettingNumber
+            field="inference_first_token_timeout_ms"
+            label="First-token timeout (ms)"
+            hint="How long one attempt waits for the first streamed token before it's abandoned and the turn fails over to the next endpoint. Guards against a box that accepts the connection but never responds. Cleared once tokens start, so slow generation isn't cut off. 45000 = 45s."
+            min={1000}
+            step={1000}
+          />
+          <SettingNumber
+            field="inference_health_poll_interval_ms"
+            label="Health poll interval (ms)"
+            hint="How often the backend probes every endpoint's /v1/models in the background to keep its up/down state fresh. Lower = faster to notice an outage or a recovery, at the cost of more probe traffic. 15000 = 15s."
+            min={5000}
+            step={1000}
+          />
+          <SettingNumber
+            field="inference_health_failure_threshold"
+            label="Failure threshold"
+            hint="Consecutive failed probes/calls before an endpoint is parked as down and dropped from routing. 2 tolerates a single transient blip; 1 diverts on the first failure."
+            min={1}
+          />
+          <SettingNumber
+            field="inference_health_cooldown_ms"
+            label="Down cooldown (ms)"
+            hint="How long a down endpoint stays excluded before one trial request is allowed through to re-check it. A recovered endpoint also returns to rotation as soon as the background probe reaches it. 60000 = 60s."
+            min={5000}
+            step={1000}
           />
         </div>
       </Section>

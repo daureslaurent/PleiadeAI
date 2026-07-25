@@ -31,6 +31,8 @@ import { startFinetunePoller } from './finetune/poller';
 import { monitorRouter } from './transport/http/routes/monitor.routes';
 import { monitorPoller } from './domain/monitor/monitor.poller';
 import { endpointService } from './domain/endpoints/endpoint.service';
+import { endpointHealth } from './inference/endpoint-health';
+import { inferenceRuntime } from './inference/runtime-config';
 import { toolsRouter } from './transport/http/routes/tools.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
 import { imagesRouter } from './transport/http/routes/images.routes';
@@ -66,6 +68,19 @@ async function main(): Promise<void> {
   // Register/refresh the built-in local docker fallback endpoint and discover its model in the
   // background. Best-effort: never blocks or fails boot if the fallback container isn't up yet.
   endpointService.ensureLocalFallback().catch((err) => rootLogger.error({ err }, 'ensureLocalFallback failed'));
+
+  // Adopt the operator's saved inference reliability tunables (Settings → Inference) into the in-memory
+  // runtime before anything reads them, so the health poller arms at the configured interval. Falls
+  // back to the INFERENCE_* env defaults when unset. Best-effort — never block boot on it.
+  await settingsService
+    .get()
+    .then((s) => inferenceRuntime.apply(s))
+    .catch((err) => rootLogger.error({ err }, 'failed to load inference runtime config'));
+
+  // Background health breaker: probe every inference endpoint on an interval so routing already knows
+  // which are down and skips them (no chat turn waits on a dead box). Reactive reports from live calls
+  // complement it. Idle-cheap; unref'd so it never holds the process open.
+  endpointHealth.start();
 
   // Poll remote fine-tune servers for tracked-job progress (loss curve + terminal alerts).
   // Idle when nothing is training: only non-terminal jobs are fetched.

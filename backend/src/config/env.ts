@@ -37,6 +37,15 @@ const EnvSchema = z.object({
   // never killed mid-generation.
   INFERENCE_FIRST_TOKEN_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
 
+  // Endpoint health circuit-breaker. Routing skips an endpoint known to be down so no chat turn ever
+  // pays the first-token timeout against a dead box: a background poller probes every endpoint on this
+  // interval AND a failed live call reports in. After this many consecutive failures the endpoint is
+  // parked as down; while down it's excluded from routing until the cooldown lets one trial request
+  // (or the poller) re-check it. A single success clears it back to up.
+  INFERENCE_HEALTH_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
+  INFERENCE_HEALTH_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(2),
+  INFERENCE_HEALTH_COOLDOWN_MS: z.coerce.number().int().positive().default(60_000),
+
   // Embeddings — a separate (CPU) llama.cpp server started with --embedding. Powers Qdrant
   // vector memory; if unreachable the agent loop degrades gracefully (memory read/write skipped).
   EMBEDDING_API_URL: z.string().url('EMBEDDING_API_URL must be a valid URL').default('http://embeddings:8080'),

@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { settingsService, type EffectiveSettings } from '../../../domain/settings/settings.service';
+import { inferenceRuntime } from '../../../inference/runtime-config';
+import { endpointHealth } from '../../../inference/endpoint-health';
 import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
 import { applyTelegramConfig } from '../../../telegram/telegram-config';
 import { telegramBot } from '../../../telegram/TelegramBot';
@@ -26,6 +28,16 @@ settingsRouter.put('/', async (req, res) => {
   if (b.context_window_auto !== undefined) patch.context_window_auto = Boolean(b.context_window_auto);
   if (b.temperature !== undefined) patch.temperature = Number(b.temperature);
   if (b.top_p !== undefined) patch.top_p = Number(b.top_p);
+  // Inference reliability / failover tunables. Floors keep a mistyped value from disabling failover
+  // (a 0ms timeout) or hammering endpoints (a sub-second poll). Applied to `inferenceRuntime` below.
+  if (b.inference_first_token_timeout_ms !== undefined)
+    patch.inference_first_token_timeout_ms = Math.max(1000, Number(b.inference_first_token_timeout_ms) || 45000);
+  if (b.inference_health_poll_interval_ms !== undefined)
+    patch.inference_health_poll_interval_ms = Math.max(5000, Number(b.inference_health_poll_interval_ms) || 15000);
+  if (b.inference_health_failure_threshold !== undefined)
+    patch.inference_health_failure_threshold = Math.max(1, Number(b.inference_health_failure_threshold) || 2);
+  if (b.inference_health_cooldown_ms !== undefined)
+    patch.inference_health_cooldown_ms = Math.max(5000, Number(b.inference_health_cooldown_ms) || 60000);
   if (typeof b.title_endpoint_id === 'string') patch.title_endpoint_id = b.title_endpoint_id;
   if (typeof b.title_model === 'string') patch.title_model = b.title_model;
   if (typeof b.vision_endpoint_id === 'string') patch.vision_endpoint_id = b.vision_endpoint_id;
@@ -110,6 +122,9 @@ settingsRouter.put('/', async (req, res) => {
   }
 
   const updated = await settingsService.update(patch);
+  // Push the inference reliability tunables into the in-memory runtime so routing/breaker pick them up
+  // immediately; re-arm the health poller if its interval changed.
+  if (inferenceRuntime.apply(updated)) endpointHealth.rearm();
   // (Re)arm or stop the periodic host update check to match the new settings.
   if (updated.update_enabled) scheduleUpdateCheck(updated.update_check_interval_hours);
   else stopUpdateCheck();

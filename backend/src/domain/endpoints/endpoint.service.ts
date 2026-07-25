@@ -7,6 +7,7 @@ import { EndpointModel, effectiveVision, type EndpointDoc } from './endpoint.mod
 import { agentRepository } from '../agents/agent.repository';
 import { introspectModels } from '../../inference/llama-introspect';
 import { endpointGate, type GateCall } from '../../inference/endpoint-gate';
+import { endpointHealth } from '../../inference/endpoint-health';
 
 const log = createLogger('endpoint-service');
 
@@ -123,8 +124,13 @@ export const endpointService = {
             const body = (await res.json()) as { data?: Array<{ id?: string }> };
             served = (body.data ?? []).map((m) => m.id ?? '').filter(Boolean);
           }
-        } catch {
+          // Fold this reading into the routing breaker too, so an operator watching the header badge
+          // keeps its up/down state fresh alongside the background poller.
+          if (res.ok) endpointHealth.reportSuccess(ep.base_url);
+          else endpointHealth.reportFailure(ep.base_url, `HTTP ${res.status}`);
+        } catch (err) {
           // Unreachable / timed out — reported as down, not an error.
+          endpointHealth.reportFailure(ep.base_url, err instanceof Error ? err.message : String(err));
         }
         const epId = ep._id.toString();
         const mine = agents.filter((a) =>

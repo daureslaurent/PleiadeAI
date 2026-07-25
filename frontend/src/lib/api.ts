@@ -912,6 +912,14 @@ export interface InferenceSettings {
   context_window_auto: boolean;
   temperature: number;
   top_p: number;
+  /** Per-attempt time-to-first-token budget (ms); on timeout the turn fails over to the next endpoint. */
+  inference_first_token_timeout_ms: number;
+  /** How often the background health breaker probes every endpoint (ms). */
+  inference_health_poll_interval_ms: number;
+  /** Consecutive failures before an endpoint is parked down and skipped by routing. */
+  inference_health_failure_threshold: number;
+  /** How long a down endpoint stays excluded before one trial request may re-check it (ms). */
+  inference_health_cooldown_ms: number;
   embedding_url: string;
   embedding_model: string;
   embedding_api_key: string;
