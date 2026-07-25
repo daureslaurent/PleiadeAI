@@ -84,9 +84,15 @@ function sq(value: string): string {
  * `google_apis` rather than `google_apis_playstore`: Play Store images are locked down (no root,
  * no `adb remount`), which breaks a lot of automation for no benefit here.
  *
- * Both interactive tools are fed an *endless* stream of answers (`yes |`, `yes no |`) rather than a
- * single `echo`: a docker build has no TTY, so one line followed by EOF leaves any subsequent prompt
- * blocking forever with nothing to answer it — the build hangs instead of failing.
+ * `avdmanager` prompt handling, settled by measurement rather than guesswork (all three variants
+ * were run against this exact base image + cmdline-tools build):
+ *   - `-d pixel_6` picks a device definition, so the "create a custom hardware profile?" question is
+ *     never asked. This is what makes the step deterministic.
+ *   - `echo no |` remains as a single-line fallback in case a future tools release asks anyway.
+ *   - Do NOT flood it (`yes no |`): avdmanager reads the *whole* of stdin as one reply and rejects
+ *     `"no\nno\nno…" is not a valid reply`.
+ *   - Do NOT close stdin (`< /dev/null`): it fails rather than taking the `[no]` default.
+ * `sdkmanager --licenses` is different — it asks once per licence, so it genuinely needs `yes |`.
  */
 export const ANDROID_EMULATOR_DOCKERFILE_SNIPPET = `# --- PleiadesAI android emulator (in-container AVD; needs /dev/kvm on the isolation profile) ---
 ENV ANDROID_SDK_ROOT=/opt/android-sdk \\
@@ -103,7 +109,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
     && mv /tmp/cmdline/cmdline-tools "\${ANDROID_SDK_ROOT}/cmdline-tools/latest" \\
     && yes | sdkmanager --licenses >/dev/null \\
     && sdkmanager --install "platform-tools" "emulator" "\${ANDROID_IMAGE}" >/dev/null \\
-    && yes no | avdmanager create avd -n pleiades -k "\${ANDROID_IMAGE}" --force`;
+    && echo no | avdmanager create avd -n pleiades -k "\${ANDROID_IMAGE}" -d pixel_6 --force`;
 
 /**
  * Idempotent launch script for an emulator running **inside** the agent container. Necessary because
