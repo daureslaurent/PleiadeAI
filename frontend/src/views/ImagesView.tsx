@@ -121,7 +121,7 @@ const withoutVisualLayer = (d: string): string => stripLayer(d, VISUAL_MARKER);
 const ANDROID_MARKER = '# --- PleiadesAI android layer';
 const ANDROID_SNIPPET = `# --- PleiadesAI android layer (adb control of an emulator / redroid / physical device) ---
 RUN apt-get update && apt-get install -y --no-install-recommends \\
-      adb scrcpy \\
+      adb \\
       python3 python3-pil \\
     && rm -rf /var/lib/apt/lists/*`;
 

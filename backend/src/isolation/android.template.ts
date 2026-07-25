@@ -31,13 +31,14 @@ export const ANDROID_LOCAL_EMULATOR_SERIAL = 'emulator-5554';
  * Dockerfile snippet provisioning the Android layer. Appended by the operator to an "android" image
  * (images are user-authored on the Images page). One `RUN` so it's a single cache layer.
  *
- * `adb` is the whole control surface. `scrcpy` is optional but cheap: on an image that *also* carries
- * the visual layer it can mirror the phone onto `:99`, so the existing noVNC panel shows the live
- * screen and allows manual takeover. `python3-pil` backs the screenshot thumbnails.
+ * `adb` is the whole control surface; `python3-pil` backs the screenshot thumbnails. Deliberately
+ * no `scrcpy` — it isn't in Debian bookworm's `main` (the default base image is
+ * `node:22-bookworm-slim`), and nothing here needs it: it would only serve a future "mirror the
+ * phone onto `:99` so the noVNC panel shows it" feature, which an operator can add themselves.
  */
 export const ANDROID_DOCKERFILE_SNIPPET = `# --- PleiadesAI android layer (adb control of an emulator / redroid / physical device) ---
 RUN apt-get update && apt-get install -y --no-install-recommends \\
-      adb scrcpy \\
+      adb \\
       python3 python3-pil \\
     && rm -rf /var/lib/apt/lists/*`;
 
