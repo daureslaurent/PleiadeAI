@@ -154,7 +154,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
     && mv /tmp/cmdline/cmdline-tools "\${ANDROID_SDK_ROOT}/cmdline-tools/latest" \\
     && yes | sdkmanager --licenses >/dev/null \\
     && sdkmanager --install "platform-tools" "emulator" "\${ANDROID_IMAGE}" >/dev/null \\
-    && echo no | avdmanager create avd -n pleiades -k "\${ANDROID_IMAGE}" --force`;
+    && yes no | avdmanager create avd -n pleiades -k "\${ANDROID_IMAGE}" --force`;
 
 /** The AVD name the snippet creates — prefilled when the emulator layer is added. */
 const DEFAULT_AVD = 'pleiades';

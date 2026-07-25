@@ -83,6 +83,10 @@ function sq(value: string): string {
  *
  * `google_apis` rather than `google_apis_playstore`: Play Store images are locked down (no root,
  * no `adb remount`), which breaks a lot of automation for no benefit here.
+ *
+ * Both interactive tools are fed an *endless* stream of answers (`yes |`, `yes no |`) rather than a
+ * single `echo`: a docker build has no TTY, so one line followed by EOF leaves any subsequent prompt
+ * blocking forever with nothing to answer it — the build hangs instead of failing.
  */
 export const ANDROID_EMULATOR_DOCKERFILE_SNIPPET = `# --- PleiadesAI android emulator (in-container AVD; needs /dev/kvm on the isolation profile) ---
 ENV ANDROID_SDK_ROOT=/opt/android-sdk \\
@@ -99,7 +103,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
     && mv /tmp/cmdline/cmdline-tools "\${ANDROID_SDK_ROOT}/cmdline-tools/latest" \\
     && yes | sdkmanager --licenses >/dev/null \\
     && sdkmanager --install "platform-tools" "emulator" "\${ANDROID_IMAGE}" >/dev/null \\
-    && echo no | avdmanager create avd -n pleiades -k "\${ANDROID_IMAGE}" --force`;
+    && yes no | avdmanager create avd -n pleiades -k "\${ANDROID_IMAGE}" --force`;
 
 /**
  * Idempotent launch script for an emulator running **inside** the agent container. Necessary because
