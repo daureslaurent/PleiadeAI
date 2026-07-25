@@ -96,8 +96,9 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server
     container_name: pleiades_llama_fallback
     restart: unless-stopped
+      # -hf LiquidAI/LFM2.5-230M-GGUF:Q8_0
     command: >
-      -hf LiquidAI/LFM2.5-230M-GGUF:Q8_0
+      -hf prism-ml/Ternary-Bonsai-27B-gguf:Q4_1
       --alias lfm2.5-230m
       --jinja
       --ctx-size 16384
