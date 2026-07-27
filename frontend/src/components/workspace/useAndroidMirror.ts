@@ -88,6 +88,12 @@ function codecFromSps(annexB: Uint8Array): string | null {
 export interface MirrorInfo {
   /** Registry name of the device being mirrored. */
   device: string;
+  /**
+   * Whether this session even *has* an audio stream — i.e. the device has `mirror_audio` on. Sent
+   * with the video metadata rather than inferred from the audio stream's absence, so the panel can
+   * tell "audio is switched off for this device" from "audio is still starting up" and say so.
+   */
+  hasAudio: boolean;
   /** The device's own reported name, e.g. "sdk_gphone64_x86_64". */
   deviceName: string;
   width: number;
@@ -211,6 +217,7 @@ export function useAndroidMirror(agentId: string) {
             const msg = JSON.parse(ev.data) as Record<string, unknown>;
             if (msg.type === 'meta') {
               setInfo({
+                hasAudio: msg.hasAudio === true,
                 device: String(msg.device ?? ''),
                 deviceName: String(msg.deviceName ?? ''),
                 width: Number(msg.width) || 0,
