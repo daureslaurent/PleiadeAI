@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Smartphone,
   Terminal,
   Trash2,
   Users,
@@ -58,6 +59,8 @@ interface Draft {
   build_timeout_min: string;
   /** Visual-desktop image: Dockerfile carries the visual layer; agents get the visual_* tools. */
   visual: boolean;
+  /** Android-control image: Dockerfile carries adb + scrcpy-server, so android_* tools can run. */
+  android: boolean;
   /** Visual desktop resolution; null → boot default (1280×800). */
   visual_width: number | null;
   visual_height: number | null;
@@ -88,8 +91,54 @@ function withVisualLayer(dockerfile: string): string {
 
 /** Strip the appended visual layer (everything from its marker to the end — we always append last). */
 function withoutVisualLayer(dockerfile: string): string {
-  const idx = dockerfile.indexOf(VISUAL_MARKER);
-  return idx === -1 ? dockerfile : `${dockerfile.slice(0, idx).replace(/\s*$/, '')}\n`;
+  return withoutLayer(dockerfile, VISUAL_MARKER);
+}
+
+/**
+ * Android layer appended when the "Android control" toggle is on. Mirrors the backend source of
+ * truth `ANDROID_DOCKERFILE_SNIPPET` (isolation/android.template.ts) — kept in sync by hand, since
+ * the frontend can't import backend modules.
+ *
+ * Only `adb`, `socat` and scrcpy's ~70 kB *server* jar: the Android SDK is never installed, because
+ * the device runs elsewhere and every tool here speaks nothing but adb.
+ */
+const ANDROID_MARKER = '# --- PleiadesAI android layer';
+const ANDROID_SNIPPET = `# --- PleiadesAI android layer (adb control + scrcpy mirroring of a registered device) ---
+ARG SCRCPY_VERSION=2.7
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+      adb socat curl ca-certificates \\
+      python3 python3-pil \\
+    && mkdir -p /opt/pleiades/android \\
+    && curl -fsSL -o /opt/pleiades/android/scrcpy-server.jar \\
+         "https://github.com/Genymobile/scrcpy/releases/download/v\${SCRCPY_VERSION}/scrcpy-server-v\${SCRCPY_VERSION}" \\
+    && echo "\${SCRCPY_VERSION}" > /opt/pleiades/android/scrcpy-version \\
+    && rm -rf /var/lib/apt/lists/*`;
+
+function withAndroidLayer(dockerfile: string): string {
+  if (dockerfile.includes(ANDROID_MARKER)) return dockerfile;
+  return `${dockerfile.replace(/\s*$/, '')}\n\n${ANDROID_SNIPPET}\n`;
+}
+
+function withoutAndroidLayer(dockerfile: string): string {
+  return withoutLayer(dockerfile, ANDROID_MARKER);
+}
+
+/**
+ * Remove one appended layer by its marker: everything from the marker to the *next* layer marker,
+ * or to the end when it is the last one. Both layers are always appended, and an image may well
+ * carry both (a phone agent that also needs a desktop), so removing one must not truncate the other.
+ */
+function withoutLayer(dockerfile: string, marker: string): string {
+  const start = dockerfile.indexOf(marker);
+  if (start === -1) return dockerfile;
+  const rest = dockerfile.slice(start + marker.length);
+  const nextRelative = [VISUAL_MARKER, ANDROID_MARKER]
+    .map((m) => rest.indexOf(m))
+    .filter((i) => i !== -1)
+    .sort((a, b) => a - b)[0];
+  const head = `${dockerfile.slice(0, start).replace(/\s*$/, '')}\n`;
+  if (nextRelative === undefined) return head;
+  return `${head}\n${rest.slice(nextRelative)}`;
 }
 
 const DEFAULT_DOCKERFILE = `# Docker image for isolated agent runtimes.
@@ -114,6 +163,7 @@ const blank = (): Draft => ({
   pull: false,
   build_timeout_min: '',
   visual: false,
+  android: false,
   visual_width: null,
   visual_height: null,
 });
@@ -128,6 +178,7 @@ const toDraft = (i: Image): Draft => ({
   pull: i.pull,
   build_timeout_min: i.build_timeout_ms ? String(Math.round(i.build_timeout_ms / 60000)) : '',
   visual: Boolean(i.visual),
+  android: Boolean(i.android),
   visual_width: i.visual_width ?? null,
   visual_height: i.visual_height ?? null,
 });
@@ -243,6 +294,7 @@ export function ImagesView() {
         no_cache: draft.no_cache,
         pull: draft.pull,
         visual: draft.visual,
+        android: draft.android,
         visual_width: draft.visual_width,
         visual_height: draft.visual_height,
         // Minutes → ms; blank/invalid clears the override (server default applies).
@@ -420,6 +472,21 @@ export function ImagesView() {
                 />
               )}
             </div>
+          </Section>
+
+          <Section title="Android control" icon={<Smartphone size={13} />}>
+            <AndroidToggle
+              android={draft.android}
+              onToggle={(on) =>
+                setDraft({
+                  ...draft,
+                  android: on,
+                  dockerfile: on
+                    ? withAndroidLayer(draft.dockerfile)
+                    : withoutAndroidLayer(draft.dockerfile),
+                })
+              }
+            />
           </Section>
 
           <Section title="Dockerfile" icon={<Layers size={13} />}>
@@ -648,6 +715,36 @@ function VisualToggle({ visual, onToggle }: { visual: boolean; onToggle: (on: bo
         </p>
       </div>
       <Toggle checked={visual} onChange={onToggle} />
+    </div>
+  );
+}
+
+/**
+ * "Android control" toggle. Injects the Android layer (adb + socat + the pinned scrcpy-server jar)
+ * into the Dockerfile, and flags the image so its Dockerfile is linted for those.
+ *
+ * Note what this does *not* do: it grants no tools by itself. An agent becomes an Android agent by
+ * being linked to a device on the Agents page — the image only has to provide adb, which is why one
+ * Android image happily serves a fleet of agents each driving a different phone.
+ */
+function AndroidToggle({ android, onToggle }: { android: boolean; onToggle: (on: boolean) => void }) {
+  return (
+    <div
+      className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+        android ? 'border-accent/40 bg-accent/[0.07]' : 'border-white/[0.06] bg-black/25'
+      }`}
+    >
+      <Smartphone size={16} className={`mt-0.5 shrink-0 ${android ? 'text-accent' : 'text-slate-500'}`} />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-slate-200">Android control</div>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+          Adds <span className="font-mono text-slate-400">adb</span> and scrcpy’s device server (a few
+          MB — never the Android SDK) so agents on this image can drive a phone or emulator and the
+          Workspace can mirror its screen. Pick <em>which</em> device on the Agents page; register
+          devices under Settings → Connections.
+        </p>
+      </div>
+      <Toggle checked={android} onChange={onToggle} />
     </div>
   );
 }

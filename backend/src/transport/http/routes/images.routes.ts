@@ -6,6 +6,7 @@ import { buildManager } from '../../../isolation/build.manager';
 import { imgImageName } from '../../../isolation/names';
 import { assertRuntimes } from '../../../isolation/dockerfile.template';
 import { assertVisualLayer } from '../../../isolation/visual.template';
+import { assertAndroidLayer } from '../../../isolation/android.template';
 import { createLogger } from '../../../config/logger';
 
 const log = createLogger('images-routes');
@@ -20,6 +21,7 @@ function pickImageFields(body: Record<string, unknown>): Record<string, unknown>
     if (body[key] !== undefined) patch[key] = body[key];
   }
   if (body.visual !== undefined) patch.visual = Boolean(body.visual);
+  if (body.android !== undefined) patch.android = Boolean(body.android);
   // Visual desktop resolution: a sane positive integer sets it; null/'' clears it (→ boot default).
   // Out-of-range/non-numeric values are dropped so a bad input can't produce a broken geometry.
   for (const key of ['visual_width', 'visual_height'] as const) {
@@ -95,11 +97,12 @@ imagesRouter.get('/:id/status', async (req, res) => {
     image_built_at: image.image_built_at,
     last_build_error: image.last_build_error,
     build_active: job?.status === 'queued' || job?.status === 'running',
-    // Base runtime lint always applies; a visual image additionally lints for the visual layer so a
-    // missing Xvfb/x11vnc/socat is surfaced before the desktop fails to boot.
+    // Base runtime lint always applies; a flagged image additionally lints for the layer it claims,
+    // so a missing Xvfb/x11vnc/socat (or adb/scrcpy-server) is surfaced before the stack fails to boot.
     warnings: [
       ...assertRuntimes(image.dockerfile ?? ''),
       ...(image.visual ? assertVisualLayer(image.dockerfile ?? '') : []),
+      ...(image.android ? assertAndroidLayer(image.dockerfile ?? '') : []),
     ],
     referenced_by: profiles.map((p) => ({ _id: String(p._id), name: p.name })),
   });

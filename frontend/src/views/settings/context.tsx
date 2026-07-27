@@ -1,9 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  androidDevicesApi,
   endpointsApi,
   finetuneServersApi,
   mailApi,
   settingsApi,
+  type AndroidDevice,
   type Endpoint,
   type FinetuneServer,
   type InferenceSettings,
@@ -44,6 +46,8 @@ interface SettingsContextValue {
   reloadFinetuneServers: () => Promise<void>;
   mailAccounts: MailAccount[];
   reloadMailAccounts: () => Promise<void>;
+  androidDevices: AndroidDevice[];
+  reloadAndroidDevices: () => Promise<void>;
 }
 
 const Ctx = createContext<SettingsContextValue | null>(null);
@@ -66,6 +70,7 @@ export function SettingsProvider({
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [finetuneServers, setFinetuneServers] = useState<FinetuneServer[]>([]);
   const [mailAccounts, setMailAccounts] = useState<MailAccount[]>([]);
+  const [androidDevices, setAndroidDevices] = useState<AndroidDevice[]>([]);
   const [save, setSave] = useState<SaveState>('idle');
 
   /** Keys edited but not yet PUT. Held in a ref so the debounce timer always flushes the latest. */
@@ -77,13 +82,18 @@ export function SettingsProvider({
   const reloadEndpoints = useCallback(() => endpointsApi.list().then(setEndpoints), []);
   const reloadFinetuneServers = useCallback(() => finetuneServersApi.list().then(setFinetuneServers), []);
   const reloadMailAccounts = useCallback(() => mailApi.list().then(setMailAccounts), []);
+  const reloadAndroidDevices = useCallback(
+    () => androidDevicesApi.list().then(setAndroidDevices),
+    [],
+  );
 
   useEffect(() => {
     void settingsApi.get().then(setForm);
     void reloadEndpoints();
     void reloadFinetuneServers();
     void reloadMailAccounts();
-  }, [reloadEndpoints, reloadFinetuneServers, reloadMailAccounts]);
+    void reloadAndroidDevices();
+  }, [reloadEndpoints, reloadFinetuneServers, reloadMailAccounts, reloadAndroidDevices]);
 
   const flush = useCallback(async () => {
     const patch = pending.current;
@@ -142,6 +152,8 @@ export function SettingsProvider({
         reloadFinetuneServers,
         mailAccounts,
         reloadMailAccounts,
+        androidDevices,
+        reloadAndroidDevices,
       }}
     >
       {children}

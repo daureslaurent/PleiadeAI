@@ -21,6 +21,7 @@ import { FineTuningView } from './views/FineTuningView';
 import { SettingsView, SettingsCategoryPage } from './views/settings/SettingsLayout';
 import { SettingsHome } from './views/settings/SettingsHome';
 import { VisualDesktopWindow } from './views/VisualDesktopWindow';
+import { AndroidPhoneWindow } from './views/AndroidPhoneWindow';
 
 function PageHeader() {
   const { pathname } = useLocation();
@@ -73,6 +74,8 @@ export default function App() {
       <Routes>
         {/* Chrome-free popped-out agent desktop (opened via window.open) — no sidebar/header. */}
         <Route path="/desktop/:agentId" element={<VisualDesktopWindow />} />
+        {/* Same, for a popped-out Android device mirror. */}
+        <Route path="/phone/:agentId" element={<AndroidPhoneWindow />} />
         <Route element={<MainLayout />}>
           <Route path="/workspace" element={<AgentWorkspace />} />
           <Route path="/agents" element={<AgentsView />} />

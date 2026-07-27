@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, ImagePlus, X, Play, Repeat, Pencil, Mic } from 'lucide-react';
+import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
@@ -90,6 +90,7 @@ interface Props {
   debuggerOpen: boolean;
   onToggleDebugger: () => void;
   onOpenVisual: () => void;
+  onOpenAndroid: () => void;
   onSend: (text: string, images?: string[]) => void;
 }
 
@@ -239,7 +240,7 @@ function AskUserPrompt({
 }
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
-export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, onOpenVisual, onSend }: Props) {
+export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, onOpenVisual, onOpenAndroid, onSend }: Props) {
   const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, todos, activeSessionId, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
@@ -374,11 +375,25 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
             <Monitor size={14} /> Desktop
           </button>
         )}
+        {agent?.android && (
+          <button
+            onClick={onOpenAndroid}
+            title="Open the agent's live Android device"
+            className={[
+              'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200',
+              !(hasSession && (contextUsage || liveContext)) && !agent?.visual ? 'ml-auto' : '',
+            ].join(' ')}
+          >
+            <Smartphone size={14} /> Phone
+          </button>
+        )}
         <button
           onClick={onToggleDebugger}
           className={[
             'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs transition-colors',
-            !(hasSession && (contextUsage || liveContext)) && !agent?.visual ? 'ml-auto' : '',
+            !(hasSession && (contextUsage || liveContext)) && !agent?.visual && !agent?.android
+              ? 'ml-auto'
+              : '',
             debuggerOpen
               ? 'bg-reasoning/15 text-reasoning shadow-[0_0_12px_rgba(168,85,247,0.2)]'
               : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',

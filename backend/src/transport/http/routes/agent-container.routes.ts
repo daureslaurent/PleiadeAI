@@ -267,6 +267,80 @@ agentContainerRouter.post('/visual/control', async (req, res) => {
   res.status(204).end();
 });
 
+/**
+ * Handshake for the live phone mirror. Brings the container up (like `/start`) and hands back the
+ * WebSocket path the mirror client connects to; the H.264 stream itself flows over that socket (see
+ * the Android proxy). Unlike the visual desktop there is no password to return — the mirror carries
+ * no credential of its own, the WS upgrade is authenticated by the same JWT, and the scrcpy session
+ * is only created once that socket opens.
+ *
+ * Refuses early, with a code the panel surfaces, when the agent has no device link or no isolation.
+ */
+agentContainerRouter.post('/android/session', async (req, res) => {
+  const agent = await agentRepository.findById(agentId(req));
+  if (!agent) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  if (!agent.android_device_id) {
+    res.status(409).json({
+      error: 'no_device',
+      message:
+        'This agent is not linked to an Android device. Pick one on the Agents page, or register one in Settings → Connections.',
+    });
+    return;
+  }
+  if (!agent.isolation_id) {
+    res.status(409).json({
+      error: 'no_isolation',
+      message:
+        'This agent has no isolation profile. adb runs inside the agent container, so an Android agent needs one whose image carries the Android layer.',
+    });
+    return;
+  }
+  const iso = await isolationRepository.findById(agent.isolation_id);
+  if (!iso) {
+    res.status(409).json({ error: 'no_isolation', message: 'isolation profile missing' });
+    return;
+  }
+  const image = iso.image_id ? await imageRepository.findById(iso.image_id) : null;
+  if (!image?.android) {
+    res.status(409).json({
+      error: 'not_android',
+      message:
+        "This agent's isolation image does not carry the Android layer. On the Images page, enable the Android control toggle and rebuild it.",
+    });
+    return;
+  }
+  const id = String(agent._id);
+  try {
+    await agentContainerManager.ensureReady(
+      agent as unknown as IsolatedAgent,
+      iso as unknown as IsolationProfile,
+    );
+    res.json({ ws_path: `/api/agents/${id}/container/android/mirror` });
+  } catch (err) {
+    res.status(409).json({ error: 'not_ready', message: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * Toggle human manual control of the phone. `{ human: true }` when the operator takes over in the
+ * mirror panel (drops a lock `android_act` honours), `false` when they release it.
+ */
+agentContainerRouter.post('/android/control', async (req, res) => {
+  const agent = await agentRepository.findById(agentId(req));
+  if (!agent) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  const human = req.body?.human === true;
+  await agentContainerManager.setAndroidHumanControl(String(agent._id), human).catch((err) => {
+    log.warn({ id: String(agent._id), err: String(err) }, 'android control toggle failed');
+  });
+  res.status(204).end();
+});
+
 /** Live resource usage: `docker stats` (CPU/mem/net/block I/O) plus `/workspace` disk footprint. */
 agentContainerRouter.get('/stats', async (req, res) => {
   const container = await requireRunningContainer(req, res);

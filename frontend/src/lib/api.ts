@@ -78,6 +78,11 @@ export interface Image {
    * pyautogui). Agents on a profile that references it are auto-granted the visual_* tools.
    */
   visual: boolean;
+  /**
+   * Android-control image: its Dockerfile carries the Android layer (adb + socat + scrcpy-server).
+   * This is where `adb` runs; *which* device an agent drives comes from its own device link.
+   */
+  android: boolean;
   /** Visual desktop resolution (Xvfb/VNC screen); null → the boot default (1280×800). */
   visual_width: number | null;
   visual_height: number | null;
@@ -316,6 +321,16 @@ export interface Agent {
    * image, so the workspace can gate the Desktop panel button. Absent on other agent responses.
    */
   visual?: boolean;
+  /**
+   * Computed by the list endpoint: true when the agent is linked to a device *and* its isolation
+   * image carries the Android layer — i.e. the phone mirror can actually open. Absent elsewhere.
+   */
+  android?: boolean;
+  /**
+   * Computed by the list endpoint: the assigned isolation image carries the Android layer. Reported
+   * separately from `android` so the Agents form can tell "no device linked" from "image lacks adb".
+   */
+  android_image?: boolean;
   /** Workspace volume scope under the assigned isolation. */
   isolation_volume_mode: 'individual' | 'shared';
   /** Assigned inference endpoint (null = the fleet default endpoint). */
@@ -330,6 +345,8 @@ export interface Agent {
   icon: string;
   /** Linked mailbox ids this agent may read via `list_mail`/`read_mail` (Settings → Connections). */
   mail_accounts: string[];
+  /** The Android device this agent drives (Settings → Connections), or null. Grants the android_* tools. */
+  android_device_id: string | null;
 }
 
 export interface Skill {
@@ -377,6 +394,7 @@ export const agentsApi = {
         | 'color'
         | 'icon'
         | 'mail_accounts'
+        | 'android_device_id'
       >
     >,
   ) =>
@@ -475,6 +493,83 @@ export const visualApi = {
       : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
     return `${base}${wsPath}?token=${encodeURIComponent(token)}`;
   },
+};
+
+/**
+ * A registered Android device (`android_devices`): an emulator or phone reachable over adb TCP/IP.
+ * Agents link to one and drive it with the `android_*` tools; the Workspace mirrors it live.
+ */
+export interface AndroidDevice {
+  _id: string;
+  name: string;
+  description: string;
+  /** Address the *agent's container* reaches adb on — not necessarily what the browser can see. */
+  adb_host: string;
+  adb_port: number;
+  /** Live-mirror encoding, handed to scrcpy when the panel opens. `mirror_max_size` 0 = native. */
+  mirror_max_size: number;
+  mirror_bit_rate: number;
+  mirror_max_fps: number;
+  enabled: boolean;
+  /** Result of the last "Test connection" — advisory, measured from the backend container. */
+  last_status: 'unknown' | 'ok' | 'error';
+  last_error: string;
+  last_checked_at: string | null;
+  last_seen_model: string;
+}
+
+export type NewAndroidDevice = Pick<AndroidDevice, 'name' | 'adb_host'> &
+  Partial<Pick<AndroidDevice, 'description' | 'adb_port' | 'enabled'>>;
+
+export interface AdbProbeResult {
+  ok: boolean;
+  message: string;
+  model?: string;
+}
+
+export const androidDevicesApi = {
+  list: () => api.get<AndroidDevice[]>('/android-devices').then((r) => r.data),
+  create: (body: NewAndroidDevice) =>
+    api.post<AndroidDevice>('/android-devices', body).then((r) => r.data),
+  update: (
+    id: string,
+    patch: Partial<
+      Pick<
+        AndroidDevice,
+        | 'name'
+        | 'description'
+        | 'adb_host'
+        | 'adb_port'
+        | 'mirror_max_size'
+        | 'mirror_bit_rate'
+        | 'mirror_max_fps'
+        | 'enabled'
+      >
+    >,
+  ) => api.patch<AndroidDevice>(`/android-devices/${id}`, patch).then((r) => r.data),
+  /** Deleting also unlinks the device from every agent that referenced it. */
+  remove: (id: string) =>
+    api.delete<{ unlinked_agents: number }>(`/android-devices/${id}`).then((r) => r.data),
+  /** Complete an adb handshake against the device and record the verdict on the doc. */
+  test: (id: string) =>
+    api.post<AdbProbeResult>(`/android-devices/${id}/test`).then((r) => r.data),
+};
+
+/** Handshake for the live phone mirror. No credential: the WS upgrade carries the same JWT. */
+export interface AndroidSession {
+  /** Backend path to open the raw-binary WebSocket relay at (append `?token=`). */
+  ws_path: string;
+}
+
+export const androidApi = {
+  /** POST the mirror handshake for an agent; `409` with a code when it isn't set up for Android. */
+  session: (id: string) =>
+    api.post<AndroidSession>(`/agents/${id}/container/android/session`).then((r) => r.data),
+  /** Signal that a human has taken (`true`) or released (`false`) manual control, pausing `android_act`. */
+  control: (id: string, human: boolean) =>
+    api.post(`/agents/${id}/container/android/control`, { human }).then((r) => r.data),
+  /** Same JWT-in-query scheme as the VNC relay — browsers can't set headers on a WebSocket. */
+  wsUrl: (wsPath: string): string => visualApi.wsUrl(wsPath),
 };
 
 /** Callbacks for the streamed image build (Server-Sent Events over fetch). */

@@ -54,8 +54,8 @@ export const CATEGORIES: SettingsCategory[] = [
   {
     slug: 'connections',
     title: 'Connections',
-    blurb: 'External services agents can reach — starting with Gmail.',
-    contains: ['Google OAuth client', 'Linked mailboxes'],
+    blurb: 'External services and devices agents can reach.',
+    contains: ['Google OAuth client', 'Linked mailboxes', 'Android devices'],
     icon: Cable,
   },
   {

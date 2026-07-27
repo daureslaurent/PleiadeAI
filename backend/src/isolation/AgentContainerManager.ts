@@ -36,9 +36,20 @@ import {
   REMOTE_PY_RUNNER,
   type RemoteTarget,
 } from './remote-ssh';
+import {
+  androidConnectFailure,
+  androidConnectScript,
+  scrcpyCleanupScript,
+  scrcpyFailure,
+  scrcpyStartScript,
+  ANDROID_CONTROL_LOCK,
+  ANDROID_LOG_DIR,
+} from './android.template';
 import { imageRepository } from '../domain/images/image.repository';
 import { agentRepository } from '../domain/agents/agent.repository';
 import { isolationRepository } from '../domain/isolations/isolation.repository';
+import { androidDeviceRepository } from '../domain/android-devices/android-device.repository';
+import { deviceSerial } from '../domain/android-devices/android-device.model';
 
 const log = createLogger('agent-container');
 
@@ -96,6 +107,22 @@ export interface VisualEndpoint {
   container: string;
   vncSock: string;
   password: string;
+}
+
+/**
+ * How the backend's Android relay reaches an agent's live phone mirror. scrcpy's server runs *on the
+ * device* and listens on an abstract socket there; `adb forward` bridges it to `port` inside the
+ * agent's container, and the relay streams that over the Docker socket (`docker exec … socat -
+ * TCP:127.0.0.1:<port>`). As with the VNC relay, nothing is ever published on a network.
+ */
+export interface AndroidMirrorEndpoint {
+  container: string;
+  /** Container-local TCP port `adb forward` allocated for this session. */
+  port: number;
+  /** adb serial of the device being mirrored (`host:port`), for teardown and logging. */
+  serial: string;
+  /** Device registry name, shown in the panel header. */
+  deviceName: string;
 }
 
 /** The isolation-profile inputs the manager needs (from the isolation doc). */
@@ -381,6 +408,116 @@ class AgentContainerManager {
     const cmd = on
       ? `mkdir -p ${VISUAL_DIR} && : > ${VISUAL_CONTROL_LOCK}`
       : `rm -f ${VISUAL_CONTROL_LOCK}`;
+    await dockerService.exec(container, ['sh', '-c', cmd]);
+  }
+
+  /**
+   * Start a live phone mirror for the agent's linked Android device and return the endpoint the
+   * Android relay should connect to. Unlike `ensureVisual` this is deliberately **not** cached: each
+   * scrcpy session owns its own device-side server and adb forward, and the server exits when the
+   * relay's sockets close, so a reopened panel wants a genuinely fresh session rather than a stale
+   * port whose server has already cleaned itself up.
+   *
+   * The caller must have run `ensureReady` first (the container must exist and be running).
+   */
+  async ensureAndroidMirror(agentId: string): Promise<AndroidMirrorEndpoint> {
+    const container = agentContainerName(agentId);
+
+    // `ssh` mode: the agent's shell and tools execute on a remote host, so `adb` — and therefore the
+    // device — lives there, not in this container. The relay streams out of the *container*, so it
+    // would mirror a device the agent isn't driving. Refuse rather than show an incoherent screen.
+    if (await this.isRemoteExecAgent(agentId)) {
+      throw new IsolationNotReadyError(
+        'The live phone mirror is not available on an "ssh" isolation profile: this agent executes on a remote host, so its adb — and its device — are not reachable from the container the mirror streams out of.',
+      );
+    }
+
+    const agent = await agentRepository.findById(agentId);
+    if (!agent?.android_device_id) {
+      throw new IsolationNotReadyError(
+        'This agent is not linked to an Android device. Pick one on the Agents page (Android device), or register one in Settings → Connections.',
+      );
+    }
+    const device = await androidDeviceRepository.findById(agent.android_device_id);
+    if (!device) {
+      throw new IsolationNotReadyError(
+        "This agent's Android device no longer exists. Pick another one on the Agents page.",
+      );
+    }
+    if (!device.enabled) {
+      throw new IsolationNotReadyError(
+        `The Android device "${device.name}" is disabled. Re-enable it in Settings → Connections.`,
+      );
+    }
+
+    if ((await dockerService.containerState(container)) !== 'running') {
+      throw new IsolationNotReadyError(
+        'The agent container is not running. The phone mirror can only start once the agent has been used at least once in this session.',
+      );
+    }
+
+    const serial = deviceSerial(device);
+
+    // Connect + wait for boot before mirroring: scrcpy's server would otherwise fail in a way that
+    // reads as a mirror bug rather than as "the device isn't there".
+    const connect = await dockerService.exec(container, ['bash', '-c', androidConnectScript(serial)], {
+      timeoutMs: 90_000,
+    });
+    if (connect.exitCode !== 0) {
+      throw new IsolationNotReadyError(androidConnectFailure(connect.stderr, serial));
+    }
+
+    // scrcpy identifies a session by a 31-bit "scid" so several clients can share one device; the
+    // top bit must stay clear, hence the mask on the first nibble.
+    const scid = crypto.randomBytes(4).toString('hex').replace(/^[89a-f]/, '0');
+    const res = await dockerService.exec(
+      container,
+      ['bash', '-c', scrcpyStartScript(serial, scid, {
+        maxSize: device.mirror_max_size ?? 1080,
+        bitRate: device.mirror_bit_rate ?? 4_000_000,
+        maxFps: device.mirror_max_fps ?? 30,
+      })],
+      { timeoutMs: 60_000 },
+    );
+    if (res.exitCode !== 0) {
+      throw new IsolationNotReadyError(scrcpyFailure(res.stderr));
+    }
+    const port = Number(/SCRCPY_PORT:(\d+)/.exec(res.stdout)?.[1]);
+    if (!Number.isFinite(port) || port <= 0) {
+      throw new IsolationNotReadyError(
+        `The phone mirror started but reported no port (${res.stdout.trim() || 'no output'}).`,
+      );
+    }
+
+    // Keep the container alive while a mirror is attached.
+    this.resetIdle(agentId, 0);
+    log.info({ agentId, container, serial, port, scid }, 'android mirror ready');
+    return { container, port, serial, deviceName: device.name };
+  }
+
+  /**
+   * Drop a finished mirror session's adb forward. scrcpy's own server exits when its sockets close,
+   * so this is only about not accumulating one dangling forward per panel the operator opened.
+   * Best-effort by design — a stopped container has nothing to clean up.
+   */
+  async cleanupAndroidMirror(endpoint: AndroidMirrorEndpoint): Promise<void> {
+    await dockerService.exec(
+      endpoint.container,
+      ['sh', '-c', scrcpyCleanupScript(endpoint.serial, endpoint.port)],
+      { timeoutMs: 10_000 },
+    );
+  }
+
+  /**
+   * Toggle human manual control of the phone. When `on`, drop a lock file `android_act` checks and
+   * refuses to act against — so the operator driving the mirror and the agent don't fight over the
+   * touchscreen. Best-effort: requires a running container.
+   */
+  async setAndroidHumanControl(agentId: string, on: boolean): Promise<void> {
+    const container = agentContainerName(agentId);
+    const cmd = on
+      ? `mkdir -p ${ANDROID_LOG_DIR} && : > ${ANDROID_CONTROL_LOCK}`
+      : `rm -f ${ANDROID_CONTROL_LOCK}`;
     await dockerService.exec(container, ['sh', '-c', cmd]);
   }
 

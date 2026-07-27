@@ -79,6 +79,14 @@ const AgentSchema = new Schema(
     color: { type: Number, default: null },
     icon: { type: String, default: '' },
     /**
+     * The Android device (`android_devices` collection) this agent drives, or null. Setting it is
+     * what makes an agent an "Android agent": `AgentRunner` auto-grants the `android_*` tools (the
+     * way a `visual` image grants the desktop tools) and the Workspace offers the live phone mirror.
+     * The agent still needs an isolation profile whose image carries the Android layer — that is
+     * where `adb` runs. One device per agent: the tools address exactly one screen.
+     */
+    android_device_id: { type: Schema.Types.ObjectId, ref: 'AndroidDevice', default: null },
+    /**
      * Ids of the linked Gmail mailboxes (`mail_accounts` collection) this agent may read via the
      * `list_mail`/`read_mail` tools. Operator-granted on the Agents page; an empty list means the
      * mail tools refuse even if they appear in `tools_allowed`. Read access only — the tools are

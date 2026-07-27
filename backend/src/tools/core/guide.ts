@@ -167,6 +167,38 @@ locates + clicks a described element in one step (more reliable than hand-passin
 \`visual_windows\` gives exact window geometry for focus/close/move instead of pixel-hunting the title
 bar. Coordinates are screen pixels from the top-left.`,
   },
+  android: {
+    title: 'Driving an Android device',
+    blurb: 'Structural UI control of a phone over adb — no pixel-hunting needed.',
+    tools: [
+      'android_ui',
+      'android_screenshot',
+      'android_act',
+      'android_app',
+      'android_shell',
+      'android_logcat',
+      'android_file',
+    ],
+    body: `# Android device
+
+Unlike the desktop, **do not locate things by looking at pixels**. Android publishes its own view
+hierarchy, so \`android_ui\` returns every widget's exact bounds, \`text\`, \`resource_id\` and
+\`content_desc\`. That is always more reliable than reading coordinates off an image.
+
+Loop: \`android_ui\` (find the widget) → \`android_act\` (tap/swipe/type). Better still, skip the first
+step: \`android_act({action:'tap', target:'Sign in'})\` resolves the description through that same
+hierarchy and taps its exact centre. A miss returns what *is* on screen, so the next call can pick
+from reality.
+
+\`android_screenshot\` is for *reading* a screen (what does this message say, what state is this in) —
+not for finding coordinates. \`android_app\` launches apps by package, which beats hunting for a
+launcher icon. \`android_logcat\` tells you *why* something failed when the screen doesn't.
+\`android_shell\` runs on the **device**; \`bash\` runs in **your own container** — \`android_file\`
+moves files between the two.
+
+While the operator has taken manual control in the Workspace mirror, \`android_act\` stands down; you
+can still read the screen.`,
+  },
 };
 
 /** Format a tool's JSON-schema parameters into a readable bullet list for the auto-generated guide. */

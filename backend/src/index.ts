@@ -8,6 +8,7 @@ import { runMigrations } from './db/migrate';
 import { setupAgenda } from './autonomy/agenda.setup';
 import { attachSocket } from './transport/ws/socket';
 import { attachVisualProxy } from './transport/ws/visual-proxy';
+import { attachAndroidProxy } from './transport/ws/android-proxy';
 import { requireAuth, requireOperator } from './transport/http/middleware/auth';
 import { authRouter } from './transport/http/routes/auth.routes';
 import { apiKeysRouter } from './transport/http/routes/api-keys.routes';
@@ -26,6 +27,7 @@ import { registerLlamaLogSubscriber } from './domain/llama-logs/llama-log.servic
 import { scoringRouter } from './transport/http/routes/scoring.routes';
 import { reconcileScoringIndexes } from './domain/scoring/conversation-score.repository';
 import { finetuneServersRouter } from './transport/http/routes/finetune-servers.routes';
+import { androidDevicesRouter } from './transport/http/routes/android-devices.routes';
 import { finetuneJobsRouter } from './transport/http/routes/finetune-jobs.routes';
 import { startFinetunePoller } from './finetune/poller';
 import { monitorRouter } from './transport/http/routes/monitor.routes';
@@ -123,6 +125,7 @@ async function main(): Promise<void> {
   app.use('/api/finetune-jobs', requireAuth, finetuneJobsRouter);
   app.use('/api/tools', requireAuth, toolsRouter);
   app.use('/api/isolations', requireAuth, isolationsRouter);
+  app.use('/api/android-devices', requireAuth, androidDevicesRouter);
   app.use('/api/images', requireAuth, imagesRouter);
   app.use('/api/resources', requireAuth, resourcesRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
@@ -137,6 +140,7 @@ async function main(): Promise<void> {
   const httpServer = http.createServer(app);
   attachSocket(httpServer);
   attachVisualProxy(httpServer);
+  attachAndroidProxy(httpServer);
   await setupAgenda();
   // Interactive Telegram bot (long-poll). The DB-backed settings (env fallback) are pushed into
   // the runtime config first so a token saved from the UI survives restarts. Best-effort: a

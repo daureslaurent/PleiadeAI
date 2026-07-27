@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Box, Cpu, FileLock2, Mail, NotebookPen, Save, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { Box, Cpu, FileLock2, Mail, NotebookPen, Save, Smartphone, Sparkles, Trash2, Loader2 } from 'lucide-react';
 import {
   agentsApi,
   mailApi,
@@ -13,6 +13,7 @@ import {
 } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
 import { AgentIsolationSelect } from './AgentIsolationSelect';
+import { AgentAndroidSelect } from './AgentAndroidSelect';
 import { AgentModelSelect } from './AgentModelSelect';
 import { agentColor, agentInitial, registerAgentIdentities } from '../lib/agentColor';
 import { AGENT_ICONS, ICON_KEYS, PRESET_HUES, iconFor } from '../lib/agentIcons';
@@ -64,6 +65,10 @@ interface Draft {
   mail_accounts: string[];
   /** Server-computed: agent's isolation image has the visual layer. Drives the vision-endpoint warning. */
   visual: boolean;
+  /** The Android device this agent drives (null = not an Android agent). */
+  android_device_id: string | null;
+  /** Server-computed: the assigned isolation image carries the Android layer (adb + scrcpy-server). */
+  android_image: boolean;
 }
 
 const blank = (): Draft => ({
@@ -85,6 +90,8 @@ const blank = (): Draft => ({
   icon: '',
   mail_accounts: [],
   visual: false,
+  android_device_id: null,
+  android_image: false,
 });
 
 /** Agents CRUD page (master-detail): create, edit, delete agents + their tools and parameters. */
@@ -154,6 +161,8 @@ export function AgentsView() {
       color: a.color ?? null,
       icon: a.icon ?? '',
       mail_accounts: a.mail_accounts ?? [],
+      android_device_id: a.android_device_id ?? null,
+      android_image: a.android_image ?? false,
       visual: Boolean(a.visual),
     });
   }
@@ -204,6 +213,7 @@ export function AgentsView() {
         color: draft.color,
         icon: draft.icon,
         mail_accounts: draft.mail_accounts,
+        android_device_id: draft.android_device_id,
       });
       await refresh();
       select(created);
@@ -616,6 +626,21 @@ export function AgentsView() {
                 agentId={draft._id}
                 isolationId={draft.isolation_id}
                 volumeMode={draft.isolation_volume_mode}
+              />
+
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <Smartphone size={13} /> Android device
+                  <span className="normal-case text-slate-600">
+                    — link a phone/emulator to grant the <code>android_*</code> tools
+                  </span>
+                </span>
+              </FieldLabel>
+              <AgentAndroidSelect
+                agentId={draft._id}
+                deviceId={draft.android_device_id}
+                hasAndroidImage={draft.android_image}
+                hasIsolation={Boolean(draft.isolation_id)}
               />
             </>
           )}

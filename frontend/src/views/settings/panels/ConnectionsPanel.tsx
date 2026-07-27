@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { Check, Copy, KeySquare, Mail } from 'lucide-react';
+import { Check, Copy, KeySquare, Mail, Smartphone } from 'lucide-react';
 import { Section } from '../../../components/ui';
 import { SettingText } from '../controls';
 import { MailAccountsManager } from '../managers/MailAccountsManager';
+import { AndroidDevicesManager } from '../managers/AndroidDevicesManager';
 import { useSettings } from '../context';
 
 /**
- * `/settings/connections` — external services agents can reach. For now: Gmail, read-only.
- * One-time setup: create an OAuth client in the Google Cloud console (type "Web application"),
- * register the redirect URI shown here, paste the client ID/secret, then link mailboxes below.
+ * `/settings/connections` — external services agents can reach: Gmail (read-only) and Android
+ * devices. Gmail's one-time setup: create an OAuth client in the Google Cloud console (type "Web
+ * application"), register the redirect URI shown here, paste the client ID/secret, then link
+ * mailboxes. Android needs no credential — just an adb address the agent containers can route to.
  */
 export function ConnectionsPanel() {
   return (
@@ -50,6 +52,17 @@ export function ConnectionsPanel() {
           in the origin mailbox.
         </p>
         <MailAccountsManager />
+      </Section>
+
+      <Section title="Android devices" icon={<Smartphone size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          Emulators and phones reachable over adb TCP/IP. Link one to an agent on the Agents page and
+          it gains the <span className="font-mono">android_*</span> tools and a live screen in the
+          Workspace. The agent also needs an isolation profile whose image has the Android layer —
+          that is where <span className="font-mono">adb</span> runs, which is also why the address
+          below must be reachable from the <em>agent’s container</em>, not from your browser.
+        </p>
+        <AndroidDevicesManager />
       </Section>
     </div>
   );

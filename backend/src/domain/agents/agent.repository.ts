@@ -99,6 +99,7 @@ export const agentRepository = {
         | 'notebook'
         | 'isolation_id'
         | 'isolation_volume_mode'
+        | 'android_device_id'
         | 'endpoint_id'
         | 'model'
         | 'color'
@@ -117,6 +118,19 @@ export const agentRepository = {
   /** Clear the isolation assignment on every agent using a profile (called when it's deleted). */
   async unassignIsolation(isolationId: string | Types.ObjectId): Promise<void> {
     await AgentModel.updateMany({ isolation_id: isolationId }, { $set: { isolation_id: null } }).exec();
+  },
+
+  /**
+   * Unlink a deleted Android device from every agent pointing at it, returning how many were
+   * affected. Without this an agent keeps the `android_*` tools granted but every call fails on a
+   * dangling id, which reads as a broken tool rather than as a removed capability.
+   */
+  async clearAndroidDevice(deviceId: string | Types.ObjectId): Promise<number> {
+    const res = await AgentModel.updateMany(
+      { android_device_id: deviceId },
+      { $set: { android_device_id: null } },
+    ).exec();
+    return res.modifiedCount ?? 0;
   },
 
   /** Replace the agent's own notebook wholesale (backs `update_notebook` in replace mode). */

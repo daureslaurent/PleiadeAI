@@ -65,6 +65,16 @@ const ImageSchema = new Schema(
     visual: { type: Boolean, default: false },
 
     /**
+     * Android control image: the Dockerfile is expected to include the Android layer (`adb`, `socat`
+     * and a pinned `scrcpy-server.jar`, see `android.template.ts`). Set from the "Android control"
+     * toggle on the Images page. This is where `adb` actually runs — an agent gets the `android_*`
+     * tools from its *device* link, but they can only execute if its isolation image carries this
+     * layer. The Dockerfile lint adds the Android-layer checks; the connect script's preflight
+     * remains authoritative.
+     */
+    android: { type: Boolean, default: false },
+
+    /**
      * Visual desktop resolution (the Xvfb/VNC screen size). Null → the boot script default
      * (1280×800). Injected as `PLEIADES_VISUAL_GEOMETRY=<w>x<h>x24` when the desktop boots, so a change
      * applies on the next desktop start (no rebuild). A change invalidates any click calibration.

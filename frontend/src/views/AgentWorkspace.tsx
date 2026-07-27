@@ -12,6 +12,9 @@ import { DebuggerDrawer } from '../components/workspace/DebuggerDrawer';
 const VisualPanel = lazy(() =>
   import('../components/workspace/VisualPanel').then((m) => ({ default: m.VisualPanel })),
 );
+const AndroidPanel = lazy(() =>
+  import('../components/workspace/AndroidPanel').then((m) => ({ default: m.AndroidPanel })),
+);
 
 /**
  * Agent Workspace (spec §2): an expandable "Workspace" navigator (agents → sessions) feeding a
@@ -31,6 +34,7 @@ export function AgentWorkspace() {
   const [activeSessionId, setActiveSessionId] = usePersistentState<string | null>('workspace:activeSessionId', null);
   const [drawer, setDrawer] = usePersistentState('workspace:debuggerOpen', true);
   const [visualOpen, setVisualOpen] = useState(false);
+  const [androidOpen, setAndroidOpen] = useState(false);
   // Sessions whose auto-title is currently being generated → render a spinner beside the name.
   const [titlingSessionIds, setTitlingSessionIds] = useState<Set<string>>(new Set());
 
@@ -242,6 +246,7 @@ export function AgentWorkspace() {
         debuggerOpen={drawer}
         onToggleDebugger={() => setDrawer((d) => !d)}
         onOpenVisual={() => setVisualOpen(true)}
+        onOpenAndroid={() => setAndroidOpen(true)}
         onSend={handleSend}
       />
       {drawer && <DebuggerDrawer onClose={() => setDrawer(false)} agent={activeAgent} />}
@@ -251,6 +256,15 @@ export function AgentWorkspace() {
             agentId={activeAgent._id}
             agentName={activeAgent.name}
             onClose={() => setVisualOpen(false)}
+          />
+        </Suspense>
+      )}
+      {androidOpen && activeAgent && (
+        <Suspense fallback={null}>
+          <AndroidPanel
+            agentId={activeAgent._id}
+            agentName={activeAgent.name}
+            onClose={() => setAndroidOpen(false)}
           />
         </Suspense>
       )}

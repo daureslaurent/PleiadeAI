@@ -11,12 +11,18 @@ import {
   FileSearch,
   FileText,
   FolderOpen,
+  FolderSync,
   Globe,
   type LucideIcon,
+  LayoutList,
   ListChecks,
   MousePointerClick,
+  Package,
+  ScrollText,
   Search,
   Settings2,
+  Smartphone,
+  Terminal,
   Wrench,
 } from 'lucide-react';
 
@@ -245,8 +251,70 @@ export function describeTool(
       return { Icon: CalendarClock, value: truncate(str(args.query ?? args.prompt), 44) };
     }
     case 'analyze_image':
-    case 'visual_screenshot': {
+    case 'visual_screenshot':
+    case 'android_screenshot': {
       return { Icon: Eye, value: quote(str(args.question), 44), title: str(args.question) };
+    }
+    case 'android_ui': {
+      // The filter *is* the question being asked of the screen; without one it's "what's here?".
+      const filter = str(args.filter);
+      const count = n(r.count);
+      const total = n(r.total);
+      return {
+        Icon: LayoutList,
+        value: filter ? quote(filter, 40) : 'screen',
+        title: filter,
+        hint: done && count != null ? `${count}${total != null && total > count ? `/${total}` : ''}` : undefined,
+      };
+    }
+    case 'android_act': {
+      const action = str(args.action);
+      const target = str(args.target);
+      const at =
+        args.x != null && args.y != null ? `(${n(args.x)}, ${n(args.y)})` : '';
+      // The resolved widget is the interesting part — it says what the description actually hit.
+      const matched = (r.matched as { text?: unknown; resource_id?: unknown } | undefined) ?? undefined;
+      const hit = matched ? str(matched.text) || str(matched.resource_id) : '';
+      return {
+        Icon: Smartphone,
+        value: `${action}${target ? ` ${quote(target, 28)}` : at ? ` ${at}` : ''}`,
+        title: [action, target, at].filter(Boolean).join(' '),
+        hint: done && hit ? truncate(hit, 24) : undefined,
+      };
+    }
+    case 'android_app': {
+      const action = str(args.action) || 'list';
+      const pkg = str(args.package);
+      const count = n(r.count);
+      return {
+        Icon: Package,
+        value: pkg ? `${action} ${truncate(pkg, 34)}` : action,
+        title: pkg || action,
+        hint: done && action === 'list' && count != null ? `${count} pkgs` : undefined,
+      };
+    }
+    case 'android_shell': {
+      const cmd = str(args.command);
+      return { Icon: Terminal, value: truncate(cmd, 44), title: cmd };
+    }
+    case 'android_logcat': {
+      const filter = str(args.filter) || str(args.tag);
+      const lines = n(r.line_count);
+      return {
+        Icon: ScrollText,
+        value: args.clear === true ? 'clear' : filter ? quote(filter, 40) : 'logcat',
+        title: filter,
+        hint: done && lines != null ? `${lines} lines` : undefined,
+      };
+    }
+    case 'android_file': {
+      const action = str(args.action);
+      const remote = str(args.remote);
+      return {
+        Icon: FolderSync,
+        value: `${action} ${shortenPath(remote)}`.trim(),
+        title: [str(args.local), remote].filter(Boolean).join(' ↔ '),
+      };
     }
     default: {
       // Unknown skill/tool: surface the first recognisable argument.

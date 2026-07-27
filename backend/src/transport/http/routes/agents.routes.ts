@@ -16,24 +16,38 @@ export const agentsRouter = Router();
 agentsRouter.use('/:id/container', agentContainerRouter);
 
 agentsRouter.get('/', async (_req, res) => {
-  // Annotate each agent with a computed `visual` capability so the workspace can gate the Desktop
-  // panel button: true only when the agent's isolation profile references a `visual` image. Resolved
-  // with three list queries + set membership (single-operator scale) rather than a join per agent.
+  // Annotate each agent with computed `visual` / `android` capabilities so the workspace can gate the
+  // Desktop and Phone panel buttons. Resolved with three list queries + set membership (single-operator
+  // scale) rather than a join per agent.
+  //
+  // The two are gated differently on purpose: a desktop exists because the *image* carries the visual
+  // layer, whereas a phone exists because the agent is *linked to a device* — the image only has to
+  // provide adb, which any number of agents can share while pointing at different phones.
   const [agents, images, isolations] = await Promise.all([
     agentRepository.list(),
     imageRepository.list(),
     isolationRepository.list(),
   ]);
-  const visualImageIds = new Set(images.filter((i) => i.visual).map((i) => String(i._id)));
-  const visualIsolationIds = new Set(
-    isolations
-      .filter((iso) => iso.image_id && visualImageIds.has(String(iso.image_id)))
-      .map((iso) => String(iso._id)),
-  );
+  const isolationIdsForImages = (match: (i: (typeof images)[number]) => boolean): Set<string> => {
+    const imageIds = new Set(images.filter(match).map((i) => String(i._id)));
+    return new Set(
+      isolations
+        .filter((iso) => iso.image_id && imageIds.has(String(iso.image_id)))
+        .map((iso) => String(iso._id)),
+    );
+  };
+  const visualIsolationIds = isolationIdsForImages((i) => i.visual);
+  const androidIsolationIds = isolationIdsForImages((i) => i.android);
   res.json(
     agents.map((a) => ({
       ...a.toObject(),
       visual: Boolean(a.isolation_id && visualIsolationIds.has(String(a.isolation_id))),
+      // `android_image` is reported separately from `android` so the Agents form can tell the two
+      // halves of the requirement apart — "no device linked" and "image lacks adb" need different fixes.
+      android_image: Boolean(a.isolation_id && androidIsolationIds.has(String(a.isolation_id))),
+      android: Boolean(
+        a.android_device_id && a.isolation_id && androidIsolationIds.has(String(a.isolation_id)),
+      ),
     })),
   );
 });
@@ -72,6 +86,9 @@ agentsRouter.patch('/:id', async (req, res) => {
   if ('isolation_id' in body && !body.isolation_id) body.isolation_id = null;
   // Same for the optional inference endpoint (empty → null = use the fleet default endpoint).
   if ('endpoint_id' in body && !body.endpoint_id) body.endpoint_id = null;
+  // …and the Android device link (empty → null = not an Android agent). Without this an empty-string
+  // id from a form reset would fail Mongoose's ObjectId cast instead of clearing the link.
+  if ('android_device_id' in body && !body.android_device_id) body.android_device_id = null;
 
   const agent = await agentRepository.update(req.params.id, body);
   if (!agent) {

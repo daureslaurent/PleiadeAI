@@ -15,6 +15,15 @@ import { annuaire } from './core/annuaire';
 import { bash } from './core/bash';
 import { scheduleTask } from './core/scheduleTask';
 import { visualScreenshot, visualAct, visualClick, visualWindows } from './core/visual';
+import {
+  androidUi,
+  androidScreenshot,
+  androidAct,
+  androidApp,
+  androidShell,
+  androidLogcat,
+  androidFile,
+} from './core/android';
 import { analyzeImage } from './core/analyzeImage';
 import { generateImage } from './core/generateImage';
 import { data } from './core/data';
@@ -39,6 +48,22 @@ const log = createLogger('tool-registry');
  */
 export const VISUAL_TOOL_NAMES = ['visual_screenshot', 'visual_act', 'visual_click', 'visual_windows'] as const;
 
+/**
+ * Names of the Android control tools. Auto-added by `AgentRunner` when the agent is linked to a
+ * device (`agent.android_device_id`) — the Android equivalent of the `visual` image flag, except the
+ * trigger is the *device* link rather than the image, because one Android image serves any number of
+ * agents pointed at different phones. The global kill-switch in `resolveTools` still applies.
+ */
+export const ANDROID_TOOL_NAMES = [
+  'android_ui',
+  'android_screenshot',
+  'android_act',
+  'android_app',
+  'android_shell',
+  'android_logcat',
+  'android_file',
+] as const;
+
 /** Static core tools every agent implicitly gets, keyed by name. */
 const CORE_TOOLS: Record<string, Tool> = {
   [setAgentParameter.name]: setAgentParameter,
@@ -58,6 +83,14 @@ const CORE_TOOLS: Record<string, Tool> = {
   [visualAct.name]: visualAct,
   [visualClick.name]: visualClick,
   [visualWindows.name]: visualWindows,
+  // Android device control — auto-granted to agents linked to a device (see AgentRunner).
+  [androidUi.name]: androidUi,
+  [androidScreenshot.name]: androidScreenshot,
+  [androidAct.name]: androidAct,
+  [androidApp.name]: androidApp,
+  [androidShell.name]: androidShell,
+  [androidLogcat.name]: androidLogcat,
+  [androidFile.name]: androidFile,
   [analyzeImage.name]: analyzeImage,
   // Text-to-image generation via the configured Image endpoint (opt-in per agent via tools_allowed).
   [generateImage.name]: generateImage,
