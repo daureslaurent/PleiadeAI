@@ -125,8 +125,20 @@ booted() {
   [ "$(adb -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r\\n')" = "1" ]
 }
 
+# A sleeping display captures as a pure-black screenshot and encodes as a black video stream — the
+# device is fine, there is simply nothing lit to capture. Android dims out after its
+# \`screen_off_timeout\` (two minutes on a stock image), which is far shorter than the gaps between an
+# agent's turns, so *most* captures would be black without this. Idempotent and cheap: we only send
+# the wake key when the device says it is actually asleep.
+wake() {
+  case "$(adb -s "$SERIAL" shell dumpsys power 2>/dev/null | grep -m1 'mWakefulness=')" in
+    *Awake*) : ;;
+    *) adb -s "$SERIAL" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true ;;
+  esac
+}
+
 # Fast path: already connected and booted — the common case, so it must stay cheap.
-if booted; then echo "ANDROID_ALREADY_UP"; exit 0; fi
+if booted; then wake; echo "ANDROID_ALREADY_UP"; exit 0; fi
 
 adb start-server >/dev/null 2>&1
 
@@ -156,7 +168,7 @@ if ! adb devices | grep -q "^$SERIAL[[:space:]]\\+device"; then
 fi
 
 for _ in $(seq 1 "$DEADLINE"); do
-  if booted; then echo "ANDROID_UP"; exit 0; fi
+  if booted; then wake; echo "ANDROID_UP"; exit 0; fi
   sleep 1
 done
 
@@ -196,6 +208,9 @@ export function scrcpyFailure(stderr: string): string {
   if (stderr.includes('SCRCPY_NO_PORT')) {
     return 'adb could not open a local forward to the device, so the mirror has nowhere to stream from.';
   }
+  if (stderr.includes('SCRCPY_NOT_LISTENING')) {
+    return 'scrcpy\'s server was launched on the device but never opened its socket. Check /workspace/.android/scrcpy.log in the agent container — a version mismatch between the pinned jar and the server it reports is the usual cause.';
+  }
   return `The phone mirror did not start: ${stderr.trim() || 'unknown error'}`;
 }
 
@@ -224,11 +239,20 @@ export interface ScrcpyOptions {
  * The server exits by itself when the client disconnects (`cleanup` defaults on), so there is no stop
  * script to get wrong: closing the relay is what tears the session down.
  *
- * Contract (parsed by `ensureMirror`):
- *  - exit 0 + `SCRCPY_PORT:<n>` on stdout   → server starting, connect to that port
- *  - exit 3 + `SCRCPY_NO_JAR` on stderr     → image lacks the scrcpy-server jar
- *  - exit 4 + `SCRCPY_PUSH_FAILED` on stderr → the jar could not be pushed to the device
- *  - exit 5 + `SCRCPY_NO_PORT` on stderr    → `adb forward` did not yield a port
+ * **It must not return until the server is actually listening.** `app_process` takes a second or two
+ * to start on the device; connect before that and adb accepts the TCP connection, fails to open the
+ * remote stream, and immediately closes it — the relay reads EOF, tears the session down, and the
+ * operator gets a blank panel while the device-side log shows a perfectly healthy server waiting for
+ * a client that already gave up. So we poll for scrcpy's abstract socket by name, which is
+ * observable (`/proc/net/unix` lists it as `@scrcpy_<scid>`) and, unlike connecting to check, does
+ * not consume the video socket.
+ *
+ * Contract (parsed by `ensureAndroidMirror`):
+ *  - exit 0 + `SCRCPY_PORT:<n>` on stdout       → server is listening; connect to that port
+ *  - exit 3 + `SCRCPY_NO_JAR` on stderr         → image lacks the scrcpy-server jar
+ *  - exit 4 + `SCRCPY_PUSH_FAILED` on stderr    → the jar could not be pushed to the device
+ *  - exit 5 + `SCRCPY_NO_PORT` on stderr        → `adb forward` did not yield a port
+ *  - exit 6 + `SCRCPY_NOT_LISTENING` on stderr  → server launched but never opened its socket
  */
 export function scrcpyStartScript(serial: string, scid: string, opts: ScrcpyOptions): string {
   return `#!/usr/bin/env bash
@@ -247,8 +271,19 @@ mkdir -p "$LOGDIR"
 VERSION="$(cat "$VERFILE" 2>/dev/null | tr -d '\\r\\n')"
 [ -n "$VERSION" ] || { echo "SCRCPY_NO_JAR" >&2; exit 3; }
 
-# Pushing is cheap and idempotent; doing it every session means a jar bumped in a rebuilt image takes
-# effect without anyone remembering to clear the device's copy.
+# Sweep servers left behind by an abandoned session. scrcpy's server exits when its sockets close,
+# but one that no client ever reached is still blocked on accept() and will wait forever, holding a
+# socket and a process on the device for every panel that failed to connect. This bounds the fleet to
+# one live mirror per device, which matches a single-operator command centre.
+# The bracket around the first character matters: pkill -f matches against full command lines, and
+# the shell adb spawns to run this very command has the pattern in its own. "[c]om..." still matches
+# the server's "com..." but no longer matches the literal text of the pkill command itself, which
+# would otherwise make the sweep kill its own shell before ever reaching the real server.
+adb -s "$SERIAL" shell 'pkill -f "[c]om.genymobile.scrcpy.Server"' >/dev/null 2>&1 || true
+
+# Pushing every session is not belt-and-braces, it is required: scrcpy's server unlinks its own jar
+# once the class is loaded, so /data/local/tmp is empty again by the time the next session starts.
+# (It also means a jar bumped in a rebuilt image takes effect with nobody clearing the device copy.)
 if ! adb -s "$SERIAL" push "$JAR" ${SCRCPY_DEVICE_JAR} >>"$LOGDIR/scrcpy.log" 2>&1; then
   echo "SCRCPY_PUSH_FAILED" >&2
   exit 4
@@ -278,8 +313,19 @@ setsid nohup adb -s "$SERIAL" shell \\
     max_fps=${Math.max(1, Math.floor(opts.maxFps))} \\
   >>"$LOGDIR/scrcpy.log" 2>&1 </dev/null &
 
-echo "SCRCPY_PORT:$PORT"
-exit 0
+# Wait for the server to open its abstract socket before telling the relay to connect. A server from
+# an abandoned session never exits (it blocks forever on accept), so this also gives the stale-server
+# sweep above something unambiguous to have cleaned up.
+for _ in $(seq 1 100); do
+  if adb -s "$SERIAL" shell grep -q "@scrcpy_$SCID" /proc/net/unix 2>/dev/null; then
+    echo "SCRCPY_PORT:$PORT"
+    exit 0
+  fi
+  sleep 0.2
+done
+
+echo "SCRCPY_NOT_LISTENING" >&2
+exit 6
 `;
 }
 

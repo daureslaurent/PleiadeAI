@@ -133,10 +133,29 @@ runs from the *backend* container, so its verdict is advisory about what the age
 - [x] Seven `android_*` tools + guide topic + debugger cards
 - [x] scrcpy relay (video + control) and the WebCodecs mirror panel, inline and popped-out
 - [x] Backend + frontend typecheck and build clean
-- [ ] **Not yet exercised against a running device.** Everything below is unverified end-to-end:
-      the `uiautomator` parsing, the scrcpy handshake/framing, and the control-message layouts.
-- [ ] scrcpy server version is pinned to **2.7** via the image's `SCRCPY_VERSION` build arg. If the
-      protocol turns out to disagree, bump that arg — the runtime reads the version back out of the
-      image, so nothing else needs changing.
+- [x] **Verified against a live redroid 14 device** (2026-07-27), driving the adb protocol directly:
+      - video prelude offsets, the config/key flag bits and the big-endian pts+length framing all
+        parse cleanly (`h264`, 608×1080, SPS → `avc1.42C029`, then IDR + delta frames);
+      - both control layouts land: a 14-byte `INJECT_KEYCODE` and a 32-byte `INJECT_TOUCH_EVENT`
+        each visibly changed the device screen;
+      - `uiautomator` returns a full hierarchy, so the structural tools work.
+- [x] scrcpy server version pinned to **2.7** via the image's `SCRCPY_VERSION` build arg; the runtime
+      reads the version back out of the image, so a bump is a one-arg change.
+
+Three things that bit us on the first real run, all fixed:
+
+1. **The relay connected before the server was listening.** `app_process` needs a second or two;
+   connect early and adb accepts the TCP connection, fails to open the device-side stream and closes
+   it, so the panel goes blank while the device-side log shows a healthy server waiting for a client
+   that already gave up. The launch script now polls `/proc/net/unix` for `@scrcpy_<scid>`, and the
+   relay retries a few times while nothing has been received.
+2. **The stale-server sweep killed its own shell.** `pkill -f com.genymobile.scrcpy.Server` matches
+   the command line of the very shell running it. Written `[c]om.genymobile…` it no longer does.
+3. **A sleeping display captures as pure black** — both to `screencap` and to the encoder. Nothing
+   was wrong with the device: Android's `screen_off_timeout` (121 s here) is far shorter than the gap
+   between an agent's turns. The connect script now wakes the device when it reports itself asleep.
+
+Also worth knowing: scrcpy's server **deletes its own jar** once loaded, so `/data/local/tmp` is
+empty again next session. Pushing every session is required, not defensive.
 - [ ] Optional later: audio, clipboard sync, multi-touch (the control protocol supports all three;
       the panel deliberately implements none of them yet).

@@ -36,6 +36,10 @@ const BACKPRESSURE_HIGH_WATER = 4 * 1024 * 1024;
 const OUT_FLAG_CONFIG = 1;
 const OUT_FLAG_KEY = 2;
 
+/** How many times to (re)open the video socket while it closes without ever delivering a byte. */
+const VIDEO_CONNECT_ATTEMPTS = 4;
+const VIDEO_RETRY_DELAY_MS = 400;
+
 /**
  * Live phone mirror relay. The Android counterpart of `visual-proxy.ts`, and structurally the same
  * idea: a raw **binary** WebSocket bridged to something inside the agent's container by streaming
@@ -117,10 +121,13 @@ async function startRelay(ws: WebSocket, agentId: string): Promise<void> {
     return;
   }
 
-  const video = connectStream(endpoint);
+  let video: ChildProcessWithoutNullStreams;
   let control: ChildProcessWithoutNullStreams | null = null;
   let closed = false;
   let meta: ScrcpyMeta | null = null;
+  /** Bytes seen on the video socket. Until this is true, an exit means "could not connect". */
+  let receivedAny = false;
+  let attempts = 0;
 
   log.info({ agentId, container: endpoint.container, port: endpoint.port }, 'android mirror relay open');
 
@@ -158,29 +165,64 @@ async function startRelay(ws: WebSocket, agentId: string): Promise<void> {
     },
   );
 
-  video.stdout.on('data', (buf: Buffer) => {
-    // The very first byte is scrcpy's dummy handshake, sent the moment the video socket is accepted.
-    // That is our cue that video won the race, so control can safely connect as the second socket.
-    if (!control) control = openControl();
-    parser.push(buf);
-    if (ws.bufferedAmount > BACKPRESSURE_HIGH_WATER) {
-      video.stdout.pause();
-      const resume = (): void => {
-        if (ws.bufferedAmount <= BACKPRESSURE_HIGH_WATER) video.stdout.resume();
-        else setTimeout(resume, 20);
-      };
-      setTimeout(resume, 20);
-    }
-  });
-  video.stderr.on('data', (d: Buffer) => log.debug({ agentId, err: d.toString() }, 'video socat stderr'));
-  video.on('exit', (code) => {
-    log.info({ agentId, code }, 'video socat exited');
-    teardown('video-exit');
-  });
-  video.on('error', (err) => {
-    log.warn({ agentId, err: String(err) }, 'video socat spawn error');
-    teardown('video-error');
-  });
+  /**
+   * Open the video socket and wire it up. Retried a few times because the failure it guards against
+   * is a *connect* failure, not a stream failure: adb accepts the forwarded TCP connection and only
+   * then discovers it cannot open the device-side stream, so a too-early attempt shows up here as an
+   * immediate clean EOF. The launch script already waits for scrcpy to listen; this is the belt to
+   * that pair of braces, and it only ever retries while nothing has been received.
+   */
+  function attachVideo(): void {
+    attempts += 1;
+    video = connectStream(endpoint);
+
+    video.stdout.on('data', (buf: Buffer) => {
+      receivedAny = true;
+      // The very first byte is scrcpy's dummy handshake, sent the moment the video socket is
+      // accepted. That is our cue that video won the race, so control can safely connect second.
+      if (!control) control = openControl();
+      parser.push(buf);
+      if (ws.bufferedAmount > BACKPRESSURE_HIGH_WATER) {
+        video.stdout.pause();
+        const resume = (): void => {
+          if (ws.bufferedAmount <= BACKPRESSURE_HIGH_WATER) video.stdout.resume();
+          else setTimeout(resume, 20);
+        };
+        setTimeout(resume, 20);
+      }
+    });
+    video.stderr.on('data', (d: Buffer) =>
+      log.debug({ agentId, err: d.toString() }, 'video socat stderr'),
+    );
+    video.on('exit', (code) => {
+      if (closed) return;
+      if (!receivedAny && attempts < VIDEO_CONNECT_ATTEMPTS) {
+        log.warn({ agentId, code, attempts }, 'video socket closed before any data — retrying');
+        setTimeout(attachVideo, VIDEO_RETRY_DELAY_MS);
+        return;
+      }
+      if (!receivedAny) {
+        log.warn({ agentId, code, attempts }, 'video socket never delivered data');
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              message:
+                "The mirror connected to the device but received no video. scrcpy's server is running yet nothing is streaming — check /workspace/.android/scrcpy.log in the agent container.",
+            }),
+          );
+        }
+      }
+      log.info({ agentId, code }, 'video socat exited');
+      teardown('video-exit');
+    });
+    video.on('error', (err) => {
+      log.warn({ agentId, err: String(err) }, 'video socat spawn error');
+      teardown('video-error');
+    });
+  }
+
+  attachVideo();
 
   function openControl(): ChildProcessWithoutNullStreams {
     const child = connectStream(endpoint);
