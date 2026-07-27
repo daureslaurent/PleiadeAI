@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { Plus, Trash2, Plug, Loader2, Check, TriangleAlert } from 'lucide-react';
 import { Button, Callout, Input, Row, useConfirm } from '../../../components/ui';
-import { androidDevicesApi, type AndroidDevice } from '../../../lib/api';
+import {
+  androidDevicesApi,
+  ANDROID_AUDIO_CODECS,
+  type AndroidAudioCodec,
+  type AndroidDevice,
+} from '../../../lib/api';
 import { useSettings } from '../context';
 
 /**
@@ -145,6 +150,41 @@ export function AndroidDevicesManager() {
               title="Frame-rate ceiling for the mirror."
               onCommit={(v) => void patch(d._id, { mirror_max_fps: v })}
             />
+          </div>
+
+          {/* Audio. Off by default and codec-sensitive, so both live next to each other. */}
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <input
+                type="checkbox"
+                checked={d.mirror_audio}
+                onChange={(ev) => void patch(d._id, { mirror_audio: ev.target.checked })}
+                className="accent-accent"
+              />
+              Forward audio
+            </label>
+            {d.mirror_audio && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                codec
+                <select
+                  value={d.mirror_audio_codec}
+                  onChange={(ev) =>
+                    void patch(d._id, { mirror_audio_codec: ev.target.value as AndroidAudioCodec })
+                  }
+                  className="rounded-md border border-white/[0.12] bg-black/25 px-2 py-1 text-[11px] text-slate-300 outline-none focus:border-accent"
+                >
+                  {ANDROID_AUDIO_CODECS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-slate-600">
+                  AAC is the safe choice — many images (redroid included) have no Opus encoder, and a
+                  missing one disables audio entirely.
+                </span>
+              </label>
+            )}
           </div>
 
           {d.last_status === 'ok' && (

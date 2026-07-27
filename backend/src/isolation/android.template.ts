@@ -214,12 +214,111 @@ export function scrcpyFailure(stderr: string): string {
   return `The phone mirror did not start: ${stderr.trim() || 'unknown error'}`;
 }
 
+/** Planted stream multiplexer (see {@link MIRROR_MUX_SCRIPT}). */
+export const MIRROR_MUX_FILE = `${ANDROID_DIR}/mirror_mux.py`;
+
+/**
+ * The mirror's stream multiplexer, planted into the agent's container and run over `docker exec`.
+ *
+ * It replaces the obvious approach — one `socat` per stream — because scrcpy assigns roles by
+ * *connection order* (video, then audio, then control) and separate `docker exec` processes race:
+ * whichever container process happens to connect first becomes the video stream, so a slow exec
+ * silently swaps audio and control and every byte after that is garbage. Upstream scrcpy connects
+ * its sockets sequentially from a single process for exactly this reason, and one process here does
+ * the same, which makes the ordering correct by construction rather than by timing.
+ *
+ * Everything is then framed onto one stdio pair as `[u8 stream][u32 BE length][payload]`, in both
+ * directions, so the backend gets a single pipe to demultiplex and the control stream has a path
+ * back in. Python rather than shell because the android layer already installs it and this needs a
+ * real `select` loop.
+ */
+export const MIRROR_MUX_SCRIPT = `#!/usr/bin/env python3
+"""PleiadesAI mirror multiplexer: N ordered scrcpy sockets <-> one framed stdio pair."""
+import os
+import select
+import socket
+import struct
+import sys
+
+port = int(sys.argv[1])
+count = int(sys.argv[2])
+
+# Sequential connects from one process: the listen backlog is FIFO, so connection order is accept
+# order, which is what assigns the video / audio / control roles.
+socks = []
+for _ in range(count):
+    s = socket.create_connection(("127.0.0.1", port))
+    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    socks.append(s)
+
+out = sys.stdout.buffer
+inp = sys.stdin.buffer
+stdin_fd = inp.fileno()
+os.set_blocking(stdin_fd, False)
+
+pending = b""
+
+
+def emit(idx, data):
+    out.write(struct.pack(">BI", idx, len(data)))
+    out.write(data)
+    out.flush()
+
+
+try:
+    while True:
+        readable, _, _ = select.select(socks + [stdin_fd], [], [])
+        for src in readable:
+            if isinstance(src, int):
+                chunk = inp.read(65536)
+                if chunk is None:
+                    continue
+                if chunk == b"":
+                    raise SystemExit(0)
+                pending += chunk
+                while len(pending) >= 5:
+                    idx, length = struct.unpack(">BI", pending[:5])
+                    if len(pending) < 5 + length:
+                        break
+                    body = pending[5 : 5 + length]
+                    pending = pending[5 + length :]
+                    if idx < len(socks):
+                        socks[idx].sendall(body)
+            else:
+                data = src.recv(65536)
+                if not data:
+                    raise SystemExit(0)
+                emit(socks.index(src), data)
+except (SystemExit, OSError, KeyboardInterrupt, BrokenPipeError):
+    pass
+finally:
+    for s in socks:
+        try:
+            s.close()
+        except OSError:
+            pass
+`;
+
+/** Audio encoders scrcpy can be asked for. See {@link ScrcpyOptions.audioCodec}. */
+export const ANDROID_AUDIO_CODECS = ['aac', 'opus', 'flac'] as const;
+export type AndroidAudioCodec = (typeof ANDROID_AUDIO_CODECS)[number];
+
 /** Tuning for the live mirror, taken from the device registry doc. */
 export interface ScrcpyOptions {
   /** Longest edge in pixels; 0 keeps the device's native resolution. */
   maxSize: number;
   bitRate: number;
   maxFps: number;
+  /** Forward device audio as a third stream. Off unless the operator asked for it. */
+  audio: boolean;
+  /**
+   * Which encoder to ask the device for. **AAC by default, not scrcpy's own default of Opus**:
+   * AAC has been a mandatory Android encoder forever, whereas Opus *encoding* is missing on plenty
+   * of images — notably redroid, where scrcpy fails with "Could not create default audio encoder
+   * for opus" and disables audio in-band. A codec the device lacks costs you the whole audio
+   * stream, so the safe option is the default and the better one is opt-in.
+   */
+  audioCodec: AndroidAudioCodec;
 }
 
 /**
@@ -297,15 +396,16 @@ case "$PORT" in
 esac
 
 # Detached so it outlives this exec (reparented to PID 1), exactly like the visual stack's daemons.
-# audio=false keeps the socket sequence to video-then-control, which is what the relay expects.
+# The audio flag decides the socket sequence — video,control or video,audio,control — which is why
+# the relay is told how many streams to expect rather than guessing.
 setsid nohup adb -s "$SERIAL" shell \\
   CLASSPATH=${SCRCPY_DEVICE_JAR} \\
   app_process / com.genymobile.scrcpy.Server "$VERSION" \\
     scid="$SCID" \\
     log_level=info \\
     video=true \\
-    audio=false \\
-    control=true \\
+    audio=${opts.audio ? 'true' : 'false'} \\
+    ${opts.audio ? `audio_codec=${opts.audioCodec} \\\n    ` : ''}control=true \\
     tunnel_forward=true \\
     video_codec=h264 \\
     max_size=${Math.max(0, Math.floor(opts.maxSize))} \\

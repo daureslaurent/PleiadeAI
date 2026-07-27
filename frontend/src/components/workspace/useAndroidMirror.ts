@@ -8,9 +8,45 @@ import { androidApi } from '../../lib/api';
 
 export type MirrorStatus = 'connecting' | 'streaming' | 'error' | 'closed';
 
-/** Flags in the relay's 9-byte packet header (see `transport/ws/android-proxy.ts`). */
+/**
+ * The relay's 10-byte packet header: `[u8 kind][u8 flags][u64 BE pts]` (see
+ * `transport/ws/android-proxy.ts`). One socket carries both media streams, so the kind byte decides
+ * which decoder a packet belongs to.
+ */
+const KIND_VIDEO = 0;
+const KIND_AUDIO = 1;
 const FLAG_CONFIG = 1;
 const FLAG_KEY = 2;
+
+/**
+ * How far ahead of the audio clock we schedule. Enough to absorb jitter over the relay without the
+ * mirror drifting audibly behind the picture; when the queue runs dry the cursor is re-primed to it.
+ */
+const AUDIO_LEAD_S = 0.08;
+/** Re-prime rather than let latency grow without bound if the device ever bursts. */
+const AUDIO_MAX_LEAD_S = 0.5;
+
+/** scrcpy captures at 48 kHz stereo regardless of codec. */
+const AUDIO_SAMPLE_RATE = 48_000;
+const AUDIO_CHANNELS = 2;
+
+/** WebCodecs codec strings for the encoders scrcpy can be asked for. */
+const AUDIO_CODEC_STRINGS: Record<string, string> = {
+  aac: 'mp4a.40.2',
+  opus: 'opus',
+  flac: 'flac',
+};
+
+/** What the panel knows about the device's audio stream. */
+export interface AudioState {
+  /** The stream exists and can be started. */
+  available: boolean;
+  /** Whether the operator has actually started it (browsers need a gesture first). */
+  playing: boolean;
+  codec: string | null;
+  /** Why there is no audio, when the device declined to provide it. */
+  reason?: string;
+}
 
 /**
  * Drop non-key frames once the decoder is this far behind. A phone mirror is a *live* view: showing
@@ -80,6 +116,15 @@ export function useAndroidMirror(agentId: string) {
   const [info, setInfo] = useState<MirrorInfo | null>(null);
   const [takeover, setTakeover] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [audio, setAudio] = useState<AudioState>({ available: false, playing: false, codec: null });
+
+  // Audio is built lazily on a user gesture (autoplay policy), so the pieces the gesture needs are
+  // held in refs and populated by the socket effect as the stream announces itself.
+  const audioCodecRef = useRef<string | null>(null);
+  const audioDescRef = useRef<Uint8Array | null>(null);
+  const audioDecoderRef = useRef<AudioDecoder | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioCursorRef = useRef(0);
 
   // Read by the pointer/key handlers, which are stable callbacks — a ref keeps them from being
   // rebuilt (and re-bound) on every toggle.
@@ -109,6 +154,9 @@ export function useAndroidMirror(agentId: string) {
     setStatus('connecting');
     setError(null);
     setInfo(null);
+    setAudio({ available: false, playing: false, codec: null });
+    audioCodecRef.current = null;
+    audioDescRef.current = null;
 
     const fail = (message: string): void => {
       if (disposed) return;
@@ -168,6 +216,20 @@ export function useAndroidMirror(agentId: string) {
                 width: Number(msg.width) || 0,
                 height: Number(msg.height) || 0,
               });
+            } else if (msg.type === 'audio_meta') {
+              const codec = typeof msg.codec === 'string' ? msg.codec : null;
+              audioCodecRef.current = codec;
+              setAudio({
+                available: Boolean(codec && AUDIO_CODEC_STRINGS[codec]),
+                playing: false,
+                codec,
+                reason:
+                  typeof msg.disabledReason === 'string'
+                    ? msg.disabledReason
+                    : codec && !AUDIO_CODEC_STRINGS[codec]
+                      ? `The device is sending ${codec}, which this browser cannot decode.`
+                      : undefined,
+              });
             } else if (msg.type === 'error') {
               fail(String(msg.message ?? 'The phone mirror failed to start.'));
             }
@@ -178,11 +240,31 @@ export function useAndroidMirror(agentId: string) {
         }
 
         const packet = new Uint8Array(ev.data);
-        if (packet.length < 9) return;
-        const flags = packet[0]!;
-        // The pts is microseconds already, which is exactly what EncodedVideoChunk wants.
-        const timestamp = Number(new DataView(ev.data).getBigUint64(1));
-        const payload = packet.subarray(9);
+        if (packet.length < 10) return;
+        const kind = packet[0]!;
+        const flags = packet[1]!;
+        // The pts is microseconds already, which is what Encoded*Chunk wants.
+        const timestamp = Number(new DataView(ev.data).getBigUint64(2));
+        const payload = packet.subarray(10);
+
+        if (kind === KIND_AUDIO) {
+          // The codec-config packet (an AAC AudioSpecificConfig) is not playable; the decoder needs
+          // it as `description` before it will accept anything, and the operator may only enable
+          // audio much later, so it is kept rather than consumed.
+          if (flags & FLAG_CONFIG) {
+            audioDescRef.current = payload.slice();
+            return;
+          }
+          const dec = audioDecoderRef.current;
+          if (!dec || dec.state !== 'configured') return;
+          try {
+            dec.decode(new EncodedAudioChunk({ type: 'key', timestamp, data: payload }));
+          } catch {
+            // A packet arriving mid-reconfigure; the next one will land.
+          }
+          return;
+        }
+        if (kind !== KIND_VIDEO) return;
 
         // A config packet (SPS/PPS) is not displayable on its own: hold it and prepend it to the
         // next key frame, so the decoder receives one self-contained chunk. Doing it this way also
@@ -255,9 +337,117 @@ export function useAndroidMirror(agentId: string) {
           /* already closed */
         }
       }
+      stopAudio();
       wsRef.current = null;
     };
   }, [agentId, attempt]);
+
+  // --- audio ------------------------------------------------------------------------------------
+
+  /** Tear down the decoder and the audio graph. Safe to call repeatedly. */
+  const stopAudio = useCallback(() => {
+    const dec = audioDecoderRef.current;
+    audioDecoderRef.current = null;
+    if (dec && dec.state !== 'closed') {
+      try {
+        dec.close();
+      } catch {
+        /* already closed */
+      }
+    }
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx) void ctx.close().catch(() => undefined);
+    audioCursorRef.current = 0;
+    setAudio((a) => ({ ...a, playing: false }));
+  }, []);
+
+  /**
+   * Start playing the device's audio. Must be called from a user gesture: browsers refuse to start
+   * an `AudioContext` without one, which is exactly why this is a button rather than automatic.
+   *
+   * Decoded frames are scheduled onto the audio clock a fixed lead ahead rather than played as they
+   * arrive — a live stream has no timeline to seek, so the only thing that matters is staying just
+   * far enough ahead to absorb jitter. If the queue drains (or the device bursts and the lead grows
+   * unboundedly) the cursor is re-primed instead of accumulating latency.
+   */
+  const startAudio = useCallback(() => {
+    const codec = audioCodecRef.current;
+    const codecString = codec ? AUDIO_CODEC_STRINGS[codec] : undefined;
+    if (!codecString || audioDecoderRef.current) return;
+    if (typeof window.AudioDecoder === 'undefined') {
+      setAudio((a) => ({ ...a, reason: 'This browser has no WebCodecs audio decoder.' }));
+      return;
+    }
+
+    const ctx = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE, latencyHint: 'interactive' });
+    audioCtxRef.current = ctx;
+    void ctx.resume().catch(() => undefined);
+
+    const decoder = new AudioDecoder({
+      output: (frame) => {
+        const target = audioCtxRef.current;
+        if (!target) {
+          frame.close();
+          return;
+        }
+        try {
+          const buffer = target.createBuffer(
+            frame.numberOfChannels,
+            frame.numberOfFrames,
+            frame.sampleRate,
+          );
+          for (let channel = 0; channel < frame.numberOfChannels; channel += 1) {
+            const plane = new Float32Array(frame.numberOfFrames);
+            frame.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
+            buffer.copyToChannel(plane, channel);
+          }
+          const source = target.createBufferSource();
+          source.buffer = buffer;
+          source.connect(target.destination);
+          const now = target.currentTime;
+          if (
+            audioCursorRef.current < now + 0.01 ||
+            audioCursorRef.current > now + AUDIO_MAX_LEAD_S
+          ) {
+            audioCursorRef.current = now + AUDIO_LEAD_S;
+          }
+          source.start(audioCursorRef.current);
+          audioCursorRef.current += buffer.duration;
+        } finally {
+          frame.close();
+        }
+      },
+      error: (e) => setAudio((a) => ({ ...a, playing: false, reason: `Audio decoding failed: ${e.message}` })),
+    });
+
+    try {
+      decoder.configure({
+        codec: codecString,
+        sampleRate: AUDIO_SAMPLE_RATE,
+        numberOfChannels: AUDIO_CHANNELS,
+        // AAC needs its AudioSpecificConfig; a codec that doesn't want one is given nothing.
+        ...(audioDescRef.current ? { description: audioDescRef.current } : {}),
+      });
+    } catch (err) {
+      setAudio((a) => ({
+        ...a,
+        playing: false,
+        reason: `Could not start ${codec} playback: ${err instanceof Error ? err.message : String(err)}`,
+      }));
+      void ctx.close().catch(() => undefined);
+      audioCtxRef.current = null;
+      return;
+    }
+
+    audioDecoderRef.current = decoder;
+    setAudio((a) => ({ ...a, playing: true, reason: undefined }));
+  }, []);
+
+  const toggleAudio = useCallback(() => {
+    if (audioDecoderRef.current) stopAudio();
+    else startAudio();
+  }, [startAudio, stopAudio]);
 
   // --- input ------------------------------------------------------------------------------------
 
@@ -377,6 +567,8 @@ export function useAndroidMirror(agentId: string) {
     info,
     takeover,
     setTakeover,
+    audio,
+    toggleAudio,
     reconnect: () => setAttempt((a) => a + 1),
     pressNav,
     sendText,

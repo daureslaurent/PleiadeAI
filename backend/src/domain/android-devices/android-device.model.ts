@@ -41,6 +41,24 @@ const AndroidDeviceSchema = new Schema(
     mirror_bit_rate: { type: Number, default: 4_000_000 },
     mirror_max_fps: { type: Number, default: 30 },
 
+    /**
+     * Forward the device's audio to the mirror panel as well. Off by default: most agent work is
+     * silent, the stream is continuous bandwidth whether or not anything is playing, and browsers
+     * refuse to start audio without a user gesture anyway.
+     *
+     * Needs Android 11+ on the device (that is when playback capture arrived), and an app in the
+     * foreground can opt out of being captured — so silence is not necessarily a fault.
+     */
+    mirror_audio: { type: Boolean, default: false },
+    /**
+     * Which encoder to ask the device for. **AAC by default, not scrcpy's own default of Opus.**
+     * AAC has been a mandatory Android encoder for many years, whereas an Opus *encoder* is missing
+     * on plenty of images — redroid among them, where asking for Opus makes scrcpy give up on audio
+     * entirely ("Could not create default audio encoder for opus") and stream video only. Getting
+     * this wrong costs the whole audio stream, so the safe choice is the default.
+     */
+    mirror_audio_codec: { type: String, enum: ['aac', 'opus', 'flac'], default: 'aac' },
+
     /** Disabled devices stay configured but are refused by the tools and hidden from the agent form. */
     enabled: { type: Boolean, default: true },
 

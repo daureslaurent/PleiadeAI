@@ -12,6 +12,8 @@ import {
   Circle,
   Square,
   ClipboardPaste,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { useAndroidMirror, type MirrorStatus } from './useAndroidMirror';
 
@@ -113,7 +115,7 @@ export function AndroidScreen({ mirror }: { mirror: Mirror }) {
 
 /** The header controls shared by both shells: take/release control and paste text. */
 export function MirrorControls({ mirror }: { mirror: Mirror }) {
-  const { status, takeover, setTakeover, sendText } = mirror;
+  const { status, takeover, setTakeover, sendText, audio, toggleAudio } = mirror;
   const live = status === 'streaming';
 
   const paste = async () => {
@@ -143,6 +145,27 @@ export function MirrorControls({ mirror }: { mirror: Mirror }) {
         {takeover ? <Hand size={14} /> : <Eye size={14} />}
         {takeover ? 'Controlling' : 'View only'}
       </button>
+      {/* Audio is only offered once the device has announced a stream this browser can decode. The
+          button is the required user gesture — browsers will not start an AudioContext without one. */}
+      {(audio.available || audio.reason) && (
+        <button
+          onClick={toggleAudio}
+          disabled={!audio.available}
+          title={
+            audio.reason ??
+            (audio.playing ? 'Mute the device audio' : 'Play the device audio')
+          }
+          className={[
+            'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors disabled:opacity-40',
+            audio.playing
+              ? 'bg-emerald-500/15 text-emerald-400'
+              : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+          ].join(' ')}
+        >
+          {audio.playing ? <Volume2 size={14} /> : <VolumeX size={14} />}
+          {audio.playing ? 'Audio' : 'Muted'}
+        </button>
+      )}
       <button
         onClick={paste}
         disabled={!live || !takeover}

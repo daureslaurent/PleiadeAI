@@ -510,6 +510,10 @@ export interface AndroidDevice {
   mirror_max_size: number;
   mirror_bit_rate: number;
   mirror_max_fps: number;
+  /** Forward device audio to the mirror panel. Off by default — see the model for why. */
+  mirror_audio: boolean;
+  /** Encoder to request. `aac` is the safe default; a codec the device lacks costs all audio. */
+  mirror_audio_codec: AndroidAudioCodec;
   enabled: boolean;
   /** Result of the last "Test connection" — advisory, measured from the backend container. */
   last_status: 'unknown' | 'ok' | 'error';
@@ -517,6 +521,9 @@ export interface AndroidDevice {
   last_checked_at: string | null;
   last_seen_model: string;
 }
+
+export const ANDROID_AUDIO_CODECS = ['aac', 'opus', 'flac'] as const;
+export type AndroidAudioCodec = (typeof ANDROID_AUDIO_CODECS)[number];
 
 export type NewAndroidDevice = Pick<AndroidDevice, 'name' | 'adb_host'> &
   Partial<Pick<AndroidDevice, 'description' | 'adb_port' | 'enabled'>>;
@@ -543,6 +550,8 @@ export const androidDevicesApi = {
         | 'mirror_max_size'
         | 'mirror_bit_rate'
         | 'mirror_max_fps'
+        | 'mirror_audio'
+        | 'mirror_audio_codec'
         | 'enabled'
       >
     >,

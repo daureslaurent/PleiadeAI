@@ -43,7 +43,11 @@ import {
   scrcpyFailure,
   scrcpyStartScript,
   ANDROID_CONTROL_LOCK,
+  ANDROID_DIR,
   ANDROID_LOG_DIR,
+  MIRROR_MUX_FILE,
+  MIRROR_MUX_SCRIPT,
+  type AndroidAudioCodec,
 } from './android.template';
 import { imageRepository } from '../domain/images/image.repository';
 import { agentRepository } from '../domain/agents/agent.repository';
@@ -123,6 +127,12 @@ export interface AndroidMirrorEndpoint {
   serial: string;
   /** Device registry name, shown in the panel header. */
   deviceName: string;
+  /**
+   * Stream roles in scrcpy's connection order, which is what the multiplexer opens and the relay
+   * demultiplexes by index. Audio is present only when the device asked for it, and its presence
+   * shifts control from index 1 to index 2 — hence carrying the layout rather than assuming it.
+   */
+  streams: Array<'video' | 'audio' | 'control'>;
 }
 
 /** The isolation-profile inputs the manager needs (from the isolation doc). */
@@ -467,6 +477,15 @@ class AgentContainerManager {
       throw new IsolationNotReadyError(androidConnectFailure(connect.stderr, serial));
     }
 
+    // Plant the multiplexer next to the scrcpy assets. Idempotent and tiny, so it is written on
+    // every session rather than tracked — that way a backend upgrade always ships its own copy.
+    await dockerService.exec(
+      container,
+      ['sh', '-c', `mkdir -p ${ANDROID_DIR} && cat > ${MIRROR_MUX_FILE}`],
+      { stdin: MIRROR_MUX_SCRIPT },
+    );
+
+    const audio = Boolean(device.mirror_audio);
     // scrcpy identifies a session by a 31-bit "scid" so several clients can share one device; the
     // top bit must stay clear, hence the mask on the first nibble.
     const scid = crypto.randomBytes(4).toString('hex').replace(/^[89a-f]/, '0');
@@ -476,6 +495,8 @@ class AgentContainerManager {
         maxSize: device.mirror_max_size ?? 1080,
         bitRate: device.mirror_bit_rate ?? 4_000_000,
         maxFps: device.mirror_max_fps ?? 30,
+        audio,
+        audioCodec: (device.mirror_audio_codec as AndroidAudioCodec) || 'aac',
       })],
       { timeoutMs: 60_000 },
     );
@@ -491,8 +512,11 @@ class AgentContainerManager {
 
     // Keep the container alive while a mirror is attached.
     this.resetIdle(agentId, 0);
-    log.info({ agentId, container, serial, port, scid }, 'android mirror ready');
-    return { container, port, serial, deviceName: device.name };
+    const streams: AndroidMirrorEndpoint['streams'] = audio
+      ? ['video', 'audio', 'control']
+      : ['video', 'control'];
+    log.info({ agentId, container, serial, port, scid, audio }, 'android mirror ready');
+    return { container, port, serial, deviceName: device.name, streams };
   }
 
   /**

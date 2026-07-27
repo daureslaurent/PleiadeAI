@@ -5,12 +5,14 @@ import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { verifyToken } from '../http/jwt';
 import { createLogger } from '../../config/logger';
 import { dockerService } from '../../isolation/docker.service';
+import { MIRROR_MUX_FILE } from '../../isolation/android.template';
 import {
   agentContainerManager,
   IsolationNotReadyError,
   type AndroidMirrorEndpoint,
 } from '../../isolation/AgentContainerManager';
 import {
+  ScrcpyAudioParser,
   ScrcpyVideoParser,
   encodeKeyPress,
   encodeScroll,
@@ -32,7 +34,13 @@ const PATH_RE = /^\/api\/agents\/([^/]+)\/container\/android\/mirror$/;
 /** Pause the device→browser pump when this much is buffered on the socket, resume once it drains. */
 const BACKPRESSURE_HIGH_WATER = 4 * 1024 * 1024;
 
-/** Flags in our own 9-byte packet header (the browser's decoder needs nothing more). */
+/**
+ * Our own 10-byte packet header to the browser: `[u8 kind][u8 flags][u64 BE pts]`. The kind byte is
+ * what lets one socket carry both media streams; flags mark a codec-config packet (which configures
+ * a decoder rather than being displayable) and, for video, a key frame.
+ */
+const KIND_VIDEO = 0;
+const KIND_AUDIO = 1;
 const OUT_FLAG_CONFIG = 1;
 const OUT_FLAG_KEY = 2;
 
@@ -98,11 +106,42 @@ function rejectUpgrade(socket: Duplex, code: number): void {
   socket.destroy();
 }
 
-/** Open one `socat` stream from the container to the forwarded scrcpy port. */
-function connectStream(endpoint: AndroidMirrorEndpoint): ChildProcessWithoutNullStreams {
+/**
+ * Open the multiplexer in the agent's container: one process that connects all of scrcpy's sockets
+ * in order and frames them onto a single stdio pair (see `MIRROR_MUX_SCRIPT`).
+ */
+function connectMux(endpoint: AndroidMirrorEndpoint): ChildProcessWithoutNullStreams {
   return dockerService.spawnRaw([
-    'exec', '-i', endpoint.container, 'socat', '-', `TCP:127.0.0.1:${endpoint.port}`,
+    'exec', '-i', endpoint.container,
+    'python3', MIRROR_MUX_FILE, String(endpoint.port), String(endpoint.streams.length),
   ]);
+}
+
+/** Incremental reader for the multiplexer's `[u8 stream][u32 BE length][payload]` framing. */
+class MuxReader {
+  private buffer: Buffer = Buffer.alloc(0);
+
+  constructor(private readonly onFrame: (stream: number, data: Buffer) => void) {}
+
+  push(chunk: Buffer): void {
+    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
+    for (;;) {
+      if (this.buffer.length < 5) return;
+      const stream = this.buffer.readUInt8(0);
+      const length = this.buffer.readUInt32BE(1);
+      if (this.buffer.length < 5 + length) return;
+      this.onFrame(stream, this.buffer.subarray(5, 5 + length));
+      this.buffer = this.buffer.subarray(5 + length);
+    }
+  }
+}
+
+/** Frame a payload for the multiplexer's stdin. */
+function muxFrame(stream: number, payload: Buffer): Buffer {
+  const header = Buffer.alloc(5);
+  header.writeUInt8(stream, 0);
+  header.writeUInt32BE(payload.length, 1);
+  return Buffer.concat([header, payload]);
 }
 
 async function startRelay(ws: WebSocket, agentId: string): Promise<void> {
@@ -121,24 +160,29 @@ async function startRelay(ws: WebSocket, agentId: string): Promise<void> {
     return;
   }
 
-  let video: ChildProcessWithoutNullStreams;
-  let control: ChildProcessWithoutNullStreams | null = null;
+  let mux: ChildProcessWithoutNullStreams;
   let closed = false;
   let meta: ScrcpyMeta | null = null;
-  /** Bytes seen on the video socket. Until this is true, an exit means "could not connect". */
+  /** Bytes seen from the multiplexer. Until this is true, an exit means "could not connect". */
   let receivedAny = false;
   let attempts = 0;
 
-  log.info({ agentId, container: endpoint.container, port: endpoint.port }, 'android mirror relay open');
+  const VIDEO = endpoint.streams.indexOf('video');
+  const AUDIO = endpoint.streams.indexOf('audio');
+  const CONTROL = endpoint.streams.indexOf('control');
+
+  log.info(
+    { agentId, container: endpoint.container, port: endpoint.port, streams: endpoint.streams },
+    'android mirror relay open',
+  );
 
   const teardown = (reason: string): void => {
     if (closed) return;
     closed = true;
     log.info({ agentId, reason }, 'android mirror relay closed');
-    for (const child of [video, control]) {
-      if (!child) continue;
-      child.stdin.destroy();
-      child.kill('SIGKILL');
+    if (mux) {
+      mux.stdin.destroy();
+      mux.kill('SIGKILL');
     }
     // scrcpy's server exits by itself once its sockets drop; drop the now-dangling adb forward too.
     void agentContainerManager
@@ -147,105 +191,107 @@ async function startRelay(ws: WebSocket, agentId: string): Promise<void> {
     if (ws.readyState === WebSocket.OPEN) ws.close();
   };
 
+  const sendJson = (payload: unknown): void => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+  };
+
   // --- device → browser -------------------------------------------------------------------------
 
-  const parser = new ScrcpyVideoParser(
+  const videoParser = new ScrcpyVideoParser(
     (m) => {
       meta = m;
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'meta', device: endpoint.deviceName, ...m }));
-      }
+      sendJson({ type: 'meta', device: endpoint.deviceName, hasAudio: AUDIO >= 0, ...m });
     },
     (packet) => {
       if (ws.readyState !== WebSocket.OPEN) return;
-      const header = Buffer.alloc(9);
-      header.writeUInt8((packet.config ? OUT_FLAG_CONFIG : 0) | (packet.keyFrame ? OUT_FLAG_KEY : 0), 0);
-      header.writeBigUInt64BE(packet.pts, 1);
+      const header = Buffer.alloc(10);
+      header.writeUInt8(KIND_VIDEO, 0);
+      header.writeUInt8((packet.config ? OUT_FLAG_CONFIG : 0) | (packet.keyFrame ? OUT_FLAG_KEY : 0), 1);
+      header.writeBigUInt64BE(packet.pts, 2);
       ws.send(Buffer.concat([header, packet.data]));
     },
   );
 
-  /**
-   * Open the video socket and wire it up. Retried a few times because the failure it guards against
-   * is a *connect* failure, not a stream failure: adb accepts the forwarded TCP connection and only
-   * then discovers it cannot open the device-side stream, so a too-early attempt shows up here as an
-   * immediate clean EOF. The launch script already waits for scrcpy to listen; this is the belt to
-   * that pair of braces, and it only ever retries while nothing has been received.
-   */
-  function attachVideo(): void {
-    attempts += 1;
-    video = connectStream(endpoint);
+  const audioParser = new ScrcpyAudioParser(
+    (m) => sendJson({ type: 'audio_meta', ...m }),
+    (packet) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const header = Buffer.alloc(10);
+      header.writeUInt8(KIND_AUDIO, 0);
+      header.writeUInt8(packet.config ? OUT_FLAG_CONFIG : 0, 1);
+      header.writeBigUInt64BE(packet.pts, 2);
+      ws.send(Buffer.concat([header, packet.data]));
+    },
+  );
 
-    video.stdout.on('data', (buf: Buffer) => {
+  const reader = new MuxReader((stream, data) => {
+    if (stream === VIDEO) videoParser.push(data);
+    else if (stream === AUDIO) audioParser.push(data);
+    // The control stream also talks back (clipboard sync, acks). The panel offers no clipboard
+    // feature, so its frames are read and dropped — which is what keeps the device's writer moving.
+  });
+
+  /**
+   * Start the multiplexer. Retried a few times because the failure it guards against is a *connect*
+   * failure, not a stream failure: adb accepts the forwarded TCP connection and only then discovers
+   * it cannot open the device-side stream, so a too-early attempt shows up as an immediate clean
+   * EOF. The launch script already waits for scrcpy to listen; this is the belt to those braces, and
+   * it only ever retries while nothing has been received.
+   */
+  function attachMux(): void {
+    attempts += 1;
+    mux = connectMux(endpoint);
+
+    mux.stdout.on('data', (buf: Buffer) => {
       receivedAny = true;
-      // The very first byte is scrcpy's dummy handshake, sent the moment the video socket is
-      // accepted. That is our cue that video won the race, so control can safely connect second.
-      if (!control) control = openControl();
-      parser.push(buf);
+      reader.push(buf);
       if (ws.bufferedAmount > BACKPRESSURE_HIGH_WATER) {
-        video.stdout.pause();
+        mux.stdout.pause();
         const resume = (): void => {
-          if (ws.bufferedAmount <= BACKPRESSURE_HIGH_WATER) video.stdout.resume();
+          if (ws.bufferedAmount <= BACKPRESSURE_HIGH_WATER) mux.stdout.resume();
           else setTimeout(resume, 20);
         };
         setTimeout(resume, 20);
       }
     });
-    video.stderr.on('data', (d: Buffer) =>
-      log.debug({ agentId, err: d.toString() }, 'video socat stderr'),
-    );
-    video.on('exit', (code) => {
+    mux.stderr.on('data', (d: Buffer) => log.debug({ agentId, err: d.toString() }, 'mux stderr'));
+    mux.on('exit', (code) => {
       if (closed) return;
       if (!receivedAny && attempts < VIDEO_CONNECT_ATTEMPTS) {
-        log.warn({ agentId, code, attempts }, 'video socket closed before any data — retrying');
-        setTimeout(attachVideo, VIDEO_RETRY_DELAY_MS);
+        log.warn({ agentId, code, attempts }, 'mirror streams closed before any data — retrying');
+        setTimeout(attachMux, VIDEO_RETRY_DELAY_MS);
         return;
       }
       if (!receivedAny) {
-        log.warn({ agentId, code, attempts }, 'video socket never delivered data');
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: 'error',
-              message:
-                "The mirror connected to the device but received no video. scrcpy's server is running yet nothing is streaming — check /workspace/.android/scrcpy.log in the agent container.",
-            }),
-          );
-        }
+        log.warn({ agentId, code, attempts }, 'mirror streams never delivered data');
+        sendJson({
+          type: 'error',
+          message:
+            "The mirror connected to the device but received nothing. scrcpy's server is running yet nothing is streaming — check /workspace/.android/scrcpy.log in the agent container.",
+        });
       }
-      log.info({ agentId, code }, 'video socat exited');
-      teardown('video-exit');
+      log.info({ agentId, code }, 'mux exited');
+      teardown('mux-exit');
     });
-    video.on('error', (err) => {
-      log.warn({ agentId, err: String(err) }, 'video socat spawn error');
-      teardown('video-error');
+    mux.on('error', (err) => {
+      log.warn({ agentId, err: String(err) }, 'mux spawn error');
+      teardown('mux-error');
     });
   }
 
-  attachVideo();
-
-  function openControl(): ChildProcessWithoutNullStreams {
-    const child = connectStream(endpoint);
-    // The device also talks back on this socket (clipboard sync, acks). The panel offers no
-    // clipboard feature, so drain it rather than let the pipe fill and stall the device's writer.
-    child.stdout.resume();
-    child.stderr.resume();
-    child.on('error', (err) => log.warn({ agentId, err: String(err) }, 'control socat spawn error'));
-    return child;
-  }
+  attachMux();
 
   // --- browser → device -------------------------------------------------------------------------
 
   ws.on('message', (data: RawData, isBinary: boolean) => {
-    if (isBinary || !control?.stdin.writable) return;
+    if (isBinary || CONTROL < 0 || !mux?.stdin.writable) return;
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(toText(data)) as Record<string, unknown>;
     } catch {
       return; // a malformed frame is a client bug; dropping it is the whole response
     }
-    const encoded = encodeControl(msg, meta);
-    for (const buf of encoded) control.stdin.write(buf);
+    for (const buf of encodeControl(msg, meta)) mux.stdin.write(muxFrame(CONTROL, buf));
   });
 
   ws.on('close', () => teardown('ws-close'));

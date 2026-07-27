@@ -119,6 +119,93 @@ export class ScrcpyVideoParser {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Audio socket
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * scrcpy reports a *failed* audio capture in-band rather than by dropping the socket, so a client
+ * can carry on with video only. Instead of a four-character codec id the first word is one of these
+ * sentinels — which is exactly what a device without the requested encoder sends (redroid has no
+ * Opus encoder, for instance, so asking for the scrcpy default yields `DISABLED`).
+ */
+const AUDIO_CODEC_DISABLED = 0;
+const AUDIO_CODEC_ERROR = 1;
+
+/** scrcpy's audio codec ids, as sent in the first word of the audio socket. */
+const AUDIO_CODEC_IDS: Record<number, string> = {
+  0x00616163: 'aac', // "\0aac"
+  0x6f707573: 'opus',
+  0x666c6143: 'flac',
+  0x00726177: 'raw',
+};
+
+export interface ScrcpyAudioMeta {
+  /** `aac` / `opus` / `flac` / `raw`, or null when the device refused to provide audio. */
+  codec: string | null;
+  /** Set when `codec` is null: why there is no audio, in words the operator can act on. */
+  disabledReason?: string;
+}
+
+/**
+ * Incremental parser for the audio socket. Structurally simpler than video — a single codec word,
+ * then frames sharing the exact same 12-byte header — but the failure path carries the interesting
+ * information, so it is surfaced as metadata rather than thrown.
+ *
+ * The first frame of an AAC stream is its `AudioSpecificConfig`, which the browser's decoder needs
+ * as `description` before it will accept anything else; it is flagged via `config` so the relay
+ * doesn't have to know the codec's rules.
+ */
+export class ScrcpyAudioParser {
+  private buffer: Buffer = Buffer.alloc(0);
+  private meta: ScrcpyAudioMeta | null = null;
+  private sawConfig = false;
+
+  constructor(
+    private readonly onMeta: (meta: ScrcpyAudioMeta) => void,
+    private readonly onPacket: (packet: { config: boolean; pts: bigint; data: Buffer }) => void,
+  ) {}
+
+  push(chunk: Buffer): void {
+    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
+
+    if (!this.meta) {
+      if (this.buffer.length < 4) return;
+      const word = this.buffer.readUInt32BE(0);
+      this.buffer = this.buffer.subarray(4);
+      if (word === AUDIO_CODEC_DISABLED || word === AUDIO_CODEC_ERROR) {
+        this.meta = {
+          codec: null,
+          disabledReason:
+            word === AUDIO_CODEC_ERROR
+              ? 'The device failed to capture audio. Audio capture needs Android 11 or newer, and the app in the foreground can opt out of being captured.'
+              : 'The device has no encoder for the requested audio codec, so scrcpy disabled audio. Try a different codec on the device in Settings → Connections (AAC is the most widely supported).',
+        };
+      } else {
+        this.meta = { codec: AUDIO_CODEC_IDS[word] ?? `0x${word.toString(16)}` };
+      }
+      log.info({ codec: this.meta.codec }, 'scrcpy audio stream opened');
+      this.onMeta(this.meta);
+      // A disabled stream sends nothing further; stop rather than parse whatever arrives as frames.
+      if (!this.meta.codec) return;
+    }
+    if (!this.meta.codec) return;
+
+    for (;;) {
+      if (this.buffer.length < 12) return;
+      const pts = this.buffer.readBigUInt64BE(0);
+      const length = this.buffer.readUInt32BE(8);
+      if (this.buffer.length < 12 + length) return;
+      const data = this.buffer.subarray(12, 12 + length);
+      // The codec-config frame arrives first and only once.
+      const config = !this.sawConfig;
+      this.sawConfig = true;
+      this.onPacket({ config, pts, data });
+      this.buffer = this.buffer.subarray(12 + length);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Control messages
 // ---------------------------------------------------------------------------------------------
 

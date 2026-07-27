@@ -99,6 +99,36 @@ Three decisions worth recording:
 Coordinates travel in the *video frame's* space; scrcpy rescales to the real screen. That is what
 lets `mirror_max_size` reduce bandwidth without costing any accuracy.
 
+### Audio, and why the sockets are multiplexed
+
+Audio is opt-in per device (`mirror_audio`). Turning it on adds a **third** scrcpy socket, and
+scrcpy assigns roles purely by connection order — video, then audio, then control. That is what
+forced the transport change: one `socat` per stream cannot express an ordering constraint, so
+whichever container process happened to connect first became the video stream and a slow `docker
+exec` would silently swap audio and control, corrupting every byte after it.
+
+`MIRROR_MUX_SCRIPT` (planted Python, run over one `docker exec`) opens the sockets sequentially from
+a single process — the listen backlog is FIFO, so connection order *is* accept order — and frames
+them all onto one stdio pair as `[u8 stream][u32 BE length][payload]`, in both directions. Ordering
+becomes correct by construction rather than by timing, which also retires the connect race the
+earlier socat version had to retry around. Upstream scrcpy's own client connects sequentially from
+one process for exactly this reason.
+
+**The codec matters more than it looks.** scrcpy defaults to Opus; redroid has no Opus *encoder*, so
+asking for it makes the server give up on audio entirely — it reports the failure in-band (a `0`
+sentinel where the codec id belongs) and streams video only. That is the whole reason the earlier
+sessions needed `--no-audio`. `mirror_audio_codec` therefore defaults to **AAC**, which has been a
+mandatory Android encoder for years, and the parser turns both sentinels into an operator-facing
+explanation instead of silence.
+
+Browser side: the relay tags each packet with a kind byte, and `useAndroidMirror` feeds audio into a
+WebCodecs `AudioDecoder` (`mp4a.40.2`, with the stream's first packet as the required
+`AudioSpecificConfig` `description`). Decoded frames are scheduled onto the `AudioContext` clock a
+fixed ~80 ms ahead rather than played on arrival — a live stream has no timeline, so the only thing
+that matters is staying just far enough ahead to absorb jitter; the cursor is re-primed on underrun
+and if the lead ever exceeds 500 ms, so latency cannot creep. Playback needs a user gesture
+(autoplay policy), which is what the panel's Audio/Muted button is for.
+
 **Human takeover** mirrors the desktop's contract: taking control drops `/workspace/.android/human_control`
 in the container, which `android_act` checks and stands down against, so the agent and the operator
 never fight over the touchscreen. The panel starts view-only and releases control on unmount.
@@ -178,5 +208,11 @@ A second pass over the prod logs (2026-07-27) found two more, both now fixed and
 `mResumedActivity`, but `mCurrentFocus` is legitimately `null` mid-transition and Android 10+ renamed
 the resumed field to `topResumedActivity`. It now asks the activity manager *and* the window manager
 and returns both.
-- [ ] Optional later: audio, clipboard sync, multi-touch (the control protocol supports all three;
-      the panel deliberately implements none of them yet).
+- [x] **Audio forwarding** (2026-07-28), opt-in per device, verified end-to-end against the same
+      device through the *real* planted multiplexer: video 39 packets, audio 408 packets at
+      `codec=aac` (2-byte AudioSpecificConfig then 341-byte frames), and a control key press visibly
+      changing the screen — all three streams simultaneously and correctly demultiplexed.
+      The browser-side `AudioDecoder` path is written but **not** browser-tested; everything up to
+      the WebSocket is.
+- [ ] Optional later: clipboard sync and multi-touch (the control protocol supports both; the panel
+      deliberately implements neither yet).

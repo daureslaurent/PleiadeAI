@@ -38,6 +38,8 @@ export const androidDeviceRepository = {
         | 'mirror_max_size'
         | 'mirror_bit_rate'
         | 'mirror_max_fps'
+        | 'mirror_audio'
+        | 'mirror_audio_codec'
         | 'enabled'
         | 'last_status'
         | 'last_error'

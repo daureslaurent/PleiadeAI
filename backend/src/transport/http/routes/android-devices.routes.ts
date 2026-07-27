@@ -18,6 +18,8 @@ const EDITABLE = [
   'mirror_max_size',
   'mirror_bit_rate',
   'mirror_max_fps',
+  'mirror_audio',
+  'mirror_audio_codec',
   'enabled',
 ] as const;
 
@@ -27,6 +29,12 @@ function pickEditable(body: Record<string, unknown>): Editable {
   const patch: Editable = {};
   for (const key of EDITABLE) if (key in body) patch[key] = body[key];
   if (typeof patch.adb_port === 'string') patch.adb_port = Number(patch.adb_port);
+  if ('mirror_audio' in patch) patch.mirror_audio = Boolean(patch.mirror_audio);
+  // An unknown codec would be rejected by the schema enum with an opaque error; drop it instead so
+  // the device keeps whatever it had.
+  if ('mirror_audio_codec' in patch && !['aac', 'opus', 'flac'].includes(String(patch.mirror_audio_codec))) {
+    delete patch.mirror_audio_codec;
+  }
   for (const numeric of ['adb_port', 'mirror_max_size', 'mirror_bit_rate', 'mirror_max_fps'] as const) {
     if (numeric in patch) patch[numeric] = Number(patch[numeric]) || undefined;
   }
