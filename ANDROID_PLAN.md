@@ -157,5 +157,26 @@ Three things that bit us on the first real run, all fixed:
 
 Also worth knowing: scrcpy's server **deletes its own jar** once loaded, so `/data/local/tmp` is
 empty again next session. Pushing every session is required, not defensive.
+
+A second pass over the prod logs (2026-07-27) found two more, both now fixed and verified:
+
+4. **`android_app action=launch` never launched anything.** `monkey -p <pkg> -c …LAUNCHER 1` needs
+   the device to report physical keys; on a headless one it aborts with `SYS_KEYS has no physical
+   keys` and **exit 251** *after* printing its usual verbose banner, so the failure reads like a
+   successful launch. Replaced with `cmd package resolve-activity --brief` + `am start -n`, which
+   needs no input subsystem and names the component it started. A package with no launcher activity
+   now gets a specific error instead of a generic one.
+5. **`android_ui` failed on a sleeping screen, and `uiautomator dump` exits 0 when it fails** —
+   printing `ERROR: null root node returned by UiTestAutomationBridge` and writing no file, so the
+   exit code proves nothing and the file is the only real signal. The connect-time wake wasn't
+   enough because readiness is cached for 60 s while the screen idles out at 121 s, i.e. within a
+   single long turn. `KEYCODE_WAKEUP` now goes in at the point of use — `dumpUi`, `captureScreen`
+   and `android_act` — where it costs nothing extra (same device shell) and also resets the idle
+   timer, so a working agent keeps its screen alive.
+
+`android_app action=current` was rewritten at the same time: it asked only for `mCurrentFocus` /
+`mResumedActivity`, but `mCurrentFocus` is legitimately `null` mid-transition and Android 10+ renamed
+the resumed field to `topResumedActivity`. It now asks the activity manager *and* the window manager
+and returns both.
 - [ ] Optional later: audio, clipboard sync, multi-touch (the control protocol supports all three;
       the panel deliberately implements none of them yet).

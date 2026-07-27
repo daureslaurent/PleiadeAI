@@ -159,6 +159,9 @@ async function captureScreen(session: AndroidSession): Promise<Capture | { error
   const command = [
     'set -e',
     `mkdir -p ${SHOT_DIR}`,
+    // A sleeping screen captures as a uniformly black PNG — the device is fine, there is simply
+    // nothing lit. See `dumpUi` for why the wake belongs at the point of use, not just at connect.
+    `${session.adb} shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true`,
     'ts=$(date +%s%N)',
     `raw="${SHOT_DIR}/shot-$ts.png"`,
     `thumb="${SHOT_DIR}/shot-$ts.thumb.jpg"`,
@@ -296,16 +299,42 @@ function parseUiDump(xml: string): UiNode[] {
   return nodes;
 }
 
-/** Dump the current screen's view hierarchy. */
+/**
+ * Dump the current screen's view hierarchy.
+ *
+ * Two things about `uiautomator dump` that this has to work around, both learned the hard way:
+ *
+ *  - **It exits 0 even when it fails.** On a sleeping screen it prints `ERROR: null root node
+ *    returned by UiTestAutomationBridge.` and writes no file, with status 0 — so the exit code
+ *    proves nothing and the *file* is the only real signal.
+ *  - **A sleeping screen has no hierarchy at all.** Android idles out after `screen_off_timeout`
+ *    (two minutes on a stock image), which is easily shorter than one agent turn, so the wake key
+ *    goes here rather than only at connect time. `KEYCODE_WAKEUP` is safe to send unconditionally —
+ *    unlike `KEYCODE_POWER` it never toggles the screen *off* — and it also resets the idle timer,
+ *    which keeps a working agent's screen alive.
+ *
+ * The dump's own message and the XML share stdout; `parseUiDump` matches `<node …>` so the banner
+ * ahead of it is harmless, and on failure that same text is what makes the error report honest.
+ */
 async function dumpUi(session: AndroidSession): Promise<UiNode[] | { error: string }> {
   const command = [
-    `${session.adb} shell uiautomator dump ${DUMP_PATH} >/dev/null 2>&1`,
-    `${session.adb} exec-out cat ${DUMP_PATH}`,
+    `${session.adb} shell ${deviceQuote(
+      `input keyevent KEYCODE_WAKEUP; rm -f ${DUMP_PATH}; uiautomator dump ${DUMP_PATH} 2>&1; ` +
+        // One retry: the bridge also returns a null root while a transition is still animating.
+        `[ -s ${DUMP_PATH} ] || { sleep 1; uiautomator dump ${DUMP_PATH} 2>&1; }`,
+    )}`,
+    `${session.adb} exec-out cat ${DUMP_PATH} 2>/dev/null || true`,
   ].join('\n');
   const res = await session.exec.run(command, { timeoutMs: TIMEOUT_MS });
   if (res.timedOut) return { error: 'uiautomator dump timed out' };
   const xml = res.stdout;
   if (!xml.includes('<node')) {
+    if (xml.includes('null root node')) {
+      return {
+        error:
+          'The device returned no view hierarchy: uiautomator reports a null root node, which means nothing is being rendered — the screen is off, or the foreground app has not drawn yet. Retry in a moment.',
+      };
+    }
     return {
       error: `uiautomator returned no view hierarchy: ${res.stderr.trim() || xml.trim().slice(0, 200) || 'empty dump'}`,
     };
@@ -719,9 +748,13 @@ export const androidAct: Tool = {
     // agent acted on. Best-effort — a null background just skips the card.
     const bg = await markerBackground(ready, ctx.agentId);
 
-    const res = await ready.exec.run(`${ready.adb} shell ${deviceQuote(shellCmd)}`, {
-      timeoutMs: TIMEOUT_MS,
-    });
+    // Wake first, in the same device shell: input aimed at a sleeping screen is swallowed, and the
+    // agent would see a successful tap that changed nothing. Free when already awake, and it resets
+    // the idle timer so a working agent doesn't keep falling asleep mid-task.
+    const res = await ready.exec.run(
+      `${ready.adb} shell ${deviceQuote(`input keyevent KEYCODE_WAKEUP; ${shellCmd}`)}`,
+      { timeoutMs: TIMEOUT_MS },
+    );
     if (res.timedOut) return { result: { ok: false, error: `android_act (${action}) timed out` } };
     if (res.exitCode !== 0) {
       return {
@@ -836,8 +869,20 @@ export const androidApp: Tool = {
         command = `${ready.adb} shell pm list packages${args.system === true ? '' : ' -3'}`;
         break;
       case 'launch':
-        // `monkey … LAUNCHER 1` starts an app knowing only its package — no activity name needed.
-        command = `${ready.adb} shell monkey -p ${pkg} -c android.intent.category.LAUNCHER 1`;
+        // Resolve the package's launcher activity, then start it explicitly.
+        //
+        // The obvious one-liner — `monkey -p <pkg> -c …LAUNCHER 1` — is a trap: monkey needs the
+        // device to report physical keys, and on a headless one (redroid, and emulators generally)
+        // it bails with "SYS_KEYS has no physical keys" and exit 251 *after* printing its usual
+        // verbose banner, so it reads like a successful launch that silently did nothing.
+        // `resolve-activity` + `am start` needs no input subsystem at all and names the component it
+        // started, which is also what makes the result worth reporting back.
+        command =
+          `${ready.adb} shell ${deviceQuote(
+            `act=$(cmd package resolve-activity --brief -c android.intent.category.LAUNCHER ${pkg} 2>/dev/null | tail -1); ` +
+              `case "$act" in */*) am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$act";; ` +
+              `*) echo "ANDROID_NO_LAUNCHER" >&2; exit 66;; esac`,
+          )}`;
         break;
       case 'stop':
         command = `${ready.adb} shell am force-stop ${pkg}`;
@@ -856,14 +901,31 @@ export const androidApp: Tool = {
         break;
       }
       default:
-        // mCurrentFocus covers most versions; mResumedActivity is the newer field — ask for both.
-        command = `${ready.adb} shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || ${ready.adb} shell dumpsys activity activities | grep -E 'mResumedActivity'`;
+        // Ask the activity manager *and* the window manager, and return whatever each says.
+        //
+        // Neither alone is reliable: `mCurrentFocus` is legitimately `null` mid-transition (so a
+        // check right after a tap can report "nothing is focused" on a perfectly healthy device),
+        // and the resumed-activity field has been renamed across versions — `topResumedActivity` on
+        // Android 10+, `mResumedActivity` before it. No `head`/`-m1` here on purpose: closing the
+        // pipe early makes dumpsys print "Failed to write while dumping service" into the result.
+        command = `${ready.adb} shell ${deviceQuote(
+          "dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity'; " +
+            "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'",
+        )}`;
     }
 
     const res = await ready.exec.run(command, { timeoutMs: TIMEOUT_MS });
     if (res.timedOut) return { result: { ok: false, error: `android_app (${action}) timed out` } };
     const out = res.stdout.trim();
     if (res.exitCode !== 0 && action !== 'current') {
+      if (res.stderr.includes('ANDROID_NO_LAUNCHER')) {
+        return {
+          result: {
+            ok: false,
+            error: `"${pkg}" has no launcher activity, so there is nothing to open from the home screen. Check the package name with action=list; a service-only or system package genuinely cannot be launched this way.`,
+          },
+        };
+      }
       return {
         result: {
           ok: false,
