@@ -129,6 +129,21 @@ that matters is staying just far enough ahead to absorb jitter; the cursor is re
 and if the lead ever exceeds 500 ms, so latency cannot creep. Playback needs a user gesture
 (autoplay policy), which is what the panel's Audio/Muted button is for.
 
+### Rotation
+
+The panel's rotate handles set the device's `user_rotation` over adb (`POST …/android/rotate`, step
+or absolute) rather than sending scrcpy's own rotate message, which is only a toggle. Auto-rotate is
+cleared first, since `user_rotation` is ignored while the sensor is in charge — without that the
+button appears to do nothing. It rotates the **device**: an app that pins its own orientation, which
+most games do, still wins.
+
+The interesting consequence is on the *client*. Rotating re-announces the stream geometry —
+608×1080 becomes 1080×608, carried as a fresh codec-config packet mid-session — so the decoder has
+to be **reconfigured**, not merely fed the new SPS. `useAndroidMirror` therefore compares each config
+packet against the one currently programmed in and reconfigures when it differs; the canvas resizes
+from the decoded frame, and touch coordinates follow because they were always expressed in the video
+frame's space.
+
 **Human takeover** mirrors the desktop's contract: taking control drops `/workspace/.android/human_control`
 in the container, which `android_act` checks and stands down against, so the agent and the operator
 never fight over the touchscreen. The panel starts view-only and releases control on unmount.

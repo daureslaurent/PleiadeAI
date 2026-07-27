@@ -70,6 +70,13 @@ function extractMessage(err: unknown): string {
  * Guessing a fixed baseline string instead would work until the device negotiated a different
  * profile (emulators commonly pick high), at which point the decoder would reject the stream.
  */
+/** Byte-equality for two codec configs — a changed SPS is what signals a geometry change. */
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 function codecFromSps(annexB: Uint8Array): string | null {
   for (let i = 0; i + 4 < annexB.length; i += 1) {
     const startCode3 = annexB[i] === 0 && annexB[i + 1] === 0 && annexB[i + 2] === 1;
@@ -155,7 +162,8 @@ export function useAndroidMirror(agentId: string) {
     let ws: WebSocket | null = null;
     let decoder: VideoDecoder | null = null;
     let pendingConfig: Uint8Array | null = null;
-    let configured = false;
+    /** The codec config currently programmed into the decoder, to spot a genuine change. */
+    let activeConfig: Uint8Array | null = null;
 
     setStatus('connecting');
     setError(null);
@@ -274,21 +282,32 @@ export function useAndroidMirror(agentId: string) {
         if (kind !== KIND_VIDEO) return;
 
         // A config packet (SPS/PPS) is not displayable on its own: hold it and prepend it to the
-        // next key frame, so the decoder receives one self-contained chunk. Doing it this way also
-        // makes mid-stream reconfiguration (a device rotation) fall out for free.
+        // next key frame, so the decoder receives one self-contained chunk.
+        //
+        // It also arrives again whenever the geometry changes — rotating the device re-announces the
+        // stream, e.g. 608x1080 becoming 1080x608. The decoder has to be *reconfigured* for that, not
+        // merely fed the new SPS, so the config is compared against what is currently programmed in.
         if (flags & FLAG_CONFIG) {
-          pendingConfig = payload.slice();
-          if (!configured) {
-            const codec = codecFromSps(pendingConfig);
-            if (!codec) return fail('The video stream did not start with a readable H.264 header.');
+          const next = payload.slice();
+          const changed = !activeConfig || !sameBytes(next, activeConfig);
+          pendingConfig = next;
+          if (!changed) return;
+
+          const codec = codecFromSps(next);
+          if (!codec) return fail('The video stream did not start with a readable H.264 header.');
+          if (!decoder) {
             decoder = new VideoDecoder({
               output: paint,
               error: (e) => fail(`Video decoding failed: ${e.message}`),
             });
-            decoder.configure({ codec, optimizeForLatency: true });
-            configured = true;
-            setStatus('streaming');
           }
+          try {
+            decoder.configure({ codec, optimizeForLatency: true });
+          } catch (err) {
+            return fail(`Could not configure the video decoder: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          activeConfig = next;
+          setStatus('streaming');
           return;
         }
 
@@ -564,6 +583,22 @@ export function useAndroidMirror(agentId: string) {
     [send],
   );
 
+  /**
+   * Turn the device a quarter turn. This goes over HTTP rather than the control socket because it
+   * sets the device's `user_rotation`, which is absolute and readable, where scrcpy's own rotate
+   * message is only a toggle. The mirror needs no prompting afterwards: the stream re-announces its
+   * geometry and the decoder picks the change up.
+   *
+   * An app that pins its own orientation — most games — still overrides this; it rotates the device,
+   * not the app.
+   */
+  const rotate = useCallback(
+    (step: 1 | -1) => {
+      void androidApi.rotate(agentId, { step }).catch(() => undefined);
+    },
+    [agentId],
+  );
+
   /** Paste (or type) a string in one go — far less painful than key-by-key for a URL or password. */
   const sendText = useCallback((text: string) => text && send({ t: 'text', text }), [send]);
 
@@ -576,6 +611,7 @@ export function useAndroidMirror(agentId: string) {
     setTakeover,
     audio,
     toggleAudio,
+    rotate,
     reconnect: () => setAttempt((a) => a + 1),
     pressNav,
     sendText,

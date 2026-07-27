@@ -39,6 +39,7 @@ import {
 import {
   androidConnectFailure,
   androidConnectScript,
+  androidRotateScript,
   scrcpyCleanupScript,
   scrcpyFailure,
   scrcpyStartScript,
@@ -530,6 +531,40 @@ class AgentContainerManager {
       ['sh', '-c', scrcpyCleanupScript(endpoint.serial, endpoint.port)],
       { timeoutMs: 10_000 },
     );
+  }
+
+  /**
+   * Rotate the agent's device, absolutely (`to`, 0–3) or by a step (`step`, ±1). Returns where it
+   * actually landed. The mirror needs no special handling: scrcpy re-announces the stream geometry
+   * on rotation, so the panel follows on its own.
+   */
+  async rotateAndroid(agentId: string, opts: { to?: number; step?: number }): Promise<number> {
+    const container = agentContainerName(agentId);
+    const agent = await agentRepository.findById(agentId);
+    if (!agent?.android_device_id) {
+      throw new IsolationNotReadyError('This agent is not linked to an Android device.');
+    }
+    const device = await androidDeviceRepository.findById(agent.android_device_id);
+    if (!device) {
+      throw new IsolationNotReadyError("This agent's Android device no longer exists.");
+    }
+    if ((await dockerService.containerState(container)) !== 'running') {
+      throw new IsolationNotReadyError('The agent container is not running.');
+    }
+
+    const res = await dockerService.exec(
+      container,
+      ['sh', '-c', androidRotateScript(deviceSerial(device), opts)],
+      { timeoutMs: 30_000 },
+    );
+    const landed = Number(/ROTATION:(\d)/.exec(res.stdout)?.[1]);
+    if (!Number.isFinite(landed)) {
+      throw new IsolationNotReadyError(
+        `Could not rotate the device: ${res.stderr.trim() || res.stdout.trim() || 'no response'}`,
+      );
+    }
+    log.info({ agentId, rotation: landed }, 'android device rotated');
+    return landed;
   }
 
   /**

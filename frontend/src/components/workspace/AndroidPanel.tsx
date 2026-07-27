@@ -14,6 +14,8 @@ import {
   ClipboardPaste,
   Volume2,
   VolumeX,
+  RotateCcw,
+  RotateCw,
 } from 'lucide-react';
 import { useAndroidMirror, type MirrorStatus } from './useAndroidMirror';
 
@@ -32,7 +34,7 @@ type Mirror = ReturnType<typeof useAndroidMirror>;
  * — the only thing that differs between them is the chrome around this.
  */
 export function AndroidScreen({ mirror }: { mirror: Mirror }) {
-  const { canvasRef, status, error, takeover, reconnect, pressNav, handlers } = mirror;
+  const { canvasRef, status, error, takeover, reconnect, pressNav, rotate, handlers } = mirror;
   const stageRef = useRef<HTMLDivElement>(null);
 
   // The canvas can't take focus on its own, so keystrokes are captured on the stage. Focusing it as
@@ -86,7 +88,7 @@ export function AndroidScreen({ mirror }: { mirror: Mirror }) {
 
       {/* Android's own navigation bar. An emulator often runs without one, and even when it has one
           the gesture equivalents are awkward with a mouse — so these are always offered. */}
-      <div className="flex items-center justify-center gap-8 border-t border-slate-800 bg-panel py-2">
+      <div className="flex items-center justify-center gap-6 border-t border-slate-800 bg-panel py-2">
         <NavButton
           label="Back"
           disabled={!takeover || status !== 'streaming'}
@@ -107,6 +109,25 @@ export function AndroidScreen({ mirror }: { mirror: Mirror }) {
           onClick={() => pressNav('app_switch')}
         >
           <Square size={13} />
+        </NavButton>
+
+        {/* Rotation. Separated from the navigation keys because it changes the device's state rather
+            than navigating it, and gated on takeover for the same reason android_act is: turning the
+            screen under a working agent would invalidate every coordinate it just read. */}
+        <span className="mx-1 h-4 w-px bg-slate-700" aria-hidden />
+        <NavButton
+          label="Rotate left"
+          disabled={!takeover || status !== 'streaming'}
+          onClick={() => rotate(-1)}
+        >
+          <RotateCcw size={15} />
+        </NavButton>
+        <NavButton
+          label="Rotate right"
+          disabled={!takeover || status !== 'streaming'}
+          onClick={() => rotate(1)}
+        >
+          <RotateCw size={15} />
         </NavButton>
       </div>
     </>

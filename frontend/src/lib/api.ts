@@ -577,6 +577,12 @@ export const androidApi = {
   /** Signal that a human has taken (`true`) or released (`false`) manual control, pausing `android_act`. */
   control: (id: string, human: boolean) =>
     api.post(`/agents/${id}/container/android/control`, { human }).then((r) => r.data),
+  /**
+   * Turn the device. `{ step: 1 | -1 }` for a quarter turn, `{ rotation: 0..3 }` for an absolute
+   * orientation. Replies with where it landed.
+   */
+  rotate: (id: string, body: { step?: 1 | -1; rotation?: number }) =>
+    api.post<{ rotation: number }>(`/agents/${id}/container/android/rotate`, body).then((r) => r.data),
   /** Same JWT-in-query scheme as the VNC relay — browsers can't set headers on a WebSocket. */
   wsUrl: (wsPath: string): string => visualApi.wsUrl(wsPath),
 };

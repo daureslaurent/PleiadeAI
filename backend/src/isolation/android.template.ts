@@ -214,6 +214,34 @@ export function scrcpyFailure(stderr: string): string {
   return `The phone mirror did not start: ${stderr.trim() || 'unknown error'}`;
 }
 
+/**
+ * Set the device's display rotation, either absolutely (0–3, i.e. 0°/90°/180°/270°) or as a step
+ * relative to where it is now — which is what a "rotate left / rotate right" handle wants.
+ *
+ * `user_rotation` is only honoured while auto-rotate is off, so `accelerometer_rotation` is cleared
+ * first; otherwise the sensor immediately overrides whatever we set and the button appears to do
+ * nothing. An app that pins its own orientation (most games do) still wins over both — this sets the
+ * *device* rotation, not the app's.
+ *
+ * Echoes `ROTATION:<n>` so the caller can report where it actually landed rather than where it aimed.
+ */
+export function androidRotateScript(serial: string, opts: { to?: number; step?: number }): string {
+  const absolute = typeof opts.to === 'number' ? ((Math.floor(opts.to) % 4) + 4) % 4 : null;
+  const step = typeof opts.step === 'number' ? Math.trunc(opts.step) : 1;
+  const compute =
+    absolute !== null
+      ? `next=${absolute}`
+      : // `settings get` yields "null" when unset, which is not a number — fall back to 0 rather
+        // than letting the arithmetic fail and leaving the device untouched.
+        `cur=$(settings get system user_rotation 2>/dev/null | tr -d '\\r\\n'); ` +
+        `case "$cur" in ''|*[!0-3]*) cur=0;; esac; ` +
+        `next=$(( (cur + ${step} + 4) % 4 ))`;
+
+  return `adb -s ${sq(serial)} shell ${sq(
+    `${compute}; settings put system accelerometer_rotation 0; settings put system user_rotation $next; echo "ROTATION:$next"`,
+  )}`;
+}
+
 /** Planted stream multiplexer (see {@link MIRROR_MUX_SCRIPT}). */
 export const MIRROR_MUX_FILE = `${ANDROID_DIR}/mirror_mux.py`;
 

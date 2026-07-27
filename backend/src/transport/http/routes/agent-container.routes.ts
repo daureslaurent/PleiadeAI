@@ -341,6 +341,32 @@ agentContainerRouter.post('/android/control', async (req, res) => {
   res.status(204).end();
 });
 
+/**
+ * Rotate the agent's device. `{ step: 1 | -1 }` turns it one quarter (what the panel's rotate
+ * handles send); `{ rotation: 0..3 }` sets an absolute orientation. Replies with where it landed.
+ *
+ * This rotates the *device*, so an app that pins its own orientation — most games — keeps winning.
+ */
+agentContainerRouter.post('/android/rotate', async (req, res) => {
+  const agent = await agentRepository.findById(agentId(req));
+  if (!agent) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  const body = req.body ?? {};
+  const to = Number(body.rotation);
+  const step = Number(body.step);
+  const opts = Number.isInteger(to)
+    ? { to }
+    : { step: step === -1 ? -1 : 1 };
+  try {
+    const rotation = await agentContainerManager.rotateAndroid(String(agent._id), opts);
+    res.json({ rotation });
+  } catch (err) {
+    res.status(409).json({ error: 'not_ready', message: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 /** Live resource usage: `docker stats` (CPU/mem/net/block I/O) plus `/workspace` disk footprint. */
 agentContainerRouter.get('/stats', async (req, res) => {
   const container = await requireRunningContainer(req, res);
