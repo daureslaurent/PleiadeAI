@@ -1,0 +1,10 @@
+{
+  "name": "emulator-local",
+  "description": "Android emulator running on the app host, listening for adb on 5555.",
+  "adb_host": "127.0.0.1",
+  "adb_port": 5555,
+  "mirror_max_size": 1080,
+  "mirror_bit_rate": 4000000,
+  "mirror_max_fps": 30,
+  "enabled": true
+}

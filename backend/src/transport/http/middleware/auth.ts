@@ -26,6 +26,7 @@ const READ_ONLY_METHODS = new Set(['GET', 'HEAD']);
 const WRITE_SCOPES: ReadonlyArray<{ scope: string; prefix: string }> = [
   { scope: 'agents:write', prefix: '/api/agents' },
   { scope: 'isolations:write', prefix: '/api/isolations' },
+  { scope: 'android:write', prefix: '/api/android-devices' },
 ];
 
 /**

@@ -158,6 +158,43 @@ export const ENDPOINTS = [
     args: { body: { type: 'object', description: 'The isolation document', required: true } },
     resolve: (a) => ({ path: '/api/isolations', body: a.body }),
   },
+  {
+    name: 'android_devices',
+    description:
+      'List the registered Android devices (emulators / phones reachable over adb TCP/IP) an agent can be linked to.',
+    args: {},
+    resolve: () => ({ path: '/api/android-devices' }),
+  },
+  {
+    name: 'create_android_device',
+    description:
+      'Create an Android device. Body: name, adb_host, adb_port (default 5555), description, mirror_max_size, mirror_bit_rate, mirror_max_fps, enabled. `adb_host` is resolved from inside the *agent container*, so 127.0.0.1 only works on a host-network profile. Needs the "android:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { body: { type: 'object', description: 'The device document', required: true } },
+    resolve: (a) => ({ path: '/api/android-devices', body: a.body }),
+  },
+  {
+    name: 'update_android_device',
+    description:
+      'Patch a registered Android device. Body holds only the fields to change. Needs the "android:write" scope.',
+    method: 'PATCH',
+    write: true,
+    args: {
+      id: { type: 'string', description: 'Device _id', required: true },
+      body: { type: 'object', description: 'Partial device document', required: true },
+    },
+    resolve: (a) => ({ path: `/api/android-devices/${a.id}`, body: a.body }),
+  },
+  {
+    name: 'test_android_device',
+    description:
+      'Complete an adb handshake against a registered device and record the verdict. Advisory: it runs from the backend container, not the agent\'s. Needs the "android:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { id: { type: 'string', description: 'Device _id', required: true } },
+    resolve: (a) => ({ path: `/api/android-devices/${a.id}/test` }),
+  },
 ];
 
 /** Build the JSON Schema an MCP client needs to call a tool. */
