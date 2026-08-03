@@ -19,7 +19,8 @@ import type {
   TodoItem,
   RecalledMemory,
   VisionEvent,
-  ImageGenEvent,
+  MediaGenEvent,
+  ToolProgressEvent,
   VisualActEvent,
 } from '../lib/ws-events.types';
 
@@ -47,18 +48,34 @@ export interface VisionInfo {
   snap?: { text: string; x: number; y: number } | null;
 }
 
-/** Generation metadata surfaced on a `generate_image` tool block (prompt + params + model). The
- * images themselves live on the block's `images` (from `tool_end`); this frames them as a generation. */
-export interface ImageGenInfo {
+/**
+ * Generation metadata surfaced on a media tool block (prompt + settings + workflow). Images live on
+ * the block's `images` (from `tool_end`); video and audio are streamed by resource handle. This
+ * frames either as a generation rather than a generic tool call.
+ */
+export interface MediaGenInfo {
+  kind: 'image' | 'video' | 'audio';
   prompt: string;
-  size: string;
-  n: number;
-  steps: number;
-  guidance: number;
-  seed: number | null;
   negativePrompt: string | null;
-  model: string;
+  workflow: string;
+  seed: number | null;
+  params: Record<string, string | number>;
   count: number;
+  resourceIds: string[];
+  sourceId: string | null;
+}
+
+/**
+ * Live progress of a running tool call. Populated from `tool_progress` and deliberately **not**
+ * persisted — after a reload the block shows its finished result, not a bar frozen at 60%.
+ */
+export interface ToolProgressInfo {
+  phase: 'queued' | 'running' | 'downloading';
+  percent: number | null;
+  nodeLabel?: string;
+  queuePosition?: number;
+  elapsedMs: number;
+  etaMs: number | null;
 }
 
 /** Where a `visual_act` call acted: a screenshot + the marked pixel(s), surfaced on its tool block. */
@@ -91,8 +108,10 @@ export type Block =
       images?: { id?: string; dataUrl: string }[];
       /** Vision analysis attached to a `visual_screenshot` call: screenshot thumbnail + the model's answer. */
       vision?: VisionInfo;
-      /** Generation metadata attached to a `generate_image` call: prompt + params + model. */
-      imageGen?: ImageGenInfo;
+      /** Generation metadata attached to a media tool call: prompt + settings + workflow. */
+      mediaGen?: MediaGenInfo;
+      /** Live progress of a long render. Never persisted — see {@link ToolProgressInfo}. */
+      progress?: ToolProgressInfo;
       /** Action marker attached to a `visual_act` call: screenshot + where the action landed. */
       visualAct?: VisualActInfo;
     }
@@ -144,7 +163,8 @@ type LiveItem =
       result?: unknown;
       images?: { id?: string; dataUrl: string }[];
       vision?: VisionInfo;
-      imageGen?: ImageGenInfo;
+      mediaGen?: MediaGenInfo;
+      progress?: ToolProgressInfo;
       visualAct?: VisualActInfo;
     }
   /** Placeholder marking where a child agent frame was spawned within this frame's stream. */
@@ -216,7 +236,8 @@ export function buildBlocks(
         result: it.result,
         images: it.images,
         vision: it.vision,
-        imageGen: it.imageGen,
+        mediaGen: it.mediaGen,
+        // `progress` is deliberately dropped here: settled blocks show their result, not a bar.
         visualAct: it.visualAct,
       });
     } else {
@@ -523,24 +544,46 @@ export const useStream = create<StreamState>((set, get) => ({
       }));
     });
 
-    // Generation card for a generate_image call: attach the prompt + params + model to its tool block.
-    // The images themselves land via `tool_end` (as the block's `images`), so this only adds framing.
-    socket.on('image_gen', (e: ImageGenEvent) => {
+    // Generation card for a media tool: attach the prompt + settings + workflow to its tool block.
+    // Images land via `tool_end` (as the block's `images`) and video/audio are fetched by resource
+    // handle, so this only adds framing.
+    socket.on('media_gen', (e: MediaGenEvent) => {
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
             ? {
                 ...it,
-                imageGen: {
+                mediaGen: {
+                  kind: e.kind,
                   prompt: e.prompt,
-                  size: e.size,
-                  n: e.n,
-                  steps: e.steps,
-                  guidance: e.guidance,
-                  seed: e.seed,
                   negativePrompt: e.negativePrompt,
-                  model: e.model,
+                  workflow: e.workflow,
+                  seed: e.seed,
+                  params: e.params ?? {},
                   count: e.count,
+                  resourceIds: e.resourceIds ?? [],
+                  sourceId: e.sourceId ?? null,
+                },
+              }
+            : it,
+        ),
+      }));
+    });
+
+    // Live progress of a long render. Replaces rather than accumulates — only the latest matters.
+    socket.on('tool_progress', (e: ToolProgressEvent) => {
+      set((s) => ({
+        liveItems: s.liveItems.map((it) =>
+          it.kind === 'tool' && it.callId === e.callId
+            ? {
+                ...it,
+                progress: {
+                  phase: e.phase,
+                  percent: e.percent,
+                  nodeLabel: e.nodeLabel,
+                  queuePosition: e.queuePosition,
+                  elapsedMs: e.elapsedMs,
+                  etaMs: e.etaMs,
                 },
               }
             : it,

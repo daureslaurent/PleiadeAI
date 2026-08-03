@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Database, Download, FileBox, Image as ImageIcon, Loader2, RotateCw } from 'lucide-react';
+import { AudioLines, Clapperboard, Database, Download, FileBox, Image as ImageIcon, Loader2, Play, RotateCw } from 'lucide-react';
 import { resourcesApi, type SessionResource } from '../../lib/api';
 import { useStream } from '../../store/stream';
 
@@ -104,38 +104,83 @@ export function DataPanel() {
   );
 }
 
+/**
+ * What a resource *is* for display purposes. Driven by mime rather than the stored `kind`, because
+ * generated video and audio are both stored as blobs — branching on `kind` would file a playable clip
+ * next to a PDF as an undifferentiated binary.
+ */
+function displayKind(resource: SessionResource): 'image' | 'video' | 'audio' | 'file' {
+  if (resource.mime.startsWith('video/')) return 'video';
+  if (resource.mime.startsWith('audio/')) return 'audio';
+  if (resource.kind === 'image' || resource.mime.startsWith('image/')) return 'image';
+  return 'file';
+}
+
 function ResourceCard({ sessionId, resource }: { sessionId: string; resource: SessionResource }) {
-  const isImage = resource.kind === 'image';
+  const [playing, setPlaying] = useState(false);
+  const kind = displayKind(resource);
+  const Icon = kind === 'video' ? Clapperboard : kind === 'audio' ? AudioLines : kind === 'image' ? ImageIcon : FileBox;
+  const playable = kind === 'video' || kind === 'audio';
+
   return (
-    <div className="animate-fade-up flex gap-3 rounded-xl bg-black/25 p-2.5 backdrop-blur-sm ring-1 ring-white/[0.06]">
-      {isImage ? (
-        <ResourceThumb sessionId={sessionId} handle={resource.handle} />
-      ) : (
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-slate-500">
-          <FileBox size={22} />
+    <div className="animate-fade-up space-y-2 rounded-xl bg-black/25 p-2.5 backdrop-blur-sm ring-1 ring-white/[0.06]">
+      <div className="flex gap-3">
+        {kind === 'image' ? (
+          <ResourceThumb sessionId={sessionId} handle={resource.handle} />
+        ) : (
+          <button
+            onClick={() => playable && setPlaying((p) => !p)}
+            disabled={!playable}
+            title={playable ? 'Play' : undefined}
+            className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] ${
+              playable ? 'text-accent hover:bg-white/[0.08]' : 'text-slate-500'
+            }`}
+          >
+            {playable ? <Play size={20} /> : <FileBox size={22} />}
+          </button>
+        )}
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+          <div className="flex items-center gap-1.5">
+            <Icon
+              size={12}
+              className={`shrink-0 ${kind === 'file' ? 'text-amber-400' : 'text-accent'}`}
+            />
+            <span className="truncate font-mono text-xs text-slate-200">{resource.handle}</span>
+            <span className="ml-auto shrink-0 text-[10px] text-slate-500">{formatBytes(resource.size)}</span>
+          </div>
+          <div className="truncate text-[11px] text-slate-500" title={resource.filename || resource.mime}>
+            {resource.filename ? `${resource.filename} · ` : ''}
+            <span className="font-mono">{shortMime(resource.mime)}</span>
+          </div>
+          <button
+            onClick={() => resourcesApi.download(sessionId, resource.handle, resource.filename)}
+            className="mt-0.5 flex w-fit items-center gap-1 rounded-md bg-white/[0.05] px-2 py-0.5 text-[10px] text-slate-300 hover:bg-white/[0.09] hover:text-slate-100"
+          >
+            <Download size={11} /> Download
+          </button>
         </div>
-      )}
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-        <div className="flex items-center gap-1.5">
-          {isImage ? (
-            <ImageIcon size={12} className="shrink-0 text-accent" />
-          ) : (
-            <FileBox size={12} className="shrink-0 text-amber-400" />
-          )}
-          <span className="truncate font-mono text-xs text-slate-200">{resource.handle}</span>
-          <span className="ml-auto shrink-0 text-[10px] text-slate-500">{formatBytes(resource.size)}</span>
-        </div>
-        <div className="truncate text-[11px] text-slate-500" title={resource.filename || resource.mime}>
-          {resource.filename ? `${resource.filename} · ` : ''}
-          <span className="font-mono">{shortMime(resource.mime)}</span>
-        </div>
-        <button
-          onClick={() => resourcesApi.download(sessionId, resource.handle, resource.filename)}
-          className="mt-0.5 flex w-fit items-center gap-1 rounded-md bg-white/[0.05] px-2 py-0.5 text-[10px] text-slate-300 hover:bg-white/[0.09] hover:text-slate-100"
-        >
-          <Download size={11} /> Download
-        </button>
       </div>
+
+      {/* Mounted only once asked for: a <video> preloads metadata on mount, and a Data tab full of
+          clips would hit the backend for every one of them on open. */}
+      {playing && kind === 'video' && (
+        <video
+          src={resourcesApi.streamUrl(sessionId, resource.handle)}
+          controls
+          autoPlay
+          preload="metadata"
+          className="max-h-64 w-full rounded-lg border border-border"
+        />
+      )}
+      {playing && kind === 'audio' && (
+        <audio
+          src={resourcesApi.streamUrl(sessionId, resource.handle)}
+          controls
+          autoPlay
+          preload="metadata"
+          className="w-full"
+        />
+      )}
     </div>
   );
 }

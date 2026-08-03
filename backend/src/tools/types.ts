@@ -88,17 +88,40 @@ export interface ToolContext {
    * + model. Used by `generate_image` so the operator sees what was asked for; the image pixels flow
    * separately as tool-result images (pooled/persisted), so they aren't sent twice.
    */
-  emitImageGen?: (payload: {
+  emitMediaGen?: (payload: {
+    kind: 'image' | 'video' | 'audio';
     prompt: string;
-    size: string;
-    n: number;
-    steps: number;
-    guidance: number;
-    seed: number | null;
     negativePrompt: string | null;
-    model: string;
+    workflow: string;
+    seed: number | null;
+    /** Effective generation settings, rendered as chips (size, steps, seconds, fps…). */
+    params: Record<string, string | number>;
     count: number;
+    /** Handles of the produced resources, so the card can stream a video/audio by handle. */
+    resourceIds: string[];
+    /** For `edit_image`: the handle of the source image, so the card can show a before/after pair. */
+    sourceId?: string | null;
   }) => void;
+  /**
+   * Report incremental progress for a long-running tool call (a ComfyUI video takes ~10 minutes).
+   * Distinct from `emitOutput`, which appends text: this is structured, drives a progress bar, and is
+   * deliberately *not* persisted — it means nothing once the turn is over.
+   */
+  emitProgress?: (payload: {
+    phase: 'queued' | 'running' | 'downloading';
+    percent: number | null;
+    node?: string;
+    nodeLabel?: string;
+    queuePosition?: number;
+    elapsedMs: number;
+    etaMs?: number | null;
+    message?: string;
+  }) => void;
+  /**
+   * Aborted when the operator stops the turn. Long-running tools should honour it — a ComfyUI job
+   * left queued after the user walked away burns a GPU nobody is waiting on.
+   */
+  signal?: AbortSignal;
   /**
    * Publish the agent's updated checklist to the UI for the current tool call, so the pinned todo
    * panel ticks over live mid-turn instead of only at the end. Used by `todowrite`; the list itself
@@ -146,6 +169,18 @@ export interface ToolConfigField {
   type: 'string' | 'password' | 'number' | 'boolean' | 'select';
   /** Allowed values when `type` is `'select'`. */
   options?: string[];
+  /**
+   * Names a provider in `tools/config-options.ts` that fills `options`/`optionLabels` server-side when
+   * the Tools page asks for the schema. For choices that live in the database rather than in code —
+   * e.g. "which ComfyUI workflow does this tool use", where the list changes whenever the operator
+   * imports one. The tool declares the source; the route resolves it.
+   */
+  optionsSource?: string;
+  /**
+   * Display name per option value, so a select can store a stable id while showing a human label.
+   * Populated by the options provider; ignored for hand-written `options`.
+   */
+  optionLabels?: Record<string, string>;
   hint?: string;
   default: string | number | boolean;
 }

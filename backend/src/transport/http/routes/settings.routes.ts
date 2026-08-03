@@ -56,9 +56,11 @@ settingsRouter.put('/', async (req, res) => {
     if (v === null || v === '') patch[key] = null;
     else if (Number.isFinite(Number(v))) patch[key] = Number(v);
   }
-  // Image generation endpoint for `generate_image`.
-  if (typeof b.image_endpoint_id === 'string') patch.image_endpoint_id = b.image_endpoint_id;
-  if (typeof b.image_model === 'string') patch.image_model = b.image_model;
+  // ComfyUI server behind the media tools. Stored bare (no trailing slash) — the client appends
+  // `/prompt`, `/view`, `/ws`… itself, and a doubled slash breaks ComfyUI's static routes.
+  if (typeof b.comfy_url === 'string') patch.comfy_url = b.comfy_url.trim().replace(/\/+$/, '');
+  if (b.comfy_queue_max !== undefined)
+    patch.comfy_queue_max = Math.max(0, Number(b.comfy_queue_max) || 0);
   // Guard against a value too low to fit a reasoning model's <think> block (would truncate titles).
   if (b.title_max_tokens !== undefined) patch.title_max_tokens = Math.max(32, Number(b.title_max_tokens) || 256);
   if (b.update_enabled !== undefined) patch.update_enabled = Boolean(b.update_enabled);

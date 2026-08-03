@@ -82,21 +82,54 @@ prefer \`visual_click\` (locate + click in one step). See the \`visual\` topic g
 
   generate_image: `# generate_image — text-to-image
 
-\`generate_image({prompt})\` creates an image from a description using the configured Image endpoint
-(Settings → Image endpoint; e.g. a FLUX server). Generation is **slow on CPU** — expect tens of
-seconds to minutes per image.
+\`generate_image({prompt})\` renders an image on the operator's ComfyUI server, using the workflow they
+selected for this tool on the Tools page. Expect a few seconds to about a minute.
 
-Writing a good prompt: be concrete about **subject, style, lighting, and composition** ("a red fox
-in a snowy forest at dawn, cinematic, shallow depth of field") rather than a bare noun. Use
-\`negative_prompt\` to exclude things ("blurry, text, watermark").
+\`prompt\` is your **only** input. Be concrete about **subject, style, lighting, and composition** ("a
+red fox in a snowy forest at dawn, cinematic, shallow depth of field") rather than a bare noun. Size,
+count, seed and negative prompt are the operator's settings — you can't pass them per call, so put
+everything that matters into the prompt itself.
 
-Options (all optional): \`size\` ("1024x1024"), \`n\` (count, capped), \`steps\` (more = slower/finer),
-\`seed\` (repeat the *same* image — reuse a seed to iterate on a prompt), \`guidance\` (how strictly to
-follow the prompt). Sensible defaults live on the Tools page, so a bare \`prompt\` works.
+The result is saved as an \`img_N\` **resource** (see the \`media\` topic): keep it with
+\`write({filePath, from_handle:"img_N"})\`, change it with \`edit_image({image:"img_N", prompt})\`, or hand
+the handle to another agent via \`ask_agent\`.`,
 
-The result is saved as an \`img_N\` **resource** (see the \`data\`/\`resources\` guides): to keep the file,
-\`write({filePath, from_handle:"img_N"})\`; to hand it to another agent, just name the handle when you
-\`ask_agent\`. If it fails with "no Image endpoint configured", tell the operator to set one in Settings.`,
+  generate_video: `# generate_video — text-to-video
+
+\`generate_video({prompt})\` renders a short clip on the operator's ComfyUI server. **This is slow** —
+on current hardware a five-second clip takes roughly ten minutes, and your turn blocks for the whole
+render. Don't call it speculatively, and don't call it twice to "compare".
+
+Describe it as a shot, not an object: subject, action, camera movement, lighting, mood. If the
+workflow produces sound as well, describe the audio too — the same prompt drives both.
+
+Duration, fps and size come from the Tools page. The clip is saved as a \`blob_N\` resource: you never
+see it, but you can \`write({filePath, from_handle:"blob_N"})\` it or forward the handle. If the render
+outlasts the operator's timeout it keeps going in the background and lands in the Data tab — check
+with \`data({action:"list"})\` rather than re-running it.`,
+
+  generate_sound: `# generate_sound — text-to-audio
+
+\`generate_sound({prompt})\` produces music, ambience or a sound effect on the operator's ComfyUI
+server. Describe genre, instruments, tempo, mood and production style ("sparse lo-fi piano loop, 70
+bpm, vinyl crackle, warm and melancholy").
+
+Duration is set on the Tools page. The clip is saved as a \`blob_N\` resource — you can't hear it, so
+say what you asked for rather than claiming what it sounds like. \`write({filePath, from_handle:"blob_N"})\`
+saves it to disk.`,
+
+  edit_image: `# edit_image — change an existing image
+
+\`edit_image({image, prompt})\` sends an image back through ComfyUI with an instruction.
+
+\`image\` is either a **resource handle** you already have (\`"img_2"\` — including one \`generate_image\`
+just produced) or a **path** to an image file in your workspace. \`prompt\` is the change to make: say
+what should stay the same as well as what should differ ("make it night, keep the composition and the
+red coat"), because the model rewrites the whole picture.
+
+The edited image comes back as a **new** \`img_N\`, so you can chain edits — each call starts from the
+handle you name, and the original is untouched. If it reports that the workflow takes no input image,
+the operator has selected a plain generation workflow for this tool instead of an edit one.`,
 };
 
 /** Cross-tool workflow topics — the multi-step flows the per-tool docs can't capture. `tools` marks
@@ -130,6 +163,31 @@ Typical flows:
 
 Images additionally: a vision-capable agent sees them directly; otherwise use
 \`analyze_image({image_id})\`. \`ask_agent\` forwards images (pixels) but never blobs.`,
+  },
+  media: {
+    title: 'Generating images, video and sound',
+    blurb: 'What the ComfyUI-backed media tools cost, and how their output reaches a file or an agent.',
+    tools: ['generate_image', 'generate_video', 'generate_sound', 'edit_image'],
+    body: `# Media generation
+
+All four media tools run on the operator's **ComfyUI** server, each using a workflow the operator
+picked on the Tools page. You choose *what* to make; they decide *how*.
+
+- \`generate_image({prompt})\` — seconds to a minute. Result: a new \`img_N\`.
+- \`edit_image({image, prompt})\` — same cost; \`image\` is a handle or a path. Result: a new \`img_N\`.
+- \`generate_sound({prompt})\` — under a minute. Result: a \`blob_N\`.
+- \`generate_video({prompt})\` — **minutes**, often ~10 for five seconds. Result: a \`blob_N\`.
+
+What you can and can't perceive: images enter your context if you're multimodal (otherwise
+\`analyze_image({image_id})\`). **Video and audio never do** — you get a handle and metadata, so
+describe what you asked for, not what it "looks" or "sounds" like.
+
+Getting it out: \`write({filePath, from_handle:"img_1"})\` saves it; naming the handle in
+\`ask_agent\` hands it over (you share the session). See the \`resources\` topic.
+
+Cost discipline: these occupy a GPU the whole time and block your turn. One render, then look at what
+you got. If a video outruns the operator's timeout it finishes in the background — find it with
+\`data({action:"list"})\` instead of starting another.`,
   },
   delegation: {
     title: 'Delegating to other agents',

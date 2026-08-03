@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { AlertTriangle, ChevronRight, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
+import { AlertTriangle, AudioLines, ChevronRight, Clapperboard, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
+import { useStream } from '../store/stream';
+import { resourcesApi } from '../lib/api';
 import { describeTool, visualActDetail } from '../lib/toolSummary';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
@@ -11,9 +13,11 @@ export function ToolCall({ block }: { block: ToolBlock }) {
   if (block.tool === 'visual_act' || block.visualAct) return <VisualActBlock block={block} />;
   if (block.tool === 'visual_screenshot' || block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
-  if (block.tool === 'generate_image' || block.imageGen) return <ImageGenBlock block={block} />;
+  if (MEDIA_TOOLS.has(block.tool) || block.mediaGen) return <MediaGenBlock block={block} />;
   return <GenericToolBlock block={block} />;
 }
+
+const MEDIA_TOOLS = new Set(['generate_image', 'generate_video', 'generate_sound', 'edit_image']);
 
 /**
  * Action-marker card for `visual_act`: shows the screenshot the action landed on with a marker at the
@@ -231,44 +235,129 @@ function VisionBlock({ block }: { block: ToolBlock }) {
   );
 }
 
-/**
- * Generation card for `generate_image`: the prompt + the effective sampling params + the produced
- * image(s), inline in the chat. Prompt/params come from the live `imageGen` event when present, else
- * fall back to the tool call `args` (which persist across a reload). Click an image to open full-size.
- */
-function ImageGenBlock({ block }: { block: ToolBlock }) {
-  const [zoom, setZoom] = useState<number | null>(null);
-  const g = block.imageGen;
-  const args = block.args ?? {};
-  // Prefer the resolved live values; fall back to the persisted args so a reloaded turn still reads.
-  const prompt = String(g?.prompt ?? args.prompt ?? '').trim();
-  const size = g?.size ?? (args.size ? String(args.size) : undefined);
-  const steps = g?.steps ?? (args.steps != null ? Number(args.steps) : undefined);
-  const guidance = g?.guidance ?? (args.guidance != null ? Number(args.guidance) : undefined);
-  const seed = g?.seed ?? (args.seed != null ? Number(args.seed) : null);
-  const model = g?.model ?? '';
-  const images = block.images ?? [];
-  const error =
-    block.status === 'error' && block.result && typeof block.result === 'object' && 'error' in block.result
-      ? String((block.result as { error: unknown }).error)
-      : null;
+/** `93000` → `1m 33s`; small values stay in seconds. */
+function humanMs(ms: number): string {
+  const total = Math.round(ms / 1000);
+  if (total < 60) return `${total}s`;
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`;
+}
 
-  // Compact "768x768 · 20 steps · cfg 3.5 · seed 42" chip line — only the parts we actually know.
+/**
+ * Live progress bar for a render in flight.
+ *
+ * A ComfyUI video takes minutes, during which a plain spinner says nothing about whether anything is
+ * happening. The node label is the same one the operator sees in the ComfyUI editor, so a stall is
+ * attributable to a specific step.
+ */
+function ProgressBar({ progress }: { progress: NonNullable<ToolBlock['progress']> }) {
+  const percent = Math.max(0, Math.min(100, progress.percent ?? 0));
+  const queued = progress.phase === 'queued' || (progress.queuePosition ?? 0) > 0;
+
+  return (
+    <div className="space-y-1">
+      <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
+        <div
+          className="h-full rounded-full bg-accent transition-[width] duration-500 ease-out"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <div className="flex items-center gap-2 text-[10px] text-slate-500">
+        <span className="font-mono text-slate-400">{percent}%</span>
+        {queued ? (
+          <span>queued behind {progress.queuePosition ?? 0}</span>
+        ) : (
+          progress.nodeLabel && <span className="truncate">{progress.nodeLabel}</span>
+        )}
+        <span className="ml-auto shrink-0 font-mono">
+          {humanMs(progress.elapsedMs)}
+          {progress.etaMs != null && progress.etaMs > 0 && ` · ~${humanMs(progress.etaMs)} left`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Inline player for a generated clip, streamed by handle so it seeks instead of pre-downloading. */
+function MediaPlayer({ kind, handle }: { kind: 'video' | 'audio'; handle: string }) {
+  const sessionId = useStream((s) => s.activeSessionId);
+  if (!sessionId) return null;
+  const src = resourcesApi.streamUrl(sessionId, handle);
+
+  return (
+    <div className="space-y-1">
+      {kind === 'video' ? (
+        <video src={src} controls preload="metadata" className="max-h-64 w-full rounded border border-border" />
+      ) : (
+        <audio src={src} controls preload="metadata" className="w-full" />
+      )}
+      <div className="font-mono text-[10px] text-slate-500">{handle}</div>
+    </div>
+  );
+}
+
+/**
+ * Generation card for the media tools: the prompt + effective settings, a live progress bar while the
+ * render runs, and the result inline — images as thumbnails, video and audio as players.
+ *
+ * Everything it needs after a reload comes from the persisted tool `result` and `args`; the live
+ * `mediaGen` event only enriches it while the session is open. `edit_image` additionally shows the
+ * source handle, so a chain of edits reads as a chain.
+ */
+function MediaGenBlock({ block }: { block: ToolBlock }) {
+  const [zoom, setZoom] = useState<number | null>(null);
+  const g = block.mediaGen;
+  const args = block.args ?? {};
+  const result = (block.result ?? {}) as {
+    error?: unknown;
+    status?: unknown;
+    note?: unknown;
+    workflow?: unknown;
+    resource_id?: unknown;
+    mime?: unknown;
+    seed?: unknown;
+    duration_ms?: unknown;
+  };
+
+  const prompt = String(g?.prompt ?? args.prompt ?? '').trim();
+  const workflow = String(g?.workflow ?? result.workflow ?? '');
+  const images = block.images ?? [];
+
+  // Which player to render: the live event knows, otherwise infer from the stored result's mime.
+  const mime = String(result.mime ?? '');
+  const kind: 'image' | 'video' | 'audio' =
+    g?.kind ??
+    (mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'image');
+  const handles = g?.resourceIds?.length
+    ? g.resourceIds
+    : typeof result.resource_id === 'string'
+      ? [result.resource_id]
+      : [];
+  const sourceId = g?.sourceId ?? (typeof args.image === 'string' ? args.image : null);
+
+  const Icon = kind === 'video' ? Clapperboard : kind === 'audio' ? AudioLines : ImagePlus;
+  const error =
+    block.status === 'error' && typeof result.error === 'string' ? result.error : null;
+  // A render that outlived the tool's patience is still going — say so rather than showing "failed".
+  const pending = result.status === 'still_running' ? String(result.note ?? '') : null;
+
+  const seed = g?.seed ?? (typeof result.seed === 'number' ? result.seed : null);
+  const duration = typeof result.duration_ms === 'number' ? result.duration_ms : null;
   const meta = [
-    size,
-    steps != null ? `${steps} steps` : null,
-    guidance != null ? `cfg ${guidance}` : null,
+    ...Object.entries(g?.params ?? {})
+      .filter(([k]) => k !== 'prompt')
+      .map(([k, v]) => `${k} ${v}`),
     seed != null ? `seed ${seed}` : null,
+    duration != null ? humanMs(duration) : null,
   ].filter(Boolean) as string[];
 
   return (
     <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
       <div className="flex items-center gap-2 px-3 py-1.5">
-        <ImagePlus size={13} className="shrink-0 text-accent" />
+        <Icon size={13} className="shrink-0 text-accent" />
         <span className="font-medium text-slate-200">{block.tool}</span>
-        {model && (
-          <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
-            {model}
+        {workflow && (
+          <span className="truncate rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+            {workflow}
           </span>
         )}
         <span className="ml-auto">
@@ -277,6 +366,12 @@ function ImageGenBlock({ block }: { block: ToolBlock }) {
       </div>
 
       <div className="space-y-2 border-t border-white/[0.06] p-3">
+        {sourceId && (
+          <div className="text-slate-400">
+            <span className="text-slate-500">From: </span>
+            <span className="font-mono text-[11px]">{sourceId}</span>
+          </div>
+        )}
         {prompt && (
           <div className="text-slate-300">
             <span className="text-slate-500">Prompt: </span>
@@ -292,6 +387,8 @@ function ImageGenBlock({ block }: { block: ToolBlock }) {
             ))}
           </div>
         )}
+
+        {block.status === 'running' && block.progress && <ProgressBar progress={block.progress} />}
 
         {images.length > 0 ? (
           <div className="flex flex-wrap gap-2">
@@ -317,6 +414,17 @@ function ImageGenBlock({ block }: { block: ToolBlock }) {
               </button>
             ))}
           </div>
+        ) : handles.length > 0 && kind !== 'image' ? (
+          <div className="space-y-2">
+            {handles.map((h) => (
+              <MediaPlayer key={h} kind={kind} handle={h} />
+            ))}
+          </div>
+        ) : pending ? (
+          <div className="flex items-start gap-1.5 text-[11px] text-slate-400">
+            <Loader2 size={12} className="mt-0.5 shrink-0 animate-spin" />
+            {pending}
+          </div>
         ) : error ? (
           <div className="flex items-start gap-1.5 text-[11px] text-amber-400">
             <AlertTriangle size={12} className="mt-0.5 shrink-0" />
@@ -324,7 +432,9 @@ function ImageGenBlock({ block }: { block: ToolBlock }) {
           </div>
         ) : (
           <div className="text-slate-500">
-            {block.status === 'running' ? 'Generating image… (can take a while on CPU)' : 'No image produced.'}
+            {block.status === 'running'
+              ? `Rendering${kind === 'video' ? ' — video takes several minutes' : ''}…`
+              : 'Nothing produced.'}
           </div>
         )}
       </div>

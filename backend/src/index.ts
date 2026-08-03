@@ -39,6 +39,8 @@ import { toolsRouter } from './transport/http/routes/tools.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
 import { imagesRouter } from './transport/http/routes/images.routes';
 import { resourcesRouter } from './transport/http/routes/resources.routes';
+import { mediaRouter } from './transport/http/routes/media.routes';
+import { allowQueryToken } from './transport/http/middleware/query-token';
 import { transferRouter } from './transport/http/routes/transfer.routes';
 import { hostRouter } from './transport/http/routes/host.routes';
 import { maintenanceRouter } from './transport/http/routes/maintenance.routes';
@@ -127,7 +129,11 @@ async function main(): Promise<void> {
   app.use('/api/isolations', requireAuth, isolationsRouter);
   app.use('/api/android-devices', requireAuth, androidDevicesRouter);
   app.use('/api/images', requireAuth, imagesRouter);
-  app.use('/api/resources', requireAuth, resourcesRouter);
+  // `allowQueryToken` on these two only: they are the surfaces a bare <img>/<video>/<audio> element
+  // fetches directly, and those can't be given an Authorization header. Every other route keeps
+  // header-only auth.
+  app.use('/api/resources', allowQueryToken, requireAuth, resourcesRouter);
+  app.use('/api/media', allowQueryToken, requireAuth, mediaRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
   app.use('/api/monitor', requireAuth, monitorRouter);
   app.use('/api/host', requireAuth, hostRouter);

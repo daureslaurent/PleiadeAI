@@ -165,28 +165,50 @@ export interface VisualActPayload {
 }
 
 /**
- * A `generate_image` call produced one or more images. Drives the chat's generation card (prompt +
- * the effective sampling params + model). The image pixels themselves ride the tool's
- * `tool:execution_complete` payload (pooled + persisted like any tool-acquired image); this event
- * carries only the framing metadata, so the picture isn't sent twice over the wire.
+ * A media tool (`generate_image` / `generate_video` / `generate_sound` / `edit_image`) produced one or
+ * more artifacts. Drives the chat's generation card. The pixels/bytes themselves ride the tool's
+ * `tool:execution_complete` payload (pooled + persisted like any tool-acquired resource); this event
+ * carries only the framing metadata, so nothing is sent twice over the wire.
  */
-export interface ImageGeneratedPayload {
+export interface MediaGeneratedPayload {
   ctx: EventContext;
-  /** Correlates with the `generate_image` tool call that produced it. */
+  /** Correlates with the tool call that produced it. */
   callId: string;
+  kind: 'image' | 'video' | 'audio';
   prompt: string;
-  /** Effective dimensions used, e.g. `768x768`. */
-  size: string;
-  /** Number of images produced. */
-  n: number;
-  steps: number;
-  guidance: number;
-  seed: number | null;
   negativePrompt: string | null;
-  /** The image model id (empty when unknown). */
-  model: string;
-  /** Count of images actually returned (may differ from requested `n`). */
+  /** Name of the ComfyUI workflow that ran. */
+  workflow: string;
+  seed: number | null;
+  /** Effective generation settings, rendered as chips (size, seconds, fps…). */
+  params: Record<string, string | number>;
+  /** Count of artifacts actually returned. */
   count: number;
+  /** Resource handles of the artifacts, so the card can stream a video/audio by handle. */
+  resourceIds: string[];
+  /** `edit_image` only: handle of the source image, for the before/after pair. */
+  sourceId?: string | null;
+}
+
+/**
+ * Incremental progress for a long-running tool call. Separate from `tool:output_chunk` (which appends
+ * text) because a ten-minute ComfyUI render needs a bar, not a log. Deliberately not persisted by
+ * `TurnRecorder` — it describes a moment, and means nothing once the turn has ended.
+ */
+export interface ToolProgressPayload {
+  ctx: EventContext;
+  callId: string;
+  phase: 'queued' | 'running' | 'downloading';
+  /** 0-100, or null before anything measurable has happened. */
+  percent: number | null;
+  /** Id and human label of the step currently executing (a ComfyUI node). */
+  node?: string;
+  nodeLabel?: string;
+  /** Jobs ahead of this one on the remote server. */
+  queuePosition?: number;
+  elapsedMs: number;
+  etaMs?: number | null;
+  message?: string;
 }
 
 /**
@@ -457,7 +479,8 @@ export interface EventMap {
   'tool:output_chunk': ToolOutputChunkPayload;
   'tool:vision': VisionAnalysisPayload;
   'tool:visual_act': VisualActPayload;
-  'agent:image_generated': ImageGeneratedPayload;
+  'agent:media_generated': MediaGeneratedPayload;
+  'tool:progress': ToolProgressPayload;
   'tool:execution_complete': ToolCompletePayload;
   'agent:ask_agent': AskAgentPayload;
   'agent:ask_agent_done': AskAgentDonePayload;

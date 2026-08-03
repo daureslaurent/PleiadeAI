@@ -854,9 +854,14 @@ export class AgentRunner {
         eventBus.emit('tool:vision', { ctx, callId: call.id, ...payload }),
       emitVisualAct: (payload) =>
         eventBus.emit('tool:visual_act', { ctx, callId: call.id, ...payload }),
-      emitImageGen: (payload) =>
-        eventBus.emit('agent:image_generated', { ctx, callId: call.id, ...payload }),
+      emitMediaGen: (payload) =>
+        eventBus.emit('agent:media_generated', { ctx, callId: call.id, ...payload }),
+      emitProgress: (payload) =>
+        eventBus.emit('tool:progress', { ctx, callId: call.id, ...payload }),
       emitTodo: (items) => eventBus.emit('agent:todo_update', { ctx, callId: call.id, items }),
+      // Long-running tools (a ComfyUI video is ~10 minutes) honour the same abort the turn does, so
+      // stopping a turn also stops the GPU work nobody is waiting on any more.
+      signal: delegation.signal,
       attachedImages: delegation.pool.all(),
       availableTools: [...toolMap.values()].map((t) => ({
         name: t.name,

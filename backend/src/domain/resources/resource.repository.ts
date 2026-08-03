@@ -96,4 +96,14 @@ export const resourceRepository = {
   openDownload(doc: ResourceDoc): DownloadStream {
     return getBucket().openDownloadStream(doc.gridfs_id);
   },
+
+  /**
+   * Open a byte-range stream, for HTTP `Range` requests. `end` is inclusive (as in the HTTP header),
+   * while GridFS wants an exclusive bound — that off-by-one is why this wrapper exists rather than
+   * callers passing options straight through. Without it a `<video>` can't seek: the player asks for
+   * a range, gets the whole file, and scrubbing restarts the download every time.
+   */
+  openDownloadRange(doc: ResourceDoc, start: number, end: number): DownloadStream {
+    return getBucket().openDownloadStream(doc.gridfs_id, { start, end: end + 1 });
+  },
 };

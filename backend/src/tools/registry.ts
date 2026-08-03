@@ -25,7 +25,7 @@ import {
   androidFile,
 } from './core/android';
 import { analyzeImage } from './core/analyzeImage';
-import { generateImage } from './core/generateImage';
+import { editImage, generateImage, generateSound, generateVideo } from './core/media';
 import { data } from './core/data';
 import { listMail, readMail } from './core/mail';
 import { guide } from './core/guide';
@@ -92,8 +92,13 @@ const CORE_TOOLS: Record<string, Tool> = {
   [androidLogcat.name]: androidLogcat,
   [androidFile.name]: androidFile,
   [analyzeImage.name]: analyzeImage,
-  // Text-to-image generation via the configured Image endpoint (opt-in per agent via tools_allowed).
+  // Media generation via the configured ComfyUI server, each running an operator-chosen workflow
+  // (opt-in per agent via tools_allowed). Video especially is slow and GPU-expensive — grant it
+  // deliberately.
   [generateImage.name]: generateImage,
+  [generateVideo.name]: generateVideo,
+  [generateSound.name]: generateSound,
+  [editImage.name]: editImage,
   // Read-only Gmail (opt-in via tools_allowed + a per-agent mailbox grant on the Agents page).
   [listMail.name]: listMail,
   [readMail.name]: readMail,

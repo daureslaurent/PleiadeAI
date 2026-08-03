@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { coreTools, getCoreTool } from '../../../tools/registry';
 import { toolConfigService } from '../../../domain/tools/tool-config.service';
+import { resolveDynamicOptions } from '../../../tools/config-options';
 
 /**
  * Config surface for the Tools page. Lists every core tool with its declared option schema and
@@ -18,7 +19,9 @@ toolsRouter.get('/', async (_req, res) => {
       return {
         name: tool.name,
         description: tool.description,
-        configSchema: schema,
+        // Fields whose choices live in the database (e.g. the ComfyUI workflow list) get filled in
+        // here rather than being frozen into the tool module.
+        configSchema: await resolveDynamicOptions(schema, config),
         config,
         enabled,
       };
@@ -40,5 +43,11 @@ toolsRouter.put('/:name', async (req, res) => {
   });
   const schema = tool.configSchema ?? [];
   const { enabled, config } = await toolConfigService.resolve(tool.name, schema);
-  res.json({ name: tool.name, description: tool.description, configSchema: schema, config, enabled });
+  res.json({
+    name: tool.name,
+    description: tool.description,
+    configSchema: await resolveDynamicOptions(schema, config),
+    config,
+    enabled,
+  });
 });

@@ -80,24 +80,44 @@ export interface VisionEvent {
 }
 
 /**
- * A `generate_image` call produced image(s). Carries the prompt + effective sampling params + model
- * for the chat's generation card; the images themselves arrive on the matching `tool_end` (pooled +
- * persisted like any tool-acquired image), so they're not duplicated here.
+ * A media tool produced artifact(s). Carries the prompt + the effective settings for the chat's
+ * generation card; images themselves arrive on the matching `tool_end` (pooled + persisted like any
+ * tool-acquired image), and video/audio are fetched by resource handle, so nothing is duplicated here.
  */
-export interface ImageGenEvent {
-  type: 'image_gen';
+export interface MediaGenEvent {
+  type: 'media_gen';
   callId: string;
+  kind: 'image' | 'video' | 'audio';
   prompt: string;
-  size: string;
-  n: number;
-  steps: number;
-  guidance: number;
-  seed: number | null;
   negativePrompt: string | null;
-  /** The image model id (empty when unknown). */
-  model: string;
-  /** Number of images actually returned. */
+  /** Name of the ComfyUI workflow that ran. */
+  workflow: string;
+  seed: number | null;
+  /** Effective generation settings, rendered as chips. */
+  params: Record<string, string | number>;
+  /** Number of artifacts actually returned. */
   count: number;
+  /** Resource handles of the artifacts — how the card streams a video/audio. */
+  resourceIds: string[];
+  /** `edit_image` only: handle of the source image, for the before/after pair. */
+  sourceId: string | null;
+}
+
+/**
+ * Live progress for a long-running tool call (a ComfyUI render). Not persisted anywhere: it describes
+ * a moment, so a reloaded turn shows the finished card rather than a stale bar.
+ */
+export interface ToolProgressEvent {
+  type: 'tool_progress';
+  callId: string;
+  phase: 'queued' | 'running' | 'downloading';
+  percent: number | null;
+  node?: string;
+  nodeLabel?: string;
+  queuePosition?: number;
+  elapsedMs: number;
+  etaMs: number | null;
+  message?: string;
 }
 
 /** Action marker for a `visual_act` call: a screenshot + where the action landed (drive-the-desktop). */
@@ -294,7 +314,8 @@ export type WsEvent =
   | ToolOutputEvent
   | ToolEndEvent
   | VisionEvent
-  | ImageGenEvent
+  | MediaGenEvent
+  | ToolProgressEvent
   | SystemAlertEvent
   | AskUserEvent
   | TruncatedEvent

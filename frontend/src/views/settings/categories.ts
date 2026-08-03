@@ -34,7 +34,7 @@ export const CATEGORIES: SettingsCategory[] = [
     slug: 'inference',
     title: 'Inference',
     blurb: 'Where models run and how they sample.',
-    contains: ['Endpoints', 'Generation', 'Vision', 'Image generation'],
+    contains: ['Endpoints', 'Generation', 'Vision'],
     icon: Server,
   },
   {
@@ -55,7 +55,7 @@ export const CATEGORIES: SettingsCategory[] = [
     slug: 'connections',
     title: 'Connections',
     blurb: 'External services and devices agents can reach.',
-    contains: ['Google OAuth client', 'Linked mailboxes', 'Android devices'],
+    contains: ['Google OAuth client', 'Linked mailboxes', 'ComfyUI server', 'Android devices'],
     icon: Cable,
   },
   {

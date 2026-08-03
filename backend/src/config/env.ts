@@ -52,6 +52,11 @@ const EnvSchema = z.object({
   EMBEDDING_API_KEY: z.string().default('sk-no-key-required'),
   EMBEDDING_MODEL: z.string().default('embedding-model'),
 
+  // ComfyUI — the media generation server behind `generate_image` / `generate_video` /
+  // `generate_sound` / `edit_image`. Only a *default*: Settings → Connections wins when set, so this
+  // stays optional and empty means "unconfigured", not "invalid".
+  COMFY_URL: z.string().default(''),
+
   // Autonomy — IANA timezone every scheduled-task cron expression is evaluated in (tool + UI).
   SCHEDULE_TZ: z
     .string()

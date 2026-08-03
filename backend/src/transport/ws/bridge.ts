@@ -125,20 +125,38 @@ export function attachBridge(io: Server): void {
   });
 
   eventBus.on(
-    'agent:image_generated',
-    ({ ctx, callId, prompt, size, n, steps, guidance, seed, negativePrompt, model, count }) => {
-      io.to(ctx.sessionId).emit('image_gen', {
-        type: 'image_gen',
+    'agent:media_generated',
+    ({ ctx, callId, kind, prompt, negativePrompt, workflow, seed, params, count, resourceIds, sourceId }) => {
+      io.to(ctx.sessionId).emit('media_gen', {
+        type: 'media_gen',
         callId,
+        kind,
         prompt,
-        size,
-        n,
-        steps,
-        guidance,
-        seed,
         negativePrompt,
-        model,
+        workflow,
+        seed,
+        params,
         count,
+        resourceIds,
+        sourceId: sourceId ?? null,
+      });
+    },
+  );
+
+  eventBus.on(
+    'tool:progress',
+    ({ ctx, callId, phase, percent, node, nodeLabel, queuePosition, elapsedMs, etaMs, message }) => {
+      io.to(ctx.sessionId).emit('tool_progress', {
+        type: 'tool_progress',
+        callId,
+        phase,
+        percent,
+        node,
+        nodeLabel,
+        queuePosition,
+        elapsedMs,
+        etaMs: etaMs ?? null,
+        message,
       });
     },
   );

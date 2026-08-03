@@ -142,7 +142,8 @@ function ConfigInput({
       <Select value={String(value ?? '')} onChange={(e) => onChange(e.target.value)}>
         {(field.options ?? []).map((opt) => (
           <option key={opt} value={opt}>
-            {opt}
+            {/* Server-resolved options store an id and display a name (e.g. a ComfyUI workflow). */}
+            {field.optionLabels?.[opt] ?? opt}
           </option>
         ))}
       </Select>

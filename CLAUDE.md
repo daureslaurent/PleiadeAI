@@ -76,6 +76,16 @@ Key seams:
   **`ssh`** (`isolation/remote-ssh.ts`, spec `SSH_ISOLATION_PLAN.md`) turns the container into a jump
   box — `bash`, the file tools and skills all run on a remote host over SSH, invisibly to the agent,
   since they all funnel through the single `AgentExecutor`.
+- **Media generation (`media/`, `domain/media-workflows/`, spec `COMFYUI_MEDIA_PLAN.md`).** The four
+  media tools (`generate_image`, `generate_video`, `generate_sound`, `edit_image`) run **workflow
+  graphs** on a remote **ComfyUI** server (Settings → Connections). A workflow is imported once — the
+  API-format graph is *snapshotted* into `media_workflows`, since ComfyUI keeps its run history in RAM
+  and its editor saves a different, subgraph-bearing format — and an auto-binder maps logical
+  parameters (prompt, seed, size, length…) onto concrete node inputs. Which workflow each tool runs is
+  a per-tool select on the Tools page, whose options are resolved server-side at request time via
+  `ToolConfigField.optionsSource` (`tools/config-options.ts`) rather than frozen into the tool module.
+  `ComfyProgressSocket` connects *before* submitting so a fast job can't finish unobserved, and polls
+  `/history` in parallel so a dropped socket never loses a result.
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.
   Embeddings failures degrade gracefully (memory just skipped).

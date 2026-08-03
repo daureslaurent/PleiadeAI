@@ -804,6 +804,17 @@ async function fetchResourceBlob(sessionId: string, handle: string): Promise<Blo
 export const resourcesApi = {
   list: (sessionId: string) =>
     api.get<SessionResource[]>('/resources', { params: { sessionId } }).then((r) => r.data),
+  /**
+   * Direct URL for a `<video>`/`<audio>` element. Those fetch their own bytes and can't be given an
+   * Authorization header, so the token rides as a query param (the backend accepts it on this route
+   * only). Unlike {@link objectUrl} this streams and seeks — a ten-minute clip starts playing
+   * immediately instead of downloading in full first.
+   */
+  streamUrl(sessionId: string, handle: string): string {
+    const token = localStorage.getItem('pleiades_token') ?? '';
+    const path = `${API_BASE}/api/resources/${encodeURIComponent(sessionId)}/${encodeURIComponent(handle)}/content`;
+    return token ? `${path}?token=${encodeURIComponent(token)}` : path;
+  },
   /** Fetch a resource's bytes as an object URL (for image thumbnails). Caller revokes it. */
   async objectUrl(sessionId: string, handle: string): Promise<string> {
     return URL.createObjectURL(await fetchResourceBlob(sessionId, handle));
@@ -841,6 +852,10 @@ export interface ToolConfigField {
   label: string;
   type: 'string' | 'password' | 'number' | 'boolean' | 'select';
   options?: string[];
+  /** Names a server-side options provider; the backend fills `options`/`optionLabels` before sending. */
+  optionsSource?: string;
+  /** Display name per option value, so a select can store an id and show a name. */
+  optionLabels?: Record<string, string>;
   hint?: string;
   default: string | number | boolean;
 }
@@ -857,6 +872,126 @@ export const toolsApi = {
   list: () => api.get<ToolInfo[]>('/tools').then((r) => r.data),
   update: (name: string, patch: { enabled?: boolean; config?: Record<string, unknown> }) =>
     api.put<ToolInfo>(`/tools/${encodeURIComponent(name)}`, patch).then((r) => r.data),
+};
+
+// --- Media generation (ComfyUI) -------------------------------------------------------------
+
+export type WorkflowKind = 'image' | 'video' | 'audio' | 'edit';
+
+/** One logical parameter pinned to a node input in the workflow graph. */
+export interface WorkflowBinding {
+  node_id: string;
+  input: string;
+  spec?: {
+    type: 'INT' | 'FLOAT' | 'STRING' | 'BOOLEAN' | 'ENUM' | 'LINK';
+    min?: number;
+    max?: number;
+    step?: number;
+    options?: string[];
+    tooltip?: string;
+  };
+  /** The input was fed by another node — binding it overrides whatever that node computed. */
+  overrides_link?: boolean;
+}
+
+export interface MediaWorkflow {
+  id: string;
+  name: string;
+  kind: WorkflowKind;
+  description: string;
+  output_node_id: string;
+  output_kind: 'image' | 'video' | 'audio';
+  source: 'discovered' | 'manual';
+  enabled: boolean;
+  avg_duration_ms: number;
+  node_count: number;
+  bound: string[];
+  unbound: string[];
+  last_validated_at: string | null;
+  last_validation_error: string;
+  updated_at: string;
+}
+
+export interface MediaWorkflowDetail extends MediaWorkflow {
+  bindings: Record<string, WorkflowBinding>;
+  graph: Record<string, { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } }>;
+  nodes: {
+    id: string;
+    class_type: string;
+    title: string;
+    inputs: { name: string; type: string; is_link: boolean; value: unknown; options?: string[] }[];
+  }[];
+}
+
+export interface DiscoveryCandidate {
+  prompt_id: string;
+  graph_hash: string;
+  suggested_name: string;
+  kind: WorkflowKind;
+  output_node_id: string;
+  output_kind: 'image' | 'video' | 'audio';
+  node_count: number;
+  model_files: string[];
+  key_classes: string[];
+  output_filename: string;
+  duration_ms: number;
+  status: string;
+  run_count: number;
+  already_imported: boolean;
+  bindings: Record<string, WorkflowBinding>;
+  unbound: string[];
+}
+
+export interface ComfyStatus {
+  ok: boolean;
+  error?: string;
+  base_url?: string;
+  version?: string;
+  python?: string;
+  ram_free?: number;
+  ram_total?: number;
+  queue_remaining?: number;
+  devices?: { name: string; vram_free: number; vram_total: number }[];
+}
+
+export const mediaApi = {
+  status: () => api.get<ComfyStatus>('/media/comfy/status').then((r) => r.data),
+  discover: () => api.get<DiscoveryCandidate[]>('/media/comfy/discover').then((r) => r.data),
+  list: (kind?: WorkflowKind) =>
+    api.get<MediaWorkflow[]>('/media/workflows', { params: kind ? { kind } : {} }).then((r) => r.data),
+  get: (id: string) => api.get<MediaWorkflowDetail>(`/media/workflows/${id}`).then((r) => r.data),
+  import: (body: { prompt_id: string; name: string; kind?: WorkflowKind }) =>
+    api.post<MediaWorkflow>('/media/workflows/import', body).then((r) => r.data),
+  create: (body: { name: string; graph: unknown; kind?: WorkflowKind }) =>
+    api.post<MediaWorkflow>('/media/workflows', body).then((r) => r.data),
+  update: (id: string, patch: Partial<Pick<MediaWorkflow, 'name' | 'kind' | 'enabled' | 'description'>> & {
+    bindings?: Record<string, WorkflowBinding>;
+    output_node_id?: string;
+  }) => api.put<MediaWorkflow>(`/media/workflows/${id}`, patch).then((r) => r.data),
+  remove: (id: string) => api.delete(`/media/workflows/${id}`).then((r) => r.data),
+  validate: (id: string) =>
+    api
+      .post<{ ok: boolean; issues: { level: string; message: string; node_id?: string }[] }>(
+        `/media/workflows/${id}/validate`,
+      )
+      .then((r) => r.data),
+  test: (id: string, prompt: string) =>
+    api
+      .post<{ ok: boolean; duration_ms: number; files: { filename: string; subfolder: string; type: string; kind: string }[] }>(
+        `/media/workflows/${id}/test`,
+        { prompt },
+      )
+      .then((r) => r.data),
+  /**
+   * Authenticated proxy to ComfyUI's own `/view`, for previewing a test render. Carries the token in
+   * the query for the same reason the resource stream does: an `<img>`/`<video>` fetches its own
+   * bytes and can't be handed a header.
+   */
+  viewUrl: (file: { filename: string; subfolder: string; type: string }) => {
+    const token = localStorage.getItem('pleiades_token') ?? '';
+    const qs = new URLSearchParams({ ...file, ...(token ? { token } : {}) }).toString();
+    return `${API_BASE}/api/media/view?${qs}`;
+  },
 };
 
 export const memoryApi = {
@@ -1049,10 +1184,10 @@ export interface InferenceSettings {
   vision_max_tokens: number | null;
   vision_frequency_penalty: number | null;
   vision_presence_penalty: number | null;
-  /** Image generation endpoint for `generate_image` ('' → the tool reports it's unconfigured). */
-  image_endpoint_id: string;
-  /** Model on `image_endpoint_id` for generation ('' → that endpoint's default). */
-  image_model: string;
+  /** ComfyUI server behind the media tools ('' → they report they're unconfigured). */
+  comfy_url: string;
+  /** Refuse a media job when ComfyUI already has this many queued (0 → no check). */
+  comfy_queue_max: number;
   /** Host self-update master switch — gates the "Update app" action + the periodic check. */
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */

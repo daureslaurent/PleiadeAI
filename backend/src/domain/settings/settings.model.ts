@@ -58,12 +58,18 @@ const SettingsSchema = new Schema(
     vision_max_tokens: { type: Number, default: 1024 },
     vision_frequency_penalty: { type: Number, default: 0.4 },
     vision_presence_penalty: { type: Number, default: 0.2 },
-    // Image generation endpoint for the `generate_image` tool. Points at an OpenAI-compatible
-    // `POST /v1/images/generations` server (e.g. the bundled image-gen/ stable-diffusion.cpp FLUX box).
-    // Empty `image_endpoint_id` → `generate_image` reports it's unconfigured. `image_model` '' → that
-    // endpoint's default model.
-    image_endpoint_id: { type: String, default: '' },
-    image_model: { type: String, default: '' },
+    /**
+     * ComfyUI server backing the media tools (`generate_image`, `generate_video`, `generate_sound`,
+     * `edit_image`). Base URL only, no trailing slash and no `/api` — the client appends the routes.
+     * Empty → every media tool reports it's unconfigured. Falls back to the `COMFY_URL` env var.
+     */
+    comfy_url: { type: String, default: '' },
+    /**
+     * Refuse to submit a media job when ComfyUI already has this many items queued. ComfyUI runs one
+     * job at a time, so joining a deep queue means an agent blocks for the sum of everything ahead of
+     * it. 0 disables the check.
+     */
+    comfy_queue_max: { type: Number, default: 3 },
     // Token budget for the title call. Must be generous enough that a reasoning model's `<think>`
     // block fits *and* leaves room for the title afterward — too low truncates mid-reasoning and
     // yields an empty/garbage title (see session-titler).

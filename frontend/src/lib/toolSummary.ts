@@ -1,8 +1,11 @@
 import {
+  AudioLines,
   BookUser,
   Brain,
   BookOpen,
   CalendarClock,
+  Clapperboard,
+  ImagePlus,
   Database,
   Eye,
   FileDiff,
@@ -179,6 +182,26 @@ export function describeTool(
         value: quote(str(args.query)),
         title: str(args.query),
         hint: done && count != null ? `${count} ${count === 1 ? 'result' : 'results'}` : undefined,
+      };
+    }
+    // The media tools all read the same way: the prompt is the action, and what came back (a handle,
+    // or how long it took) is the outcome worth showing without expanding the card.
+    case 'generate_image':
+    case 'generate_video':
+    case 'generate_sound':
+    case 'edit_image': {
+      const prompt = str(args.prompt);
+      const ms = n(r.duration_ms);
+      const hint = done
+        ? r.status === 'still_running'
+          ? 'still rendering'
+          : str(r.resource_id) || (ms != null ? `${ms >= 60_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 1000)}s`}` : undefined)
+        : undefined;
+      return {
+        Icon: tool === 'generate_video' ? Clapperboard : tool === 'generate_sound' ? AudioLines : ImagePlus,
+        value: tool === 'edit_image' ? `${str(args.image)} — ${prompt}` : prompt,
+        title: prompt,
+        hint,
       };
     }
     case 'webfetch': {

@@ -1,4 +1,4 @@
-import { Eye, HeartPulse, Image, Server, SlidersHorizontal } from 'lucide-react';
+import { Eye, HeartPulse, Server, SlidersHorizontal } from 'lucide-react';
 import { Field, Section } from '../../../components/ui';
 import { EndpointsManager } from '../managers/EndpointsManager';
 import { useSettings } from '../context';
@@ -152,15 +152,6 @@ export function InferencePanel() {
         </div>
       </Section>
 
-      <Section title="Image generation" icon={<Image size={13} />}>
-        <EndpointModelPicker
-          endpointField="image_endpoint_id"
-          modelField="image_model"
-          label="Image endpoint (for generate_image)"
-          noneLabel="None — generate_image is unavailable"
-          hint="The generate_image tool sends prompts here (POST /v1/images/generations). Point it at an OpenAI-compatible image server — e.g. the bundled image-gen/ stable-diffusion.cpp FLUX box. Per-image defaults (size/steps/guidance) live on the Tools page."
-        />
-      </Section>
     </div>
   );
 }
