@@ -19,6 +19,12 @@ const AUDIO_SAVE_CLASS = /^SaveAudio\w*$/;
 const PROMPT_INPUTS = ['prompt', 'text'];
 /** Weight files, as opposed to the many other things a COMBO input can hold. */
 const MODEL_FILE = /\.(safetensors|ckpt|pt|pth|bin|gguf|sft|onnx)$/i;
+/**
+ * ComfyUI's *annotated filepath* form — `some.png [output]` — naming a file in the output or temp
+ * folder rather than the input folder a `LoadImage` enum lists. Nodes resolve it via
+ * `folder_paths.get_annotated_filepath`, so it is valid despite never appearing in the enum.
+ */
+const ANNOTATED_FILEPATH = /\s\[(output|input|temp)\]$/;
 
 export type SchemaMap = Map<string, ComfyNodeSchema | null>;
 
@@ -439,8 +445,12 @@ export interface ValidationIssue {
 
 /**
  * Check a stored workflow still matches the ComfyUI it will run on: every node class exists, every
- * binding points at a real input, and every model filename it names is installed. Run before
- * submitting, so a missing checkpoint fails in milliseconds instead of after a ten-minute queue wait.
+ * binding points at a real input, and every model file it names is installed. Run before submitting,
+ * so a missing checkpoint fails in milliseconds instead of after a ten-minute queue wait.
+ *
+ * Only conditions that genuinely stop the graph running are `error`. Being over-strict here is worse
+ * than being lax: a false positive refuses a workflow ComfyUI would have executed perfectly, and the
+ * operator has no way to overrule it.
  */
 export function validateWorkflow(
   graph: ComfyGraph,
@@ -448,6 +458,9 @@ export function validateWorkflow(
   schemas: SchemaMap,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const boundInputs = new Set(
+    Object.values(bindings).map((b) => `${b.node_id} ${b.input}`),
+  );
 
   for (const nodeId of sortedNodeIds(graph)) {
     const node = graph[nodeId]!;
@@ -463,16 +476,29 @@ export function validateWorkflow(
     const declared = schemaInputs(schema);
     for (const [input, value] of Object.entries(node.inputs)) {
       if (isLink(value) || typeof value !== 'string') continue;
+      // A bound input is overwritten at submit, so whatever the workflow was saved with is about to
+      // be replaced — validating the stale literal would block a run over a value never used.
+      if (boundInputs.has(`${nodeId} ${input}`)) continue;
       const spec = parseInputSpec(declared[input]);
       if (!spec || spec.type !== 'ENUM' || !spec.options || spec.options.length === 0) continue;
       if (spec.options.includes(value)) continue;
+      // `name [output]` is ComfyUI's *annotated filepath*: a file in the output/temp folder rather
+      // than the input folder the enum lists. `LoadImage` resolves these itself, so they are valid
+      // by construction and simply can never appear in the enum.
+      if (ANNOTATED_FILEPATH.test(value)) continue;
+
       const shown = spec.options.slice(0, 6).join(', ');
+      // Only weights are worth refusing to run over. Every other enum is a list of things the server
+      // discovers at runtime — image files come and go, and a stale name there is not a broken graph.
+      const isWeight = MODEL_FILE.test(value);
       issues.push({
-        level: 'error',
+        level: isWeight ? 'error' : 'warning',
         node_id: nodeId,
-        message:
-          `Node ${nodeId} (${node.class_type}) wants "${value}" for ${input}, which isn't installed. ` +
-          `Available: ${shown}${spec.options.length > 6 ? ', …' : ''}`,
+        message: isWeight
+          ? `Node ${nodeId} (${node.class_type}) wants "${value}" for ${input}, which isn't installed. ` +
+            `Available: ${shown}${spec.options.length > 6 ? ', …' : ''}`
+          : `Node ${nodeId} (${node.class_type}) refers to "${value}" for ${input}, which this ComfyUI ` +
+            `doesn't currently list. Available: ${shown}${spec.options.length > 6 ? ', …' : ''}`,
       });
     }
   }
