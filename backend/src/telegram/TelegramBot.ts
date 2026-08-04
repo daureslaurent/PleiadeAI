@@ -5,11 +5,15 @@ import { sessionLock } from '../core/session/SessionLock';
 import { agentRepository } from '../domain/agents/agent.repository';
 import type { AgentDoc } from '../domain/agents/agent.model';
 import { agentRunner, RunAbortedError } from '../orchestrator/AgentRunner';
+import { resourceRepository } from '../domain/resources/resource.repository';
+import type { ImageBlock } from '../core/event-bus/events.types';
 import { chatSessions } from './session';
 import {
   telegramClient,
+  MAX_DOWNLOAD_BYTES,
   type BotCommand,
   type InlineButton,
+  type TelegramFile,
   type TelegramUpdate,
 } from './TelegramClient';
 import { telegramChatIds } from './telegram-config';
@@ -26,6 +30,54 @@ const COMMANDS: BotCommand[] = [
   { command: 'cancel', description: 'Stop the running agent turn' },
   { command: 'help', description: 'How to use this bot' },
 ];
+
+/**
+ * The one file a message carries, and what to call it.
+ *
+ * Telegram splits media across many fields rather than a single typed union, and a photo arrives as
+ * an array of re-encodings — the last is the largest, which is the only one worth analysing.
+ */
+function attachedFile(
+  message: NonNullable<TelegramUpdate['message']>,
+): { file: TelegramFile; kind: string; fallbackMime: string } | null {
+  if (message.photo?.length) {
+    return { file: message.photo[message.photo.length - 1]!, kind: 'photo', fallbackMime: 'image/jpeg' };
+  }
+  if (message.voice) return { file: message.voice, kind: 'voice', fallbackMime: 'audio/ogg' };
+  if (message.audio) return { file: message.audio, kind: 'audio', fallbackMime: 'audio/mpeg' };
+  if (message.video) return { file: message.video, kind: 'video', fallbackMime: 'video/mp4' };
+  if (message.video_note) return { file: message.video_note, kind: 'video note', fallbackMime: 'video/mp4' };
+  if (message.animation) return { file: message.animation, kind: 'animation', fallbackMime: 'video/mp4' };
+  if (message.document) {
+    return { file: message.document, kind: 'file', fallbackMime: 'application/octet-stream' };
+  }
+  return null;
+}
+
+/** One conversation per chat, so resources and handles accumulate across a chat's turns. */
+const sessionIdFor = (chatId: number): string => `telegram-${chatId}`;
+
+/**
+ * Handles already in the session, so a reply can send only what the latest turn added. `null` means
+ * the snapshot failed — the caller then sends nothing, since without a baseline the only safe
+ * alternative would be re-sending the chat's entire history of media.
+ */
+async function sessionResourceHandles(sessionId: string): Promise<Set<string> | null> {
+  try {
+    const rows = await resourceRepository.listBySession(sessionId);
+    return new Set(rows.map((r) => r.handle));
+  } catch {
+    return null;
+  }
+}
+
+/** A filename extension for media Telegram gave no name to — from its mime, else its own path. */
+function extensionFor(mime: string, telegramPath: string): string {
+  const fromPath = telegramPath.split('.').pop();
+  if (fromPath && fromPath.length <= 5 && !fromPath.includes('/')) return fromPath;
+  const subtype = mime.split('/')[1] ?? 'bin';
+  return subtype.replace(/[^a-z0-9]/gi, '') || 'bin';
+}
 
 /** Telegram server-side hold for a single long-poll (seconds). */
 const POLL_TIMEOUT_SEC = 30;
@@ -113,7 +165,10 @@ class TelegramBot {
 
   private async dispatch(update: TelegramUpdate): Promise<void> {
     if (update.callback_query) return this.handleCallback(update.callback_query);
-    if (update.message?.text) return this.handleMessage(update.message);
+    // A photo/voice/video message carries its text in `caption`, and often no text at all — keying
+    // on `.text` alone made the bot silently ignore every media message.
+    if (update.message && (update.message.text || attachedFile(update.message)))
+      return this.handleMessage(update.message);
   }
 
   // --- Message handling ---------------------------------------------------
@@ -133,7 +188,139 @@ class TelegramBot {
     }
 
     if (text.startsWith('/')) return this.handleCommand(chatId, text);
+
+    const attached = attachedFile(message);
+    if (attached) {
+      const ingested = await this.ingestMedia(chatId, message, attached);
+      if (!ingested) return;
+      return this.runAgentTurn(chatId, ingested.text, ingested.images);
+    }
     return this.runAgentTurn(chatId, text);
+  }
+
+  /**
+   * Pull a file the user sent into the session's resource pool.
+   *
+   * Persisting rather than passing bytes straight through is what makes the media *usable*: it earns
+   * an `img_N` / `blob_N` handle, so the agent can edit it, save it, or hand it to another agent, and
+   * it stays referenceable on later turns ("now make it blue"). Telegram sessions keep no message
+   * documents, so an un-persisted attachment would vanish the moment the turn ended.
+   *
+   * Returns the text to run the turn with, plus the image blocks a multimodal agent should see.
+   */
+  private async ingestMedia(
+    chatId: number,
+    message: NonNullable<TelegramUpdate['message']>,
+    attached: NonNullable<ReturnType<typeof attachedFile>>,
+  ): Promise<{ text: string; images: ImageBlock[] } | null> {
+    const { file, kind, fallbackMime } = attached;
+    const caption = (message.caption ?? message.text ?? '').trim();
+
+    if ((file.file_size ?? 0) > MAX_DOWNLOAD_BYTES) {
+      await telegramClient.sendMessage(
+        chatId,
+        `⚠️ That ${kind} is ${(file.file_size! / 1024 / 1024).toFixed(1)}MB — Telegram only lets bots ` +
+          `download up to ${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB.`,
+      );
+      return null;
+    }
+
+    await telegramClient.sendChatAction(chatId, 'typing');
+    const downloaded = await telegramClient.downloadFile(file.file_id);
+    if (!downloaded) {
+      await telegramClient.sendMessage(chatId, `⚠️ Could not download that ${kind} from Telegram.`);
+      return null;
+    }
+
+    const mime = file.mime_type || fallbackMime;
+    const isImage = mime.startsWith('image/');
+    const filename =
+      file.file_name || `${kind.replace(/\s+/g, '_')}_${Date.now()}.${extensionFor(mime, downloaded.path)}`;
+
+    const agent = await this.resolveAgent(chatSessions.get(chatId).agentName);
+    const stored = await resourceRepository.store({
+      sessionId: sessionIdFor(chatId),
+      agentId: agent ? String(agent._id) : '',
+      bytes: downloaded.bytes,
+      kind: isImage ? 'image' : 'blob',
+      mime,
+      filename,
+      source: 'attachment',
+    });
+
+    const sizeMb = (downloaded.bytes.length / 1024 / 1024).toFixed(1);
+    log.info({ chatId, kind, handle: stored.handle, mime, bytes: downloaded.bytes.length }, 'telegram media in');
+
+    // Images ride into the turn as pixels so a multimodal agent simply sees them; audio and video
+    // can't enter a model's context at all, so the agent gets the handle and a plain description.
+    const images: ImageBlock[] = isImage
+      ? [
+          {
+            id: stored.handle,
+            kind: 'image',
+            mime,
+            size: downloaded.bytes.length,
+            filename,
+            storageId: String(stored.gridfs_id),
+            source: 'attachment',
+            dataUrl: `data:${mime};base64,${downloaded.bytes.toString('base64')}`,
+          },
+        ]
+      : [];
+
+    const note = isImage
+      ? `[The user sent an image, saved as \`${stored.handle}\`. Use that handle for \`edit_image\`, \`write from_handle\` or \`data\`.]`
+      : `[The user sent ${
+          kind === 'voice' ? 'a voice message' : `a ${kind}`
+        } (${mime}, ${sizeMb}MB), saved as \`${stored.handle}\`. You cannot listen to or watch it — ` +
+        `work with it by handle (\`data\`, \`write from_handle\`) or hand it to a tool that can.]`;
+
+    return { text: caption ? `${caption}\n\n${note}` : note, images };
+  }
+
+  /**
+   * Deliver whatever the turn produced — a generated image, a rendered clip, a fetched PDF — as real
+   * Telegram media rather than leaving the operator with a handle they can only see in the web UI.
+   *
+   * Sent one at a time and best-effort: a single oversized video must not cost the user the picture
+   * that rendered alongside it.
+   */
+  private async sendNewResources(
+    chatId: number,
+    sessionId: string,
+    before: Set<string> | null,
+  ): Promise<void> {
+    if (!before) return;
+    let rows: Awaited<ReturnType<typeof resourceRepository.listBySession>>;
+    try {
+      rows = await resourceRepository.listBySession(sessionId);
+    } catch (err) {
+      log.warn({ err, chatId }, 'could not list session resources for telegram reply');
+      return;
+    }
+
+    for (const row of rows) {
+      if (before.has(row.handle)) continue;
+      // The user sent this to us moments ago; echoing it back is noise.
+      if (row.source === 'attachment') continue;
+      try {
+        const bytes = await resourceRepository.readBytes(sessionId, row.handle);
+        if (!bytes) continue;
+        const ok = await telegramClient.sendMedia(
+          chatId,
+          { bytes, filename: row.filename || row.handle, mime: row.mime || 'application/octet-stream' },
+          { caption: row.handle },
+        );
+        if (!ok) {
+          await telegramClient.sendMessage(
+            chatId,
+            `⚠️ Couldn't send \`${row.handle}\` (${row.mime}, ${(row.size / 1024 / 1024).toFixed(1)}MB) — it's available in the web UI.`,
+          );
+        }
+      } catch (err) {
+        log.warn({ err, chatId, handle: row.handle }, 'failed to send resource to telegram');
+      }
+    }
   }
 
   private async handleCommand(chatId: number, text: string): Promise<void> {
@@ -168,7 +355,7 @@ class TelegramBot {
     }
   }
 
-  private async runAgentTurn(chatId: number, text: string): Promise<void> {
+  private async runAgentTurn(chatId: number, text: string, images: ImageBlock[] = []): Promise<void> {
     const session = chatSessions.get(chatId);
     if (session.running) {
       await telegramClient.sendMessage(
@@ -195,6 +382,7 @@ class TelegramBot {
     session.abort = abort;
     sessionLock.acquireUserSession(agentId);
 
+    const sessionId = sessionIdFor(chatId);
     try {
       await telegramClient.sendChatAction(chatId, 'typing');
       // Keep the typing indicator alive across a long turn (Telegram clears it after ~5s).
@@ -203,14 +391,20 @@ class TelegramBot {
         4000,
       );
 
+      // Which resources already existed, so the reply carries only what *this* turn produced. The
+      // session pool accumulates across the whole chat, so sending "everything" would re-send every
+      // earlier picture on each message.
+      const before = await sessionResourceHandles(sessionId);
+
       let answer: string;
       try {
         answer = (
           await agentRunner.run({
             agentName: agent.name,
-            sessionId: `telegram-${chatId}`,
+            sessionId,
             depth: 0,
             userText: text,
+            images,
             history: session.history,
             signal: abort.signal,
           })
@@ -222,6 +416,7 @@ class TelegramBot {
       session.history.push({ role: 'user', content: text });
       session.history.push({ role: 'assistant', content: answer });
       await telegramClient.sendMessage(chatId, answer);
+      await this.sendNewResources(chatId, sessionId, before);
     } catch (err) {
       if (err instanceof RunAbortedError) {
         await telegramClient.sendMessage(chatId, '🛑 Stopped.');
@@ -341,6 +536,11 @@ class TelegramBot {
         '• /new — start a fresh conversation (clears history)',
         '• /status — show the active agent and state',
         '• /cancel — stop a running agent turn',
+        '',
+        '*Media*',
+        '• Send a photo, voice note, video or file — the agent receives it and can edit,',
+        '  save or pass it on. Add a caption to say what you want done with it.',
+        '• Images, clips and sound the agent produces come back here as media.',
         '',
         'Completion alerts from autonomous tasks are also delivered here.',
       ].join('\n'),

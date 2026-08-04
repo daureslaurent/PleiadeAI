@@ -338,6 +338,13 @@ export function watchDetachedJob(input: {
             `The ${input.workflow.kind} job ${input.agentName} started has finished after ` +
             `${Math.round((Date.now() - startedAt) / 1000)}s. Saved as ${handles.join(', ')} — ` +
             'find it in the session\'s Data tab.',
+          // The whole point of waiting ten minutes was the artifact — deliver it, don't just
+          // announce it. Telegram declines anything too big, and the text alert still lands.
+          attachments: files.map((f) => ({
+            bytes: f.bytes,
+            filename: f.filename,
+            mime: f.mime,
+          })),
         });
         log.info({ promptId: input.promptId, handles }, 'detached media job landed');
         return;

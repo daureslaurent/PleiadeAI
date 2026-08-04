@@ -5,6 +5,34 @@ const log = createLogger('telegram-client');
 
 /** Telegram caps a single text message at 4096 chars; we split on that boundary. */
 const MAX_MESSAGE_LEN = 4096;
+/** Captions on media are capped far lower than message text. */
+const MAX_CAPTION_LEN = 1024;
+/** Uploads and downloads move real megabytes over a consumer link — far longer than an API call. */
+const FILE_TIMEOUT_MS = 120_000;
+/** Bots may not download anything larger than this (Telegram's limit, enforced at `getFile`). */
+export const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+/** Photos are capped tighter than other media; a bigger image has to go as a document. */
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Which Bot API method renders this content best, and the form field it wants.
+ *
+ * Sending everything as a document would always *work* — and would make every generated image an
+ * attachment the operator has to tap to open, every clip a file rather than a player. The type is
+ * what makes the result usable in the client.
+ */
+function mediaMethodFor(mime: string): { method: string; field: string } {
+  if (mime.startsWith('image/')) {
+    // Telegram re-encodes `sendPhoto` and rejects GIF/SVG there; animations and vectors keep their
+    // fidelity only as a document or animation.
+    if (mime === 'image/gif') return { method: 'sendAnimation', field: 'animation' };
+    if (mime === 'image/svg+xml') return { method: 'sendDocument', field: 'document' };
+    return { method: 'sendPhoto', field: 'photo' };
+  }
+  if (mime.startsWith('video/')) return { method: 'sendVideo', field: 'video' };
+  if (mime.startsWith('audio/')) return { method: 'sendAudio', field: 'audio' };
+  return { method: 'sendDocument', field: 'document' };
+}
 
 /** A single button in an inline keyboard row. */
 export interface InlineButton {
@@ -19,6 +47,19 @@ export interface BotCommand {
   description: string;
 }
 
+/** A file Telegram holds, in every media field's payload. */
+export interface TelegramFile {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_name?: string;
+  mime_type?: string;
+  /** Photos only — Telegram sends an array of sizes, largest last. */
+  width?: number;
+  height?: number;
+  duration?: number;
+}
+
 /** Minimal shape of the pieces of a Telegram `Update` we act on. */
 export interface TelegramUpdate {
   update_id: number;
@@ -27,6 +68,19 @@ export interface TelegramUpdate {
     chat: { id: number };
     from?: { id: number; username?: string; first_name?: string };
     text?: string;
+    /** Text accompanying a media message — the user's actual instruction. */
+    caption?: string;
+    /** Compressed photo, in ascending size order; the last entry is the largest. */
+    photo?: TelegramFile[];
+    /** A recorded voice note (opus). `audio` is a music/file send instead. */
+    voice?: TelegramFile;
+    audio?: TelegramFile;
+    video?: TelegramFile;
+    /** Round "telescope" video message. */
+    video_note?: TelegramFile;
+    animation?: TelegramFile;
+    /** Any uncompressed file — how an image sent "as file" arrives. */
+    document?: TelegramFile;
   };
   callback_query?: {
     id: string;
@@ -123,6 +177,76 @@ class TelegramClient {
     };
     if (opts.keyboard) body.reply_markup = { inline_keyboard: opts.keyboard };
     await this.call('editMessageText', body);
+  }
+
+  /**
+   * Download a file the user sent. Two steps by Telegram's design: `getFile` resolves a `file_id`
+   * into a temporary path, which is then fetched from the *file* host rather than the API host.
+   *
+   * Bots may only download files up to 20MB; beyond that Telegram refuses at the `getFile` step, so
+   * a null here usually means "too big", not "broken".
+   */
+  async downloadFile(fileId: string): Promise<{ bytes: Buffer; path: string } | null> {
+    const file = await this.call<{ file_path?: string }>('getFile', { file_id: fileId });
+    if (!file?.file_path) return null;
+    try {
+      const res = await fetch(
+        `https://api.telegram.org/file/bot${telegramToken()}/${file.file_path}`,
+        { signal: AbortSignal.timeout(FILE_TIMEOUT_MS) },
+      );
+      if (!res.ok) {
+        log.warn({ fileId, status: res.status }, 'telegram file download failed');
+        return null;
+      }
+      return { bytes: Buffer.from(await res.arrayBuffer()), path: file.file_path };
+    } catch (err) {
+      log.error({ err, fileId }, 'telegram file download failed');
+      return null;
+    }
+  }
+
+  /**
+   * Upload bytes as a photo / audio / video / document, picked from the mime type.
+   *
+   * Media goes as `multipart/form-data`, not the JSON every other call uses — hence the separate
+   * path here rather than a branch inside `call`. Telegram renders each type differently (a photo
+   * inline, audio with a player, video with a thumbnail), so choosing the right method is what makes
+   * the result usable in the client rather than an attachment to download.
+   */
+  async sendMedia(
+    chatId: number | string,
+    file: { bytes: Buffer; filename: string; mime: string },
+    opts: { caption?: string } = {},
+  ): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+
+    // An oversized photo is rejected outright by `sendPhoto`; as a document it still arrives.
+    const oversizedPhoto = file.mime.startsWith('image/') && file.bytes.length > MAX_PHOTO_BYTES;
+    const { method, field } = oversizedPhoto
+      ? { method: 'sendDocument', field: 'document' }
+      : mediaMethodFor(file.mime);
+
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    if (opts.caption) form.append('caption', opts.caption.slice(0, MAX_CAPTION_LEN));
+    form.append(field, new Blob([new Uint8Array(file.bytes)], { type: file.mime }), file.filename);
+
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${telegramToken()}/${method}`, {
+        method: 'POST',
+        body: form,
+        signal: AbortSignal.timeout(FILE_TIMEOUT_MS),
+      });
+      const json = (await res.json()) as { ok: boolean; description?: string };
+      if (!json.ok) {
+        log.warn({ method, description: json.description, mime: file.mime }, 'telegram media send failed');
+        return false;
+      }
+      return true;
+    } catch (err) {
+      log.error({ err, method }, 'telegram media send failed');
+      return false;
+    }
   }
 
   /** Acknowledge a button tap (removes the client's loading spinner). */

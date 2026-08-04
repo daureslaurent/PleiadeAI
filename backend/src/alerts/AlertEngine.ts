@@ -19,6 +19,12 @@ export const alertEngine = {
     agentId?: string | Types.ObjectId | null;
     title: string;
     content: string;
+    /**
+     * Media produced by the work being announced. It rides the Telegram leg only — the Mongo
+     * notification stays a text record, since the artifact is already in the session's resource pool
+     * and the UI reads it from there.
+     */
+    attachments?: { bytes: Buffer; filename: string; mime: string }[];
   }): Promise<void> {
     const results = await Promise.allSettled([
       notificationRepository.create({
@@ -26,7 +32,7 @@ export const alertEngine = {
         title: input.title,
         content: input.content,
       }),
-      telegramService.send(input.title, input.content),
+      telegramService.send(input.title, input.content, input.attachments),
     ]);
 
     results.forEach((r, i) => {

@@ -20,14 +20,29 @@ export const telegramService = {
     return telegramChatIds();
   },
 
-  async send(title: string, content: string): Promise<void> {
+  async send(
+    title: string,
+    content: string,
+    /**
+     * Media the alert is *about* — a rendered clip, a generated image. A headless task that produced
+     * one should deliver it, not just describe it and leave the operator to open the web UI.
+     */
+    attachments: { bytes: Buffer; filename: string; mime: string }[] = [],
+  ): Promise<void> {
     if (!this.isConfigured()) {
       log.debug('telegram not configured; skipping alert');
       return;
     }
     const text = `*${title}*\n${content}`;
     await Promise.all(
-      this.targets().map((chatId) => telegramClient.sendMessage(chatId, text)),
+      this.targets().map(async (chatId) => {
+        await telegramClient.sendMessage(chatId, text);
+        // Sequential per chat so files arrive under their own message in order; failures are logged
+        // by the client and must not lose the text alert that already went out.
+        for (const file of attachments) {
+          await telegramClient.sendMedia(chatId, file);
+        }
+      }),
     );
   },
 };
