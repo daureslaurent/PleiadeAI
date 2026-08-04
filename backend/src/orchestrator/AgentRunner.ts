@@ -208,7 +208,10 @@ export class AgentRunner {
     // resource a tool/skill acquires. Shared by reference across every tool call so a resource acquired
     // in one call is reachable — by handle — in a later one (analyze_image / ask_agent / write).
     const imagePool = new TurnImagePool(priorResources, 'tool');
-    imagePool.addMany(attachedImages, 'attachment');
+    // Keep the stamped copies: these carry the `img_N` handles the pool just assigned, which is what
+    // the tools take. Handle numbering continues the session's sequence, so this turn's attachment is
+    // rarely `img_1` — the note below has to name it rather than let the model guess.
+    const pooledImages = imagePool.addMany(attachedImages, 'attachment');
 
     // Resolve the inference target before picking tools: whether the agent's own model is multimodal
     // decides both what enters its context (raw pixels vs. a note) and whether it is granted
@@ -342,6 +345,20 @@ export class AgentRunner {
     //    through `analyze_image` (the Vision endpoint) or `ask_agent`.
     const idxRange = (n: number) => (n > 1 ? `..${n - 1}` : '');
     const plural = (n: number) => (n > 1 ? 'them' : 'it');
+    /**
+     * `img_3` / `img_3 and img_4`. Naming the handles is what lets an agent *act* on an image:
+     * `analyze_image` takes an index, but `edit_image`, `write from_handle` and `data` all take a
+     * handle, and numbering continues across the session — so "the first image" is not `img_1`.
+     * Without this the model guesses, and prod transcripts show it guessing `0`, `img_0`, `img_1`
+     * in turn before falling back to `data list`.
+     */
+    const handleList = (): string => {
+      const ids = pooledImages.map((i) => i.id).filter(Boolean);
+      if (ids.length === 0) return '';
+      return ids.length === 1
+        ? ` It is \`${ids[0]}\`.`
+        : ` They are ${ids.map((id) => `\`${id}\``).join(', ')}.`;
+    };
     const userText = (() => {
       if (inference.supportsVision) {
         // Carried-over images are re-fed to a multimodal agent, but they are NOT part of this message
@@ -352,7 +369,11 @@ export class AgentRunner {
             n > 1 ? 'are' : 'is'
           } from earlier in this conversation, not newly sent. You can see ${plural(
             n,
-          )} — forward ${plural(n)} to another agent with \`ask_agent\` (include_image: true).]`;
+          )}.${handleList()} Use that handle to edit ${plural(n)} (\`edit_image\`), save ${plural(
+            n,
+          )} (\`write from_handle\`) or forward ${plural(
+            n,
+          )} to another agent with \`ask_agent\` (include_image: true).]`;
         }
         return input.userText;
       }
@@ -362,7 +383,7 @@ export class AgentRunner {
           n,
         )} directly — call the \`analyze_image\` tool (index 0${idxRange(n)}) to read ${
           n > 1 ? 'each one' : 'it'
-        } before answering.]`;
+        } before answering.${handleList()} Use that handle for any tool that acts on the image — \`edit_image\`, \`write from_handle\`, \`data\`.]`;
       }
       if (sessionImages.length) {
         const n = sessionImages.length;
@@ -372,7 +393,7 @@ export class AgentRunner {
           n,
         )}) to read ${plural(n)}, or forward ${plural(
           n,
-        )} to another agent with \`ask_agent\` (include_image: true).]`;
+        )} to another agent with \`ask_agent\` (include_image: true).${handleList()} Use that handle for \`edit_image\`, \`write from_handle\` or \`data\`.]`;
       }
       return input.userText;
     })();

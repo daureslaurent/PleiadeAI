@@ -498,7 +498,7 @@ async function resolveInputImage(ctx: ToolContext, ref: string): Promise<InputIm
   if (!bytes || bytes.length === 0) {
     throw new ComfyError(
       isHandle
-        ? `No ${unknownHandleError(ctx, ref)}`
+        ? `There is ${unknownHandleError(ctx, ref)}`
         : `Could not read "${ref}" — give a path that exists, or a resource handle like img_1.`,
     );
   }
