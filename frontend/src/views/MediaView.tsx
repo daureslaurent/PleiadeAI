@@ -472,7 +472,9 @@ function DiscoverPanel({ onImported, enabled }: { onImported: () => Promise<void
                     )}
                   </div>
                   <div className="truncate font-mono text-[10px] text-slate-600">
-                    {c.model_files.slice(0, 2).join(', ')}
+                    {/* Prefer showing where the name came from — a saved workflow file beats a
+                        checkpoint filename as an identifier the operator recognises. */}
+                    {c.source_file || c.model_files.slice(0, 2).join(', ')}
                   </div>
                 </div>
                 <Button

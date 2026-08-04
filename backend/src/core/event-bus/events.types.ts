@@ -174,18 +174,37 @@ export interface MediaGeneratedPayload {
   ctx: EventContext;
   /** Correlates with the tool call that produced it. */
   callId: string;
+  /**
+   * `start` fires the instant ComfyUI accepts the job and carries only what is knowable then; `done`
+   * fires on completion and adds the artifacts. Two emissions rather than one because a video takes
+   * ten minutes, and naming the run only at the end leaves the card blank for the whole render. The
+   * client merges them, so `start`-only fields survive.
+   */
+  phase: 'start' | 'done';
   kind: 'image' | 'video' | 'audio';
   prompt: string;
   negativePrompt: string | null;
   /** Name of the ComfyUI workflow that ran. */
   workflow: string;
+  /** Its declared kind — `edit` is distinct from `image` even though both output an image. */
+  workflowKind?: string;
+  /** Weight files the graph loads: the clearest statement of what is actually running. */
+  models?: string[];
+  /** ComfyUI's id for this job, and the server it is running on — together they locate the run. */
+  promptId?: string;
+  comfyUrl?: string;
+  /** Jobs ahead of this one when it was queued. */
+  queuePosition?: number;
+  /** Free / total VRAM on the tightest GPU at submit — what predicts an out-of-memory failure. */
+  vramFreeBytes?: number;
+  vramTotalBytes?: number;
   seed: number | null;
   /** Effective generation settings, rendered as chips (size, seconds, fps…). */
   params: Record<string, string | number>;
-  /** Count of artifacts actually returned. */
-  count: number;
+  /** Count of artifacts actually returned (`done` only). */
+  count?: number;
   /** Resource handles of the artifacts, so the card can stream a video/audio by handle. */
-  resourceIds: string[];
+  resourceIds?: string[];
   /** `edit_image` only: handle of the source image, for the before/after pair. */
   sourceId?: string | null;
 }
@@ -204,10 +223,25 @@ export interface ToolProgressPayload {
   /** Id and human label of the step currently executing (a ComfyUI node). */
   node?: string;
   nodeLabel?: string;
+  /** Sampler steps within the current node, and graph nodes overall — a bar alone hides both. */
+  step?: number;
+  steps?: number;
+  nodesDone?: number;
+  nodesTotal?: number;
   /** Jobs ahead of this one on the remote server. */
   queuePosition?: number;
   elapsedMs: number;
   etaMs?: number | null;
+  /**
+   * Latest in-progress preview frame as a data URL, when the remote reports one. Replaced, never
+   * accumulated, and never persisted — it is a glimpse of work in flight, worthless afterwards.
+   */
+  preview?: string;
+  /**
+   * Whether any preview has arrived this run. Lets the UI distinguish "the server isn't sending
+   * previews" (ComfyUI defaults `--preview-method` to none) from "nothing has rendered yet".
+   */
+  sawPreview?: boolean;
   message?: string;
 }
 

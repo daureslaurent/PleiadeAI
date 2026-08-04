@@ -89,16 +89,28 @@ export interface ToolContext {
    * separately as tool-result images (pooled/persisted), so they aren't sent twice.
    */
   emitMediaGen?: (payload: {
+    /** `start` on submit (identity only), `done` on completion (adds artifacts). Merged client-side. */
+    phase: 'start' | 'done';
     kind: 'image' | 'video' | 'audio';
     prompt: string;
     negativePrompt: string | null;
     workflow: string;
+    workflowKind?: string;
+    /** Weight files the remote workflow loads. */
+    models?: string[];
+    /** The remote job's id and server, so the operator can open it there. */
+    promptId?: string;
+    comfyUrl?: string;
+    queuePosition?: number;
+    /** Free / total VRAM on the tightest GPU at submit. */
+    vramFreeBytes?: number;
+    vramTotalBytes?: number;
     seed: number | null;
     /** Effective generation settings, rendered as chips (size, steps, seconds, fps…). */
     params: Record<string, string | number>;
-    count: number;
+    count?: number;
     /** Handles of the produced resources, so the card can stream a video/audio by handle. */
-    resourceIds: string[];
+    resourceIds?: string[];
     /** For `edit_image`: the handle of the source image, so the card can show a before/after pair. */
     sourceId?: string | null;
   }) => void;
@@ -112,9 +124,16 @@ export interface ToolContext {
     percent: number | null;
     node?: string;
     nodeLabel?: string;
+    step?: number;
+    steps?: number;
+    nodesDone?: number;
+    nodesTotal?: number;
     queuePosition?: number;
     elapsedMs: number;
     etaMs?: number | null;
+    /** Latest in-progress preview frame (data URL), when the remote provides one. */
+    preview?: string;
+    sawPreview?: boolean;
     message?: string;
   }) => void;
   /**

@@ -171,6 +171,29 @@ export class ComfyHttpClient {
     return json;
   }
 
+  /**
+   * The operator's saved workflow filenames (`GET /api/userdata?dir=workflows`).
+   *
+   * These files are the *editor's* format — they reference subgraph definitions by UUID and can't be
+   * submitted — so they are useless as an import source. What they do carry is the name the operator
+   * actually gave each workflow, which beats guessing one from a checkpoint filename.
+   */
+  async listUserWorkflows(): Promise<string[]> {
+    const files = await this.getJson<unknown[]>('/api/userdata?dir=workflows');
+    return files.filter((f): f is string => typeof f === 'string');
+  }
+
+  /** One saved workflow file. Only its top-level `id` matters to us — it keys runs back to a name. */
+  async userWorkflow(filename: string): Promise<{ id?: string } | null> {
+    try {
+      return await this.getJson<{ id?: string }>(
+        `/api/userdata/${encodeURIComponent(`workflows/${filename}`)}`,
+      );
+    } catch {
+      return null;
+    }
+  }
+
   /** Drop a *pending* job. Safe and targeted — unlike `/interrupt`, it can't touch a running one. */
   async queueDelete(promptId: string): Promise<void> {
     await this.request('/queue', {

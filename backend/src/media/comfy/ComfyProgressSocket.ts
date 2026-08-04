@@ -12,6 +12,23 @@ const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 8_000];
 const EMIT_INTERVAL_MS = 500;
 /** Percent is noise until enough of the graph has run for the extrapolation to mean anything. */
 const ETA_MIN_FRACTION = 0.05;
+/**
+ * Previews get their own, slower clock than the numeric bar: they're ~30-60KB each and ComfyUI emits
+ * several a second, so at the bar's rate a ten-minute video would push hundreds of megabytes at the
+ * browser for frames nobody can perceive individually.
+ */
+const PREVIEW_INTERVAL_MS = 1_000;
+
+/** ComfyUI's binary websocket event ids (`protocol.py` `BinaryEventTypes`). */
+const BINARY_PREVIEW_IMAGE = 1;
+const BINARY_PREVIEW_WITH_METADATA = 4;
+
+/** `ws` hands a frame over as a Buffer, an ArrayBuffer, or a list of chunks. */
+function toBuffer(data: WebSocket.RawData): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return Buffer.from(data as ArrayBuffer);
+}
 
 export interface ComfyProgress {
   phase: 'queued' | 'running' | 'downloading';
@@ -21,10 +38,20 @@ export interface ComfyProgress {
   node?: string;
   /** Its `_meta.title`, else its class name — what the operator sees in the ComfyUI editor. */
   nodeLabel?: string;
+  /** Sampler steps inside the current node — the number that actually moves during a long render. */
+  step?: number;
+  steps?: number;
+  /** Graph nodes finished / total, so "40%" is attributable to a position in the pipeline. */
+  nodesDone?: number;
+  nodesTotal?: number;
   /** Jobs ahead of ours in ComfyUI's queue (it runs one at a time). */
   queuePosition?: number;
   elapsedMs: number;
   etaMs?: number | null;
+  /** Newest in-progress preview frame as a data URL, when the server emits them. */
+  preview?: string;
+  /** Whether any preview has arrived — distinguishes "off on the server" from "not yet". */
+  sawPreview?: boolean;
   message?: string;
 }
 
@@ -60,6 +87,12 @@ export class ComfyProgressSocket {
   private nodeFraction = 0;
   private startedAt = 0;
   private queueRemaining = 0;
+
+  private step = 0;
+  private steps = 0;
+  private sawPreview = false;
+  private pendingPreview: string | null = null;
+  private lastPreviewAt = 0;
 
   private lastEmitAt = 0;
   private lastPercent = -1;
@@ -108,10 +141,27 @@ export class ComfyProgressSocket {
     }
     this.ws = ws;
 
+    ws.on('open', () => {
+      // Declare that we can take binary previews. ComfyUI answers with its own feature set and only
+      // sends the metadata-bearing preview variant to clients that asked for it.
+      try {
+        ws.send(
+          JSON.stringify({
+            type: 'feature_flags',
+            data: { supports_binary_preview: true, supports_preview_metadata: true },
+          }),
+        );
+      } catch {
+        /* the socket died before we could greet it; reconnect logic covers this */
+      }
+    });
+
     ws.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
       // ComfyUI interleaves binary preview frames (the live sampler thumbnail) with JSON events.
-      // They are megabytes of PNG we have no use for — never parse them.
-      if (isBinary) return;
+      if (isBinary) {
+        this.handleBinary(toBuffer(data));
+        return;
+      }
       let msg: { type?: string; data?: Record<string, unknown> };
       try {
         msg = JSON.parse(data.toString());
@@ -137,6 +187,48 @@ export class ComfyProgressSocket {
     ws.on('error', (err: Error) => {
       log.debug({ err: err.message }, 'progress socket error');
     });
+  }
+
+  /**
+   * Decode a binary frame. ComfyUI's layout (`protocol.py`, `server.py`):
+   *
+   *   PREVIEW_IMAGE (1)               `[4B event][4B image type: 1=JPEG, 2=PNG][image bytes]`
+   *   UNENCODED_PREVIEW_IMAGE (2)     raw pixels — not decodable without the shape, skipped
+   *   TEXT (3)                        not ours
+   *   PREVIEW_IMAGE_WITH_METADATA (4) `[4B event][4B json length][JSON][image bytes]`
+   *
+   * These arrive only when the server was started with `--preview-method` — it defaults to *none*,
+   * so a run producing no frames is the normal case, not a fault.
+   */
+  private handleBinary(buf: Buffer): void {
+    if (buf.length < 8) return;
+    const event = buf.readUInt32BE(0);
+
+    let mime = 'image/jpeg';
+    let body: Buffer;
+    if (event === BINARY_PREVIEW_IMAGE) {
+      mime = buf.readUInt32BE(4) === 2 ? 'image/png' : 'image/jpeg';
+      body = buf.subarray(8);
+    } else if (event === BINARY_PREVIEW_WITH_METADATA) {
+      const jsonLength = buf.readUInt32BE(4);
+      if (buf.length < 8 + jsonLength) return;
+      try {
+        const meta = JSON.parse(buf.subarray(8, 8 + jsonLength).toString('utf8')) as { image_type?: string };
+        if (typeof meta.image_type === 'string' && meta.image_type.includes('/')) mime = meta.image_type;
+      } catch {
+        /* keep the default mime — the pixels still decode */
+      }
+      body = buf.subarray(8 + jsonLength);
+    } else {
+      return;
+    }
+    if (body.length === 0) return;
+
+    this.sawPreview = true;
+    // Previews are ~30-60KB each and arrive several times a second. Keep only the newest, and let
+    // `emit` decide (on its own slower clock) whether to ship it.
+    this.pendingPreview = `data:${mime};base64,${body.toString('base64')}`;
+    this.emit('running');
   }
 
   /** Start accepting events for this job. Called immediately after `POST /prompt` returns. */
@@ -187,6 +279,8 @@ export class ComfyProgressSocket {
         const max = Number(data.max ?? 0);
         if (data.node != null) this.currentNode = String(data.node);
         this.nodeFraction = max > 0 ? Math.min(1, value / max) : 0;
+        this.step = value;
+        this.steps = max;
         this.emit('running');
         break;
       }
@@ -209,6 +303,8 @@ export class ComfyProgressSocket {
             sum += Math.min(1, value / max);
             count += 1;
             this.currentNode = nodeId;
+            this.step = value;
+            this.steps = max;
           }
         }
         this.nodeFraction = count > 0 ? sum / count : this.nodeFraction;
@@ -253,16 +349,33 @@ export class ComfyProgressSocket {
   private emit(phase: ComfyProgress['phase']): void {
     const percent = Math.round(this.fraction() * 100);
     const now = Date.now();
+
+    // A preview is worth sending even when the numbers haven't moved — it's the part of the card
+    // that visibly changes during a long sampler run — but on its own, slower clock.
+    const previewDue =
+      this.pendingPreview !== null && now - this.lastPreviewAt >= PREVIEW_INTERVAL_MS;
+
     // Hard rate cap first, then suppress anything the UI would render identically.
-    if (now - this.lastEmitAt < EMIT_INTERVAL_MS) return;
-    const changed =
-      percent !== this.lastPercent || this.currentNode !== this.lastNode || phase !== this.lastPhase;
-    if (!changed) return;
+    if (!previewDue) {
+      if (now - this.lastEmitAt < EMIT_INTERVAL_MS) return;
+      const changed =
+        percent !== this.lastPercent ||
+        this.currentNode !== this.lastNode ||
+        phase !== this.lastPhase;
+      if (!changed) return;
+    }
 
     this.lastEmitAt = now;
     this.lastPercent = percent;
     this.lastNode = this.currentNode;
     this.lastPhase = phase;
+
+    let preview: string | undefined;
+    if (previewDue) {
+      preview = this.pendingPreview ?? undefined;
+      this.pendingPreview = null;
+      this.lastPreviewAt = now;
+    }
 
     const elapsedMs = this.startedAt ? now - this.startedAt : 0;
     const fraction = this.fraction();
@@ -276,9 +389,15 @@ export class ComfyProgressSocket {
       percent,
       node: this.currentNode ?? undefined,
       nodeLabel: this.currentNode ? this.labels[this.currentNode] : undefined,
+      step: this.steps > 0 ? this.step : undefined,
+      steps: this.steps > 0 ? this.steps : undefined,
+      nodesDone: this.completed.size,
+      nodesTotal: this.totalNodes,
       queuePosition: Math.max(0, this.queueRemaining - 1),
       elapsedMs,
       etaMs,
+      ...(preview ? { preview } : {}),
+      sawPreview: this.sawPreview,
     });
   }
 

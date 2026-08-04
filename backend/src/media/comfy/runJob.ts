@@ -27,6 +27,12 @@ export interface RunJobOptions {
   /** Refuse to submit when ComfyUI already has this many jobs queued. 0 disables the check. */
   queueMax: number;
   onProgress: ProgressHandler;
+  /**
+   * Fired the instant ComfyUI accepts the job, long before it finishes. This is the earliest the run
+   * has an identity, and it is what lets the UI name the workflow during a ten-minute render instead
+   * of only once the last byte is downloaded.
+   */
+  onSubmitted?: (promptId: string) => void;
   signal?: AbortSignal;
 }
 
@@ -76,7 +82,7 @@ function describe(err: ComfyExecutionError): ComfyExecutionError {
  * watcher instead. Only an explicit abort cancels.
  */
 export async function runJob(opts: RunJobOptions): Promise<RunJobResult> {
-  const { client, graph, outputNodeId, timeoutMs, queueMax, onProgress, signal } = opts;
+  const { client, graph, outputNodeId, timeoutMs, queueMax, onProgress, onSubmitted, signal } = opts;
 
   if (signal?.aborted) return { status: 'aborted', promptId: '', durationMs: 0 };
 
@@ -104,6 +110,7 @@ export async function runJob(opts: RunJobOptions): Promise<RunJobResult> {
     const submitted = await client.submit(graph, clientId);
     promptId = submitted.prompt_id;
     socket.bind(promptId);
+    onSubmitted?.(promptId);
     log.info({ promptId, nodes: Object.keys(graph).length, live }, 'submitted to ComfyUI');
 
     const outcome = await race(client, socket, promptId, timeoutMs, startedAt, signal);

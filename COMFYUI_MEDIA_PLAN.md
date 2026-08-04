@@ -8,6 +8,10 @@
 > (image and image-edit), the progress socket, and the resource Range/streaming route. Video and
 > sound run the identical code path but had no workflow in ComfyUI's history at verification time —
 > import one on the Media page after running it once in ComfyUI.
+>
+> **Live telemetry increment** (§ *Reporting a run as it happens*, below) also verified live: the
+> run announces itself at **+0.0s**, step/node counters track the sampler, and preview frames decode
+> into real images mid-render.
 
 ## Context
 
@@ -34,10 +38,23 @@ card. The ComfyUI endpoint is configured in **Settings → Connections**.
 - Installed, with **measured** runtimes from the server's own history:
   z-image turbo **3.5 s** warm (22–47 s cold) · krea2 turbo ~43 s · MiniMax H3 video+audio
   **538–632 s per 5 s clip** · Stable Audio 3 (its only run failed on VRAM).
-- **Discovery format**: saved `.app.json` workflows are UI-format **and use subgraphs** (node `type` is a
+- **Discovery format**: saved workflows are UI-format **and use subgraphs** (node `type` is a
   UUID into `definitions.subgraphs`) — converting those means reimplementing ComfyUI's frontend graph
   flattening. **Do not.** `/history` entries are already API-format and already flattened (`prompt[2]`),
-  directly re-submittable, with the output node in `prompt[4]`.
+  directly re-submittable, with the output node in `prompt[4]`. Re-verified on every saved file the
+  operator has, `.json` and `.app.json` alike: each carries exactly one UUID-typed node.
+- **Saved workflows are still worth reading — for their names.** `GET /api/userdata?dir=workflows`
+  lists them, and each file's top-level `id` matches `extra_data.extra_pnginfo.workflow.id` on a
+  history run, so a discovered candidate can be named after the file the operator actually created
+  (`image_flux2_ask.json` → *Image Flux2 Ask*) instead of after its checkpoint. Roughly a third of
+  runs match; the rest fall back to the model-derived guess.
+- **Live preview frames** are binary websocket messages (`protocol.py` `BinaryEventTypes`):
+  `PREVIEW_IMAGE = 1` → `[4B event][4B image type: 1=JPEG, 2=PNG][bytes]`;
+  `PREVIEW_IMAGE_WITH_METADATA = 4` → `[4B event][4B json length][JSON][bytes]`. A client should first
+  send `{"type":"feature_flags","data":{"supports_binary_preview":true}}`; the server replies with its
+  own feature set. **These only exist when ComfyUI is started with `--preview-method`** — it defaults
+  to `NoPreviews`, so a run emitting nothing is normal, not a fault. Observed live at
+  `--preview-method auto`: ~60-70KB JPEGs, several per second, throughout sampling.
 - **ComfyUI history is in RAM** and dies with the process → discovery must *snapshot* into Mongo.
 - **Output-shape trap**: `SaveVideo` results come back under the `images` key
   (`{"92":{"images":[{"filename":"MiniMax_H3_00002_.mp4","subfolder":"video"}],"animated":[true]}}`).
@@ -320,6 +337,35 @@ extension — **server-resolved options, no new field type**:
 14. Reload the browser on a finished turn → video/audio cards still render from persisted `result`, and
     pre-migration `generate_image` turns still render via the legacy `imageGen` path.
 15. A cron task that generates an image completes and its inbox notification carries the result.
+
+## Reporting a run as it happens
+
+A ten-minute video used to reach the chat as a bare percentage: `emitMediaGen` fired from
+`packageResult`, i.e. only once the last byte was downloaded, so every identifying detail arrived
+after the operator had stopped caring. The run now narrates itself.
+
+- **Two emissions, merged client-side.** `MediaGeneratedPayload.phase` is `start` or `done`.
+  `runJob` gained `onSubmitted`, which fires the instant `POST /prompt` returns — the earliest moment
+  a run has an identity — and `generateMedia` turns that into `onStart` carrying the workflow name and
+  kind, the graph's model files, the `prompt_id`, the ComfyUI base URL, the queue depth, the seed, and
+  **free VRAM on the tightest GPU**. That last one is the number that predicts the
+  `VRAM grow failed` this box is prone to, since its 3060 is shared with the inference server.
+  The store merges rather than replaces, so `done` adds artifacts without erasing any of it.
+  Measured: the start emission lands at **+0.0s**.
+- **The queue preflight moved** from `runJob` into `generateMedia` (which passes `queueMax: 0` on) so
+  the depth can be *reported* rather than merely enforced, without a second round trip.
+- **Counters, not just a bar.** `ComfyProgressSocket` now reports `step/steps` (the sampler's own
+  progress inside the running node) and `nodesDone/nodesTotal`. A percentage alone hides which of
+  those is stuck.
+- **Live previews.** The socket sends the `feature_flags` greeting and decodes binary frames instead
+  of dropping them. Previews ride their own **1/s** clock, separate from the numeric bar's 2/s: at
+  ~65KB a frame and several per second, matching the bar's rate would push hundreds of megabytes at
+  the browser for frames nobody can perceive individually. Only the newest is kept, and none of it is
+  persisted — `sawPreview` lets the card say *"start ComfyUI with `--preview-method auto`"* instead of
+  rendering an empty box when the server isn't sending any.
+- A progress tick that **omits** a field is not asserting the field is gone (the closing
+  `downloading` tick carries no counters at all), so the store spreads previous state forward. Without
+  that the card flickers empty exactly at 100%.
 
 ## Risks
 

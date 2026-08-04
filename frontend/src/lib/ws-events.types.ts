@@ -87,18 +87,33 @@ export interface VisionEvent {
 export interface MediaGenEvent {
   type: 'media_gen';
   callId: string;
+  /**
+   * `start` lands seconds after the remote accepts the job and names the run; `done` adds the
+   * artifacts. The store merges them, so `start`-only fields stay put.
+   */
+  phase: 'start' | 'done';
   kind: 'image' | 'video' | 'audio';
   prompt: string;
   negativePrompt: string | null;
   /** Name of the ComfyUI workflow that ran. */
   workflow: string;
+  workflowKind?: string;
+  /** Weight files the workflow loads. */
+  models?: string[];
+  /** The remote job's id and server — together they locate the run in ComfyUI. */
+  promptId?: string;
+  comfyUrl?: string;
+  queuePosition?: number;
+  /** Free / total VRAM on the tightest GPU at submit. */
+  vramFreeBytes?: number;
+  vramTotalBytes?: number;
   seed: number | null;
   /** Effective generation settings, rendered as chips. */
   params: Record<string, string | number>;
-  /** Number of artifacts actually returned. */
-  count: number;
+  /** Number of artifacts actually returned (`done` only). */
+  count?: number;
   /** Resource handles of the artifacts — how the card streams a video/audio. */
-  resourceIds: string[];
+  resourceIds?: string[];
   /** `edit_image` only: handle of the source image, for the before/after pair. */
   sourceId: string | null;
 }
@@ -114,9 +129,18 @@ export interface ToolProgressEvent {
   percent: number | null;
   node?: string;
   nodeLabel?: string;
+  /** Sampler steps within the current node, and graph nodes overall. */
+  step?: number;
+  steps?: number;
+  nodesDone?: number;
+  nodesTotal?: number;
   queuePosition?: number;
   elapsedMs: number;
   etaMs: number | null;
+  /** Newest in-progress preview frame as a data URL, when the remote emits them. */
+  preview?: string;
+  /** Whether any preview has arrived — separates "server isn't sending them" from "not yet". */
+  sawPreview?: boolean;
   message?: string;
 }
 

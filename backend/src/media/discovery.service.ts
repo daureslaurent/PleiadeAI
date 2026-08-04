@@ -1,7 +1,13 @@
 import { createLogger } from '../config/logger';
-import { comfyClient } from './comfy/ComfyHttpClient';
+import { comfyClient, type ComfyHttpClient } from './comfy/ComfyHttpClient';
 import { ComfyError } from './comfy/errors';
-import { autoBind, loadSchemas, structureHash, type AutoBindResult } from './comfy/graph-introspect';
+import {
+  autoBind,
+  loadSchemas,
+  modelFiles,
+  structureHash,
+  type AutoBindResult,
+} from './comfy/graph-introspect';
 import { mediaWorkflowRepository } from '../domain/media-workflows/media-workflow.repository';
 import type { ComfyGraph, ComfyHistoryEntry } from './comfy/types';
 import type { WorkflowKind } from '../domain/media-workflows/media-workflow.model';
@@ -15,6 +21,8 @@ export interface DiscoveryCandidate {
   prompt_id: string;
   /** {@link structureHash} of the graph — the identity used for dedup and "already imported". */
   graph_hash: string;
+  /** The operator's saved workflow file this run came from, when it could be matched ('' otherwise). */
+  source_file: string;
   suggested_name: string;
   kind: WorkflowKind;
   output_node_id: string;
@@ -52,19 +60,39 @@ function prettifyModelName(filename: string): string {
     .join(' ');
 }
 
-/** Model filenames the graph loads, most significant loader first. */
-function modelFiles(graph: ComfyGraph): string[] {
-  const priority = ['UNETLoader', 'CheckpointLoaderSimple', 'CheckpointLoader', 'DiffusersLoader'];
-  const found: { file: string; rank: number }[] = [];
-  for (const node of Object.values(graph)) {
-    for (const value of Object.values(node.inputs)) {
-      if (typeof value !== 'string' || !/\.(safetensors|ckpt|pt|gguf|sft)$/i.test(value)) continue;
-      const rank = priority.indexOf(node.class_type);
-      found.push({ file: value, rank: rank === -1 ? priority.length : rank });
-    }
+/** `video_minimax_h3_t2v.app.json` → `Video Minimax H3 T2v`. */
+function prettifyFileName(filename: string): string {
+  return filename
+    .replace(/\.app\.json$|\.json$/i, '')
+    .split(/[_\-.]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/** The editor workflow id a run came from, when the frontend stamped one into the submission. */
+function workflowUuid(entry: ComfyHistoryEntry): string {
+  const extra = entry.prompt?.[3] as { extra_pnginfo?: { workflow?: { id?: string } } } | undefined;
+  return String(extra?.extra_pnginfo?.workflow?.id ?? '');
+}
+
+/**
+ * Map each saved workflow file's own `id` to its filename, so a history run can be traced back to the
+ * name the operator gave it. Costs one small GET per saved file, and is purely cosmetic — any failure
+ * degrades to naming candidates after their checkpoint.
+ */
+async function savedWorkflowNames(client: ComfyHttpClient): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  try {
+    const files = await client.listUserWorkflows();
+    const entries = await Promise.all(
+      files.map(async (file) => [file, (await client.userWorkflow(file))?.id ?? ''] as const),
+    );
+    for (const [file, id] of entries) if (id) names.set(id, file);
+  } catch (err) {
+    log.debug({ err: String(err) }, 'could not list saved ComfyUI workflows — naming from models');
   }
-  found.sort((a, b) => a.rank - b.rank);
-  return [...new Set(found.map((f) => f.file))];
+  return names;
 }
 
 /** Node classes that identify the workflow, skipping the plumbing every graph has. */
@@ -114,6 +142,7 @@ export async function discoverWorkflows(): Promise<DiscoveryCandidate[]> {
   const client = await comfyClient();
   const history = await client.history();
   const imported = await mediaWorkflowRepository.importedHashes();
+  const savedNames = await savedWorkflowNames(client);
 
   const byStructure = new Map<string, DiscoveryCandidate>();
 
@@ -127,10 +156,16 @@ export async function discoverWorkflows(): Promise<DiscoveryCandidate[]> {
       const bound = autoBind(graph, entry.prompt[4] ?? [], schemas);
       const hash = structureHash(graph, schemas);
       const files = modelFiles(graph);
+      // Prefer what the operator actually called this workflow in ComfyUI; fall back to the model
+      // name only when the run came from a graph they never saved.
+      const sourceFile = savedNames.get(workflowUuid(entry)) ?? '';
       candidate = {
         prompt_id: promptId,
         graph_hash: hash,
-        suggested_name: files[0] ? prettifyModelName(files[0]) : `Workflow ${promptId.slice(0, 8)}`,
+        source_file: sourceFile,
+        suggested_name:
+          (sourceFile && prettifyFileName(sourceFile)) ||
+          (files[0] ? prettifyModelName(files[0]) : `Workflow ${promptId.slice(0, 8)}`),
         kind: bound.kind,
         output_node_id: bound.output_node_id,
         output_kind: bound.output_kind,

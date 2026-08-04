@@ -124,42 +124,21 @@ export function attachBridge(io: Server): void {
     });
   });
 
-  eventBus.on(
-    'agent:media_generated',
-    ({ ctx, callId, kind, prompt, negativePrompt, workflow, seed, params, count, resourceIds, sourceId }) => {
-      io.to(ctx.sessionId).emit('media_gen', {
-        type: 'media_gen',
-        callId,
-        kind,
-        prompt,
-        negativePrompt,
-        workflow,
-        seed,
-        params,
-        count,
-        resourceIds,
-        sourceId: sourceId ?? null,
-      });
-    },
-  );
+  eventBus.on('agent:media_generated', ({ ctx, ...payload }) => {
+    io.to(ctx.sessionId).emit('media_gen', {
+      type: 'media_gen',
+      ...payload,
+      sourceId: payload.sourceId ?? null,
+    });
+  });
 
-  eventBus.on(
-    'tool:progress',
-    ({ ctx, callId, phase, percent, node, nodeLabel, queuePosition, elapsedMs, etaMs, message }) => {
-      io.to(ctx.sessionId).emit('tool_progress', {
-        type: 'tool_progress',
-        callId,
-        phase,
-        percent,
-        node,
-        nodeLabel,
-        queuePosition,
-        elapsedMs,
-        etaMs: etaMs ?? null,
-        message,
-      });
-    },
-  );
+  eventBus.on('tool:progress', ({ ctx, ...payload }) => {
+    io.to(ctx.sessionId).emit('tool_progress', {
+      type: 'tool_progress',
+      ...payload,
+      etaMs: payload.etaMs ?? null,
+    });
+  });
 
   eventBus.on('tool:execution_complete', ({ ctx, callId, tool, status, result, images }) => {
     io.to(ctx.sessionId).emit('tool_end', {

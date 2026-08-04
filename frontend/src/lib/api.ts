@@ -926,6 +926,8 @@ export interface MediaWorkflowDetail extends MediaWorkflow {
 export interface DiscoveryCandidate {
   prompt_id: string;
   graph_hash: string;
+  /** The operator's saved ComfyUI workflow file this run came from ('' when unmatched). */
+  source_file: string;
   suggested_name: string;
   kind: WorkflowKind;
   output_node_id: string;

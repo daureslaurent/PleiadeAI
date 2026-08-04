@@ -58,10 +58,17 @@ export interface MediaGenInfo {
   prompt: string;
   negativePrompt: string | null;
   workflow: string;
+  workflowKind?: string;
+  models?: string[];
+  promptId?: string;
+  comfyUrl?: string;
+  queuePosition?: number;
+  vramFreeBytes?: number;
+  vramTotalBytes?: number;
   seed: number | null;
   params: Record<string, string | number>;
-  count: number;
-  resourceIds: string[];
+  count?: number;
+  resourceIds?: string[];
   sourceId: string | null;
 }
 
@@ -73,9 +80,16 @@ export interface ToolProgressInfo {
   phase: 'queued' | 'running' | 'downloading';
   percent: number | null;
   nodeLabel?: string;
+  step?: number;
+  steps?: number;
+  nodesDone?: number;
+  nodesTotal?: number;
   queuePosition?: number;
   elapsedMs: number;
   etaMs: number | null;
+  /** Latest in-progress preview frame. Replaced each tick, never accumulated. */
+  preview?: string;
+  sawPreview?: boolean;
 }
 
 /** Where a `visual_act` call acted: a screenshot + the marked pixel(s), surfaced on its tool block. */
@@ -548,23 +562,13 @@ export const useStream = create<StreamState>((set, get) => ({
     // Images land via `tool_end` (as the block's `images`) and video/audio are fetched by resource
     // handle, so this only adds framing.
     socket.on('media_gen', (e: MediaGenEvent) => {
+      const { type: _type, callId: _callId, phase: _phase, ...fields } = e;
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
-            ? {
-                ...it,
-                mediaGen: {
-                  kind: e.kind,
-                  prompt: e.prompt,
-                  negativePrompt: e.negativePrompt,
-                  workflow: e.workflow,
-                  seed: e.seed,
-                  params: e.params ?? {},
-                  count: e.count,
-                  resourceIds: e.resourceIds ?? [],
-                  sourceId: e.sourceId ?? null,
-                },
-              }
+            ? // Merge, don't replace: the `start` emission establishes the workflow, models and VRAM
+              // seconds after submit, and the later `done` carries only the artifacts.
+              { ...it, mediaGen: { ...it.mediaGen, ...fields } }
             : it,
         ),
       }));
@@ -578,12 +582,22 @@ export const useStream = create<StreamState>((set, get) => ({
             ? {
                 ...it,
                 progress: {
+                  ...it.progress,
+                  // A tick that omits a field isn't asserting it's gone: previews arrive on their own
+                  // slower clock, and the closing `downloading` tick carries no counters at all.
+                  // Spreading the previous state keeps the card from flickering empty at 100%.
                   phase: e.phase,
                   percent: e.percent,
-                  nodeLabel: e.nodeLabel,
-                  queuePosition: e.queuePosition,
                   elapsedMs: e.elapsedMs,
                   etaMs: e.etaMs,
+                  ...(e.nodeLabel !== undefined ? { nodeLabel: e.nodeLabel } : {}),
+                  ...(e.step !== undefined ? { step: e.step } : {}),
+                  ...(e.steps !== undefined ? { steps: e.steps } : {}),
+                  ...(e.nodesDone !== undefined ? { nodesDone: e.nodesDone } : {}),
+                  ...(e.nodesTotal !== undefined ? { nodesTotal: e.nodesTotal } : {}),
+                  ...(e.queuePosition !== undefined ? { queuePosition: e.queuePosition } : {}),
+                  ...(e.preview !== undefined ? { preview: e.preview } : {}),
+                  ...(e.sawPreview !== undefined ? { sawPreview: e.sawPreview } : {}),
                 },
               }
             : it,

@@ -11,7 +11,13 @@ import {
 import { mediaWorkflowRepository } from '../domain/media-workflows/media-workflow.repository';
 import { comfyClient, type ComfyHttpClient } from './comfy/ComfyHttpClient';
 import { ComfyError } from './comfy/errors';
-import { applyBindings, loadSchemas, validateWorkflow, type BindingValues } from './comfy/graph-introspect';
+import {
+  applyBindings,
+  loadSchemas,
+  modelFiles,
+  validateWorkflow,
+  type BindingValues,
+} from './comfy/graph-introspect';
 import { collectArtifacts, selectArtifacts, type ComfyArtifact, type MediaKind } from './comfy/outputs';
 import { runJob } from './comfy/runJob';
 import type { ProgressHandler } from './comfy/ComfyProgressSocket';
@@ -40,9 +46,35 @@ export interface GenerateRequest {
   inputImages?: InputImage[];
   timeoutMs: number;
   onProgress: ProgressHandler;
+  /** Fired the moment ComfyUI accepts the job — see {@link MediaRunStart}. */
+  onStart?: (info: MediaRunStart) => void;
   signal?: AbortSignal;
   /** Stamped into the output filename prefix so ComfyUI's output folder stays navigable. */
   sessionId?: string;
+}
+
+/**
+ * What is knowable about a run the instant it is queued, as opposed to when it finishes.
+ *
+ * A ten-minute video used to reach the UI as a bare percentage because every identifying detail rode
+ * on the completion event. Everything here is available seconds after submit, so the operator can see
+ * *what* is running — and, from the VRAM figure, guess whether it is about to fail.
+ */
+export interface MediaRunStart {
+  workflow: string;
+  workflowKind: WorkflowKind;
+  outputKind: 'image' | 'video' | 'audio';
+  /** Weight files the graph loads — the clearest statement of what is actually running. */
+  models: string[];
+  promptId: string;
+  /** Base URL of the ComfyUI server, so the card can link to the job. */
+  comfyUrl: string;
+  /** Jobs ahead of this one when it was queued. */
+  queuePosition: number;
+  /** Free / total VRAM on the busiest GPU at submit time. 0 when the probe failed. */
+  vramFreeBytes: number;
+  vramTotalBytes: number;
+  seed: number;
 }
 
 export interface GeneratedFile {
@@ -94,6 +126,22 @@ async function resolveWorkflow(id: string, expectKind: WorkflowKind): Promise<Me
 /** ComfyUI's own default seed is fixed, so an unset seed would return the same picture forever. */
 function randomSeed(): number {
   return Math.floor(Math.random() * 2 ** 31);
+}
+
+/**
+ * Free/total VRAM on the GPU with the least headroom — the one that decides whether a render fails.
+ * Never throws: this is a nicety for the UI, not a precondition for running.
+ */
+async function busiestGpu(client: ComfyHttpClient): Promise<{ free: number; total: number }> {
+  try {
+    const stats = await client.systemStats();
+    const gpus = stats.devices.filter((d) => d.vram_total > 0);
+    if (gpus.length === 0) return { free: 0, total: 0 };
+    const worst = gpus.reduce((a, b) => (a.vram_free <= b.vram_free ? a : b));
+    return { free: worst.vram_free, total: worst.vram_total };
+  } catch {
+    return { free: 0, total: 0 };
+  }
 }
 
 /**
@@ -171,13 +219,41 @@ export async function generateMedia(req: GenerateRequest): Promise<GenerateOutco
 
   const submitGraph: ComfyGraph = applyBindings(graph, bindings, values);
 
+  // Preflight the queue and read VRAM in one pass. Both feed the start event, and the queue check is
+  // done here rather than inside `runJob` so its depth can be reported instead of just enforced —
+  // hence `queueMax: 0` below, which skips the redundant second check.
+  const queueMax = settings.comfy_queue_max ?? 0;
+  const [queuePosition, vram] = await Promise.all([
+    client.queueRemaining().catch(() => 0),
+    busiestGpu(client),
+  ]);
+  if (queueMax > 0 && queuePosition >= queueMax) {
+    throw new ComfyError(
+      `ComfyUI already has ${queuePosition} job(s) queued and runs one at a time — refusing to pile on. ` +
+        'Wait for it to drain, or raise the queue ceiling in Settings → Connections.',
+    );
+  }
+
   const outcome = await runJob({
     client,
     graph: submitGraph,
     outputNodeId: workflow.output_node_id || undefined,
     timeoutMs: Math.min(req.timeoutMs, MAX_WAIT_MS),
-    queueMax: settings.comfy_queue_max ?? 0,
+    queueMax: 0,
     onProgress: req.onProgress,
+    onSubmitted: (promptId) =>
+      req.onStart?.({
+        workflow: workflow.name,
+        workflowKind: workflow.kind as WorkflowKind,
+        outputKind: workflow.output_kind as 'image' | 'video' | 'audio',
+        models: modelFiles(graph),
+        promptId,
+        comfyUrl: client.baseUrl,
+        queuePosition,
+        vramFreeBytes: vram.free,
+        vramTotalBytes: vram.total,
+        seed,
+      }),
     signal: req.signal,
   });
 

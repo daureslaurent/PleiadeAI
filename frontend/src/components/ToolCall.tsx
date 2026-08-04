@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, AudioLines, ChevronRight, Clapperboard, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
+import { AlertTriangle, AudioLines, ChevronRight, Clapperboard, ExternalLink, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
 import type { Block } from '../store/stream';
 import { useStream } from '../store/stream';
 import { resourcesApi } from '../lib/api';
@@ -252,9 +252,21 @@ function humanMs(ms: number): string {
 function ProgressBar({ progress }: { progress: NonNullable<ToolBlock['progress']> }) {
   const percent = Math.max(0, Math.min(100, progress.percent ?? 0));
   const queued = progress.phase === 'queued' || (progress.queuePosition ?? 0) > 0;
+  // Steps are what actually move during a long sampler run; nodes say where in the pipeline we are.
+  const counters = [
+    progress.steps ? `step ${progress.step ?? 0}/${progress.steps}` : null,
+    progress.nodesTotal ? `node ${progress.nodesDone ?? 0}/${progress.nodesTotal}` : null,
+  ].filter(Boolean) as string[];
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
+      {progress.preview && (
+        <img
+          src={progress.preview}
+          alt="render in progress"
+          className="block max-h-52 rounded border border-border object-contain"
+        />
+      )}
       <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
         <div
           className="h-full rounded-full bg-accent transition-[width] duration-500 ease-out"
@@ -266,13 +278,23 @@ function ProgressBar({ progress }: { progress: NonNullable<ToolBlock['progress']
         {queued ? (
           <span>queued behind {progress.queuePosition ?? 0}</span>
         ) : (
-          progress.nodeLabel && <span className="truncate">{progress.nodeLabel}</span>
+          <>
+            {counters.length > 0 && <span className="font-mono">{counters.join(' · ')}</span>}
+            {progress.nodeLabel && <span className="truncate">{progress.nodeLabel}</span>}
+          </>
         )}
         <span className="ml-auto shrink-0 font-mono">
           {humanMs(progress.elapsedMs)}
           {progress.etaMs != null && progress.etaMs > 0 && ` · ~${humanMs(progress.etaMs)} left`}
         </span>
       </div>
+      {/* The server decides whether previews exist at all — say so rather than showing a blank space. */}
+      {!progress.sawPreview && progress.phase === 'running' && (progress.percent ?? 0) > 10 && (
+        <div className="text-[10px] text-slate-600">
+          Live preview off — start ComfyUI with <span className="font-mono">--preview-method auto</span> to
+          watch the render.
+        </div>
+      )}
     </div>
   );
 }
@@ -335,6 +357,14 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
   const sourceId = g?.sourceId ?? (typeof args.image === 'string' ? args.image : null);
 
   const Icon = kind === 'video' ? Clapperboard : kind === 'audio' ? AudioLines : ImagePlus;
+  // Everything below arrives on the `start` emission, seconds after submit — so a ten-minute render
+  // identifies itself for its whole duration instead of only at the end.
+  const models = g?.models ?? [];
+  const vram =
+    g?.vramFreeBytes && g?.vramTotalBytes
+      ? `${(g.vramFreeBytes / 1e9).toFixed(1)}/${(g.vramTotalBytes / 1e9).toFixed(1)}GB free`
+      : null;
+  const jobUrl = g?.comfyUrl && g?.promptId ? g.comfyUrl : null;
   const error =
     block.status === 'error' && typeof result.error === 'string' ? result.error : null;
   // A render that outlived the tool's patience is still going — say so rather than showing "failed".
@@ -360,12 +390,43 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
             {workflow}
           </span>
         )}
+        {jobUrl && (
+          <a
+            href={jobUrl}
+            target="_blank"
+            rel="noreferrer"
+            title={`Open ComfyUI — job ${g?.promptId}`}
+            className="shrink-0 text-slate-600 transition-colors hover:text-accent"
+          >
+            <ExternalLink size={11} />
+          </a>
+        )}
         <span className="ml-auto">
           <StatusIcon status={block.status} />
         </span>
       </div>
 
       <div className="space-y-2 border-t border-white/[0.06] p-3">
+        {(models.length > 0 || vram) && (
+          <div className="flex flex-wrap items-center gap-1">
+            {models.slice(0, 3).map((m) => (
+              <span
+                key={m}
+                title={m}
+                className="max-w-[14rem] truncate rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent/80"
+              >
+                {m.replace(/\.(safetensors|ckpt|pt|gguf|sft)$/i, '')}
+              </span>
+            ))}
+            {/* Free VRAM at submit is the number that predicts an out-of-memory failure on a box
+                whose GPU is shared with the inference server. */}
+            {vram && (
+              <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
+                {vram}
+              </span>
+            )}
+          </div>
+        )}
         {sourceId && (
           <div className="text-slate-400">
             <span className="text-slate-500">From: </span>

@@ -204,6 +204,7 @@ async function packageResult(
 
   const kind = outcome.files[0]?.kind === 'image' ? 'image' : (outcome.files[0]?.kind ?? 'image');
   ctx.emitMediaGen?.({
+    phase: 'done',
     kind: kind === 'other' ? 'image' : kind,
     prompt: extra.params.prompt ? String(extra.params.prompt) : '',
     negativePrompt: extra.negativePrompt,
@@ -269,6 +270,26 @@ async function runMediaTool(
       inputImages: opts.inputImages,
       timeoutMs: waitSeconds * 1000,
       onProgress: progressReporter(ctx, opts.toolName),
+      // Announce the run the moment ComfyUI takes it, so the card names the workflow and its models
+      // for the whole render rather than only once the artifact lands.
+      onStart: (info) =>
+        ctx.emitMediaGen?.({
+          phase: 'start',
+          kind: info.outputKind,
+          prompt: opts.prompt,
+          negativePrompt: opts.negativePrompt,
+          workflow: info.workflow,
+          workflowKind: info.workflowKind,
+          models: info.models,
+          promptId: info.promptId,
+          comfyUrl: info.comfyUrl,
+          queuePosition: info.queuePosition,
+          vramFreeBytes: info.vramFreeBytes,
+          vramTotalBytes: info.vramTotalBytes,
+          seed: info.seed,
+          params: { prompt: opts.prompt, ...opts.params },
+          sourceId: opts.sourceId ?? null,
+        }),
       signal: ctx.signal,
       sessionId: ctx.sessionId,
     });

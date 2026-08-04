@@ -334,6 +334,26 @@ export function autoBind(
   return { bindings, output_node_id: outputNodeId, output_kind: outputKind, kind, unbound };
 }
 
+/**
+ * The weight files a graph loads, most significant loader first.
+ *
+ * This is the most legible answer to "what is actually running" — far more so than the node count or
+ * the workflow's name — so it feeds both the discovery list and the live tool card.
+ */
+export function modelFiles(graph: ComfyGraph): string[] {
+  const priority = ['UNETLoader', 'CheckpointLoaderSimple', 'CheckpointLoader', 'DiffusersLoader'];
+  const found: { file: string; rank: number }[] = [];
+  for (const node of Object.values(graph)) {
+    for (const value of Object.values(node.inputs)) {
+      if (typeof value !== 'string' || !MODEL_FILE.test(value)) continue;
+      const rank = priority.indexOf(node.class_type);
+      found.push({ file: value, rank: rank === -1 ? priority.length : rank });
+    }
+  }
+  found.sort((a, b) => a.rank - b.rank);
+  return [...new Set(found.map((f) => f.file))];
+}
+
 /** Which parameters are worth reporting as missing, per workflow kind. */
 export function relevantKeys(kind: WorkflowKind): BindingKey[] {
   switch (kind) {
