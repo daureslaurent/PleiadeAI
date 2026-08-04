@@ -1,5 +1,6 @@
 import { createLogger } from '../../config/logger';
 import { resourceRepository } from '../../domain/resources/resource.repository';
+import { readResourceBytes, unknownHandleError } from './resource-bytes';
 import type { ImageBlock } from '../../core/event-bus/events.types';
 import type { Tool } from '../types';
 import { readFileBytes, writeFileBytes, toErrorResult } from './fs/env-fs';
@@ -47,20 +48,33 @@ export const data: Tool = {
 
     if (action === 'list') {
       const rows = await resourceRepository.listBySession(ctx.sessionId);
-      return {
-        result: {
-          ok: true,
-          count: rows.length,
-          resources: rows.map((r) => ({
-            handle: r.handle,
-            kind: r.kind,
-            mime: r.mime,
-            size: r.size,
-            filename: r.filename || undefined,
-            source: r.source,
-          })),
-        },
-      };
+      const resources = rows.map((r) => ({
+        handle: r.handle,
+        kind: r.kind,
+        mime: r.mime,
+        size: r.size,
+        filename: r.filename || undefined,
+        source: r.source,
+      }));
+
+      // Images the user attached to the conversation are held on the message document, not in the
+      // resource store, so listing the store alone reports "no resources" to an agent that is
+      // literally looking at a photo. Fold in anything the turn's pool has that the store doesn't.
+      const stored = new Set(resources.map((r) => r.handle));
+      for (const img of ctx.attachedImages ?? []) {
+        if (!img.id || stored.has(img.id) || !img.dataUrl) continue;
+        resources.push({
+          handle: img.id,
+          kind: img.kind ?? 'image',
+          mime: img.mime || (img.dataUrl.match(/^data:([^;]+);/)?.[1] ?? 'image/png'),
+          // Base64 carries ~4 bytes per 3 of payload; close enough for an agent sizing a decision.
+          size: img.size ?? Math.floor(((img.dataUrl.split(',')[1] ?? '').length * 3) / 4),
+          filename: img.filename || undefined,
+          source: img.source ?? 'attachment',
+        });
+      }
+
+      return { result: { ok: true, count: resources.length, resources } };
     }
 
     if (action === 'save') {
@@ -69,10 +83,8 @@ export const data: Tool = {
       if (!handle) return { result: { ok: false, error: 'handle is required for save' } };
       if (!path) return { result: { ok: false, error: 'path is required for save' } };
       try {
-        const bytes = await resourceRepository.readBytes(ctx.sessionId, handle);
-        if (!bytes) {
-          return { result: { ok: false, error: `no resource with handle "${handle}" in this session` } };
-        }
+        const bytes = await readResourceBytes(ctx, handle);
+        if (!bytes) return { result: { ok: false, error: unknownHandleError(ctx, handle) } };
         await writeFileBytes(ctx, path, bytes);
         log.info({ agent: ctx.agentName, handle, path, bytes: bytes.length }, 'data save');
         return { result: { ok: true, handle, path, bytes: bytes.length } };

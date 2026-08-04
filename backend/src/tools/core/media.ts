@@ -1,6 +1,7 @@
 import { createLogger } from '../../config/logger';
 import { toolConfigService } from '../../domain/tools/tool-config.service';
 import { resourceRepository } from '../../domain/resources/resource.repository';
+import { readResourceBytes, unknownHandleError } from './resource-bytes';
 import { ComfyError } from '../../media/comfy/errors';
 import {
   generateMedia,
@@ -491,13 +492,13 @@ function sniffImage(bytes: Buffer): { mime: string; ext: string } | null {
 async function resolveInputImage(ctx: ToolContext, ref: string): Promise<InputImage> {
   const isHandle = /^(img|blob)_\d+$/.test(ref);
   const bytes = isHandle
-    ? await resourceRepository.readBytes(ctx.sessionId, ref)
+    ? await readResourceBytes(ctx, ref)
     : await readFileBytes(ctx, ref).catch(() => null);
 
   if (!bytes || bytes.length === 0) {
     throw new ComfyError(
       isHandle
-        ? `No resource with handle "${ref}" in this session.`
+        ? `No ${unknownHandleError(ctx, ref)}`
         : `Could not read "${ref}" — give a path that exists, or a resource handle like img_1.`,
     );
   }

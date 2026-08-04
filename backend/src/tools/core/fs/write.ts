@@ -1,5 +1,5 @@
 import type { Tool } from '../../types';
-import { resourceRepository } from '../../../domain/resources/resource.repository';
+import { readResourceBytes, unknownHandleError } from '../resource-bytes';
 import { fileExists, writeFileBytes, toErrorResult } from './env-fs';
 
 /**
@@ -39,10 +39,8 @@ export const write: Tool = {
       // Bytes to write: a resource handle's raw bytes (binary-safe), else the provided text content.
       let bytes: Buffer;
       if (fromHandle) {
-        const data = await resourceRepository.readBytes(ctx.sessionId, fromHandle);
-        if (!data) {
-          return { result: { ok: false, error: `no resource with handle "${fromHandle}" in this session` } };
-        }
+        const data = await readResourceBytes(ctx, fromHandle);
+        if (!data) return { result: { ok: false, error: unknownHandleError(ctx, fromHandle) } };
         bytes = data;
       } else {
         const content = typeof args.content === 'string' ? args.content : String(args.content ?? '');
