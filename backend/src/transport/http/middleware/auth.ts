@@ -30,6 +30,9 @@ const WRITE_SCOPES: ReadonlyArray<{ scope: string; prefix: string }> = [
   // Covers running a flow as well as editing one: a run spends real GPU time and can drive agents,
   // so it is deliberately not something a read-only key may trigger.
   { scope: 'flows:write', prefix: '/api/flows' },
+  // Importing, editing and test-running ComfyUI workflows. A test run spends GPU time, so this is a
+  // write in the same sense `flows:write` is.
+  { scope: 'media:write', prefix: '/api/media' },
 ];
 
 /**

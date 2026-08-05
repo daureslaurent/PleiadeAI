@@ -38,6 +38,7 @@ route family:
 | `isolations:write` | `/api/isolations` |
 | `android:write` | `/api/android-devices` |
 | `flows:write` | `/api/flows` — editing **and running** a flow, since a run spends real GPU time and can drive agents |
+| `media:write` | `/api/media` — importing, correcting and test-running ComfyUI workflows |
 
 Regardless of scope, a key can never reach `/api/api-keys`, and cannot open a websocket (so it can't
 drive a chat). Response bodies are scrubbed of credentials — `GET /api/endpoints` returns each
@@ -72,6 +73,18 @@ Two things worth knowing before authoring a graph from the outside:
 
 `run_flow` returns a run id **immediately**; it does not wait, because a flow with a video node runs
 for minutes. Poll `flow_run` for status, output and the debug trace.
+
+### ComfyUI workflows
+
+Read: `media_workflows`, `media_workflow`, `media_status`, `media_discover`.
+Write (needs `media:write`): `import_media_workflow`, `update_media_workflow`,
+`delete_media_workflow`, `validate_media_workflow`.
+
+A flow's media nodes reference workflows **by id**, so `media_workflows` is how you find the id to
+put in a node's `workflow` config. Two things to check on an imported workflow before wiring a flow
+to it: that its `kind` is what you expect (a graph ending in a preview rather than a save used to be
+misclassified), and that `bindings.prompt` exists — without one the run is refused, because
+submitting it would silently regenerate the workflow author's own prompt.
 
 ```
 node scripts/prod.mjs flow_node_types

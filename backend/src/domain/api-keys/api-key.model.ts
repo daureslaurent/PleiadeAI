@@ -11,6 +11,7 @@ export const API_KEY_SCOPES = [
   'isolations:write',
   'android:write',
   'flows:write',
+  'media:write',
 ] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 

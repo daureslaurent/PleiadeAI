@@ -2011,6 +2011,7 @@ export const API_KEY_SCOPES = [
   { scope: 'isolations:write', label: 'create and edit isolation profiles' },
   { scope: 'android:write', label: 'register and test Android devices' },
   { scope: 'flows:write', label: 'create, edit, delete and run flows' },
+  { scope: 'media:write', label: 'import, edit and test ComfyUI workflows' },
 ] as const;
 
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number]['scope'];

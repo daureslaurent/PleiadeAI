@@ -127,6 +127,81 @@ export const ENDPOINTS = [
     resolve: (a) => ({ path: a.path, query: a.query ?? {} }),
   },
 
+  // --- ComfyUI media workflows (COMFYUI_MEDIA_PLAN.md) ---
+  {
+    name: 'media_workflows',
+    description:
+      'The imported ComfyUI workflows the media nodes and tools can run, with each one\'s kind (image/video/audio/edit) and id. The ids are what a flow\'s media nodes reference.',
+    args: { kind: { type: 'string', description: 'Filter: image | video | audio | edit' } },
+    resolve: (a) => ({ path: '/api/media/workflows', query: { kind: a.kind } }),
+  },
+  {
+    name: 'media_workflow',
+    description:
+      "One workflow in full, including its graph and its parameter bindings. Check `bindings.prompt` exists — a workflow without one is refused at run time, because submitting it would silently regenerate the workflow author's own prompt.",
+    args: { id: { type: 'string', description: 'Workflow id', required: true } },
+    resolve: (a) => ({ path: `/api/media/workflows/${a.id}` }),
+  },
+  {
+    name: 'media_status',
+    description:
+      'ComfyUI server health: version, queue depth, and per-GPU VRAM. Read the free VRAM before queueing a large model — that is what decides whether a render fails.',
+    args: {},
+    resolve: () => ({ path: '/api/media/comfy/status' }),
+  },
+  {
+    name: 'media_discover',
+    description:
+      "Workflows found in ComfyUI's run history that could be imported, with the kind each was classified as. ComfyUI keeps history in RAM and loses it on restart, so a workflow only appears here until then.",
+    args: {},
+    resolve: () => ({ path: '/api/media/comfy/discover' }),
+  },
+  {
+    name: 'import_media_workflow',
+    description:
+      'Import a discovered workflow by its prompt_id (from pleiades_media_discover), snapshotting its graph and auto-binding its parameters. Needs the "media:write" scope.',
+    method: 'POST',
+    write: true,
+    args: {
+      prompt_id: { type: 'string', description: 'From pleiades_media_discover', required: true },
+      name: { type: 'string', description: 'Name to store it under', required: true },
+      kind: { type: 'string', description: 'Override the detected kind: image | video | audio | edit' },
+    },
+    resolve: (a) => ({
+      path: '/api/media/workflows/import',
+      body: { prompt_id: a.prompt_id, name: a.name, ...(a.kind ? { kind: a.kind } : {}) },
+    }),
+  },
+  {
+    name: 'update_media_workflow',
+    description:
+      'Correct an imported workflow: name, kind, description, enabled, output_node_id, or its `bindings`. Use it when auto-binding guessed wrong. Needs the "media:write" scope.',
+    method: 'PUT',
+    write: true,
+    args: {
+      id: { type: 'string', description: 'Workflow id', required: true },
+      body: { type: 'object', description: 'Fields to change', required: true },
+    },
+    resolve: (a) => ({ path: `/api/media/workflows/${a.id}`, body: a.body }),
+  },
+  {
+    name: 'delete_media_workflow',
+    description: 'Delete an imported workflow. Needs the "media:write" scope.',
+    method: 'DELETE',
+    write: true,
+    args: { id: { type: 'string', description: 'Workflow id', required: true } },
+    resolve: (a) => ({ path: `/api/media/workflows/${a.id}` }),
+  },
+  {
+    name: 'validate_media_workflow',
+    description:
+      'Check a stored workflow against the live ComfyUI: that its bindings still match its graph and every model file it names is installed. Cheap, and it is what stops a ten-minute render dying on a renamed checkpoint. Needs the "media:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { id: { type: 'string', description: 'Workflow id', required: true } },
+    resolve: (a) => ({ path: `/api/media/workflows/${a.id}/validate` }),
+  },
+
   // --- Flows (FLOWS_PLAN.md). Reads first; the writes are further down. ---
   {
     name: 'flows',
