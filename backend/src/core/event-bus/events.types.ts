@@ -572,6 +572,27 @@ export interface FlowRunEndPayload {
   error?: string;
 }
 
+/**
+ * A node persisted an artifact into the run.
+ *
+ * Emitted at the moment the bytes are stored rather than when the node finishes, for two reasons: a
+ * node that produces several files announces each as it lands, and it catches artifacts that leave
+ * on a secondary port (an `ask_agent` node handing back images) which a node-completion event would
+ * miss. That is what lets the Media tab fill in during a run instead of at the end of it.
+ */
+export interface FlowArtifactPayload {
+  ctx: EventContext;
+  runId: string;
+  nodeId: string;
+  handle: string;
+  kind: 'image' | 'blob';
+  mime: string;
+  size: number;
+  filename?: string;
+  /** Set inside a `for_each` body, so a gallery can group by shot. */
+  iteration?: number;
+}
+
 /** The run is blocked on the operator's decision at an `approval` node. */
 export interface FlowAwaitingApprovalPayload {
   ctx: EventContext;
@@ -617,6 +638,7 @@ export interface EventMap {
   'flow:node_end': FlowNodeEndPayload;
   'flow:run_end': FlowRunEndPayload;
   'flow:awaiting_approval': FlowAwaitingApprovalPayload;
+  'flow:artifact': FlowArtifactPayload;
 }
 
 export type EventName = keyof EventMap;

@@ -393,6 +393,19 @@ export interface FlowRunEndEvent {
   error?: string;
 }
 
+/** A node persisted an artifact — emitted as the bytes land, not when the node finishes. */
+export interface FlowArtifactEvent {
+  type: 'flow_artifact';
+  runId: string;
+  nodeId: string;
+  handle: string;
+  kind: 'image' | 'blob';
+  mime: string;
+  size: number;
+  filename?: string;
+  iteration?: number;
+}
+
 export interface FlowAwaitingApprovalEvent {
   type: 'flow_awaiting_approval';
   runId: string;
@@ -428,4 +441,5 @@ export type WsEvent =
   | FlowNodeOutputEvent
   | FlowNodeEndEvent
   | FlowRunEndEvent
+  | FlowArtifactEvent
   | FlowAwaitingApprovalEvent;

@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   Play,
+  Images,
   Save,
   SlidersHorizontal,
   Terminal,
@@ -26,16 +27,18 @@ import { FlowCanvas } from './FlowCanvas';
 import { NodeInspector } from './NodeInspector';
 import { NodePalette } from './NodePalette';
 import { FlowDebugPanel } from './FlowDebugPanel';
+import { FlowMediaPanel } from './FlowMediaPanel';
 import { FlowRunPanel, messageOf } from './FlowRunPanel';
 import { FlowRunsPanel } from './FlowRunsPanel';
 import { useFlowRun } from './useFlowRun';
 
 type Tab = 'design' | 'runs';
-type RailTab = 'run' | 'debug' | 'params';
+type RailTab = 'run' | 'debug' | 'media' | 'params';
 
 const RAIL_TABS = [
   { key: 'run' as const, label: 'Run', icon: Play },
   { key: 'debug' as const, label: 'Debug', icon: Terminal },
+  { key: 'media' as const, label: 'Media', icon: Images },
   { key: 'params' as const, label: 'Params', icon: SlidersHorizontal },
 ];
 
@@ -391,6 +394,14 @@ export function FlowsView() {
                     nodes={nodes}
                     selectedNodeId={selectedNodeId}
                     live={live.detail?.status === 'running' || live.detail?.status === 'awaiting_input'}
+                  />
+                )}
+                {railTab === 'media' && (
+                  <FlowMediaPanel
+                    artifacts={live.artifacts}
+                    states={live.states}
+                    nodes={nodes}
+                    sessionId={live.detail?.sessionId ?? live.runId}
                   />
                 )}
                 {railTab === 'params' &&

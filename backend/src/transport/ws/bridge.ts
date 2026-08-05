@@ -358,6 +358,20 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  eventBus.on('flow:artifact', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_artifact', {
+      type: 'flow_artifact',
+      runId: p.runId,
+      nodeId: p.nodeId,
+      handle: p.handle,
+      kind: p.kind,
+      mime: p.mime,
+      size: p.size,
+      filename: p.filename,
+      iteration: p.iteration,
+    });
+  });
+
   eventBus.on('flow:awaiting_approval', (p) => {
     io.to(p.ctx.sessionId).emit('flow_awaiting_approval', {
       type: 'flow_awaiting_approval',

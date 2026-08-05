@@ -3,6 +3,7 @@ import { getSocket } from '../../lib/socket';
 import { flowsApi, type FlowLogSource, type FlowRunDetail } from '../../lib/api';
 import type { NodeRunState } from './FlowNodeCard';
 import type {
+  FlowArtifactEvent,
   FlowAwaitingApprovalEvent,
   FlowNodeEndEvent,
   FlowNodeOutputEvent,
@@ -24,6 +25,19 @@ export interface LogLine {
   iteration?: number | null;
 }
 
+/** One artifact a run produced, in the order it was produced. */
+export interface RunArtifact {
+  handle: string;
+  nodeId: string;
+  kind: 'image' | 'blob';
+  mime: string;
+  size: number;
+  filename?: string;
+  iteration?: number;
+  /** Absent for artifacts recovered from a finished run — only live ones are timed. */
+  at?: string;
+}
+
 /** Live view of one flow run: per-node status, the debug stream, and the pending approval gate. */
 export interface LiveRun {
   runId: string;
@@ -31,6 +45,8 @@ export interface LiveRun {
   states: Map<string, NodeRunState>;
   /** Chronological across every node — filtering by node happens in the view (spec §6.2). */
   logs: LogLine[];
+  /** Everything the run has produced so far, appended as each file lands. */
+  artifacts: RunArtifact[];
   pending: { nodeId: string; question: string; artifacts: string[] } | null;
   finished: { status: string; output?: string; handles?: string[]; error?: string } | null;
 }
@@ -39,6 +55,7 @@ const EMPTY: Omit<LiveRun, 'runId'> = {
   detail: null,
   states: new Map(),
   logs: [],
+  artifacts: [],
   pending: null,
   finished: null,
 };
@@ -103,6 +120,9 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
                 text: e.text,
                 iteration: e.iteration,
               })),
+          // The run's stored resources are authoritative for a finished run; live arrivals win while
+          // one is in flight, since they carry the producing node and arrive in production order.
+          artifacts: mergeArtifacts(prev.artifacts, detail),
           pending: detail.pending
             ? {
                 nodeId: detail.pending.node_id,
@@ -204,6 +224,28 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
       refresh();
     };
 
+    const onArtifact = (e: FlowArtifactEvent) =>
+      setState((prev) =>
+        prev.artifacts.some((a) => a.handle === e.handle)
+          ? prev
+          : {
+              ...prev,
+              artifacts: [
+                ...prev.artifacts,
+                {
+                  handle: e.handle,
+                  nodeId: e.nodeId,
+                  kind: e.kind,
+                  mime: e.mime,
+                  size: e.size,
+                  filename: e.filename,
+                  iteration: e.iteration,
+                  at: new Date().toISOString(),
+                },
+              ],
+            },
+      );
+
     const onApproval = (e: FlowAwaitingApprovalEvent) =>
       setState((prev) => ({
         ...prev,
@@ -216,6 +258,7 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
     socket.on('flow_node_end', onEnd);
     socket.on('flow_run_end', onRunEnd);
     socket.on('flow_awaiting_approval', onApproval);
+    socket.on('flow_artifact', onArtifact);
     // Emitted by the agent/tool/media work happening *inside* the run's nodes.
     socket.on('stream_chunk', onStreamChunk);
     socket.on('tool_start', onToolStart);
@@ -230,6 +273,7 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
       socket.off('flow_node_end', onEnd);
       socket.off('flow_run_end', onRunEnd);
       socket.off('flow_awaiting_approval', onApproval);
+      socket.off('flow_artifact', onArtifact);
       socket.off('stream_chunk', onStreamChunk);
       socket.off('tool_start', onToolStart);
       socket.off('tool_end', onToolEnd);
@@ -239,6 +283,28 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
   }, [runId, refresh]);
 
   return { runId: runId ?? '', ...state, refresh, reset };
+}
+
+/**
+ * Fold the run's stored resources into the live artifact list.
+ *
+ * A live arrival knows which node made it and lands in production order; a stored row knows neither,
+ * so it only fills in handles nothing announced — which is every handle when replaying a past run,
+ * and none while watching a live one.
+ */
+function mergeArtifacts(live: RunArtifact[], detail: FlowRunDetail): RunArtifact[] {
+  const seen = new Set(live.map((a) => a.handle));
+  const extra = (detail.resources ?? [])
+    .filter((r) => !seen.has(r.handle))
+    .map<RunArtifact>((r) => ({
+      handle: r.handle,
+      nodeId: '',
+      kind: r.kind,
+      mime: r.mime,
+      size: r.size,
+      filename: r.filename,
+    }));
+  return extra.length ? [...live, ...extra] : live;
 }
 
 /** Fold the persisted node trace into the live map without clobbering fresher live state. */

@@ -664,6 +664,7 @@ export class FlowRunner {
           filename: inputResource.filename,
           source: 'tool',
         });
+        this.announceArtifact(exec, node.id, stored);
         return stored.handle;
       },
       readResource: async (handle) => {
@@ -688,11 +689,31 @@ export class FlowRunner {
           filename: doc.filename,
           source: 'attachment',
         });
+        this.announceArtifact(exec, node.id, stored);
         return stored.handle;
       },
       askApproval: (question, artifacts) =>
         flowApprovalBroker.ask(ctx, { runId, nodeId: node.id, question, artifacts }),
     };
+  }
+
+  /** Tell the page an artifact exists the moment its bytes are persisted (spec §5). */
+  private announceArtifact(
+    exec: RegionExecution,
+    nodeId: string,
+    stored: { handle: string; kind: string; mime: string; size: number; filename?: string },
+  ): void {
+    eventBus.emit('flow:artifact', {
+      ctx: exec.ctx,
+      runId: exec.runId,
+      nodeId,
+      handle: stored.handle,
+      kind: stored.kind === 'image' ? 'image' : 'blob',
+      mime: stored.mime || 'application/octet-stream',
+      size: stored.size ?? 0,
+      filename: stored.filename || undefined,
+      iteration: exec.scopeIndex,
+    });
   }
 
   private async markSkipped(exec: RegionExecution, node: FlowNode): Promise<void> {

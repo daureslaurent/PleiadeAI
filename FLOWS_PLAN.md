@@ -234,6 +234,23 @@ id (§1.1), so the buffer just listens. They carry the *agent's* identity rather
 the runner stamps the executing node before each step — best-effort attribution, since a region runs
 nodes concurrently, and the alternative would put flow concerns inside the agent runner.
 
+### §6.3 Media, as it is made
+
+The run rail answers "what came out at the end". For a pipeline that renders for an hour that is the
+wrong question — you want to see the third shot while the fourth is still rendering, and judge
+whether to stop.
+
+Artifacts therefore ride their own `flow:artifact` event, emitted the moment bytes are persisted
+rather than when a node finishes. That timing matters twice: a node producing several files announces
+each as it lands, and it catches artifacts leaving on a secondary port (an `ask_agent` node handing
+images back) which a node-completion event would miss.
+
+The Media tab renders them newest-first, tagged with the producing node and — inside a `for_each` —
+the shot number. Nodes still rendering appear as live cards carrying ComfyUI's in-progress preview
+frame, because ten minutes of empty grid is indistinguishable from a broken run. Full view is
+portalled to `<body>`: the rail is `.glass`, and a `backdrop-filter` ancestor becomes the containing
+block for `position: fixed`, which would otherwise trap a full-screen overlay in a 320px column.
+
 ## §7 Triggers
 
 1. **Manual** — `POST /api/flows/:id/run` from the Flow page, with the `input` node values.
@@ -254,7 +271,7 @@ nodes concurrently, and the alternative would put flow concerns inside the agent
 ## §8 Frontend
 
 `/flows` (Operate group). The right rail carries three peer tabs — **Run** (inputs, controls, result),
-**Debug** (§6.2's stream, filterable by node and by source), **Params** (the node inspector). They are
+**Debug** (§6.2's stream, filterable by node and by source), **Media** (§6.3), **Params** (the node inspector). They are
 peers because they were previously fighting for one space: selecting a node replaced the run
 controls, and a node's log was an unscrollable overlay pinned to the canvas. Clicking a node opens
 Params and starting a run opens Debug, but any manual tab choice parks that until the next run, so
