@@ -11,6 +11,7 @@ import { attachSocket } from './transport/ws/socket';
 import { attachVisualProxy } from './transport/ws/visual-proxy';
 import { attachAndroidProxy } from './transport/ws/android-proxy';
 import { requireAuth, requireOperator } from './transport/http/middleware/auth';
+import { installAsyncErrorHandling } from './transport/http/middleware/async-errors';
 import { authRouter } from './transport/http/routes/auth.routes';
 import { apiKeysRouter } from './transport/http/routes/api-keys.routes';
 import { agentsRouter } from './transport/http/routes/agents.routes';
@@ -146,6 +147,12 @@ async function main(): Promise<void> {
   // mounted openly (before the authed router grabs the prefix) and guarded by its signed state token.
   app.use('/api/mail/oauth/callback', mailOauthCallbackRouter);
   app.use('/api/mail', requireAuth, mailRouter);
+
+  // After every route is mounted: catch async rejections and turn them into real status codes.
+  // Without this an invalid body rejects its handler, the request hangs, and the caller gets a bare
+  // 502 from the edge — which is exactly the wrong answer for an API driven by the MCP server, the
+  // CLI and agents (see middleware/async-errors.ts).
+  installAsyncErrorHandling(app);
 
   const httpServer = http.createServer(app);
   attachSocket(httpServer);
