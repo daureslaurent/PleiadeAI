@@ -501,6 +501,87 @@ export interface ConversationTurnCompletePayload {
 }
 
 // ---------------------------------------------------------------------------
+// Flows (FLOWS_PLAN.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * Flow events all carry an `EventContext` whose `sessionId` is the **run id** (flows spec §1.1), so
+ * `bridge.ts` relays them with the same room-scoped line as everything else — and a page watching a
+ * run also receives, for free, the `stream_chunk` / `tool_progress` / `media_gen` events emitted by
+ * the agent and media nodes executing inside it.
+ */
+export interface FlowRunStartPayload {
+  ctx: EventContext;
+  runId: string;
+  flowId: string;
+  flowName: string;
+  trigger: string;
+}
+
+export interface FlowNodeStartPayload {
+  ctx: EventContext;
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  label: string;
+  /** Set inside a `for_each` body, so repeated executions are distinguishable in the UI. */
+  iteration?: number;
+}
+
+export interface FlowNodeProgressPayload {
+  ctx: EventContext;
+  runId: string;
+  nodeId: string;
+  phase: 'queued' | 'running' | 'downloading';
+  percent?: number | null;
+  message?: string;
+  /** Latest in-progress preview frame (data URL) from ComfyUI, when the remote provides one. */
+  preview?: string;
+  etaMs?: number | null;
+  elapsedMs: number;
+}
+
+/** A line of live output from a node (agent tokens, tool stdout, a milestone). */
+export interface FlowNodeOutputPayload {
+  ctx: EventContext;
+  runId: string;
+  nodeId: string;
+  chunk: string;
+}
+
+export interface FlowNodeEndPayload {
+  ctx: EventContext;
+  runId: string;
+  nodeId: string;
+  status: 'success' | 'error' | 'skipped';
+  durationMs: number;
+  /** Truncated text rendering of the output, for the node card. */
+  summary?: string;
+  /** Handles the node produced, so the canvas can show a thumbnail without a refetch. */
+  handles?: string[];
+  error?: string;
+}
+
+export interface FlowRunEndPayload {
+  ctx: EventContext;
+  runId: string;
+  status: 'success' | 'error' | 'aborted';
+  durationMs: number;
+  output?: string;
+  handles?: string[];
+  error?: string;
+}
+
+/** The run is blocked on the operator's decision at an `approval` node. */
+export interface FlowAwaitingApprovalPayload {
+  ctx: EventContext;
+  runId: string;
+  nodeId: string;
+  question: string;
+  artifacts: string[];
+}
+
+// ---------------------------------------------------------------------------
 // Event name → payload map
 // ---------------------------------------------------------------------------
 
@@ -529,6 +610,13 @@ export interface EventMap {
   'llama:call_end': LlamaCallEndPayload;
   'scoring:turn_scored': TurnScoredPayload;
   'finetune:job_update': FinetuneJobUpdatePayload;
+  'flow:run_start': FlowRunStartPayload;
+  'flow:node_start': FlowNodeStartPayload;
+  'flow:node_progress': FlowNodeProgressPayload;
+  'flow:node_output': FlowNodeOutputPayload;
+  'flow:node_end': FlowNodeEndPayload;
+  'flow:run_end': FlowRunEndPayload;
+  'flow:awaiting_approval': FlowAwaitingApprovalPayload;
 }
 
 export type EventName = keyof EventMap;

@@ -86,6 +86,16 @@ Key seams:
   `ToolConfigField.optionsSource` (`tools/config-options.ts`) rather than frozen into the tool module.
   `ComfyProgressSocket` connects *before* submitting so a fast job can't finish unobserved, and polls
   `/history` in parallel so a dropped socket never loses a result.
+- **Flows (`flows/`, `domain/flows/`, spec `FLOWS_PLAN.md`).** Operator-authored node graphs run by
+  the backend in a *fixed* order — the deterministic counterpart to an agent deciding its own tool
+  order. Nodes wrap the same primitives the agent layer uses (`agentRunner.run`, `generateMedia`, any
+  registered tool/skill) plus control flow (condition, agent router, human approval, for_each). The
+  node registry (`flows/nodes/index.ts`) is the single source of truth: `GET /api/flows/node-types`
+  serves it, so the canvas palette and inspector form render themselves from the handlers' declared
+  ports and `ToolConfigField[]`. **A run's `sessionId` is its run id** — that one choice makes every
+  produced artifact an ordinary session resource (handle + preview route) and makes the page's
+  existing `session:subscribe` deliver agent/tool/media events with no new plumbing. Fired manually,
+  by cron (`flow:scheduled_run`), or by an agent via the `run_flow` tool.
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.
   Embeddings failures degrade gracefully (memory just skipped).

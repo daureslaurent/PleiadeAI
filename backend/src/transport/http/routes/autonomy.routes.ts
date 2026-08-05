@@ -1,15 +1,27 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
-import { getAgenda, AUTONOMOUS_RUN_JOB } from '../../../autonomy/agenda.setup';
+import { getAgenda, AUTONOMOUS_RUN_JOB, FLOW_RUN_JOB } from '../../../autonomy/agenda.setup';
 import { parseCron, applyCron, previewCron } from '../../../autonomy/cron';
 import { env } from '../../../config/env';
 import { runResultRepository } from '../../../domain/autonomy/run-result.repository';
+import { flowRepository } from '../../../domain/flows/flow.repository';
 
 /** Autonomy control board: schedule, list, cancel, and the global kill switch. */
 export const autonomyRouter = Router();
 
+/**
+ * The two things a schedule can run: an agent prompt, or a saved flow (FLOWS_PLAN.md §7). Both are
+ * ordinary Agenda jobs with the same cron semantics and the same result history, so the whole control
+ * board — list, edit, run-now, cancel, kill — treats them uniformly; only the payload differs.
+ */
+const JOB_NAMES = [AUTONOMOUS_RUN_JOB, FLOW_RUN_JOB];
+
+function jobNameFor(kind: unknown): string {
+  return String(kind ?? 'agent') === 'flow' ? FLOW_RUN_JOB : AUTONOMOUS_RUN_JOB;
+}
+
 autonomyRouter.get('/jobs', async (_req, res) => {
-  const jobs = await getAgenda().jobs({ name: AUTONOMOUS_RUN_JOB });
+  const jobs = await getAgenda().jobs({ name: { $in: JOB_NAMES } });
   // Run-now / busy-requeue create ad-hoc *clones* of a schedule (same `data.scheduleId`, different
   // `_id`). They are executions, not schedules: hide them from the list, but fold their liveness
   // (Agenda's `lockedAt`) back into the schedule they belong to.
@@ -24,6 +36,7 @@ autonomyRouter.get('/jobs', async (_req, res) => {
   res.json(
     schedules.map((j) => ({
       id: String(j.attrs._id),
+      kind: j.attrs.name === FLOW_RUN_JOB ? 'flow' : 'agent',
       data: j.attrs.data,
       nextRunAt: j.attrs.nextRunAt,
       lastRunAt: j.attrs.lastRunAt,
@@ -51,17 +64,34 @@ autonomyRouter.get('/cron/preview', (req, res) => {
  * at the next occurrence, otherwise the job repeats.
  */
 autonomyRouter.post('/jobs', async (req, res) => {
-  const { agentName, prompt, cron, once, alert } = req.body ?? {};
-  if (!agentName || !prompt || !cron) {
-    res.status(400).json({ error: 'agentName, prompt and cron are required' });
+  const { agentName, prompt, cron, once, alert, kind, flowId, inputs } = req.body ?? {};
+  if (!cron) {
+    res.status(400).json({ error: 'cron is required' });
     return;
   }
+
+  let payload: Record<string, unknown>;
+  if (jobNameFor(kind) === FLOW_RUN_JOB) {
+    const flow = flowId ? await flowRepository.findById(String(flowId)) : null;
+    if (!flow) {
+      res.status(400).json({ error: 'flowId must name an existing flow' });
+      return;
+    }
+    payload = { flowId: String(flow._id), flowName: flow.name, inputs: inputs ?? {}, alert };
+  } else {
+    if (!agentName || !prompt) {
+      res.status(400).json({ error: 'agentName and prompt are required' });
+      return;
+    }
+    payload = { agentName, prompt, alert };
+  }
+
   const parsed = parseCron(String(cron).trim());
   if (!parsed.ok) {
     res.status(400).json({ error: parsed.error });
     return;
   }
-  const job = getAgenda().create(AUTONOMOUS_RUN_JOB, { agentName, prompt, alert });
+  const job = getAgenda().create(jobNameFor(kind), payload);
   applyCron(job, String(cron).trim(), Boolean(once), parsed.value.next);
   await job.save();
   // Stamp the schedule id into the payload so every run (scheduled or run-now) groups its results.
@@ -91,20 +121,23 @@ autonomyRouter.get('/jobs/:id/results', async (req, res) => {
  * mode when omitted).
  */
 autonomyRouter.put('/jobs/:id', async (req, res) => {
-  const { agentName, prompt, cron, once, alert } = req.body ?? {};
+  const { agentName, prompt, cron, once, alert, inputs } = req.body ?? {};
   const [job] = await getAgenda().jobs({
     _id: new Types.ObjectId(req.params.id),
-    name: AUTONOMOUS_RUN_JOB,
+    name: { $in: JOB_NAMES },
   });
   if (!job) {
     res.status(404).json({ error: 'not found' });
     return;
   }
 
+  // A schedule's kind is fixed at creation: switching an agent prompt into a flow run in place would
+  // silently orphan its result history, which is keyed by the schedule id.
   job.attrs.data = {
     ...job.attrs.data,
-    agentName: agentName ?? job.attrs.data.agentName,
-    prompt: prompt ?? job.attrs.data.prompt,
+    ...(job.attrs.name === FLOW_RUN_JOB
+      ? { inputs: inputs ?? job.attrs.data.inputs }
+      : { agentName: agentName ?? job.attrs.data.agentName, prompt: prompt ?? job.attrs.data.prompt }),
     alert: alert ?? job.attrs.data.alert,
     scheduleId: job.attrs.data.scheduleId ?? String(job.attrs._id),
   };
@@ -127,14 +160,14 @@ autonomyRouter.put('/jobs/:id', async (req, res) => {
 autonomyRouter.post('/jobs/:id/run', async (req, res) => {
   const [job] = await getAgenda().jobs({
     _id: new Types.ObjectId(req.params.id),
-    name: AUTONOMOUS_RUN_JOB,
+    name: { $in: JOB_NAMES },
   });
   if (!job) {
     res.status(404).json({ error: 'not found' });
     return;
   }
   // Carry the schedule id so the ad-hoc run lands in the same result history as scheduled runs.
-  await getAgenda().now(AUTONOMOUS_RUN_JOB, {
+  await getAgenda().now(job.attrs.name, {
     ...job.attrs.data,
     scheduleId: job.attrs.data.scheduleId ?? String(job.attrs._id),
   });
@@ -146,8 +179,8 @@ autonomyRouter.delete('/jobs/:id', async (req, res) => {
   res.json({ cancelled: removed ?? 0 });
 });
 
-/** Global execution kill switch: cancels every scheduled autonomous job. */
+/** Global execution kill switch: cancels every scheduled autonomous job, agent and flow alike. */
 autonomyRouter.post('/kill', async (_req, res) => {
-  const removed = await getAgenda().cancel({ name: AUTONOMOUS_RUN_JOB });
+  const removed = await getAgenda().cancel({ name: { $in: JOB_NAMES } });
   res.json({ ok: true, cancelled: removed ?? 0 });
 });

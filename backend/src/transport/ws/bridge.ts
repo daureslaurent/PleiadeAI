@@ -284,4 +284,87 @@ export function attachBridge(io: Server): void {
       error: p.error,
     });
   });
+
+  // --- Flows (FLOWS_PLAN.md §5) ---------------------------------------------------------------
+  // A run's `ctx.sessionId` *is* its run id, so these relay through the same room machinery as chat —
+  // and the Flow page, having joined that room, also receives the agent/tool/media events emitted by
+  // the nodes executing inside the run, with no flow-specific plumbing on either side.
+  eventBus.on('flow:run_start', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_run_start', {
+      type: 'flow_run_start',
+      runId: p.runId,
+      flowId: p.flowId,
+      flowName: p.flowName,
+      trigger: p.trigger,
+    });
+  });
+
+  eventBus.on('flow:node_start', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_node_start', {
+      type: 'flow_node_start',
+      runId: p.runId,
+      nodeId: p.nodeId,
+      nodeType: p.nodeType,
+      label: p.label,
+      iteration: p.iteration,
+    });
+  });
+
+  eventBus.on('flow:node_progress', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_node_progress', {
+      type: 'flow_node_progress',
+      runId: p.runId,
+      nodeId: p.nodeId,
+      phase: p.phase,
+      percent: p.percent,
+      message: p.message,
+      preview: p.preview,
+      etaMs: p.etaMs,
+      elapsedMs: p.elapsedMs,
+    });
+  });
+
+  eventBus.on('flow:node_output', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_node_output', {
+      type: 'flow_node_output',
+      runId: p.runId,
+      nodeId: p.nodeId,
+      chunk: p.chunk,
+    });
+  });
+
+  eventBus.on('flow:node_end', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_node_end', {
+      type: 'flow_node_end',
+      runId: p.runId,
+      nodeId: p.nodeId,
+      status: p.status,
+      durationMs: p.durationMs,
+      summary: p.summary,
+      handles: p.handles,
+      error: p.error,
+    });
+  });
+
+  eventBus.on('flow:run_end', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_run_end', {
+      type: 'flow_run_end',
+      runId: p.runId,
+      status: p.status,
+      durationMs: p.durationMs,
+      output: p.output,
+      handles: p.handles,
+      error: p.error,
+    });
+  });
+
+  eventBus.on('flow:awaiting_approval', (p) => {
+    io.to(p.ctx.sessionId).emit('flow_awaiting_approval', {
+      type: 'flow_awaiting_approval',
+      runId: p.runId,
+      nodeId: p.nodeId,
+      question: p.question,
+      artifacts: p.artifacts,
+    });
+  });
 }

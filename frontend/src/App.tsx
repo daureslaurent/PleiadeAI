@@ -9,6 +9,7 @@ import { AgentsView } from './views/AgentsView';
 import { SkillsView } from './views/SkillsView';
 import { ToolsView } from './views/ToolsView';
 import { MediaView } from './views/MediaView';
+import { FlowsView } from './views/flows/FlowsView';
 import { IsolationsView } from './views/IsolationsView';
 import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
@@ -83,6 +84,7 @@ export default function App() {
           <Route path="/skills" element={<SkillsView />} />
           <Route path="/tools" element={<ToolsView />} />
           <Route path="/media" element={<MediaView />} />
+          <Route path="/flows" element={<FlowsView />} />
           <Route path="/images" element={<ImagesView />} />
           <Route path="/isolation" element={<IsolationsView />} />
           <Route path="/memory" element={<MemoryVault />} />

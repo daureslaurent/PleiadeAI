@@ -5,6 +5,8 @@ import { createLogger } from '../config/logger';
 import { sessionLock } from '../core/session/SessionLock';
 import { agentRunner } from '../orchestrator/AgentRunner';
 import { agentRepository } from '../domain/agents/agent.repository';
+import { flowRepository } from '../domain/flows/flow.repository';
+import { flowRunner } from '../flows/FlowRunner';
 import { runResultRepository } from '../domain/autonomy/run-result.repository';
 import { alertEngine } from '../alerts/AlertEngine';
 import { conversationGenService } from '../domain/conversation-gen/conversation-gen.service';
@@ -14,6 +16,22 @@ import type { ConversationGeneratorDoc } from '../domain/conversation-gen/genera
 const log = createLogger('agenda');
 
 export const AUTONOMOUS_RUN_JOB = 'agent:autonomous_run';
+
+/** Scheduled execution of a saved flow (FLOWS_PLAN.md §7). */
+export const FLOW_RUN_JOB = 'flow:scheduled_run';
+
+/** Payload of a scheduled flow run. */
+export interface FlowJobData {
+  flowId: string;
+  flowName: string;
+  /** Values for the flow's `input` nodes, keyed by input name. */
+  inputs?: Record<string, unknown>;
+  /** Alert on completion (default true). */
+  alert?: boolean;
+  scheduleId?: string;
+  cron?: string;
+  once?: boolean;
+}
 
 /** Conversation Generator tick: one generated conversation with one target agent. */
 export const CONVERSATION_GEN_JOB = 'conversation:generate';
@@ -141,6 +159,50 @@ export async function setupAgenda(): Promise<Agenda> {
         title: `Autonomous task complete: ${agentName}`,
         content: answer.slice(0, 2000),
       });
+    }
+  });
+
+  // Scheduled flows (FLOWS_PLAN.md §7). Deliberately the same tail as an autonomous task: the result
+  // is recorded in the run history and fanned out to the inbox and Telegram, so "my pipeline ran
+  // overnight" reaches the operator through the channel they already watch. No session yielding —
+  // a flow's agent nodes each yield on their own agent, which is the lock that actually matters.
+  agenda.define(FLOW_RUN_JOB, async (job: Job<FlowJobData>) => {
+    const { flowId, flowName, inputs = {}, alert = true } = job.attrs.data;
+    const scheduleId = job.attrs.data.scheduleId ?? String(job.attrs._id);
+    const flow = await flowRepository.findById(flowId);
+    if (!flow) {
+      log.warn({ flowId, flowName }, 'scheduled flow skipped: flow not found');
+      return;
+    }
+    if (!flow.enabled) {
+      log.info({ flow: flow.name }, 'scheduled flow skipped: disabled');
+      return;
+    }
+
+    log.info({ flow: flow.name }, 'running scheduled flow');
+    const startedAt = new Date();
+    const outcome = await flowRunner.start({ flow, trigger: 'cron', inputs });
+    const ok = outcome.status === 'success';
+
+    await runResultRepository
+      .record({
+        schedule_id: scheduleId,
+        agent_name: `flow:${flow.name}`,
+        prompt: Object.keys(inputs).length ? JSON.stringify(inputs) : '(no inputs)',
+        status: ok ? 'success' : 'error',
+        output: ok ? outcome.output : (outcome.error ?? 'the flow failed'),
+        started_at: startedAt,
+      })
+      .catch((e) => log.error({ err: e }, 'failed to persist flow run result'));
+
+    if (alert) {
+      await alertEngine
+        .dispatch({
+          agentId: flowId,
+          title: `${ok ? 'Flow complete' : 'Flow FAILED'}: ${flow.name}`,
+          content: (ok ? outcome.output : (outcome.error ?? '')).slice(0, 2000),
+        })
+        .catch((e) => log.error({ err: e }, 'failed to dispatch flow alert'));
     }
   });
 

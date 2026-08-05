@@ -330,6 +330,77 @@ export interface FinetuneJobUpdateEvent {
   error?: string;
 }
 
+// --- Flows (FLOWS_PLAN.md §5) ----------------------------------------------------------------
+// A flow run's socket room is its run id, so the Flows page joins it with the ordinary
+// `session:subscribe` and also receives the agent/tool/media events its nodes emit.
+
+export interface FlowRunStartEvent {
+  type: 'flow_run_start';
+  runId: string;
+  flowId: string;
+  flowName: string;
+  trigger: string;
+}
+
+export interface FlowNodeStartEvent {
+  type: 'flow_node_start';
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  label: string;
+  /** Set inside a `for_each` body, so repeated executions are distinguishable. */
+  iteration?: number;
+}
+
+export interface FlowNodeProgressEvent {
+  type: 'flow_node_progress';
+  runId: string;
+  nodeId: string;
+  phase: 'queued' | 'running' | 'downloading';
+  percent?: number | null;
+  message?: string;
+  /** Latest ComfyUI preview frame (data URL), when the remote emits them. */
+  preview?: string;
+  etaMs?: number | null;
+  elapsedMs: number;
+}
+
+export interface FlowNodeOutputEvent {
+  type: 'flow_node_output';
+  runId: string;
+  nodeId: string;
+  chunk: string;
+}
+
+export interface FlowNodeEndEvent {
+  type: 'flow_node_end';
+  runId: string;
+  nodeId: string;
+  status: 'success' | 'error' | 'skipped';
+  durationMs: number;
+  summary?: string;
+  handles?: string[];
+  error?: string;
+}
+
+export interface FlowRunEndEvent {
+  type: 'flow_run_end';
+  runId: string;
+  status: 'success' | 'error' | 'aborted';
+  durationMs: number;
+  output?: string;
+  handles?: string[];
+  error?: string;
+}
+
+export interface FlowAwaitingApprovalEvent {
+  type: 'flow_awaiting_approval';
+  runId: string;
+  nodeId: string;
+  question: string;
+  artifacts: string[];
+}
+
 export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
@@ -350,4 +421,11 @@ export type WsEvent =
   | LlamaCallDeltaEvent
   | LlamaCallEndEvent
   | TurnScoredEvent
-  | FinetuneJobUpdateEvent;
+  | FinetuneJobUpdateEvent
+  | FlowRunStartEvent
+  | FlowNodeStartEvent
+  | FlowNodeProgressEvent
+  | FlowNodeOutputEvent
+  | FlowNodeEndEvent
+  | FlowRunEndEvent
+  | FlowAwaitingApprovalEvent;

@@ -996,6 +996,157 @@ export const mediaApi = {
   },
 };
 
+// --- Flows (FLOWS_PLAN.md) ------------------------------------------------------------------
+
+export type PortType = 'text' | 'image' | 'video' | 'audio' | 'file' | 'json' | 'signal';
+
+export interface FlowValue {
+  type: PortType;
+  text?: string;
+  handles?: string[];
+  json?: unknown;
+}
+
+export interface PortSpec {
+  name: string;
+  types: PortType[];
+  required?: boolean;
+  description?: string;
+}
+
+/**
+ * A node type as declared by the backend registry. The canvas builds its palette, its ports and its
+ * inspector form entirely from these — adding a node type server-side needs no change here.
+ */
+export interface FlowNodeType {
+  type: string;
+  label: string;
+  group: 'io' | 'agent' | 'media' | 'tool' | 'control';
+  description: string;
+  inputs: PortSpec[];
+  outputs: PortSpec[];
+  config: ToolConfigField[];
+}
+
+export interface FlowNode {
+  id: string;
+  type: string;
+  label: string;
+  position: { x: number; y: number };
+  config: Record<string, unknown>;
+  run_as_agent?: string;
+}
+
+export interface FlowEdge {
+  id: string;
+  source: string;
+  source_port: string;
+  target: string;
+  target_port: string;
+}
+
+export interface FlowIssue {
+  level: 'error' | 'warning';
+  message: string;
+  nodeId?: string;
+  edgeId?: string;
+}
+
+export interface FlowSummary {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  nodeCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FlowInputSpec {
+  nodeId: string;
+  key: string;
+  label: string;
+  type: PortType;
+  default: unknown;
+  required: boolean;
+}
+
+export interface FlowDetail extends FlowSummary {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  issues: FlowIssue[];
+  runnable: boolean;
+  inputs: FlowInputSpec[];
+}
+
+export type FlowRunStatus = 'running' | 'awaiting_input' | 'success' | 'error' | 'aborted';
+export type FlowNodeStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
+
+export interface FlowRunSummary {
+  id: string;
+  flowId: string;
+  flowName: string;
+  status: FlowRunStatus;
+  trigger: 'manual' | 'agent' | 'cron' | 'api';
+  sessionId: string;
+  startedAt: string;
+  endedAt?: string | null;
+  error?: string;
+}
+
+export interface FlowRunNodeState {
+  node_id: string;
+  status: FlowNodeStatus;
+  started_at?: string | null;
+  ended_at?: string | null;
+  output?: Record<string, FlowValue> | null;
+  error?: string;
+  iteration?: number | null;
+}
+
+export interface FlowRunDetail extends FlowRunSummary {
+  inputs: Record<string, unknown>;
+  nodes: FlowRunNodeState[];
+  pending: { node_id: string; kind: 'approval'; question: string; artifacts: string[] } | null;
+  output: Record<string, FlowValue> | null;
+  live: boolean;
+  resources: { handle: string; kind: 'image' | 'blob'; mime: string; size: number; filename?: string }[];
+}
+
+export const flowsApi = {
+  nodeTypes: () =>
+    api.get<{ types: FlowNodeType[]; portTypes: PortType[] }>('/flows/node-types').then((r) => r.data),
+  list: () => api.get<FlowSummary[]>('/flows').then((r) => r.data),
+  get: (id: string) => api.get<FlowDetail>(`/flows/${id}`).then((r) => r.data),
+  create: (body: { name: string; description?: string }) =>
+    api.post<FlowDetail>('/flows', body).then((r) => r.data),
+  update: (
+    id: string,
+    patch: Partial<Pick<FlowSummary, 'name' | 'description' | 'enabled'>> & {
+      nodes?: FlowNode[];
+      edges?: FlowEdge[];
+    },
+  ) => api.put<FlowDetail>(`/flows/${id}`, patch).then((r) => r.data),
+  remove: (id: string) => api.delete(`/flows/${id}`).then((r) => r.data),
+  duplicate: (id: string) => api.post<FlowDetail>(`/flows/${id}/duplicate`).then((r) => r.data),
+  /** Validate an unsaved graph — called as you wire, before anything is persisted. */
+  validate: (nodes: FlowNode[], edges: FlowEdge[]) =>
+    api
+      .post<{ issues: FlowIssue[]; runnable: boolean }>('/flows/validate', { nodes, edges })
+      .then((r) => r.data),
+  run: (id: string, inputs: Record<string, unknown>) =>
+    api.post<FlowRunSummary>(`/flows/${id}/run`, { inputs }).then((r) => r.data),
+  runs: (flowId?: string, limit = 50) =>
+    api.get<FlowRunSummary[]>('/flows/runs/list', { params: { flowId, limit } }).then((r) => r.data),
+  getRun: (runId: string) => api.get<FlowRunDetail>(`/flows/runs/${runId}`).then((r) => r.data),
+  approve: (runId: string, approved: boolean) =>
+    api.post(`/flows/runs/${runId}/approve`, { approved }).then((r) => r.data),
+  stop: (runId: string) => api.post(`/flows/runs/${runId}/stop`).then((r) => r.data),
+  /** Ports a node currently exposes — refetched when a router's choices change. */
+  ports: (node: FlowNode) =>
+    api.post<{ inputs: PortSpec[]; outputs: PortSpec[] }>('/flows/ports', { node }).then((r) => r.data),
+};
+
 export const memoryApi = {
   list: (agentId: string) =>
     api.get<Array<{ id: string | number; payload: Record<string, unknown> }>>(`/memory/${agentId}`).then((r) => r.data),

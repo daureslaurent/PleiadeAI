@@ -6,6 +6,7 @@ import { rootLogger } from './config/logger';
 import { connectMongo, disconnectMongo } from './db/mongoose';
 import { runMigrations } from './db/migrate';
 import { setupAgenda } from './autonomy/agenda.setup';
+import { flowRunner } from './flows/FlowRunner';
 import { attachSocket } from './transport/ws/socket';
 import { attachVisualProxy } from './transport/ws/visual-proxy';
 import { attachAndroidProxy } from './transport/ws/android-proxy';
@@ -40,6 +41,7 @@ import { isolationsRouter } from './transport/http/routes/isolations.routes';
 import { imagesRouter } from './transport/http/routes/images.routes';
 import { resourcesRouter } from './transport/http/routes/resources.routes';
 import { mediaRouter } from './transport/http/routes/media.routes';
+import { flowsRouter } from './transport/http/routes/flows.routes';
 import { allowQueryToken } from './transport/http/middleware/query-token';
 import { transferRouter } from './transport/http/routes/transfer.routes';
 import { hostRouter } from './transport/http/routes/host.routes';
@@ -134,6 +136,8 @@ async function main(): Promise<void> {
   // header-only auth.
   app.use('/api/resources', allowQueryToken, requireAuth, resourcesRouter);
   app.use('/api/media', allowQueryToken, requireAuth, mediaRouter);
+  // Same reason as the two above: the run panel previews a flow's artifacts with bare media elements.
+  app.use('/api/flows', allowQueryToken, requireAuth, flowsRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
   app.use('/api/monitor', requireAuth, monitorRouter);
   app.use('/api/host', requireAuth, hostRouter);
@@ -148,6 +152,9 @@ async function main(): Promise<void> {
   attachVisualProxy(httpServer);
   attachAndroidProxy(httpServer);
   await setupAgenda();
+  // Any flow run still marked live belongs to an executor that died with the previous process
+  // (FLOWS_PLAN.md §4) — fail them so the UI never shows a run that nothing is driving.
+  await flowRunner.sweepInterrupted().catch((err) => rootLogger.error({ err }, 'flow run sweep failed'));
   // Interactive Telegram bot (long-poll). The DB-backed settings (env fallback) are pushed into
   // the runtime config first so a token saved from the UI survives restarts. Best-effort: a
   // Telegram outage never blocks boot.

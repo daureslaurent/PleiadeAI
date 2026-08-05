@@ -33,6 +33,21 @@ Handing a resource to another agent: you do **not** forward bytes. Just name the
 \`ask_agent\` query ("analyse blob_1") — the delegate reaches it with its own \`data\` tool because
 you share the session. See the \`resources\` topic guide.`,
 
+  run_flow: `# run_flow — run a saved pipeline
+
+A **flow** is a graph the operator drew: agents, media generation and tools wired together, run by
+the backend in a fixed order. Where you decide what to do next turn by turn, a flow's order is
+already decided — which is exactly why you should prefer one when it covers the job.
+
+- \`run_flow({action:"list"})\` — what flows exist, and which inputs each takes. Do this first; the
+  input names are what you must key your arguments by.
+- \`run_flow({action:"run", flow:"…", inputs:{…}})\` — run one and get its result text back. Any
+  images it produced come back as pictures you can see and forward; video and audio stay on the
+  Flows page (they're too large to hand around, and you can't perceive them anyway).
+
+A flow can take minutes — a video step alone runs about ten. That is expected; don't retry because
+it feels slow. If it fails, the error names the node that failed, which is what to report.`,
+
   ask_agent: `# ask_agent — delegate to another agent
 
 \`ask_agent({agent, query})\` runs another agent and returns its final answer. Use \`annuaire\` first

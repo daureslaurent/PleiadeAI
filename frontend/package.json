@@ -12,6 +12,7 @@
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
     "@novnc/novnc": "^1.7.0",
+    "@xyflow/react": "^12.11.2",
     "axios": "^1.7.7",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",

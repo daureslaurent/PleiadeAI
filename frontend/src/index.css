@@ -156,3 +156,65 @@ body {
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* React Flow, re-skinned onto the app's glass idiom (FLOWS_PLAN.md §8). The library ships an
+   opaque light-grey chrome that would sit on the starfield like a pasted screenshot, so its
+   surfaces are overridden here rather than in the component — these are the library's own class
+   names, and keeping them in one block makes the override obvious to the next reader. */
+.flow-canvas {
+  background: transparent;
+}
+
+.flow-canvas .react-flow__edge-path {
+  stroke-linecap: round;
+}
+
+.flow-canvas .react-flow__edge.selected .react-flow__edge-path,
+.flow-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 2.5;
+}
+
+/* The handle is drawn inline (its colour is the port's type), so only the interaction
+   affordances live here. */
+.flow-canvas .react-flow__handle {
+  border-radius: 9999px;
+  transition: transform 0.12s ease;
+}
+
+.flow-canvas .react-flow__handle:hover {
+  transform: translateY(-50%) scale(1.45);
+}
+
+.flow-canvas .react-flow__handle-connecting {
+  transform: translateY(-50%) scale(1.45);
+}
+
+/* Refusing an invalid drop needs to read instantly — red on the target handle beats a silent
+   no-op that looks like a broken canvas. */
+.flow-canvas .react-flow__handle-valid {
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.35) !important;
+}
+
+.flow-controls,
+.flow-minimap {
+  background: rgba(13, 20, 36, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.6rem;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+.flow-controls button {
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgb(148, 163, 184);
+}
+
+.flow-controls button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgb(226, 232, 240);
+}
+
+.flow-controls button svg {
+  fill: currentColor;
+}
