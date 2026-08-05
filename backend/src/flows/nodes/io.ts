@@ -210,7 +210,9 @@ export const mergeNode: FlowNodeHandler = {
     { name: 'd', types: [...PORT_TYPES].filter((t) => t !== 'signal') },
     { name: 'run', types: ['signal'], description: 'Gate: only merge on this branch.' },
   ],
-  outputs: [{ name: 'default', types: ['text'] }],
+  // `file` for the same reason as Collect: when every input carries handles this gathers them all,
+  // and `file` narrows to any binary kind downstream while still reaching a text port.
+  outputs: [{ name: 'default', types: ['file'] }],
   config: [
     {
       key: 'separator',

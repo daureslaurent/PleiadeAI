@@ -39,6 +39,15 @@ export interface StartRunInput {
   inputs?: Record<string, unknown>;
   /** Nested-flow depth; the `run_flow` tool passes its caller's depth + 1. */
   depth?: number;
+  /**
+   * Fired the instant the run document exists, before any node executes.
+   *
+   * The HTTP route answers with the run id without waiting for the run — a flow with a video node
+   * takes minutes. Looking the id up afterwards is a race the caller loses whenever run creation is
+   * slower than the route's grace period, and it answers with no id at all. This hands the id over at
+   * the only moment it is knowable and unambiguous.
+   */
+  onRunCreated?: (runId: string) => void;
 }
 
 export interface RunOutcome {
@@ -115,6 +124,7 @@ export class FlowRunner {
         .map<FlowNodeState>((n) => ({ node_id: n.id, status: 'pending' })),
     });
     const runId = String(run._id);
+    input.onRunCreated?.(runId);
 
     const controller = new AbortController();
     this.active.set(runId, controller);

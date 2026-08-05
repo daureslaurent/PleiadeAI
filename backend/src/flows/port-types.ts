@@ -22,6 +22,11 @@ export function canConnect(source: PortType, target: PortType): boolean {
   if (source === 'signal' || target === 'signal') return false;
   // A `file` port is the generic binary sink: any handle-bearing kind fits.
   if (target === 'file' && isBinary(source)) return true;
+  // …and `file` is equally the generic binary *source*, so it may be narrowed to a specific kind.
+  // This is what lets a Collect or Merge — which gather handles without knowing what they hold —
+  // feed a node that wants video. The narrowing is the operator's assertion, and the receiving node
+  // checks the actual bytes (ffprobe will say "no video stream" long before anything is wasted).
+  if (source === 'file' && isBinary(target)) return true;
   // Anything renders to text (a handle list stringifies to its handles).
   if (target === 'text') return true;
   // Text may be parsed as JSON. A malformed string is a run-time node error, not a wiring error.

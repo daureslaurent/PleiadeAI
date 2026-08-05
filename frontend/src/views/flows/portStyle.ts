@@ -42,6 +42,9 @@ export function canConnect(source: PortType, target: PortType): boolean {
   if (source === target) return true;
   if (source === 'signal' || target === 'signal') return false;
   if (target === 'file' && ['image', 'video', 'audio', 'file'].includes(source)) return true;
+  // `file` is equally the generic binary source, so it narrows to a specific kind — that is how a
+  // Collect or Merge feeds a node that wants video. The backend still checks the actual bytes.
+  if (source === 'file' && ['image', 'video', 'audio'].includes(target)) return true;
   if (target === 'text') return true;
   if (target === 'json' && source === 'text') return true;
   return false;

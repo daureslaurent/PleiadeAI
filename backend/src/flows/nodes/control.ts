@@ -171,7 +171,10 @@ export const collectNode: FlowNodeHandler = {
     { name: 'value', types: ['text', 'json', 'image', 'video', 'audio', 'file'], required: true },
   ],
   outputs: [
-    { name: 'default', types: ['json'], description: 'Every iteration, as a list.' },
+    // `file` rather than `json`: whenever the body produced artifacts this carries every iteration's
+    // handle, which is the whole point of a loop that renders something. It narrows to video/image/
+    // audio downstream (see canConnect), and a text-only loop still reaches any text port.
+    { name: 'default', types: ['file'], description: 'Every iteration — handles when the body made artifacts.' },
     { name: 'text', types: ['text'], description: 'The iterations joined as text.' },
     { name: 'done', types: ['signal'] },
   ],

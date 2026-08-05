@@ -217,15 +217,29 @@ flowsRouter.post('/:id/run', async (req, res) => {
   }
 
   const inputs = (req.body?.inputs ?? {}) as Record<string, unknown>;
-  const started = flowRunner.start({ flow, trigger: 'manual', inputs });
 
-  // Surface a synchronous failure (a bad input, an unreachable ComfyUI at submit) as a 400 rather
-  // than a silent background error, but don't wait for the run itself.
+  // Answer with the run id as soon as the run document exists, and never wait for the run itself —
+  // a flow with a video node runs for ten minutes, far past any HTTP timeout. The id arrives through
+  // `onRunCreated` rather than a lookup-after-the-fact, which is a race the caller loses.
+  let settleId: (id: string | null) => void;
+  const runId = new Promise<string | null>((resolve) => {
+    settleId = resolve;
+  });
+
+  const started = flowRunner
+    .start({ flow, trigger: 'manual', inputs, onRunCreated: (id) => settleId(id) })
+    .catch((err: unknown) => {
+      // Nothing was created (validation, or a failure before the document existed).
+      settleId(null);
+      throw err;
+    });
+
+  // A failure this early is the operator's mistake, not a run outcome — surface it as a 400.
   const outcome = await Promise.race([
-    started.then((r) => r).catch((err: unknown) => ({ error: err })),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), 500)),
+    runId.then((id) => ({ id })),
+    started.then(() => ({ id: null })).catch((err: unknown) => ({ error: err })),
   ]);
-  if (outcome && 'error' in outcome) {
+  if ('error' in outcome) {
     const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
     res.status(400).json({ error: message });
     return;
@@ -233,8 +247,7 @@ flowsRouter.post('/:id/run', async (req, res) => {
 
   started.catch((err: unknown) => log.error({ err: String(err), flow: flow.name }, 'flow run failed'));
 
-  const runs = await flowRunRepository.list(String(flow._id), 1);
-  const run = runs[0];
+  const run = outcome.id ? await flowRunRepository.findById(outcome.id) : null;
   res.status(202).json(run ? runSummary(run) : { status: 'running' });
 });
 

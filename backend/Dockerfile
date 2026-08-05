@@ -17,7 +17,9 @@ ENV NODE_ENV=production
 # through the mounted host /var/run/docker.sock (see docker-compose.yml). openssh-client backs the
 # Isolation page's "scan host key" / "test connection" actions for the `ssh` network mode.
 # tzdata gives Python's zoneinfo the IANA database (skills doing timezone math need it).
-RUN apk add --no-cache python3 make g++ bash docker-cli openssh-client tzdata
+# ffmpeg backs the `video_compose` flow node (concat / mux / still) — assembling a per-shot clip and
+# stitching a finished video is CPU work, and routing it through ComfyUI would burn GPU time on it.
+RUN apk add --no-cache python3 make g++ bash docker-cli openssh-client tzdata ffmpeg
 
 # Working directory used by the `bash` terminal tool (BASH_CWD).
 RUN mkdir -p /workspace

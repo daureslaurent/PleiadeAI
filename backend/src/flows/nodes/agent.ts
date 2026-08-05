@@ -3,7 +3,7 @@ import { sessionLock } from '../../core/session/SessionLock';
 import { agentRepository } from '../../domain/agents/agent.repository';
 import { agentRunner } from '../../orchestrator/AgentRunner';
 import type { ImageBlock } from '../../core/event-bus/events.types';
-import { asHandles, asText, handleValue, textValue } from '../port-types';
+import { asHandles, asText, handleValue, jsonValue, textValue } from '../port-types';
 import type { FlowNodeContext, FlowNodeHandler, PortSpec } from '../types';
 
 const log = createLogger('flow:agent-node');
@@ -118,7 +118,29 @@ export const askAgentNode: FlowNodeHandler = {
       default: '',
       hint: 'What to ask. Supports {{node_id}} references to earlier nodes.',
     },
+    {
+      key: 'response_format',
+      label: 'Response format',
+      type: 'select',
+      options: ['text', 'json'],
+      default: 'text',
+      hint:
+        'json parses the answer into structured data, so a For Each can iterate it and later nodes can ' +
+        'read {{item.field}}. The answer must be JSON — say so in the prompt.',
+    },
   ],
+
+  dynamicOutputs(config) {
+    // The output port's *type* follows the response format, so the canvas draws a Data wire and
+    // validation knows a For Each can iterate it — rather than everyone discovering at run time that
+    // a "text" port was carrying an array.
+    const json = String(config.response_format ?? 'text') === 'json';
+    return [
+      { name: 'default', types: [json ? 'json' : 'text'] },
+      { name: 'images', types: ['image'] },
+      { name: 'done', types: ['signal'] },
+    ];
+  },
 
   validate(node) {
     return String(node.config.agent ?? '').trim() ? [] : ['no agent is selected'];
@@ -128,8 +150,14 @@ export const askAgentNode: FlowNodeHandler = {
     const agentName = String(config.agent ?? '').trim();
     if (!agentName) throw new Error('no agent is selected for this node');
 
-    const userText = buildPrompt(config, asText(inputs.text));
+    const wantsJson = String(config.response_format ?? 'text') === 'json';
+    let userText = buildPrompt(config, asText(inputs.text));
     if (!userText) throw new Error('the prompt is empty');
+    if (wantsJson) {
+      // Restated at the end of the prompt because that is where models actually honour it, and
+      // because the node's own contract shouldn't depend on the operator remembering to say it.
+      userText += '\n\nRespond with valid JSON only — no prose, no explanation, no markdown fences.';
+    }
 
     const images = await imagesFrom(ctx, asHandles(inputs.images));
     const result = await runAgent(ctx, agentName, userText, images);
@@ -138,7 +166,7 @@ export const askAgentNode: FlowNodeHandler = {
     // travel on as handles rather than being re-persisted here.
     const handles = result.images.map((i) => i.id).filter((id): id is string => Boolean(id));
     return {
-      default: textValue(result.text),
+      default: wantsJson ? jsonValue(parseJsonAnswer(result.text, ctx)) : textValue(result.text),
       ...(handles.length ? { images: handleValue('image', handles) } : {}),
       done: { type: 'signal' as const },
     };
@@ -224,6 +252,46 @@ export const routerNode: FlowNodeHandler = {
     };
   },
 };
+
+/**
+ * Parse a model's answer as JSON, forgiving the two things every model does anyway: wrapping it in a
+ * ```json fence, and topping and tailing it with a sentence of prose. Failing the node on either
+ * would make `response_format: json` unusable in practice, so the outermost `[...]`/`{...}` is
+ * extracted instead — and a genuinely unparseable answer throws with the text included, because
+ * silently yielding `null` downstream is the failure that costs a ten-minute render.
+ */
+function parseJsonAnswer(answer: string, ctx: FlowNodeContext): unknown {
+  const trimmed = answer.trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
+  const candidates = [fenced?.[1], trimmed, sliceOutermost(trimmed)].filter(
+    (c): c is string => typeof c === 'string' && c.trim().length > 0,
+  );
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate.trim());
+    } catch {
+      /* try the next shape */
+    }
+  }
+  ctx.emitOutput(`the answer was not valid JSON:\n${trimmed.slice(0, 400)}\n`);
+  throw new Error(
+    `the agent was asked for JSON but returned something else (starts: "${trimmed.slice(0, 80)}…")`,
+  );
+}
+
+/** The outermost bracketed span, for an answer padded with prose on either side. */
+function sliceOutermost(text: string): string | undefined {
+  const first = Math.min(...['[', '{'].map((c) => idx(text.indexOf(c))));
+  if (!Number.isFinite(first)) return undefined;
+  const closer = text[first] === '[' ? ']' : '}';
+  const last = text.lastIndexOf(closer);
+  return last > first ? text.slice(first, last + 1) : undefined;
+}
+
+function idx(i: number): number {
+  return i < 0 ? Number.POSITIVE_INFINITY : i;
+}
 
 /** `"yes, no"` → `['yes','no']`, de-duplicated, preserving order. */
 export function parseChoices(raw: unknown): string[] {

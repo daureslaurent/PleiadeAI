@@ -1,6 +1,7 @@
 import { askAgentNode, routerNode } from './agent';
 import { approvalNode, collectNode, conditionNode, forEachNode } from './control';
 import { inputNode, logNode, mergeNode, noteNode, outputNode } from './io';
+import { videoComposeNode } from './compose';
 import { editImageNode, generateImageNode, generateSoundNode, generateVideoNode } from './media';
 import { toolNode } from './tool';
 import type { FlowNodeHandler, PortSpec } from '../types';
@@ -25,6 +26,7 @@ const HANDLERS: FlowNodeHandler[] = [
   generateVideoNode,
   generateSoundNode,
   editImageNode,
+  videoComposeNode,
   toolNode,
   conditionNode,
   approvalNode,
