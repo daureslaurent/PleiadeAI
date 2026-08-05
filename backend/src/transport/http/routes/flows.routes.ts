@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { createLogger } from '../../../config/logger';
 import { flowRepository } from '../../../domain/flows/flow.repository';
 import { flowRunRepository } from '../../../domain/flows/flow-run.repository';
@@ -9,6 +10,7 @@ import { flowApprovalBroker } from '../../../flows/FlowApprovalBroker';
 import { allHandlers, inputPorts, outputPorts } from '../../../flows/nodes';
 import { validateFlow, isRunnable } from '../../../flows/validate';
 import { PORT_TYPES } from '../../../flows/port-types';
+import { stagingSessionOf } from '../../../flows/staging';
 import { resolveDynamicOptions } from '../../../tools/config-options';
 import { resourceRepository } from '../../../domain/resources/resource.repository';
 
@@ -21,6 +23,17 @@ const log = createLogger('flows-route');
  * `<img>`/`<video>` elements that can't carry a header).
  */
 export const flowsRouter = Router();
+
+/**
+ * Operator uploads for a flow's `input` nodes. Held in memory then written straight to GridFS — the
+ * ceiling matches the ComfyUI server's own upload limit, since a video frame or a source image is the
+ * realistic payload here.
+ */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 256 * 1024 * 1024 },
+});
+
 
 function summarize(doc: FlowDoc) {
   return {
@@ -274,6 +287,69 @@ flowsRouter.post('/runs/:runId/stop', (req, res) => {
     return;
   }
   res.json({ ok: true });
+});
+
+/**
+ * Upload a file for one of the flow's `input` nodes. Returns the handle to put in the input's value
+ * (or its default), plus enough metadata for the UI to preview it.
+ */
+flowsRouter.post('/:id/uploads', upload.single('file'), async (req, res) => {
+  // multer's handler overload widens `params`, so narrow it back rather than casting `req`.
+  const flow = await flowRepository.findById(String(req.params.id));
+  if (!flow) {
+    res.status(404).json({ error: 'flow not found' });
+    return;
+  }
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ error: 'a file is required (multipart field "file")' });
+    return;
+  }
+
+  const mime = file.mimetype || 'application/octet-stream';
+  const stored = await resourceRepository.store({
+    sessionId: stagingSessionOf(String(flow._id)),
+    agentId: String(flow._id),
+    bytes: file.buffer,
+    // Images get an `img_` handle so they can enter a model's context downstream; everything else is
+    // an opaque blob reached by handle, exactly as elsewhere in the resource store.
+    kind: mime.startsWith('image/') ? 'image' : 'blob',
+    mime,
+    filename: file.originalname,
+    source: 'attachment',
+  });
+
+  log.info({ flow: flow.name, handle: stored.handle, size: file.size }, 'flow input uploaded');
+  res.status(201).json({
+    handle: stored.handle,
+    filename: stored.filename || file.originalname,
+    mime: stored.mime,
+    size: stored.size,
+    kind: stored.kind,
+    sessionId: stagingSessionOf(String(flow._id)),
+  });
+});
+
+/** Files already staged for this flow, so the run form can offer them instead of a re-upload. */
+flowsRouter.get('/:id/uploads', async (req, res) => {
+  const flow = await flowRepository.findById(req.params.id);
+  if (!flow) {
+    res.status(404).json({ error: 'flow not found' });
+    return;
+  }
+  const sessionId = stagingSessionOf(String(flow._id));
+  const rows = await resourceRepository.listBySession(sessionId);
+  res.json({
+    sessionId,
+    files: rows.map((r) => ({
+      handle: r.handle,
+      filename: r.filename || undefined,
+      mime: r.mime,
+      size: r.size,
+      kind: r.kind,
+      createdAt: r.created_at,
+    })),
+  });
 });
 
 /** Ports a node currently exposes — the canvas refetches this when a router's choices change. */

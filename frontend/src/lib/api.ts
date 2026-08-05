@@ -1113,6 +1113,14 @@ export interface FlowRunDetail extends FlowRunSummary {
   resources: { handle: string; kind: 'image' | 'blob'; mime: string; size: number; filename?: string }[];
 }
 
+export interface FlowUpload {
+  handle: string;
+  filename?: string;
+  mime: string;
+  size: number;
+  kind: 'image' | 'blob';
+}
+
 export const flowsApi = {
   nodeTypes: () =>
     api.get<{ types: FlowNodeType[]; portTypes: PortType[] }>('/flows/node-types').then((r) => r.data),
@@ -1145,6 +1153,25 @@ export const flowsApi = {
   /** Ports a node currently exposes — refetched when a router's choices change. */
   ports: (node: FlowNode) =>
     api.post<{ inputs: PortSpec[]; outputs: PortSpec[] }>('/flows/ports', { node }).then((r) => r.data),
+
+  /**
+   * Upload a file for an `input` node. Multipart rather than a base64 body: a start frame or a source
+   * clip is the realistic payload, and base64 would inflate it by a third on the way up.
+   */
+  upload: (flowId: string, file: File, onProgress?: (percent: number) => void) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post<FlowUpload & { sessionId: string }>(`/flows/${flowId}/uploads`, form, {
+        onUploadProgress: (e) =>
+          onProgress?.(e.total ? Math.round((e.loaded / e.total) * 100) : 0),
+      })
+      .then((r) => r.data);
+  },
+
+  /** Files already staged on this flow, offered instead of a re-upload. */
+  uploads: (flowId: string) =>
+    api.get<{ sessionId: string; files: FlowUpload[] }>(`/flows/${flowId}/uploads`).then((r) => r.data),
 };
 
 export const memoryApi = {

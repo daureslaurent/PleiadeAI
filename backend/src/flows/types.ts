@@ -61,6 +61,12 @@ export interface FlowNodeContext {
   }): Promise<string>;
   /** Read a handle's bytes back (an `edit_image` node reading its source, say). */
   readResource(handle: string): Promise<{ bytes: Buffer; mime: string; filename: string } | null>;
+  /**
+   * Copy a resource from another session into this run's, returning its new handle. Used by `input`
+   * to pull an operator-uploaded file out of the flow's staging session (see `flows/staging.ts`), so
+   * every node downstream deals in one handle space and the run's artifact list is self-contained.
+   */
+  importResource(fromSessionId: string, handle: string): Promise<string | null>;
   /** Block on the operator (the `approval` node). Resolves to their decision. */
   askApproval(question: string, artifacts: string[]): Promise<boolean>;
 }

@@ -1,7 +1,8 @@
 import { Trash2, X } from 'lucide-react';
 import { Button, Field, Input, Select, Textarea, Toggle } from '../../components/ui';
-import type { FlowNode, FlowNodeType, ToolConfigField } from '../../lib/api';
+import type { FlowNode, FlowNodeType, PortType, ToolConfigField } from '../../lib/api';
 import { GROUP_COLORS } from './portStyle';
+import { ResourceInput } from './ResourceInput';
 
 /** Fields rendered as a multi-line box — prompts and JSON argument sets need the room. */
 const MULTILINE_KEYS = new Set(['prompt', 'question', 'args', 'text', 'default', 'expression']);
@@ -13,15 +14,23 @@ const MULTILINE_KEYS = new Set(['prompt', 'question', 'args', 'text', 'default',
  * field type the Tools page renders — so a new node type on the server shows up here complete, with
  * its selects already filled from the database (agents, ComfyUI workflows, tools).
  */
+/** True for the `default` field of an `input` node whose port type carries bytes. */
+function isBinaryDefault(node: FlowNode, key: string): boolean {
+  if (node.type !== 'input' || key !== 'default') return false;
+  return ['image', 'video', 'audio', 'file'].includes(String(node.config.port_type ?? 'text'));
+}
+
 export function NodeInspector({
   node,
   nodeType,
+  flowId,
   onChange,
   onDelete,
   onClose,
 }: {
   node: FlowNode;
   nodeType: FlowNodeType | undefined;
+  flowId: string;
   onChange: (patch: Partial<FlowNode>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -53,15 +62,28 @@ export function NodeInspector({
           <Input value={node.label} onChange={(e) => onChange({ label: e.target.value })} />
         </Field>
 
-        {(nodeType?.config ?? []).map((field) => (
-          <Field key={field.key} label={field.label} hint={field.hint}>
-            <ConfigInput
-              field={field}
-              value={node.config[field.key]}
-              onChange={(v) => setConfig(field.key, v)}
-            />
-          </Field>
-        ))}
+        {(nodeType?.config ?? []).map((field) =>
+          // An `input` node of a binary type gets the uploader for its default, so a flow can ship
+          // with a file already attached instead of an operator pasting a handle they can't know.
+          isBinaryDefault(node, field.key) ? (
+            <Field key={field.key} label="Default file" hint="Used when a run supplies nothing.">
+              <ResourceInput
+                flowId={flowId}
+                type={String(node.config.port_type ?? 'file') as PortType}
+                value={String(node.config[field.key] ?? '')}
+                onChange={(v) => setConfig(field.key, v)}
+              />
+            </Field>
+          ) : (
+            <Field key={field.key} label={field.label} hint={field.hint}>
+              <ConfigInput
+                field={field}
+                value={node.config[field.key]}
+                onChange={(v) => setConfig(field.key, v)}
+              />
+            </Field>
+          ),
+        )}
 
         {nodeType && nodeType.config.length === 0 && (
           <p className="text-xs text-slate-600">This node has no settings.</p>

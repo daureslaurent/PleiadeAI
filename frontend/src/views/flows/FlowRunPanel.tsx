@@ -3,6 +3,7 @@ import { AlertTriangle, Check, CircleStop, Play, ThumbsDown, ThumbsUp } from 'lu
 import { Button, Callout, Input, Textarea } from '../../components/ui';
 import { flowsApi, type FlowDetail, type FlowInputSpec, type FlowValue } from '../../lib/api';
 import { ArtifactPreview } from './ArtifactPreview';
+import { ResourceInput } from './ResourceInput';
 import type { LiveRun } from './useFlowRun';
 
 /**
@@ -84,6 +85,7 @@ export function FlowRunPanel({
             {flow.inputs.map((input) => (
               <InputField
                 key={input.key}
+                flowId={flow.id}
                 spec={input}
                 value={values[input.key] ?? ''}
                 onChange={(v) => setValues((prev) => ({ ...prev, [input.key]: v }))}
@@ -154,32 +156,32 @@ export function FlowRunPanel({
 }
 
 function InputField({
+  flowId,
   spec,
   value,
   onChange,
 }: {
+  flowId: string;
   spec: FlowInputSpec;
   value: string;
   onChange: (v: string) => void;
 }) {
   const binary = ['image', 'video', 'audio', 'file'].includes(spec.type);
   return (
-    <label className="block">
+    <div className="block">
       <div className="mb-1 flex items-baseline gap-1.5">
         <span className="text-xs text-slate-300">{spec.label}</span>
         {spec.required && <span className="text-red-400">*</span>}
         <span className="ml-auto font-mono text-[9px] text-slate-600">{spec.type}</span>
       </div>
-      {spec.type === 'text' || spec.type === 'json' ? (
+      {binary ? (
+        <ResourceInput flowId={flowId} type={spec.type} value={value} onChange={onChange} />
+      ) : spec.type === 'text' || spec.type === 'json' ? (
         <Textarea rows={3} value={value} onChange={(e) => onChange(e.target.value)} />
       ) : (
-        <Input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={binary ? 'resource handle, e.g. img_1' : ''}
-        />
+        <Input value={value} onChange={(e) => onChange(e.target.value)} />
       )}
-    </label>
+    </div>
   );
 }
 

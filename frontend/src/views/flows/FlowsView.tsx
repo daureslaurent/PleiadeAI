@@ -331,6 +331,7 @@ export function FlowsView() {
               <NodeInspector
                 node={selectedNode}
                 nodeType={typeMap.get(selectedNode.type)}
+                flowId={flow.id}
                 onChange={(patch) => patchNode(selectedNode.id, patch)}
                 onDelete={() => deleteNode(selectedNode.id)}
                 onClose={() => setSelectedNodeId(null)}

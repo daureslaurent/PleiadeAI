@@ -1,5 +1,6 @@
 import { PORT_TYPES } from '../port-types';
 import { asText, handleValue, isBinary, jsonValue, textValue, type FlowValue, type PortType } from '../port-types';
+import { stagingSessionOf } from '../staging';
 import type { FlowNodeHandler } from '../types';
 
 /**
@@ -66,8 +67,20 @@ export const inputNode: FlowNodeHandler = {
       throw new Error(`input "${String(config.key ?? ctx.node.id)}" is required but was not supplied`);
     }
     if (isBinary(type)) {
-      // Binary inputs arrive as handles (the route stored any upload before the run started).
-      const handles = text.split(',').map((h) => h.trim()).filter(Boolean);
+      // Binary inputs are named by handle. A handle here always refers to the flow's **staging
+      // session** — the run's own session is empty at input time — so the bytes are imported into the
+      // run, giving every node downstream one uniform handle space (see flows/staging.ts).
+      const staged = text.split(',').map((h) => h.trim()).filter(Boolean);
+      const handles: string[] = [];
+      for (const handle of staged) {
+        const imported = await ctx.importResource(stagingSessionOf(ctx.flowId), handle);
+        if (!imported) {
+          throw new Error(
+            `"${handle}" is not an uploaded file on this flow — upload one for this input, or clear it`,
+          );
+        }
+        handles.push(imported);
+      }
       return handleValue(type, handles);
     }
     if (type === 'json') {

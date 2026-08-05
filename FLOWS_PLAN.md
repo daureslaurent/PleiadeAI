@@ -119,7 +119,7 @@ interface FlowNodeHandler {
 
 | Type | Group | Behaviour |
 |---|---|---|
-| `input` | io | Injection point — the "inject data into the graph" node. Config: port type + default value. Overridden per run from the run form / `run_flow` args / the cron schedule. |
+| `input` | io | Injection point — the "inject data into the graph" node. Config: port type + default value. Overridden per run from the run form / `run_flow` args / the cron schedule. Binary types (image/video/audio/file) are **uploaded** through the run form or the inspector and carried as a handle — see §6.1. |
 | `output` | io | Terminal. Its value becomes `FlowRun.output` and the `run_flow` return value. |
 | `log` | io | Debug **tap**: records what reaches it (type, handles, text, optionally the JSON) into the run trace and the node's live log. Deliberately a tap, not a pass-through — a pass-through would need one static output type, which either breaks the wire for every other type or makes the operator restate a type the graph already knows. Branch the source's output instead: one wire onward, one into the Log. |
 | `note` | io | A comment card. No ports, no execution. |
@@ -188,6 +188,24 @@ timing, output, error), pending, output, error, started_at, ended_at }`.
 
 Node outputs are truncated before persistence (text capped, handles kept) — the run document is a
 trace, not a data store; the artifacts live in `resources`.
+
+### §6.1 Uploaded inputs — the staging session
+
+An upload can't be written into a run's session, because that session *is* the run id and doesn't
+exist until the run starts. So each flow has a **staging session**, `flow-<flowId>`
+(`flows/staging.ts`), which `POST /api/flows/:id/uploads` writes into (multipart, via the `multer`
+already used by the fine-tune routes). It returns the handle, and that handle is the value the
+`input` node stores — as a per-run override *or* as the node's default, so a flow can ship with a
+file attached.
+
+Staging per flow rather than per upload is what makes a file reusable: upload once, re-run any number
+of times without re-uploading. At input time the runner **imports** the bytes into the run's own
+session (`FlowNodeContext.importResource`), so every node downstream deals in one handle space and
+the run's artifact list stays self-contained. Previewing a staged file needs no new route — the
+existing `GET /api/resources/:sessionId/:handle/content` is generic over the session id.
+
+A handle that isn't in staging fails the run with a message naming the node, rather than quietly
+passing nothing along.
 
 ## §7 Triggers
 

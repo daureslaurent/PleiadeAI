@@ -624,6 +624,23 @@ export class FlowRunner {
         if (!bytes) return null;
         return { bytes, mime: doc.mime || 'application/octet-stream', filename: doc.filename || handle };
       },
+      importResource: async (fromSessionId, handle) => {
+        if (fromSessionId === runId) return handle;
+        const doc = await resourceRepository.findByHandle(fromSessionId, handle);
+        if (!doc) return null;
+        const bytes = await resourceRepository.readBytes(fromSessionId, handle);
+        if (!bytes) return null;
+        const stored = await resourceRepository.store({
+          sessionId: runId,
+          agentId: String(exec.flow._id),
+          bytes,
+          kind: doc.kind,
+          mime: doc.mime,
+          filename: doc.filename,
+          source: 'attachment',
+        });
+        return stored.handle;
+      },
       askApproval: (question, artifacts) =>
         flowApprovalBroker.ask(ctx, { runId, nodeId: node.id, question, artifacts }),
     };
