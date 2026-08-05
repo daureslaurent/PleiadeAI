@@ -101,6 +101,7 @@ async function runWorkflow(
   values: BindingValues,
   inputImages: InputImage[] | undefined,
   fallbackTimeoutSeconds: number,
+  inputAudios?: InputImage[] | undefined,
 ): Promise<Record<string, FlowValue>> {
   const workflowId = String(config.workflow ?? '').trim();
   if (!workflowId) throw new Error('no ComfyUI workflow is selected for this node (pick one in the inspector)');
@@ -116,6 +117,7 @@ async function runWorkflow(
     negativePrompt: String(config.negative_prompt ?? '') || undefined,
     values: { ...values, ...(seed !== undefined ? { seed } : {}) },
     inputImages,
+    inputAudios,
     timeoutMs: timeoutFrom(config, fallbackTimeoutSeconds),
     sessionId: ctx.sessionId,
     signal: ctx.signal,
@@ -218,7 +220,16 @@ export const generateVideoNode: FlowNodeHandler = {
   label: 'Generate Video',
   group: 'media',
   description: 'Renders a video clip on ComfyUI. Slow and GPU-expensive — minutes, not seconds.',
-  inputs: [...SHARED_INPUTS, { name: 'image', types: ['image'], description: 'Start frame, if the workflow takes one.' }],
+  inputs: [
+    ...SHARED_INPUTS,
+    { name: 'image', types: ['image'], description: 'Start frame, if the workflow takes one.' },
+    {
+      name: 'audio',
+      types: ['audio'],
+      description:
+        'Soundtrack the model paces its motion to (LTX-style A/V models). Only for a workflow with a LoadAudio node.',
+    },
+  ],
   outputs: outputsFor('video'),
   config: [
     workflowField('video'),
@@ -249,6 +260,7 @@ export const generateVideoNode: FlowNodeHandler = {
       { ...parseSize(config.size), seconds, fps, length: seconds * fps },
       await inputImagesFrom(ctx, asHandles(inputs.image)),
       1800,
+      await inputImagesFrom(ctx, asHandles(inputs.audio)),
     );
   },
 };

@@ -12,8 +12,11 @@ import type { ComfyGraph, ComfyInputSpec, ComfyLink, ComfyNodeSchema } from './t
 const SAVE_CLASS = /^(SaveImage|SaveImageAdvanced|SaveVideo|SaveWEBM|SaveAnimated\w+|SaveAudio\w*|VHS_VideoCombine)$/;
 const SAMPLER_CLASS = /^(KSampler|KSamplerAdvanced|SamplerCustom|SamplerCustomAdvanced)$/;
 const EMPTY_LATENT_CLASS = /^Empty\w*Latent\w*$/;
-const VIDEO_SAVE_CLASS = /^(SaveVideo|SaveWEBM|SaveAnimated\w+|VHS_VideoCombine)$/;
-const AUDIO_SAVE_CLASS = /^SaveAudio\w*$/;
+const VIDEO_SAVE_CLASS = /^(SaveVideo|SaveWEBM|SaveAnimated\w+|VHS_VideoCombine|PreviewVideo)$/;
+// `Preview*` counts as a save: it writes a real file (into `temp/`) that `/history` reports and
+// `/view` serves, and plenty of published workflows — a TTS graph being the common case — end at a
+// preview rather than a save. Without it such a workflow is silently classified as producing images.
+const AUDIO_SAVE_CLASS = /^(SaveAudio\w*|PreviewAudio)$/;
 
 /** Input names that carry the positive text prompt, in preference order. */
 const PROMPT_INPUTS = ['prompt', 'text'];
@@ -224,6 +227,26 @@ function bindInput(
   };
 }
 
+/**
+ * A multiline STRING input holding a literal — the text slot of a graph that has no sampler and no
+ * conditioning chain to anchor on (a text-to-speech workflow is the motivating case).
+ *
+ * Restricted to *multiline* fields holding a literal, because that is what a human-authored line of
+ * text looks like: single-line strings in these graphs are filenames, model names and prefixes.
+ */
+function findMultilineText(graph: ComfyGraph, schemas: SchemaMap): WorkflowBinding | null {
+  for (const nodeId of sortedNodeIds(graph)) {
+    const node = graph[nodeId]!;
+    for (const [input, value] of Object.entries(node.inputs)) {
+      if (isLink(value) || typeof value !== 'string') continue;
+      const spec = specFor(schemas.get(node.class_type) ?? null, input);
+      if (spec?.type !== 'STRING' || !spec.multiline) continue;
+      return { node_id: nodeId, input, spec, overrides_link: false };
+    }
+  }
+  return null;
+}
+
 /** Search the whole graph for an input by name, preferring one that holds a literal. */
 function findInputAnywhere(
   graph: ComfyGraph,
@@ -284,7 +307,12 @@ export function autoBind(
     // No sampler (or no conditioning chain): fall back to any multiline text field named `prompt`,
     // which is how the video model's own node exposes it.
     const direct = findInputAnywhere(graph, schemas, ['prompt']);
-    if (direct) bindings.prompt = direct;
+    // Last resort: a multiline string primitive. A text-to-speech graph has no sampler, no
+    // conditioning and nothing called `prompt` — the line to speak simply sits in a
+    // `PrimitiveStringMultiline`. Without this the workflow imports with no prompt binding at all,
+    // and every tool that selects it refuses to run rather than speak the author's test sentence.
+    bindings.prompt = direct ?? findMultilineText(graph, schemas) ?? undefined;
+    if (!bindings.prompt) delete bindings.prompt;
   }
 
   const negative = findTextInput(graph, schemas, negativeLink);
@@ -326,6 +354,15 @@ export function autoBind(
   loaders.slice(0, imageKeys.length).forEach((nodeId, i) => {
     const binding = bindInput(graph, schemas, nodeId, 'image');
     if (binding) bindings[imageKeys[i]!] = binding;
+  });
+
+  // --- input audio: same idea, from LoadAudio. A video model that takes a soundtrack paces its
+  //     motion to it, so this is a driving input, not decoration.
+  const audioLoaders = sortedNodeIds(graph).filter((id) => graph[id]?.class_type === 'LoadAudio');
+  const audioKeys: BindingKey[] = ['audio1', 'audio2'];
+  audioLoaders.slice(0, audioKeys.length).forEach((nodeId, i) => {
+    const binding = bindInput(graph, schemas, nodeId, 'audio');
+    if (binding) bindings[audioKeys[i]!] = binding;
   });
 
   const prefix = bindInput(graph, schemas, outputNodeId, 'filename_prefix');

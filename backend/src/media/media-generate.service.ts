@@ -44,6 +44,8 @@ export interface GenerateRequest {
   values?: BindingValues;
   /** Images to upload and wire into the workflow's `image1..image3` bindings. */
   inputImages?: InputImage[];
+  /** Audio to upload and wire into the workflow's `audio1..audio2` bindings (LTX-style A/V models). */
+  inputAudios?: InputImage[];
   timeoutMs: number;
   onProgress: ProgressHandler;
   /** Fired the moment ComfyUI accepts the job — see {@link MediaRunStart}. */
@@ -168,6 +170,28 @@ async function uploadInputs(
 }
 
 /**
+ * Same, for audio. ComfyUI has one upload route (`/upload/image`) that writes into `input/`
+ * regardless of media type, and `LoadAudio` lists that same directory — so the only thing that has to
+ * be right is the extension, which decides how the node demuxes the file.
+ */
+async function uploadAudioInputs(
+  client: ComfyHttpClient,
+  audios: InputImage[],
+  sessionId: string,
+): Promise<BindingValues> {
+  const keys = ['audio1', 'audio2'] as const;
+  const values: BindingValues = {};
+  for (let i = 0; i < audios.length && i < keys.length; i += 1) {
+    const audio = audios[i]!;
+    const ext = audio.filename.split('.').pop()?.toLowerCase() || 'wav';
+    const name = `pleiades_${sessionId || 'test'}_a${i + 1}.${ext}`;
+    const up = await client.uploadImage(audio.bytes, name, audio.mime);
+    values[keys[i]!] = up.subfolder ? `${up.subfolder}/${up.name}` : up.name;
+  }
+  return values;
+}
+
+/**
  * Run a stored workflow on ComfyUI and return the bytes it produced.
  *
  * Everything operator-facing is decided before a single GPU cycle is spent: the workflow exists, is
@@ -204,6 +228,12 @@ export async function generateMedia(req: GenerateRequest): Promise<GenerateOutco
         'Pick an edit workflow on the Tools page.',
     );
   }
+  if (req.inputAudios?.length && !bindings.audio1) {
+    throw new ComfyError(
+      `Workflow "${workflow.name}" takes no input audio (no LoadAudio node is bound). ` +
+        'Either pick a workflow that accepts one, or leave the audio input unwired.',
+    );
+  }
 
   const seed = typeof req.values?.seed === 'number' ? req.values.seed : randomSeed();
   const values: BindingValues = {
@@ -212,6 +242,7 @@ export async function generateMedia(req: GenerateRequest): Promise<GenerateOutco
     seed,
     ...(req.negativePrompt ? { negative_prompt: req.negativePrompt } : {}),
     ...(req.inputImages?.length ? await uploadInputs(client, req.inputImages, req.sessionId ?? '') : {}),
+    ...(req.inputAudios?.length ? await uploadAudioInputs(client, req.inputAudios, req.sessionId ?? '') : {}),
   };
   if (bindings.filename_prefix) {
     values.filename_prefix = `pleiades/${workflow.kind}/${workflow.name.replace(/[^\w-]+/g, '_')}`;

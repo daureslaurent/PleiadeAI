@@ -289,6 +289,56 @@ export async function stillToVideo(
   });
 }
 
+/**
+ * Lay a bed of music under a voice.
+ *
+ * `duck` is what makes this usable rather than a mush: the music is attenuated whenever the voice is
+ * speaking (ffmpeg's `sidechaincompress`) and comes back up between lines. Without it a score mixed
+ * loud enough to hear swallows the narration, and one quiet enough to stay out of the way is
+ * inaudible. The bed is looped or trimmed to the voice, since the voice is the thing with meaning.
+ */
+export async function mixAudio(
+  voice: MediaInput,
+  music: MediaInput,
+  opts: { musicGainDb?: number; duck?: boolean } = {},
+): Promise<Buffer> {
+  return withWorkspace(async (dir) => {
+    const [voicePath, musicPath] = await writeInputs(dir, [voice, music]);
+    const vp = await probe(voicePath!);
+    if (!vp.hasAudio) throw new FfmpegError('the voice input has no audio stream');
+
+    const gain = Number.isFinite(opts.musicGainDb) ? (opts.musicGainDb as number) : -14;
+    const duck = opts.duck !== false;
+    const out = path.join(dir, 'out.m4a');
+
+    // The bed loops so a short cue can underlay a long line, then is cut to the voice's length.
+    const bed =
+      `[1:a]aloop=loop=-1:size=2e9,atrim=duration=${Math.max(0.1, vp.durationSec).toFixed(3)},` +
+      `volume=${gain}dB,aresample=48000,aformat=channel_layouts=stereo[bed]`;
+
+    // Measured on this build: these values duck the bed by ~6dB under speech and let it recover in
+    // the gaps, which is the broadcast norm. The defaults (threshold 0.125, ratio 2) manage under
+    // 2dB — technically ducking, inaudibly so. `ratio` saturates past 20, so depth comes from the
+    // low threshold and the sidechain gain rather than from pushing it further.
+    const filter = duck
+      ? `[0:a]aresample=48000,aformat=channel_layouts=stereo,asplit=2[v1][v2];${bed};` +
+        `[bed][v2]sidechaincompress=threshold=0.015:ratio=20:attack=5:release=250:level_sc=4[ducked];` +
+        `[v1][ducked]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[out]`
+      : `[0:a]aresample=48000,aformat=channel_layouts=stereo[v1];${bed};` +
+        `[v1][bed]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[out]`;
+
+    log.info({ voiceSec: vp.durationSec.toFixed(2), gain, duck }, 'mixing narration with music');
+    await run([
+      '-y', '-i', voicePath!, '-i', musicPath!,
+      '-filter_complex', filter,
+      '-map', '[out]',
+      '-c:a', 'aac', '-b:a', '192k',
+      out,
+    ]);
+    return readFile(out);
+  });
+}
+
 /** yuv420p needs even dimensions; an odd one makes libx264 refuse the whole job. */
 function even(n: number): number {
   return Math.floor(n / 2) * 2;

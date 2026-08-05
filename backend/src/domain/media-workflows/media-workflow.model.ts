@@ -23,6 +23,11 @@ export const BINDING_KEYS = [
   'image1',
   'image2',
   'image3',
+  // A generative video model can be driven by a reference *sound* as well as a reference image —
+  // LTX 2.3 lip-syncs and paces its motion to one. Bound from `LoadAudio`, uploaded the same way an
+  // input image is.
+  'audio1',
+  'audio2',
   'filename_prefix',
 ] as const;
 export type BindingKey = (typeof BINDING_KEYS)[number];
