@@ -108,6 +108,14 @@ export const FlowNodeCard = memo(function FlowNodeCard({ data, selected }: NodeP
         </div>
       )}
 
+      {/* What the node actually produced. Without this a finished card goes blank and you have to
+          open a panel to learn whether the step did anything at all. */}
+      {run?.status === 'success' && run.summary && (
+        <div className="mx-2.5 mb-1.5 line-clamp-3 rounded bg-white/[0.04] px-1.5 py-1 text-[9px] leading-tight text-slate-400">
+          {run.summary}
+        </div>
+      )}
+
       {run?.error && (
         <div className="mx-2.5 mb-1.5 rounded bg-red-500/10 px-1.5 py-1 text-[9px] leading-tight text-red-300">
           {run.error}

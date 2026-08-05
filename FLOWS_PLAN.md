@@ -207,6 +207,28 @@ existing `GET /api/resources/:sessionId/:handle/content` is generic over the ses
 A handle that isn't in staging fails the run with a message naming the node, rather than quietly
 passing nothing along.
 
+### §6.2 The debug trace
+
+Every line a run produces — node output, the agent's streaming reasoning, each tool call, media
+submissions, and node start/finish/error — lands in one **flat chronological list** on the run
+document. Flat rather than nested per node because the question being asked is almost always "what
+happened, in what order"; per-node buckets can't show that two nodes interleaved, and filtering to
+one node is a view concern the Debug tab handles.
+
+`RunLogBuffer` owns it, and exists for two reasons:
+
+- **Write volume.** An agent node streams tokens, so persisting per chunk would be thousands of
+  round trips per turn. Entries buffer in memory and flush on a 2s timer plus once at run end.
+- **Unbounded growth.** A chatty `bash` node in a 20-item loop would otherwise walk the document
+  toward Mongo's 16MB ceiling. Each node keeps a rolling 8KB window — capped per *node*, not per run,
+  because a global cap lets one noisy node evict every other node's lines, which is exactly the
+  context you still need when that node is the one misbehaving.
+
+The agent/tool/media lines come free: those events already flow on the bus keyed by the run's session
+id (§1.1), so the buffer just listens. They carry the *agent's* identity rather than the node's, so
+the runner stamps the executing node before each step — best-effort attribution, since a region runs
+nodes concurrently, and the alternative would put flow concerns inside the agent runner.
+
 ## §7 Triggers
 
 1. **Manual** — `POST /api/flows/:id/run` from the Flow page, with the `input` node values.
@@ -218,8 +240,14 @@ passing nothing along.
 
 ## §8 Frontend
 
-`/flows` (Operate group). `@xyflow/react` canvas styled onto the glass/starfield look (DIRECT_ART) —
-never the stock theme. Palette grouped by `FlowNodeHandler.group`; handles colour-coded per
+`/flows` (Operate group). The right rail carries three peer tabs — **Run** (inputs, controls, result),
+**Debug** (§6.2's stream, filterable by node and by source), **Params** (the node inspector). They are
+peers because they were previously fighting for one space: selecting a node replaced the run
+controls, and a node's log was an unscrollable overlay pinned to the canvas. Clicking a node opens
+Params and starting a run opens Debug, but any manual tab choice parks that until the next run, so
+the rail is never yanked away mid-read.
+
+`@xyflow/react` canvas styled onto the glass/starfield look (DIRECT_ART) — never the stock theme. Palette grouped by `FlowNodeHandler.group`; handles colour-coded per
 `PortType` with a legend; incompatible edges refused as you drag. The inspector renders
 `config: ToolConfigField[]` with the shared `Field`/`Input`/`Select`/`Toggle` kit, the same renderer
 shape as the Tools page. The run panel generates its form from the flow's `input` nodes, subscribes

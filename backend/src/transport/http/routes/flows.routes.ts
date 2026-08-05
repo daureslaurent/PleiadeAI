@@ -256,6 +256,7 @@ flowsRouter.get('/runs/:runId', async (req, res) => {
     ...runSummary(run),
     inputs: run.inputs,
     nodes: run.nodes,
+    logs: run.logs ?? [],
     pending: run.pending,
     output: run.output,
     live: flowRunner.isRunning(String(run._id)),

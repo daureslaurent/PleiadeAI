@@ -1104,9 +1104,21 @@ export interface FlowRunNodeState {
   iteration?: number | null;
 }
 
+export type FlowLogSource = 'node' | 'agent' | 'tool' | 'media' | 'system';
+
+export interface FlowLogEntry {
+  at: string;
+  node_id: string;
+  source: FlowLogSource;
+  text: string;
+  iteration?: number | null;
+}
+
 export interface FlowRunDetail extends FlowRunSummary {
   inputs: Record<string, unknown>;
   nodes: FlowRunNodeState[];
+  /** The persisted debug trace (capped per node) — what the Debug tab replays for a past run. */
+  logs: FlowLogEntry[];
   pending: { node_id: string; kind: 'approval'; question: string; artifacts: string[] } | null;
   output: Record<string, FlowValue> | null;
   live: boolean;

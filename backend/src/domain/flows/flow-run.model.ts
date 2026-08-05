@@ -23,6 +23,37 @@ export interface FlowNodeState {
   iteration?: number | null;
 }
 
+/** Where a log line came from — the Debug view colours and filters by this. */
+export const FLOW_LOG_SOURCES = ['node', 'agent', 'tool', 'media', 'system'] as const;
+export type FlowLogSource = (typeof FLOW_LOG_SOURCES)[number];
+
+/**
+ * One line of the run's debug trace (flows spec §6.2).
+ *
+ * Flat and chronological rather than nested per node, because the question this answers is usually
+ * "what happened, in what order" — a node's own output is reachable by filtering on `node_id`, but
+ * the interleaving between two nodes cannot be reconstructed from per-node buckets.
+ */
+export interface FlowLogEntry {
+  at: Date;
+  node_id: string;
+  source: FlowLogSource;
+  text: string;
+  /** Set inside a `for_each` body, so one iteration's lines are tellable from another's. */
+  iteration?: number | null;
+}
+
+const LogEntrySchema = new Schema<FlowLogEntry>(
+  {
+    at: { type: Date, default: () => new Date() },
+    node_id: { type: String, required: true },
+    source: { type: String, enum: FLOW_LOG_SOURCES, default: 'node' },
+    text: { type: String, default: '' },
+    iteration: { type: Number, default: null },
+  },
+  { _id: false },
+);
+
 /** A question the run is blocked on (currently only the human approval gate). */
 export interface FlowPending {
   node_id: string;
@@ -65,6 +96,12 @@ const FlowRunSchema = new Schema(
     /** Values the operator (or caller) supplied for the flow's `input` nodes. */
     inputs: { type: Schema.Types.Mixed, default: {} },
     nodes: { type: [NodeStateSchema], default: [] },
+    /**
+     * The debug trace. Written in batches by the runner (an agent streaming tokens would otherwise be
+     * thousands of writes) and capped per node, so a chatty tool inside a 20-item loop can't grow the
+     * document without bound — the run doc is a trace, not a log store.
+     */
+    logs: { type: [LogEntrySchema], default: [] },
     pending: { type: Schema.Types.Mixed, default: null },
     output: { type: Schema.Types.Mixed, default: null },
     error: { type: String, default: '' },

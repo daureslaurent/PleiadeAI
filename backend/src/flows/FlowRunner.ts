@@ -6,6 +6,7 @@ import { flowRunRepository } from '../domain/flows/flow-run.repository';
 import type { FlowNodeState, FlowTrigger } from '../domain/flows/flow-run.model';
 import type { FlowDoc, FlowEdge, FlowNode, FlowValue } from '../domain/flows/flow.model';
 import { flowApprovalBroker } from './FlowApprovalBroker';
+import { RunLogBuffer } from './RunLogBuffer';
 import { clearFlowDepth, setFlowDepth } from './flow-depth';
 import { getHandler, inputPorts, outputPorts, NON_EXECUTING_TYPES } from './nodes';
 import { asHandles, asList, asText, coerce, jsonValue, textValue, type PortType } from './port-types';
@@ -117,6 +118,11 @@ export class FlowRunner {
 
     const controller = new AbortController();
     this.active.set(runId, controller);
+
+    // The run's debug trace. Attached before the first node so an agent node's very first token is
+    // already being captured (see RunLogBuffer).
+    const logs = new RunLogBuffer(runId);
+    logs.attach();
     // Register the nesting depth against the run's session *before* anything executes: an agent node
     // that calls `run_flow` inherits this session, and that inheritance is the only thing the guard
     // can see (see flows/flow-depth.ts).
@@ -153,6 +159,7 @@ export class FlowRunner {
         region: new Set(executable.map((n) => n.id)),
         scopeItem: undefined,
         scopeIndex: undefined,
+        logs,
       });
 
       const outputNode = executable.find((n) => n.type === 'output');
@@ -190,6 +197,7 @@ export class FlowRunner {
       this.active.delete(runId);
       flowApprovalBroker.cancel(runId);
       clearFlowDepth(runId);
+      await logs.close();
     }
   }
 
@@ -312,6 +320,9 @@ export class FlowRunner {
     const state = runtime.get(node.id)!;
     state.status = 'running';
     const startedAt = Date.now();
+    // Ambient agent/tool events carry the agent's identity, not the node's, so tell the trace which
+    // node is executing before anything can emit (see RunLogBuffer.setCurrentNode).
+    exec.logs.setCurrentNode(node.id);
 
     await flowRunRepository.patchNode(
       runId,
@@ -346,6 +357,12 @@ export class FlowRunner {
       state.status = 'success';
 
       const value = primary(outputs);
+      exec.logs.append(
+        node.id,
+        'system',
+        `✓ ${labelOf(node)} (${Math.round(Date.now() - startedAt)}ms)`,
+        { iteration: exec.scopeIndex },
+      );
       await flowRunRepository.patchNode(
         runId,
         node.id,
@@ -365,6 +382,7 @@ export class FlowRunner {
       state.status = 'error';
       const aborted = err instanceof FlowAbortedError || exec.signal.aborted;
       const message = err instanceof Error ? err.message : String(err);
+      exec.logs.append(node.id, 'system', `✗ ${labelOf(node)}: ${message}`, { iteration: exec.scopeIndex });
       await flowRunRepository.patchNode(
         runId,
         node.id,
@@ -604,7 +622,10 @@ export class FlowRunner {
           etaMs: payload.etaMs ?? null,
           elapsedMs: Date.now() - startedAt,
         }),
-      emitOutput: (chunk) => eventBus.emit('flow:node_output', { ctx, runId, nodeId: node.id, chunk }),
+      emitOutput: (chunk) => {
+        exec.logs.append(node.id, 'node', chunk, { iteration: exec.scopeIndex });
+        eventBus.emit('flow:node_output', { ctx, runId, nodeId: node.id, chunk });
+      },
       storeResource: async (inputResource) => {
         const stored = await resourceRepository.store({
           sessionId: runId,
@@ -696,6 +717,8 @@ interface RegionExecution {
   region: Set<string>;
   scopeItem: FlowValue | undefined;
   scopeIndex: number | undefined;
+  /** The run's debug trace, shared by every region (including loop bodies). */
+  logs: RunLogBuffer;
 }
 
 /** A handler may return one value or a map of them; normalise to the map form. */

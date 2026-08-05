@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { AlertTriangle, Check, Copy, Save, Trash2, Workflow } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Play,
+  Save,
+  SlidersHorizontal,
+  Terminal,
+  Trash2,
+  Workflow,
+} from 'lucide-react';
 import { ListRow, MasterDetail } from '../../components/MasterDetail';
 import { Button, EmptyState, Spinner, Toggle, useConfirm } from '../../components/ui';
 import {
@@ -15,11 +25,19 @@ import {
 import { FlowCanvas } from './FlowCanvas';
 import { NodeInspector } from './NodeInspector';
 import { NodePalette } from './NodePalette';
+import { FlowDebugPanel } from './FlowDebugPanel';
 import { FlowRunPanel, messageOf } from './FlowRunPanel';
 import { FlowRunsPanel } from './FlowRunsPanel';
 import { useFlowRun } from './useFlowRun';
 
 type Tab = 'design' | 'runs';
+type RailTab = 'run' | 'debug' | 'params';
+
+const RAIL_TABS = [
+  { key: 'run' as const, label: 'Run', icon: Play },
+  { key: 'debug' as const, label: 'Debug', icon: Terminal },
+  { key: 'params' as const, label: 'Params', icon: SlidersHorizontal },
+];
 
 /**
  * The Flows page (FLOWS_PLAN.md §8).
@@ -43,6 +61,9 @@ export function FlowsView() {
   const [issues, setIssues] = useState<FlowIssue[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('design');
+  const [railTab, setRailTab] = useState<RailTab>('run');
+  /** Set once the operator picks a rail tab themselves; cleared when a new run starts. */
+  const railPinned = useRef(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [runsKey, setRunsKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -302,7 +323,7 @@ export function FlowsView() {
               )}
             </aside>
 
-            <div className="relative min-w-0 flex-1">
+            <div className="min-w-0 flex-1">
               <ReactFlowProvider>
                 <FlowCanvas
                   nodes={nodes}
@@ -311,43 +332,87 @@ export function FlowsView() {
                   issues={issues}
                   runStates={live.states.size ? live.states : undefined}
                   selectedId={selectedNodeId}
-                  onSelect={setSelectedNodeId}
+                  onSelect={(id) => {
+                    setSelectedNodeId(id);
+                    // Clicking a node opens its settings — unless the operator has chosen a tab
+                    // themselves, in which case leave the rail where they put it.
+                    if (id && !railPinned.current) setRailTab('params');
+                  }}
                   onNodesChange={changeNodes}
                   onEdgesChange={changeEdges}
                   readOnly={tab === 'runs'}
                 />
               </ReactFlowProvider>
 
-              {/* A node's live log, pinned over the canvas while its card is selected. */}
-              {selectedNodeId && live.logs.get(selectedNodeId) && (
-                <pre className="glass-popover pointer-events-none absolute bottom-3 left-3 right-3 max-h-32 overflow-auto rounded-lg px-3 py-2 font-mono text-[10px] leading-relaxed text-slate-400">
-                  {live.logs.get(selectedNodeId)}
-                </pre>
-              )}
             </div>
 
-            {/* Right rail: the node inspector while designing, the run controls otherwise. */}
-            {tab === 'design' && selectedNode ? (
-              <NodeInspector
-                node={selectedNode}
-                nodeType={typeMap.get(selectedNode.type)}
-                flowId={flow.id}
-                onChange={(patch) => patchNode(selectedNode.id, patch)}
-                onDelete={() => deleteNode(selectedNode.id)}
-                onClose={() => setSelectedNodeId(null)}
-              />
-            ) : (
-              <aside className="glass w-80 shrink-0 border-l">
-                <FlowRunPanel
-                  flow={{ ...flow, issues }}
-                  live={live}
-                  onStarted={(id) => {
-                    setRunId(id);
-                    setRunsKey((k) => k + 1);
-                  }}
-                />
-              </aside>
-            )}
+            {/* Right rail. Run, Debug and Parameters used to fight for this space — selecting a node
+                replaced the run controls, and a node's log was an unscrollable overlay on the canvas.
+                They are peers now, so watching a run and inspecting a node no longer exclude each
+                other. */}
+            <aside className="glass flex w-80 shrink-0 flex-col border-l">
+              <div className="flex shrink-0 gap-0.5 border-b border-white/[0.06] p-1.5">
+                {RAIL_TABS.map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setRailTab(key);
+                      // Any manual choice parks the auto-switching until the next run starts, so the
+                      // rail is never yanked away mid-read.
+                      railPinned.current = true;
+                    }}
+                    className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1 text-[11px] transition-colors ${
+                      railTab === key ? 'bg-accent/20 text-accent' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Icon size={11} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="min-h-0 flex-1">
+                {railTab === 'run' && (
+                  <FlowRunPanel
+                    flow={{ ...flow, issues }}
+                    live={live}
+                    onStarted={(id) => {
+                      setRunId(id);
+                      setRunsKey((k) => k + 1);
+                      // A fresh run re-arms auto-switching and jumps to Debug.
+                      railPinned.current = false;
+                      setRailTab('debug');
+                    }}
+                  />
+                )}
+                {railTab === 'debug' && (
+                  <FlowDebugPanel
+                    logs={live.logs}
+                    nodes={nodes}
+                    selectedNodeId={selectedNodeId}
+                    live={live.detail?.status === 'running' || live.detail?.status === 'awaiting_input'}
+                  />
+                )}
+                {railTab === 'params' &&
+                  (selectedNode ? (
+                    <NodeInspector
+                      node={selectedNode}
+                      nodeType={typeMap.get(selectedNode.type)}
+                      flowId={flow.id}
+                      readOnly={tab === 'runs'}
+                      onChange={(patch) => patchNode(selectedNode.id, patch)}
+                      onDelete={() => deleteNode(selectedNode.id)}
+                      onClose={() => setSelectedNodeId(null)}
+                    />
+                  ) : (
+                    <div className="p-4">
+                      <EmptyState icon={<SlidersHorizontal size={18} />}>
+                        Select a node to edit its settings.
+                      </EmptyState>
+                    </div>
+                  ))}
+              </div>
+            </aside>
           </div>
         </div>
       )}

@@ -24,6 +24,7 @@ export function NodeInspector({
   node,
   nodeType,
   flowId,
+  readOnly = false,
   onChange,
   onDelete,
   onClose,
@@ -31,6 +32,8 @@ export function NodeInspector({
   node: FlowNode;
   nodeType: FlowNodeType | undefined;
   flowId: string;
+  /** True while reviewing a past run — settings are readable, but editing one would be a lie. */
+  readOnly?: boolean;
   onChange: (patch: Partial<FlowNode>) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -53,7 +56,11 @@ export function NodeInspector({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-auto p-4">
+      <div
+        className={`min-h-0 flex-1 space-y-4 overflow-auto p-4 ${
+          readOnly ? 'pointer-events-none opacity-60' : ''
+        }`}
+      >
         {nodeType?.description && (
           <p className="text-[11px] leading-relaxed text-slate-500">{nodeType.description}</p>
         )}
@@ -90,11 +97,13 @@ export function NodeInspector({
         )}
       </div>
 
-      <div className="border-t border-white/[0.06] p-3">
-        <Button variant="danger" icon={<Trash2 size={13} />} onClick={onDelete} className="w-full">
-          Delete node
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="border-t border-white/[0.06] p-3">
+          <Button variant="danger" icon={<Trash2 size={13} />} onClick={onDelete} className="w-full">
+            Delete node
+          </Button>
+        </div>
+      )}
     </aside>
   );
 }

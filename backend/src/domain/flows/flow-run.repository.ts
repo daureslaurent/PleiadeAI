@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import {
   FlowRunModel,
+  type FlowLogEntry,
   type FlowNodeState,
   type FlowPending,
   type FlowRunDoc,
@@ -71,6 +72,17 @@ export const flowRunRepository = {
   async addNode(runId: string, state: FlowNodeState): Promise<void> {
     if (!Types.ObjectId.isValid(runId)) return;
     await FlowRunModel.updateOne({ _id: runId }, { $push: { nodes: state } }).exec();
+  },
+
+  /**
+   * Replace the run's debug trace. A whole-array `$set` rather than `$push`, because the runner holds
+   * the authoritative capped buffer in memory — pushing would need the per-node cap enforced in the
+   * database, and a `$slice` can only bound the array globally, which would let one noisy node evict
+   * every other node's lines.
+   */
+  async setLogs(runId: string, logs: FlowLogEntry[]): Promise<void> {
+    if (!Types.ObjectId.isValid(runId)) return;
+    await FlowRunModel.updateOne({ _id: runId }, { $set: { logs } }).exec();
   },
 
   async setPending(runId: string, pending: FlowPending | null): Promise<void> {
