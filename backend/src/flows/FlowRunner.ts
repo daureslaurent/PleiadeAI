@@ -515,7 +515,9 @@ export class FlowRunner {
     for (const id of body) runtime.set(id, { outputs: {}, status: 'pending' });
     runtime.set(loop.id, {
       status: 'success',
-      outputs: { default: item, index: textValue(String(index)) },
+      // `each` is the per-iteration trigger: a body node whose inputs are all templates still needs
+      // an edge from the loop, or it isn't in the body and never runs (see the port's description).
+      outputs: { default: item, index: textValue(String(index)), each: { type: 'signal' } },
     });
 
     for (const id of body) {

@@ -119,6 +119,12 @@ export const forEachNode: FlowNodeHandler = {
   outputs: [
     { name: 'default', types: ['text'], description: 'The current item.' },
     { name: 'index', types: ['text'], description: 'The current 0-based index.' },
+    {
+      name: 'each',
+      types: ['signal'],
+      description:
+        'Fires once per item. Wire this into a body node that reads its data from {{item.…}} templates rather than from a port — without it that node has no edge from the loop, so it is not part of the body at all.',
+    },
   ],
   config: [
     {
