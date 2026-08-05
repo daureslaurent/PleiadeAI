@@ -25,6 +25,16 @@ const EnvSchema = z.object({
   // Built-in local fallback (docker-compose `llama-fallback` service). The backend ensures a
   // system-managed endpoint pointing here at boot and auto-discovers its model. The URL is the
   // docker-network hostname (reachable from the backend container, not the operator's browser).
+  //
+  // `LLAMA_FALLBACK_ENABLED=false` turns the whole thing off: the backend registers nothing and
+  // retires any managed endpoint a previous boot left behind. It has to be a separate switch rather
+  // than "unset the URL", because the container is behind a compose profile — without this, the
+  // backend would keep re-registering an endpoint whose host does not exist, and the health poller
+  // would mark it down forever.
+  LLAMA_FALLBACK_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
   LLAMA_FALLBACK_URL: z.string().url('LLAMA_FALLBACK_URL must be a valid URL').default('http://llama-fallback:8080'),
   LLAMA_FALLBACK_MODEL: z.string().default('lfm2.5-230m'),
 

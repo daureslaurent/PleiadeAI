@@ -172,6 +172,24 @@ export const endpointService = {
     // Match an existing managed endpoint first, else the well-known name (e.g. from the migration seed).
     let ep = (await endpointRepository.findManaged()) ?? (await endpointRepository.findByName(LOCAL_FALLBACK_NAME));
 
+    // Switched off (the compose service is behind a profile): retire whatever a previous boot left,
+    // so the health poller stops probing a host that no longer exists and the Connections page stops
+    // showing a permanently-down endpoint. Refuses to delete one the operator has made their default
+    // — that would silently leave the system with no inference target at all.
+    if (!env.LLAMA_FALLBACK_ENABLED) {
+      if (!ep) return;
+      if (ep.is_default) {
+        log.warn(
+          { endpoint: ep.name },
+          'local fallback is disabled but this endpoint is the default — leaving it in place',
+        );
+        return;
+      }
+      await endpointRepository.delete(ep._id);
+      log.info({ endpoint: ep.name }, 'local fallback disabled — managed endpoint removed');
+      return;
+    }
+
     if (!ep) {
       ep = await endpointRepository.create({
         name: LOCAL_FALLBACK_NAME,

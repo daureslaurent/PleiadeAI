@@ -86,13 +86,25 @@ services:
       - pleiades_net
 
   # ----------------------------------------
-  # 2b. FALLBACK INFERENCE (CPU llama.cpp — last-resort chat model)
+  # 2b. FALLBACK INFERENCE (CPU llama.cpp — last-resort chat model) — OPT-IN
   # ----------------------------------------
-  # Always up: a tiny CPU LFM2.5-230M served with --jinja so native tool-calls work. Q8_0 on purpose:
-  # at 230M params quantization loss is disproportionate and the file is only ~250MB anyway. The backend
-  # fails over to it (base_url http://llama-fallback:8080, model id `lfm2.5-230m`) only when a
-  # primary endpoint is unreachable. Note: plain llama-server keeps the model resident while running.
+  # A tiny CPU model served with --jinja so native tool-calls work. Q8_0 on purpose: at 230M params
+  # quantization loss is disproportionate and the file is only ~250MB anyway. The backend fails over
+  # to it (base_url http://llama-fallback:8080, model id `lfm2.5-230m`) only when a primary endpoint
+  # is unreachable.
+  #
+  # **Off by default.** llama-server keeps the model resident for as long as it runs, so on a small
+  # host it costs RAM around the clock to insure against an outage of a remote box that is usually
+  # up. Turn it on with:
+  #
+  #     docker compose --profile fallback up -d
+  #
+  # and flip `LLAMA_FALLBACK_ENABLED` to "true" in the backend's environment below — the backend only
+  # registers the managed endpoint when that flag is set, so the two must agree. Note that
+  # `depends_on` deliberately does NOT list this service: compose auto-activates the profile of
+  # anything a running service depends on, which would defeat the switch entirely.
   llama-fallback:
+    profiles: ["fallback"]
     image: ghcr.io/ggml-org/llama.cpp:server
     container_name: pleiades_llama_fallback
     restart: unless-stopped
@@ -156,6 +168,9 @@ services:
       QDRANT_URL: http://qdrant:6333
       EMBEDDING_API_URL: http://embeddings:8080
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text-v1.5}
+      # Must match whether the `fallback` compose profile is active (see the service above).
+      # "false" → the backend registers no managed endpoint and retires one a previous boot created.
+      LLAMA_FALLBACK_ENABLED: "false"
       LLAMA_FALLBACK_URL: http://llama-fallback:8080
       LLAMA_FALLBACK_MODEL: lfm2.5-230m
       # Timezone all scheduled-task cron expressions are evaluated in (schedule_task + Autonomy UI).
@@ -204,12 +219,11 @@ services:
       qdrant:
         condition: service_healthy
       # Non-critical deps degrade gracefully in the backend, so gate on start (not health) to avoid
-      # blocking boot for ~10 min while embeddings/fallback download their GGUFs on first run.
+      # blocking boot for ~10 min while embeddings downloads its GGUF on first run. `llama-fallback`
+      # is absent on purpose — listing it here would auto-activate its profile (see that service).
       embeddings:
         condition: service_started
       searxng:
-        condition: service_started
-      llama-fallback:
         condition: service_started
     logging: *default-logging
     networks:
@@ -263,6 +277,7 @@ volumes:
   pleiades_mongo_data:
   pleiades_qdrant_data:
   pleiades_embeddings_models:
+  # Kept even while the `fallback` profile is off, so re-enabling it doesn't re-download the GGUF.
   pleiades_fallback_models:
   pleiades_caddy_data:
   pleiades_caddy_config:
