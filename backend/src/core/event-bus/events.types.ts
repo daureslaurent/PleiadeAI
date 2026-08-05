@@ -573,6 +573,23 @@ export interface FlowRunEndPayload {
 }
 
 /**
+ * A `for_each` began another pass over its body.
+ *
+ * The live node states a page keeps are keyed by node id, which has no room for "the same node, one
+ * shot later" — so without this the body nodes keep the previous iteration's result and the canvas
+ * claims work is finished that has not been done for *this* item. The body is named explicitly
+ * because only the runner knows which nodes belong to the loop.
+ */
+export interface FlowIterationStartPayload {
+  ctx: EventContext;
+  runId: string;
+  loopId: string;
+  iteration: number;
+  /** Node ids in the loop body, to be reset for this pass. */
+  nodes: string[];
+}
+
+/**
  * A node persisted an artifact into the run.
  *
  * Emitted at the moment the bytes are stored rather than when the node finishes, for two reasons: a
@@ -639,6 +656,7 @@ export interface EventMap {
   'flow:run_end': FlowRunEndPayload;
   'flow:awaiting_approval': FlowAwaitingApprovalPayload;
   'flow:artifact': FlowArtifactPayload;
+  'flow:iteration_start': FlowIterationStartPayload;
 }
 
 export type EventName = keyof EventMap;

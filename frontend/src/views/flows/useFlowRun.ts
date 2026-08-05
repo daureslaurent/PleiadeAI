@@ -4,6 +4,7 @@ import { flowsApi, type FlowLogSource, type FlowRunDetail } from '../../lib/api'
 import type { NodeRunState } from './FlowNodeCard';
 import type {
   FlowArtifactEvent,
+  FlowIterationStartEvent,
   FlowAwaitingApprovalEvent,
   FlowNodeEndEvent,
   FlowNodeOutputEvent,
@@ -224,6 +225,17 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
       refresh();
     };
 
+    // A new pass over a loop body: clear the previous iteration's results, so a node reads as
+    // "not done yet for this shot" rather than carrying the last shot's tick.
+    const onIterationStart = (e: FlowIterationStartEvent) =>
+      setState((prev) => {
+        const states = new Map(prev.states);
+        for (const id of e.nodes) {
+          states.set(id, { status: 'pending', percent: null, iteration: e.iteration });
+        }
+        return { ...prev, states };
+      });
+
     const onArtifact = (e: FlowArtifactEvent) =>
       setState((prev) =>
         prev.artifacts.some((a) => a.handle === e.handle)
@@ -259,6 +271,7 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
     socket.on('flow_run_end', onRunEnd);
     socket.on('flow_awaiting_approval', onApproval);
     socket.on('flow_artifact', onArtifact);
+    socket.on('flow_iteration_start', onIterationStart);
     // Emitted by the agent/tool/media work happening *inside* the run's nodes.
     socket.on('stream_chunk', onStreamChunk);
     socket.on('tool_start', onToolStart);
@@ -274,6 +287,7 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
       socket.off('flow_run_end', onRunEnd);
       socket.off('flow_awaiting_approval', onApproval);
       socket.off('flow_artifact', onArtifact);
+      socket.off('flow_iteration_start', onIterationStart);
       socket.off('stream_chunk', onStreamChunk);
       socket.off('tool_start', onToolStart);
       socket.off('tool_end', onToolEnd);

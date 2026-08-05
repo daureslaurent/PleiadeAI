@@ -540,6 +540,16 @@ export class FlowRunner {
       await flowRunRepository.addNode(exec.runId, { node_id: id, status: 'pending', iteration: index });
     }
 
+    // Tell the page this pass has begun so it can clear the previous iteration's results. It keeps
+    // one state per node id, which cannot express "same node, next shot" on its own.
+    eventBus.emit('flow:iteration_start', {
+      ctx: exec.ctx,
+      runId: exec.runId,
+      loopId: loop.id,
+      iteration: index,
+      nodes: [...body],
+    });
+
     await this.executeRegion({
       ...exec,
       runtime,

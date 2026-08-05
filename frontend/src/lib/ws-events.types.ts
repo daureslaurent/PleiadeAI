@@ -393,6 +393,15 @@ export interface FlowRunEndEvent {
   error?: string;
 }
 
+/** A `for_each` began another pass — the body's nodes should drop the last pass's result. */
+export interface FlowIterationStartEvent {
+  type: 'flow_iteration_start';
+  runId: string;
+  loopId: string;
+  iteration: number;
+  nodes: string[];
+}
+
 /** A node persisted an artifact — emitted as the bytes land, not when the node finishes. */
 export interface FlowArtifactEvent {
   type: 'flow_artifact';
@@ -442,4 +451,5 @@ export type WsEvent =
   | FlowNodeEndEvent
   | FlowRunEndEvent
   | FlowArtifactEvent
+  | FlowIterationStartEvent
   | FlowAwaitingApprovalEvent;

@@ -166,6 +166,11 @@ container that can't be made ready surfaces `isolationError` rather than silentl
   port's first declared type flattens everything on a permissive port — `output` accepts every type
   and lists `text` first, so an image reaching it would arrive as a string and lose the handles that
   *are* the result.
+- **Each pass of a `for_each` resets its body.** The live node states a page holds are keyed by node
+  id, which has no room for "the same node, one shot later" — so a body node kept the previous
+  iteration's tick and the canvas claimed work was done that had not been done for the current item.
+  `flow:iteration_start` names the body so the page can clear it. The persisted trace never had this
+  problem: it already carries one row per node per iteration.
 - **A wired `signal` input is a gate.** If the branch feeding it wasn't taken, the node does not run
   — even when its data inputs are all sitting there ready. Without that rule a condition could never
   gate a node that also receives data from upstream, which is the main thing you'd put one in front
