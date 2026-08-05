@@ -16,9 +16,11 @@ import '@xyflow/react/dist/style.css';
 import { Trash2 } from 'lucide-react';
 import type { FlowEdge, FlowIssue, FlowNode, FlowNodeType, PortType } from '../../lib/api';
 import { FlowNodeCard, type FlowNodeData, type NodeRunState } from './FlowNodeCard';
+import { FlowEdgeLine } from './FlowEdgeLine';
 import { canConnect, GROUP_COLORS, portColor } from './portStyle';
 
 const NODE_TYPES = { flowNode: FlowNodeCard };
+const EDGE_TYPES = { flowEdge: FlowEdgeLine };
 
 /**
  * The graph canvas.
@@ -61,6 +63,9 @@ export function FlowCanvas({
    */
   const [sizes, setSizes] = useState<Map<string, { width: number; height: number }>>(new Map());
 
+  /** Selected link, for the same reason: it must be restated onto the rebuilt edge objects. */
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
   const issueByNode = useMemo(() => {
     const map = new Map<string, 'error' | 'warning'>();
     for (const issue of issues) {
@@ -97,6 +102,15 @@ export function FlowCanvas({
     [nodes, nodeTypes, selectedId, runStates, issueByNode, readOnly, sizes],
   );
 
+  const deleteEdge = useCallback(
+    (id: string) => {
+      if (readOnly) return;
+      onEdgesChange(edges.filter((e) => e.id !== id));
+      setSelectedEdgeId((current) => (current === id ? null : current));
+    },
+    [edges, onEdgesChange, readOnly],
+  );
+
   const rfEdges = useMemo<Edge[]>(
     () =>
       edges.map((edge) => {
@@ -106,15 +120,21 @@ export function FlowCanvas({
         const color = portColor(portType);
         return {
           id: edge.id,
+          type: 'flowEdge',
           source: edge.source,
           sourceHandle: edge.source_port,
           target: edge.target,
           targetHandle: edge.target_port,
           animated: portType === 'signal',
+          // Selection has to be restated here: these objects are rebuilt from props on every render,
+          // so React Flow's own selection would be discarded and an edge could never *look* selected
+          // — which is why the Backspace-to-delete it documents appeared to do nothing.
+          selected: edge.id === selectedEdgeId,
+          data: { color, onDelete: readOnly ? undefined : deleteEdge },
           style: { stroke: color, strokeWidth: 1.6 },
         };
       }),
-    [edges, nodes, nodeTypes],
+    [edges, nodes, nodeTypes, selectedEdgeId, deleteEdge, readOnly],
   );
 
   /** Port type of a specific handle, for connection validation. */
@@ -185,9 +205,16 @@ export function FlowCanvas({
 
   const handleEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
+      for (const change of changes) {
+        if (change.type === 'select') setSelectedEdgeId(change.selected ? change.id : null);
+      }
       if (readOnly) return;
+      // `remove` is what the Delete/Backspace key produces for a selected link.
       const removed = new Set(changes.filter((c) => c.type === 'remove').map((c) => c.id));
-      if (removed.size) onEdgesChange(edges.filter((e) => !removed.has(e.id)));
+      if (removed.size) {
+        onEdgesChange(edges.filter((e) => !removed.has(e.id)));
+        setSelectedEdgeId((current) => (current && removed.has(current) ? null : current));
+      }
     },
     [edges, onEdgesChange, readOnly],
   );
@@ -212,23 +239,40 @@ export function FlowCanvas({
     [edges, onEdgesChange, isValidConnection, readOnly],
   );
 
+  /** Toolbar delete: whichever of a node or a link is currently selected. */
   const deleteSelected = useCallback(() => {
-    if (readOnly || !selectedId) return;
+    if (readOnly) return;
+    if (selectedEdgeId) {
+      deleteEdge(selectedEdgeId);
+      return;
+    }
+    if (!selectedId) return;
     onNodesChange(nodes.filter((n) => n.id !== selectedId));
     onEdgesChange(edges.filter((e) => e.source !== selectedId && e.target !== selectedId));
     onSelect(null);
-  }, [selectedId, nodes, edges, onNodesChange, onEdgesChange, onSelect, readOnly]);
+  }, [selectedId, selectedEdgeId, deleteEdge, nodes, edges, onNodesChange, onEdgesChange, onSelect, readOnly]);
 
   return (
     <ReactFlow
       nodes={rfNodes}
       edges={rfEdges}
       nodeTypes={NODE_TYPES}
+      edgeTypes={EDGE_TYPES}
+      // Both keys, because "Delete" is the one people reach for and Backspace is React Flow's default.
+      deleteKeyCode={['Delete', 'Backspace']}
       onNodesChange={handleNodesChange}
       onEdgesChange={handleEdgesChange}
       onConnect={onConnect}
       isValidConnection={isValidConnection}
-      onPaneClick={() => onSelect(null)}
+      onPaneClick={() => {
+        onSelect(null);
+        setSelectedEdgeId(null);
+      }}
+      onEdgeClick={(_, edge) => {
+        setSelectedEdgeId(edge.id);
+        // Clear the node selection so the toolbar's delete acts on the link you just clicked.
+        onSelect(null);
+      }}
       nodesConnectable={!readOnly}
       elementsSelectable
       proOptions={{ hideAttribution: true }}
@@ -249,7 +293,7 @@ export function FlowCanvas({
       <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="rgba(148,163,184,0.14)" />
       <Controls showInteractive={false} className="flow-controls">
         {!readOnly && (
-          <ControlButton onClick={deleteSelected} title="Delete selected node">
+          <ControlButton onClick={deleteSelected} title="Delete the selected node or link">
             <Trash2 size={12} />
           </ControlButton>
         )}

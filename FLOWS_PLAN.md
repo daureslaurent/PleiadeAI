@@ -121,6 +121,7 @@ interface FlowNodeHandler {
 |---|---|---|
 | `input` | io | Injection point — the "inject data into the graph" node. Config: port type + default value. Overridden per run from the run form / `run_flow` args / the cron schedule. |
 | `output` | io | Terminal. Its value becomes `FlowRun.output` and the `run_flow` return value. |
+| `log` | io | Debug **tap**: records what reaches it (type, handles, text, optionally the JSON) into the run trace and the node's live log. Deliberately a tap, not a pass-through — a pass-through would need one static output type, which either breaks the wire for every other type or makes the operator restate a type the graph already knows. Branch the source's output instead: one wire onward, one into the Log. |
 | `note` | io | A comment card. No ports, no execution. |
 | `ask_agent` | agent | `agentRunner.run()` as the configured agent. `userText` = prompt template + text inputs; `images` resolved from image-port handles. Outputs `text` + `images`. Yields to a live user session via `sessionLock`, like cron does. |
 | `router` | agent | Agent judgement: a question plus N labelled choices; the answer picks one of N `signal` outputs. Unparseable answer → first choice, recorded on the node state. |
@@ -156,6 +157,10 @@ container that can't be made ready surfaces `isolationError` rather than silentl
   `skipped`, minus anything still reachable by another path. Mechanically there is no reachability
   pass: a branching node simply omits the output ports it didn't take, and a node whose every
   incoming edge is dead is skipped in turn.
+- **A value is only converted when the port can't take it as-is.** Coercing unconditionally to a
+  port's first declared type flattens everything on a permissive port — `output` accepts every type
+  and lists `text` first, so an image reaching it would arrive as a string and lose the handles that
+  *are* the result.
 - **A wired `signal` input is a gate.** If the branch feeding it wasn't taken, the node does not run
   — even when its data inputs are all sitting there ready. Without that rule a condition could never
   gate a node that also receives data from upstream, which is the main thing you'd put one in front

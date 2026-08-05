@@ -103,6 +103,85 @@ export const outputNode: FlowNodeHandler = {
 };
 
 /**
+ * `log` — a **tap** on a wire: it records whatever reaches it, in the run trace and in the node's
+ * live log, so you can see what a step actually produced (flows spec §3).
+ *
+ * Deliberately a tap rather than a pass-through. A pass-through would have to declare one static
+ * output type, which either breaks the wire for every other type or forces the operator to restate a
+ * type the graph already knows. Branching the source's output — one wire onward, one into the Log —
+ * costs a single extra edge and keeps the canvas honest about where data really flows.
+ *
+ * Its `default` output is the *text rendering* of what it saw, which is also the useful thing to
+ * splice into a later prompt ("here is what the previous step returned").
+ */
+export const logNode: FlowNodeHandler = {
+  type: 'log',
+  label: 'Log',
+  group: 'io',
+  description: 'Records whatever is wired into it, for debugging. Tap a wire by branching it here.',
+  inputs: [
+    { name: 'value', types: [...PORT_TYPES].filter((t) => t !== 'signal') },
+    { name: 'run', types: ['signal'], description: 'Gate: only log on this branch.' },
+  ],
+  outputs: [
+    { name: 'default', types: ['text'], description: 'What it saw, as text.' },
+    { name: 'done', types: ['signal'] },
+  ],
+  config: [
+    {
+      key: 'note',
+      label: 'Note',
+      type: 'string',
+      default: '',
+      hint: 'Prefixed to the entry, so several logs stay tellable apart. Supports {{node_id}}.',
+    },
+    {
+      key: 'detail',
+      label: 'Detail',
+      type: 'select',
+      options: ['summary', 'full'],
+      default: 'summary',
+      hint: '"full" also dumps the structured payload (JSON) — verbose, but it is what you want when a tool result looks wrong.',
+    },
+    {
+      key: 'max_chars',
+      label: 'Max characters',
+      type: 'number',
+      default: 2000,
+      hint: 'Longer values are cut here. The run trace caps entries again at 4000.',
+    },
+  ],
+
+  async run(ctx, inputs, config) {
+    const value = inputs.value;
+    const note = String(config.note ?? '').trim();
+    const limit = Math.max(80, Math.min(20000, Math.trunc(Number(config.max_chars)) || 2000));
+
+    const lines: string[] = [];
+    lines.push(`type: ${value?.type ?? '(nothing wired)'}`);
+    if (value?.handles?.length) lines.push(`handles: ${value.handles.join(', ')}`);
+
+    const text = asText(value);
+    if (text) lines.push(text.length > limit ? `${text.slice(0, limit)}\n… (${text.length} chars total)` : text);
+
+    if (String(config.detail ?? 'summary') === 'full' && value?.json !== undefined) {
+      let dump: string;
+      try {
+        dump = JSON.stringify(value.json, null, 2);
+      } catch {
+        dump = String(value.json);
+      }
+      lines.push(`json:\n${dump.length > limit ? `${dump.slice(0, limit)}\n… (truncated)` : dump}`);
+    }
+
+    const body = lines.join('\n');
+    const entry = note ? `${note}\n${body}` : body;
+    ctx.emitOutput(`${entry}\n`);
+    return { default: textValue(entry), done: { type: 'signal' } };
+  },
+};
+
+/**
  * `merge` — join several inputs into one value without writing a template. Handles concatenate into a
  * single list; text joins with the configured separator.
  */

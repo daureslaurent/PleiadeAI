@@ -534,7 +534,14 @@ export class FlowRunner {
               }
             : textValue(values.map(asText).filter(Boolean).join('\n\n'));
 
-      inputs[port.name] = coerce(merged, (port.types[0] ?? 'text') as PortType);
+      // Only convert when the port cannot take what arrived. Coercing unconditionally to the port's
+      // first declared type would flatten every value on a permissive port — `output` accepts all
+      // types and lists `text` first, so an image reaching it would arrive as a string and lose the
+      // handles that *are* the result.
+      const accepted = port.types as PortType[];
+      inputs[port.name] = accepted.includes(merged.type)
+        ? merged
+        : coerce(merged, accepted[0] ?? 'text');
     }
     return inputs;
   }
