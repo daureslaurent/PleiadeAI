@@ -237,6 +237,14 @@ nodes concurrently, and the alternative would put flow concerns inside the agent
 3. **Cron** — the `flow:scheduled_run` Agenda job, alongside `agent:autonomous_run`, recording into
    `run_results` and firing `alertEngine.dispatch` so a finished flow reaches the inbox and Telegram
    like an autonomous task.
+4. **MCP / CLI** — `tools/pleiades-mcp/endpoints.mjs` exposes the whole surface (read: `flows`,
+   `flow`, `flow_node_types`, `flow_runs`, `flow_run`; write: create / update / delete / duplicate /
+   validate / run / stop / approve). Writes need an API key carrying the **`flows:write`** scope,
+   which covers *running* as well as editing — a run spends real GPU time and can drive agents, so it
+   is not something a read-only key may trigger. `flow_node_types` is what makes authoring from the
+   outside viable: it publishes every node type's ports and config fields with the database-backed
+   options already resolved, so an external agent sees the agents, tools and workflows that actually
+   exist rather than guessing.
 
 ## §8 Frontend
 

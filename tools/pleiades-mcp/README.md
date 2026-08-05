@@ -1,6 +1,6 @@
 # pleiades-mcp
 
-Read-only access to a deployed PleiadesAI instance, for an external agent (Claude Code) or a shell.
+Access to a deployed PleiadesAI instance, for an external agent (Claude Code) or a shell.
 
 Two front-ends over one client:
 
@@ -9,8 +9,8 @@ Two front-ends over one client:
 | **MCP server** | `tools/pleiades-mcp/index.mjs`, wired up by the repo-root `.mcp.json` |
 | **CLI** | `node scripts/prod.mjs <command> [--key=value …]` |
 
-Both read the same endpoint catalogue (`endpoints.mjs`) and the same credentials, and both speak
-only `GET`. No dependencies — a bare `node` runs them.
+Both read the same endpoint catalogue (`endpoints.mjs`) and the same credentials. Reads work with any
+key; writes need a key carrying the matching scope (below). No dependencies — a bare `node` runs them.
 
 ## Setup
 
@@ -28,22 +28,61 @@ only `GET`. No dependencies — a bare `node` runs them.
 
 ## What a key can do
 
-A key authenticates but is **read-only**: the backend rejects any non-`GET`/`HEAD` request with
-`403`, refuses `/api/api-keys` entirely, and cannot open a websocket (so it can't drive an agent).
-Response bodies are additionally scrubbed of credentials — `GET /api/endpoints` returns each
+A key is **read-only unless you grant it scopes** when you create it. Without one, the backend
+rejects any non-`GET`/`HEAD` request with `403`. With one, writes are still confined to that scope's
+route family:
+
+| Scope | Unlocks |
+| --- | --- |
+| `agents:write` | `/api/agents` |
+| `isolations:write` | `/api/isolations` |
+| `android:write` | `/api/android-devices` |
+| `flows:write` | `/api/flows` — editing **and running** a flow, since a run spends real GPU time and can drive agents |
+
+Regardless of scope, a key can never reach `/api/api-keys`, and cannot open a websocket (so it can't
+drive a chat). Response bodies are scrubbed of credentials — `GET /api/endpoints` returns each
 inference server's `api_key` as `[redacted]`.
 
 Revoke a compromised key from the same Settings panel; it stops working immediately.
 
 ## Tools / commands
 
-`pleiades_agents`, `pleiades_agent`, `pleiades_skills`, `pleiades_sessions`, `pleiades_session_messages`,
-`pleiades_llama_logs`, `pleiades_llama_log`, `pleiades_llama_stats`, `pleiades_scoring_summary`,
-`pleiades_scores`, `pleiades_inbox`, `pleiades_memory`, `pleiades_autonomy_jobs`, and `pleiades_get`
-(escape hatch: any `/api/…` path).
+Run the CLI with no arguments for the authoritative list — it is generated from `endpoints.mjs`, so
+it can't drift. Broadly: agents, skills, sessions and their transcripts, inference logs and stats,
+scoring, inbox, memory, autonomy jobs, flows (below), and `pleiades_get` as an escape hatch onto any
+`/api/…` path.
 
 The CLI drops the `pleiades_` prefix: `node scripts/prod.mjs llama_logs --limit=25`.
-Run it with no arguments for the full list with each command's options.
+
+### Flows
+
+Read: `flows`, `flow`, `flow_node_types`, `flow_runs`, `flow_run`.
+Write (needs `flows:write`): `create_flow`, `update_flow`, `delete_flow`, `duplicate_flow`,
+`validate_flow`, `run_flow`, `stop_flow_run`, `approve_flow_run`.
+
+Two things worth knowing before authoring a graph from the outside:
+
+- **`flow_node_types` is the source of truth.** It publishes every node type with its port names and
+  types and its config fields — including the options resolved from the database, so you see the
+  agents, tools and ComfyUI workflows that actually exist on that instance. Guessing a node type or a
+  config key without it is how you get a graph that saves but won't run.
+- **`update_flow` replaces whole arrays.** Passing `nodes` or `edges` overwrites that array outright,
+  so read the flow, modify the list, and send it back complete. The response carries `issues` and
+  `runnable` — check them rather than assuming.
+
+`run_flow` returns a run id **immediately**; it does not wait, because a flow with a video node runs
+for minutes. Poll `flow_run` for status, output and the debug trace.
+
+```
+node scripts/prod.mjs flow_node_types
+node scripts/prod.mjs create_flow --body='{"name":"nightly render"}'
+node scripts/prod.mjs update_flow --id=<id> --body=@graph.json
+node scripts/prod.mjs run_flow --id=<id> --inputs='{"topic":"a lighthouse"}'
+node scripts/prod.mjs flow_run --run_id=<run>
+```
+
+`object` and `array` options take inline JSON or `@file.json` — a flow graph is far too big to paste
+on a command line.
 
 ## Cloning prod into local
 

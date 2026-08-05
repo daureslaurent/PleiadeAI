@@ -27,6 +27,9 @@ const WRITE_SCOPES: ReadonlyArray<{ scope: string; prefix: string }> = [
   { scope: 'agents:write', prefix: '/api/agents' },
   { scope: 'isolations:write', prefix: '/api/isolations' },
   { scope: 'android:write', prefix: '/api/android-devices' },
+  // Covers running a flow as well as editing one: a run spends real GPU time and can drive agents,
+  // so it is deliberately not something a read-only key may trigger.
+  { scope: 'flows:write', prefix: '/api/flows' },
 ];
 
 /**

@@ -2009,6 +2009,8 @@ export const finetuneJobsApi = {
 export const API_KEY_SCOPES = [
   { scope: 'agents:write', label: 'create, edit and delete agents' },
   { scope: 'isolations:write', label: 'create and edit isolation profiles' },
+  { scope: 'android:write', label: 'register and test Android devices' },
+  { scope: 'flows:write', label: 'create, edit, delete and run flows' },
 ] as const;
 
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number]['scope'];

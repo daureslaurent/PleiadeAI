@@ -127,6 +127,44 @@ export const ENDPOINTS = [
     resolve: (a) => ({ path: a.path, query: a.query ?? {} }),
   },
 
+  // --- Flows (FLOWS_PLAN.md). Reads first; the writes are further down. ---
+  {
+    name: 'flows',
+    description: 'List saved flows (operator-authored node graphs the backend runs in a fixed order).',
+    args: {},
+    resolve: () => ({ path: '/api/flows' }),
+  },
+  {
+    name: 'flow',
+    description:
+      "One flow in full: its nodes, edges, declared inputs, and any validation issues. `runnable` says whether it would start. Read this before editing — an update replaces the whole graph.",
+    args: { id: { type: 'string', description: 'Flow _id', required: true } },
+    resolve: (a) => ({ path: `/api/flows/${a.id}` }),
+  },
+  {
+    name: 'flow_node_types',
+    description:
+      'The catalogue of node types a flow may contain: each one\'s input/output ports with their types, and its config fields (with database-backed options already resolved — the agents, tools and ComfyUI workflows that actually exist). Read this before authoring a graph; it is the only reliable source for valid node types, port names and config keys.',
+    args: {},
+    resolve: () => ({ path: '/api/flows/node-types' }),
+  },
+  {
+    name: 'flow_runs',
+    description: 'Run history, newest first. Omit flow_id for every flow.',
+    args: {
+      flow_id: { type: 'string', description: 'Restrict to one flow' },
+      limit: { type: 'number', description: 'Max rows (default 50)' },
+    },
+    resolve: (a) => ({ path: '/api/flows/runs/list', query: { flowId: a.flow_id, limit: a.limit } }),
+  },
+  {
+    name: 'flow_run',
+    description:
+      "One run in full: per-node status and timing, the produced artifacts, and the debug trace (node output, the agent's reasoning, each tool call). This is where to look when a flow did the wrong thing.",
+    args: { run_id: { type: 'string', description: 'Run _id, from pleiades_flow_runs', required: true } },
+    resolve: (a) => ({ path: `/api/flows/runs/${a.run_id}` }),
+  },
+
   // --- Writes. Each needs an API key with the matching scope. ---
   {
     name: 'create_agent',
@@ -195,6 +233,104 @@ export const ENDPOINTS = [
     args: { id: { type: 'string', description: 'Device _id', required: true } },
     resolve: (a) => ({ path: `/api/android-devices/${a.id}/test` }),
   },
+
+  // --- Flow writes. All need the "flows:write" scope, running included: a run spends real GPU time
+  //     and can drive agents, so it is not something a read-only key may trigger.
+  {
+    name: 'create_flow',
+    description:
+      'Create an empty flow. Body: name (required, unique), description, enabled. Add its graph afterwards with pleiades_update_flow. Needs the "flows:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { body: { type: 'object', description: 'The flow document: { name, description?, enabled? }', required: true } },
+    resolve: (a) => ({ path: '/api/flows', body: a.body }),
+  },
+  {
+    name: 'update_flow',
+    description:
+      'Update a flow. Body holds only the fields to change: name, description, enabled, nodes[], edges[]. ' +
+      'Passing `nodes` or `edges` REPLACES that whole array — read the flow first and send the full list, ' +
+      'not a delta. A node is { id, type, label, position:{x,y}, config:{} }; an edge is ' +
+      '{ id, source, source_port, target, target_port }. The response carries `issues` and `runnable`, ' +
+      'so check it rather than assuming the graph is valid. Needs the "flows:write" scope.',
+    method: 'PUT',
+    write: true,
+    args: {
+      id: { type: 'string', description: 'Flow _id', required: true },
+      body: { type: 'object', description: 'Partial flow document', required: true },
+    },
+    resolve: (a) => ({ path: `/api/flows/${a.id}`, body: a.body }),
+  },
+  {
+    name: 'delete_flow',
+    description:
+      'Delete a flow, along with its run history and the artifacts those runs produced. Needs the "flows:write" scope.',
+    method: 'DELETE',
+    write: true,
+    args: { id: { type: 'string', description: 'Flow _id', required: true } },
+    resolve: (a) => ({ path: `/api/flows/${a.id}` }),
+  },
+  {
+    name: 'duplicate_flow',
+    description:
+      'Copy a flow (graph and all) under a new name. The safe way to try a variant. Needs the "flows:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { id: { type: 'string', description: 'Flow _id to copy', required: true } },
+    resolve: (a) => ({ path: `/api/flows/${a.id}/duplicate` }),
+  },
+  {
+    name: 'validate_flow',
+    description:
+      'Check a graph without saving it: port type compatibility, dangling {{refs}}, cycles, unpaired loops, ' +
+      'missing required inputs. Send the nodes and edges you intend to save. Mutates nothing, but it is a ' +
+      'POST, so it still needs the "flows:write" scope.',
+    method: 'POST',
+    write: true,
+    args: {
+      nodes: { type: 'array', description: 'The nodes to check', required: true },
+      edges: { type: 'array', description: 'The edges to check', required: true },
+    },
+    resolve: (a) => ({ path: '/api/flows/validate', body: { nodes: a.nodes, edges: a.edges } }),
+  },
+  {
+    name: 'run_flow',
+    description:
+      'Start a flow and return its run id immediately — it does NOT wait, because a flow with a video node ' +
+      'runs for minutes. Poll pleiades_flow_run for status, output and the debug trace. `inputs` is keyed by ' +
+      'each input node\'s name (see `inputs` on pleiades_flow). Needs the "flows:write" scope.',
+    method: 'POST',
+    write: true,
+    args: {
+      id: { type: 'string', description: 'Flow _id', required: true },
+      inputs: { type: 'object', description: 'Values for the flow\'s input nodes, keyed by input name' },
+    },
+    resolve: (a) => ({ path: `/api/flows/${a.id}/run`, body: { inputs: a.inputs ?? {} } }),
+  },
+  {
+    name: 'stop_flow_run',
+    description:
+      'Stop an in-flight run. Also interrupts any queued ComfyUI job it was waiting on. Needs the "flows:write" scope.',
+    method: 'POST',
+    write: true,
+    args: { run_id: { type: 'string', description: 'Run _id', required: true } },
+    resolve: (a) => ({ path: `/api/flows/runs/${a.run_id}/stop` }),
+  },
+  {
+    name: 'approve_flow_run',
+    description:
+      'Answer a run parked on an approval gate (status `awaiting_input`). Needs the "flows:write" scope.',
+    method: 'POST',
+    write: true,
+    args: {
+      run_id: { type: 'string', description: 'Run _id', required: true },
+      approved: { type: 'boolean', description: 'true to approve, false to reject (default true)' },
+    },
+    resolve: (a) => ({
+      path: `/api/flows/runs/${a.run_id}/approve`,
+      body: { approved: a.approved !== false },
+    }),
+  },
 ];
 
 /** Build the JSON Schema an MCP client needs to call a tool. */
@@ -203,8 +339,11 @@ export function inputSchemaOf(endpoint) {
   const required = [];
   for (const [name, spec] of Object.entries(endpoint.args)) {
     properties[name] = { type: spec.type, description: spec.description };
-    // Free-form documents (agent/isolation bodies) — the server validates the shape, not us.
+    // Free-form documents (agent/isolation/flow bodies) — the server validates the shape, not us.
     if (spec.type === 'object') properties[name].additionalProperties = true;
+    // Likewise for lists (a flow's nodes/edges): accept any element rather than restating the schema
+    // the backend already enforces and `flow_node_types` already publishes.
+    if (spec.type === 'array') properties[name].items = {};
     if (spec.required) required.push(name);
   }
   return { type: 'object', properties, required, additionalProperties: false };

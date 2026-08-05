@@ -36,8 +36,9 @@ function parseArgs(argv, endpoint) {
       const n = Number(raw);
       if (!Number.isFinite(n)) throw new Error(`--${rawKey} must be a number, got "${raw}"`);
       out[rawKey] = n;
-    } else if (spec.type === 'object') {
-      // Inline JSON, or `@file.json` — bodies are far too big to paste on a command line.
+    } else if (spec.type === 'object' || spec.type === 'array') {
+      // Inline JSON, or `@file.json` — bodies are far too big to paste on a command line, and a flow
+      // graph is the extreme case.
       const source = raw.startsWith('@') ? fs.readFileSync(raw.slice(1), 'utf8') : raw;
       try {
         out[rawKey] = JSON.parse(source);
