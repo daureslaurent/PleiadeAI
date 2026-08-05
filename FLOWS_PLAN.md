@@ -122,6 +122,7 @@ interface FlowNodeHandler {
 | `input` | io | Injection point — the "inject data into the graph" node. Config: port type + default value. Overridden per run from the run form / `run_flow` args / the cron schedule. Binary types (image/video/audio/file) are **uploaded** through the run form or the inspector and carried as a handle — see §6.1. |
 | `output` | io | Terminal. Its value becomes `FlowRun.output` and the `run_flow` return value. |
 | `log` | io | Debug **tap**: records what reaches it (type, handles, text, optionally the JSON) into the run trace and the node's live log. Deliberately a tap, not a pass-through — a pass-through would need one static output type, which either breaks the wire for every other type or makes the operator restate a type the graph already knows. Branch the source's output instead: one wire onward, one into the Log. |
+| `data` | io | A value written into the graph — the constant to `input`'s parameter. Wire it, or quote it as `{{node_id}}` in **any other node's config field**, which is how a value reaches a setting that has no port (a clip duration, a house style suffix). Written once, changed once. |
 | `note` | io | A comment card. No ports, no execution. |
 | `ask_agent` | agent | `agentRunner.run()` as the configured agent. `userText` = prompt template + text inputs; `images` resolved from image-port handles. Outputs `text` + `images`. Yields to a live user session via `sessionLock`, like cron does. |
 | `router` | agent | Agent judgement: a question plus N labelled choices; the answer picks one of N `signal` outputs. Unparseable answer → first choice, recorded on the node state. |
@@ -152,7 +153,11 @@ container that can't be made ready surfaces `isolationError` rather than silentl
 - **Order**: topological. Independent branches run concurrently (bounded, default 4).
 - **Templates**: `{{node_id.text}}`, `{{node_id.json.a.b}}`, `{{node_id.handles}}` interpolate any
   completed node's output into any string config field. This is the escape hatch that keeps the
-  canvas readable — one prompt can splice three upstream results without three merge nodes.
+  canvas readable — one prompt can splice three upstream results without three merge nodes, and it
+  is the only way to drive a setting that has no port. **A reference is an ordering constraint**: a
+  node waits for everything it quotes, since otherwise it could be scheduled first and silently
+  interpolate an empty string. It delays but never skips — the quoted node may legitimately have been
+  skipped on an untaken branch.
 - **Skip**: the untaken side of a `condition`/`router`/`approval` marks its downstream reachable set
   `skipped`, minus anything still reachable by another path. Mechanically there is no reachability
   pass: a branching node simply omits the output ports it didn't take, and a node whose every

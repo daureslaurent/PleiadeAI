@@ -10,7 +10,13 @@ import { RunLogBuffer } from './RunLogBuffer';
 import { clearFlowDepth, setFlowDepth } from './flow-depth';
 import { getHandler, inputPorts, outputPorts, NON_EXECUTING_TYPES } from './nodes';
 import { asHandles, asList, asText, coerce, jsonValue, textValue, type PortType } from './port-types';
-import { primary, renderConfig, type NodeOutputs, type TemplateScope } from './template';
+import {
+  primary,
+  referencedNodesDeep,
+  renderConfig,
+  type NodeOutputs,
+  type TemplateScope,
+} from './template';
 import { isRunnable, loopBody, validateFlow } from './validate';
 import type { FlowNodeContext } from './types';
 
@@ -287,6 +293,16 @@ export class FlowRunner {
     region: Set<string>,
     loopOwned: Set<string>,
   ): 'run' | 'wait' | 'skip' {
+    // A `{{ref}}` is a read of another node's output, but it draws no edge — so without this a node
+    // could be scheduled before the node it quotes and silently interpolate an empty string. Treated
+    // as an ordering constraint only: an unresolved reference delays, it never skips, because the
+    // referenced node may legitimately have been skipped on an untaken branch.
+    for (const ref of referencedNodesDeep(node.config ?? {})) {
+      if (ref === node.id) continue;
+      const source = runtime.get(ref);
+      if (source && (source.status === 'pending' || source.status === 'running')) return 'wait';
+    }
+
     const incoming = edges.filter((e) => e.target === node.id && (region.has(e.source) || loopOwned.has(e.source)));
     if (incoming.length === 0) return 'run';
 

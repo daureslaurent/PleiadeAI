@@ -351,6 +351,8 @@ function subtitleOf(node: FlowNode, type: FlowNodeType | undefined): string {
       return String(config.expression ?? '') || 'no condition';
     case 'for_each':
       return `×${String(config.max_items ?? 20)} max`;
+    case 'data':
+      return `${String(config.port_type ?? 'text')} · ${String(config.value ?? '').slice(0, 24) || 'empty'}`;
     case 'note':
       return String(config.text ?? '');
     default:

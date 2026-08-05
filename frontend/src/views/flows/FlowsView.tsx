@@ -399,6 +399,7 @@ export function FlowsView() {
                       node={selectedNode}
                       nodeType={typeMap.get(selectedNode.type)}
                       flowId={flow.id}
+                      nodes={nodes}
                       readOnly={tab === 'runs'}
                       onChange={(patch) => patchNode(selectedNode.id, patch)}
                       onDelete={() => deleteNode(selectedNode.id)}

@@ -95,6 +95,87 @@ export const inputNode: FlowNodeHandler = {
 };
 
 /**
+ * `data` — a value written into the graph itself (flows spec §3).
+ *
+ * The constant to `input`'s parameter. An `input` is a question the run asks its caller and appears
+ * on the run form; a `data` node is a decision already made, fixed in the flow. Two things follow
+ * from that, and both are the point:
+ *
+ * - **It can be read from anywhere.** A settings-like value — a clip duration, a house style suffix,
+ *   a negative prompt — is usually wanted by several nodes *in their config*, where there is no port
+ *   to wire. Any config field of any node can quote it as `{{node_id}}`, so the value is written once
+ *   and changing it changes every consumer.
+ * - **It can also be wired**, for the cases where a port does exist.
+ *
+ * The runner treats a `{{ref}}` as an ordering constraint (see `settle`), so a consumer never runs
+ * before the data it quotes.
+ */
+export const dataNode: FlowNodeHandler = {
+  type: 'data',
+  label: 'Data',
+  group: 'io',
+  description:
+    'A fixed value held in the graph — text, a number, JSON or a file. Wire it, or quote it as {{node_id}} in any other node\'s settings.',
+  inputs: [{ name: 'run', types: ['signal'], description: 'Gate: only publish on this branch.' }],
+  outputs: [{ name: 'default', types: ['text'] }],
+  config: [
+    {
+      key: 'port_type',
+      label: 'Type',
+      type: 'select',
+      options: [...PORT_TYPES].filter((t) => t !== 'signal'),
+      default: 'text',
+      hint: 'What this holds. A number is text that parses — put it straight into a numeric field with {{node_id}}.',
+    },
+    {
+      key: 'value',
+      label: 'Value',
+      type: 'string',
+      default: '',
+      hint: 'The value. Supports {{node_id}} references, so one data node can be built from others.',
+    },
+  ],
+
+  dynamicOutputs(config) {
+    return [{ name: 'default', types: [portTypeOf(config.port_type)] }];
+  },
+
+  validate(node) {
+    const type = portTypeOf(node.config.port_type);
+    if (isBinary(type) && !String(node.config.value ?? '').trim()) {
+      return ['no file is attached (upload one in the inspector)'];
+    }
+    return [];
+  },
+
+  async run(ctx, _inputs, config) {
+    const type = portTypeOf(config.port_type);
+    const text = String(config.value ?? '');
+
+    if (isBinary(type)) {
+      // Same as `input`: the value names a file staged on this flow, imported into the run so every
+      // node downstream sees one handle space.
+      const staged = text.split(',').map((h) => h.trim()).filter(Boolean);
+      const handles: string[] = [];
+      for (const handle of staged) {
+        const imported = await ctx.importResource(stagingSessionOf(ctx.flowId), handle);
+        if (!imported) throw new Error(`"${handle}" is not an uploaded file on this flow`);
+        handles.push(imported);
+      }
+      return handleValue(type, handles);
+    }
+    if (type === 'json') {
+      try {
+        return jsonValue(JSON.parse(text || 'null'));
+      } catch {
+        throw new Error(`the value is not valid JSON: ${text.slice(0, 80)}`);
+      }
+    }
+    return textValue(text);
+  },
+};
+
+/**
  * `output` — the flow's result. Whatever reaches it becomes `FlowRun.output`, the value the run panel
  * shows, and what the `run_flow` tool hands back to the calling agent.
  */

@@ -132,7 +132,11 @@ export function validateFlow(flow: Pick<FlowDoc, 'nodes' | 'edges'>): Validation
 
   // --- reachability --------------------------------------------------------------------------
   for (const node of nodes) {
-    if (NON_EXECUTING_TYPES.has(node.type) || node.type === 'input') continue;
+    // `input` and `data` are sources — nothing is supposed to feed them.
+    if (NON_EXECUTING_TYPES.has(node.type) || node.type === 'input' || node.type === 'data') continue;
+    // A node that quotes another in its config is connected, just not by a wire. Warning that it is
+    // orphaned would be false, and false warnings are how real ones stop being read.
+    if (referencedNodesDeep(node.config ?? {}).some((ref) => byId.has(ref))) continue;
     const hasIncoming = (incoming.get(node.id) ?? []).length > 0;
     if (!hasIncoming && inputPorts(node).length > 0) {
       issues.push({

@@ -1,4 +1,4 @@
-import { Trash2, X } from 'lucide-react';
+import { Link2, Trash2, X } from 'lucide-react';
 import { Button, Field, Input, Select, Textarea, Toggle } from '../../components/ui';
 import type { FlowNode, FlowNodeType, PortType, ToolConfigField } from '../../lib/api';
 import { GROUP_COLORS } from './portStyle';
@@ -24,6 +24,7 @@ export function NodeInspector({
   node,
   nodeType,
   flowId,
+  nodes,
   readOnly = false,
   onChange,
   onDelete,
@@ -32,6 +33,8 @@ export function NodeInspector({
   node: FlowNode;
   nodeType: FlowNodeType | undefined;
   flowId: string;
+  /** Every node in the flow, so a field can offer the references it could be driven by. */
+  nodes: FlowNode[];
   /** True while reviewing a past run — settings are readable, but editing one would be a lie. */
   readOnly?: boolean;
   onChange: (patch: Partial<FlowNode>) => void;
@@ -82,13 +85,14 @@ export function NodeInspector({
               />
             </Field>
           ) : (
-            <Field key={field.key} label={field.label} hint={field.hint}>
-              <ConfigInput
-                field={field}
-                value={node.config[field.key]}
-                onChange={(v) => setConfig(field.key, v)}
-              />
-            </Field>
+            <ConfigField
+              key={field.key}
+              field={field}
+              value={node.config[field.key]}
+              nodes={nodes}
+              selfId={node.id}
+              onChange={(v) => setConfig(field.key, v)}
+            />
           ),
         )}
 
@@ -105,6 +109,85 @@ export function NodeInspector({
         </div>
       )}
     </aside>
+  );
+}
+
+/** True when a stored value is a template rather than a literal. */
+function isReference(value: unknown): boolean {
+  return typeof value === 'string' && value.includes('{{');
+}
+
+/**
+ * One setting, with the option to drive it from another node instead of typing a literal.
+ *
+ * A number field is the case that forces this: a clip's duration is a `<input type="number">`, so
+ * without a way to enter `{{duration}}` the value can only ever be a constant typed into that one
+ * node. The link button swaps the control for a reference picker, which is what makes a `data` node
+ * able to feed a setting that has no port — and the runner already interpolates every config field,
+ * so nothing behind this needed to change.
+ */
+function ConfigField({
+  field,
+  value,
+  nodes,
+  selfId,
+  onChange,
+}: {
+  field: ToolConfigField;
+  value: unknown;
+  nodes: FlowNode[];
+  selfId: string;
+  onChange: (v: unknown) => void;
+}) {
+  const linked = isReference(value);
+  const others = nodes.filter((n) => n.id !== selfId && n.type !== 'note');
+
+  return (
+    <Field
+      label={field.label}
+      hint={linked ? 'Driven by another node. Its value is substituted before the node runs.' : field.hint}
+    >
+      <div className="space-y-1">
+        <div className="flex items-start gap-1">
+          <div className="min-w-0 flex-1">
+            {linked ? (
+              <Input
+                value={String(value ?? '')}
+                onChange={(e) => onChange(e.target.value)}
+                className="font-mono text-[11px]"
+                placeholder="{{node_id}}"
+              />
+            ) : (
+              <ConfigInput field={field} value={value} onChange={onChange} />
+            )}
+          </div>
+          <button
+            onClick={() => onChange(linked ? (field.default ?? '') : '{{}}')}
+            title={linked ? 'Use a fixed value' : 'Drive this from another node'}
+            className={`mt-1 shrink-0 rounded p-1 transition-colors ${
+              linked ? 'text-accent' : 'text-slate-600 hover:text-slate-300'
+            }`}
+          >
+            <Link2 size={12} />
+          </button>
+        </div>
+
+        {linked && others.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => e.target.value && onChange(`{{${e.target.value}}}`)}
+            className="w-full rounded border border-white/[0.1] bg-black/30 px-1.5 py-1 text-[10px] text-slate-400 outline-none focus:border-accent/50"
+          >
+            <option value="">Insert a reference…</option>
+            {others.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.label || n.type} ({n.id})
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    </Field>
   );
 }
 

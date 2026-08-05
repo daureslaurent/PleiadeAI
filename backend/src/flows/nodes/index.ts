@@ -1,6 +1,6 @@
 import { askAgentNode, routerNode } from './agent';
 import { approvalNode, collectNode, conditionNode, forEachNode } from './control';
-import { inputNode, logNode, mergeNode, noteNode, outputNode } from './io';
+import { dataNode, inputNode, logNode, mergeNode, noteNode, outputNode } from './io';
 import { audioMixNode } from './audio';
 import { videoComposeNode } from './compose';
 import { editImageNode, generateImageNode, generateSoundNode, generateVideoNode } from './media';
@@ -19,6 +19,7 @@ import type { FlowNode } from '../../domain/flows/flow.model';
 const HANDLERS: FlowNodeHandler[] = [
   inputNode,
   outputNode,
+  dataNode,
   logNode,
   noteNode,
   askAgentNode,
