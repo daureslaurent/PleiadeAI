@@ -46,6 +46,8 @@ export interface GenerateRequest {
   inputImages?: InputImage[];
   /** Audio to upload and wire into the workflow's `audio1..audio2` bindings (LTX-style A/V models). */
   inputAudios?: InputImage[];
+  /** Source clip to upload and wire into the workflow's `video1` binding (a video→video graph). */
+  inputVideo?: InputImage;
   timeoutMs: number;
   onProgress: ProgressHandler;
   /** Fired the moment ComfyUI accepts the job — see {@link MediaRunStart}. */
@@ -191,6 +193,18 @@ async function uploadAudioInputs(
   return values;
 }
 
+/** And for a source clip. Same single upload route; the extension is what the loader demuxes by. */
+async function uploadVideoInput(
+  client: ComfyHttpClient,
+  video: InputImage,
+  sessionId: string,
+): Promise<BindingValues> {
+  const ext = video.filename.split('.').pop()?.toLowerCase() || 'mp4';
+  const name = `pleiades_${sessionId || 'test'}_v1.${ext}`;
+  const up = await client.uploadImage(video.bytes, name, video.mime);
+  return { video1: up.subfolder ? `${up.subfolder}/${up.name}` : up.name };
+}
+
 /**
  * Run a stored workflow on ComfyUI and return the bytes it produced.
  *
@@ -234,6 +248,12 @@ export async function generateMedia(req: GenerateRequest): Promise<GenerateOutco
         'Either pick a workflow that accepts one, or leave the audio input unwired.',
     );
   }
+  if (req.inputVideo && !bindings.video1) {
+    throw new ComfyError(
+      `Workflow "${workflow.name}" takes no input video (no LoadVideo node is bound). ` +
+        'Pick a video-edit workflow, or re-import this one if you have since added a loader to it.',
+    );
+  }
 
   const seed = typeof req.values?.seed === 'number' ? req.values.seed : randomSeed();
   const values: BindingValues = {
@@ -243,6 +263,7 @@ export async function generateMedia(req: GenerateRequest): Promise<GenerateOutco
     ...(req.negativePrompt ? { negative_prompt: req.negativePrompt } : {}),
     ...(req.inputImages?.length ? await uploadInputs(client, req.inputImages, req.sessionId ?? '') : {}),
     ...(req.inputAudios?.length ? await uploadAudioInputs(client, req.inputAudios, req.sessionId ?? '') : {}),
+    ...(req.inputVideo ? await uploadVideoInput(client, req.inputVideo, req.sessionId ?? '') : {}),
   };
   if (bindings.filename_prefix) {
     values.filename_prefix = `pleiades/${workflow.kind}/${workflow.name.replace(/[^\w-]+/g, '_')}`;

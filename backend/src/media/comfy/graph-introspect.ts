@@ -17,6 +17,8 @@ const VIDEO_SAVE_CLASS = /^(SaveVideo|SaveWEBM|SaveAnimated\w+|VHS_VideoCombine|
 // `/view` serves, and plenty of published workflows — a TTS graph being the common case — end at a
 // preview rather than a save. Without it such a workflow is silently classified as producing images.
 const AUDIO_SAVE_CLASS = /^(SaveAudio\w*|PreviewAudio)$/;
+/** Video source loaders: the core node and VideoHelperSuite's, which is at least as widely used. */
+const VIDEO_LOAD_CLASS = /^(LoadVideo|VHS_LoadVideo\w*)$/;
 
 /** Input names that carry the positive text prompt, in preference order. */
 const PROMPT_INPUTS = ['prompt', 'text'];
@@ -364,6 +366,15 @@ export function autoBind(
     const binding = bindInput(graph, schemas, nodeId, 'audio');
     if (binding) bindings[audioKeys[i]!] = binding;
   });
+
+  // --- input video, for a video→video graph. VideoHelperSuite's loader is as common as the core
+  //     one and names its input `video` too, so both are matched on class and the input by name.
+  const videoLoader = findNode(graph, VIDEO_LOAD_CLASS);
+  if (videoLoader) {
+    const binding =
+      bindInput(graph, schemas, videoLoader, 'video') ?? bindInput(graph, schemas, videoLoader, 'file');
+    if (binding) bindings.video1 = binding;
+  }
 
   const prefix = bindInput(graph, schemas, outputNodeId, 'filename_prefix');
   if (prefix) bindings.filename_prefix = prefix;

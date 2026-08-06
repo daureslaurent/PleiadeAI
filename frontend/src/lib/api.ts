@@ -876,7 +876,8 @@ export const toolsApi = {
 
 // --- Media generation (ComfyUI) -------------------------------------------------------------
 
-export type WorkflowKind = 'image' | 'video' | 'audio' | 'edit';
+/** Keep in step with `WORKFLOW_KINDS` in the backend's `media-workflow.model.ts`. */
+export type WorkflowKind = 'image' | 'video' | 'audio' | 'edit' | 'video_edit';
 
 /** One logical parameter pinned to a node input in the workflow graph. */
 export interface WorkflowBinding {

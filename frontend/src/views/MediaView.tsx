@@ -4,6 +4,7 @@ import {
   AudioLines,
   CheckCircle2,
   Clapperboard,
+  Film,
   Download,
   ImagePlus,
   Pencil,
@@ -37,6 +38,7 @@ const KIND_ICON: Record<WorkflowKind, typeof ImagePlus> = {
   video: Clapperboard,
   audio: AudioLines,
   edit: Pencil,
+  video_edit: Film,
 };
 
 /** The logical parameters a workflow can expose, in the order the editor lists them. */
@@ -53,6 +55,9 @@ const BINDING_KEYS = [
   'image1',
   'image2',
   'image3',
+  'audio1',
+  'audio2',
+  'video1',
   'filename_prefix',
 ] as const;
 

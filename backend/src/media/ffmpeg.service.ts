@@ -339,6 +339,79 @@ export async function mixAudio(
   });
 }
 
+export interface VideoMixOptions {
+  /** Level of the clip's own audio. `null` mutes it entirely. */
+  originalGainDb: number | null;
+  /** Level of the added track. */
+  addedGainDb: number;
+  /** Pull the added track down while the clip's own audio is loud (music under dialogue). */
+  duck: boolean;
+  /** Loop a short added track to cover the clip, rather than letting it end early. */
+  loop: boolean;
+}
+
+/**
+ * Mix an audio track into a video, keeping the picture untouched.
+ *
+ * Distinct from `muxAudio`, which *replaces* the audio outright. Here both survive: a clip that
+ * already speaks keeps its voice while music is laid underneath at its own level, optionally ducked.
+ * The video stream is stream-copied — the picture is not being changed, and re-encoding it would cost
+ * minutes and a generation of quality for nothing.
+ */
+export async function mixVideoAudio(
+  video: MediaInput,
+  audio: MediaInput,
+  opts: VideoMixOptions,
+): Promise<Buffer> {
+  return withWorkspace(async (dir) => {
+    const [videoPath, audioPath] = await writeInputs(dir, [video, audio]);
+    const vp = await probe(videoPath!);
+    if (!vp.hasVideo) throw new FfmpegError('the video input has no video stream');
+
+    const keepOriginal = opts.originalGainDb !== null && vp.hasAudio;
+    const duration = Math.max(0.1, vp.durationSec);
+    const out = path.join(dir, 'out.mp4');
+
+    // The added track is trimmed (or looped then trimmed) to the picture: a soundtrack outlasting the
+    // clip would otherwise extend the file with a black tail.
+    const added =
+      `[1:a]${opts.loop ? 'aloop=loop=-1:size=2e9,' : ''}atrim=duration=${duration.toFixed(3)},` +
+      `asetpts=PTS-STARTPTS,volume=${opts.addedGainDb}dB,aresample=48000,` +
+      `aformat=channel_layouts=stereo[add]`;
+
+    let filter: string;
+    if (!keepOriginal) {
+      filter = `${added};[add]alimiter=limit=0.95[out]`;
+    } else if (opts.duck) {
+      filter =
+        `[0:a]volume=${opts.originalGainDb}dB,aresample=48000,aformat=channel_layouts=stereo,asplit=2[o1][o2];` +
+        `${added};` +
+        `[add][o2]sidechaincompress=threshold=0.015:ratio=20:attack=5:release=250:level_sc=4[ducked];` +
+        `[o1][ducked]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[out]`;
+    } else {
+      filter =
+        `[0:a]volume=${opts.originalGainDb}dB,aresample=48000,aformat=channel_layouts=stereo[o1];` +
+        `${added};` +
+        `[o1][add]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.95[out]`;
+    }
+
+    log.info(
+      { seconds: duration.toFixed(2), keepOriginal, duck: opts.duck, addedGainDb: opts.addedGainDb },
+      'mixing audio into video',
+    );
+    await run([
+      '-y', '-i', videoPath!, '-i', audioPath!,
+      '-filter_complex', filter,
+      '-map', '0:v', '-map', '[out]',
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-b:a', '192k',
+      '-movflags', '+faststart',
+      out,
+    ]);
+    return readFile(out);
+  });
+}
+
 /** yuv420p needs even dimensions; an odd one makes libx264 refuse the whole job. */
 function even(n: number): number {
   return Math.floor(n / 2) * 2;

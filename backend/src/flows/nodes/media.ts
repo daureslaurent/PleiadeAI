@@ -102,6 +102,7 @@ async function runWorkflow(
   inputImages: InputImage[] | undefined,
   fallbackTimeoutSeconds: number,
   inputAudios?: InputImage[] | undefined,
+  inputVideo?: InputImage | undefined,
 ): Promise<Record<string, FlowValue>> {
   const workflowId = String(config.workflow ?? '').trim();
   if (!workflowId) throw new Error('no ComfyUI workflow is selected for this node (pick one in the inspector)');
@@ -118,6 +119,7 @@ async function runWorkflow(
     values: { ...values, ...(seed !== undefined ? { seed } : {}) },
     inputImages,
     inputAudios,
+    inputVideo,
     timeoutMs: timeoutFrom(config, fallbackTimeoutSeconds),
     sessionId: ctx.sessionId,
     signal: ctx.signal,
@@ -291,6 +293,129 @@ export const generateSoundNode: FlowNodeHandler = {
       { seconds: clampInt(config.seconds, 1, 600, 30) },
       undefined,
       600,
+    );
+  },
+};
+
+/**
+ * `animate_image` — turn a still into a clip with a generative model (image-to-video).
+ *
+ * `generate_video` can also accept an image, but its workflow list includes every video graph, and a
+ * text-to-video one silently ignores — or outright refuses — the picture you wired in. Here the image
+ * is **required** and the node is named for the job, so the pairing is obvious on the canvas: the
+ * image node feeds this, and this is what moves it.
+ */
+export const animateImageNode: FlowNodeHandler = {
+  type: 'animate_image',
+  label: 'Animate Image',
+  group: 'media',
+  description: 'Turns a still into a clip with a generative video model (image-to-video).',
+  inputs: [
+    { name: 'image', types: ['image'], required: true, description: 'The frame to animate.' },
+    ...SHARED_INPUTS,
+    {
+      name: 'audio',
+      types: ['audio'],
+      description: 'Soundtrack the model paces its motion to, if the workflow takes one.',
+    },
+  ],
+  outputs: outputsFor('video'),
+  config: [
+    workflowField('video'),
+    {
+      ...PROMPT_FIELD,
+      label: 'Motion',
+      hint: 'How the shot moves — "slow push in", "pan left". One simple motion works far better than several.',
+    },
+    { key: 'seconds', label: 'Duration (s)', type: 'number', default: 5, hint: 'Converted to frames via fps.' + IGNORED_NOTE },
+    { key: 'fps', label: 'FPS', type: 'number', default: 25, hint: 'Frame rate of the output.' + IGNORED_NOTE },
+    {
+      key: 'size',
+      label: 'Size',
+      type: 'select',
+      options: ['auto', '1344x768', '768x1344', '1024x576', '576x1024', '832x480'],
+      default: 'auto',
+      hint: '"auto" keeps the workflow\'s own size, which usually means it follows the input image.' + IGNORED_NOTE,
+    },
+    ...SEED_FIELDS,
+    waitField(1800, 'Generative video is slow — minutes per clip on a single GPU.'),
+  ],
+
+  async run(ctx, inputs, config) {
+    const sources = await inputImagesFrom(ctx, asHandles(inputs.image));
+    if (!sources?.length) throw new Error('no image is wired into this node');
+    const seconds = clampInt(config.seconds, 1, 60, 5);
+    const fps = clampInt(config.fps, 1, 60, 25);
+    return runWorkflow(
+      ctx,
+      'video',
+      'video',
+      config,
+      promptOf(config, asText(inputs.prompt)),
+      { ...parseSize(config.size), seconds, fps, length: seconds * fps },
+      sources,
+      1800,
+      await inputImagesFrom(ctx, asHandles(inputs.audio)),
+    );
+  },
+};
+
+/**
+ * `edit_video` — video in, video out: restyle, upscale, interpolate, relight.
+ *
+ * Its own workflow kind (`video_edit`) rather than a flag on `generate_video`, because the two are
+ * not interchangeable: a text-to-video graph has no `LoadVideo` to receive a clip, and offering it
+ * here would only produce a run that fails after the queue wait.
+ */
+export const editVideoNode: FlowNodeHandler = {
+  type: 'edit_video',
+  label: 'Edit Video',
+  group: 'media',
+  description: 'Transforms an existing clip with a ComfyUI workflow (restyle, upscale, interpolate).',
+  inputs: [
+    { name: 'video', types: ['video', 'file'], required: true, description: 'The clip to transform.' },
+    ...SHARED_INPUTS,
+    { name: 'image', types: ['image'], description: 'Style or identity reference, if the workflow takes one.' },
+  ],
+  outputs: outputsFor('video'),
+  config: [
+    workflowField('video_edit'),
+    {
+      ...PROMPT_FIELD,
+      label: 'Instruction',
+      hint: 'What to change about the clip. Supports {{node_id}} references.',
+    },
+    { key: 'fps', label: 'FPS', type: 'number', default: 0, hint: 'Output frame rate. 0 keeps the workflow\'s own.' + IGNORED_NOTE },
+    {
+      key: 'size',
+      label: 'Size',
+      type: 'select',
+      options: ['auto', '1920x1080', '1344x768', '1280x720', '768x1344', '832x480'],
+      default: 'auto',
+      hint: '"auto" keeps whatever the workflow was built with.' + IGNORED_NOTE,
+    },
+    ...SEED_FIELDS,
+    waitField(1800, 'A video-to-video pass runs over every frame — budget like a generation, not an edit.'),
+  ],
+
+  async run(ctx, inputs, config) {
+    const handles = asHandles(inputs.video);
+    if (!handles.length) throw new Error('no clip is wired into this node');
+    const source = await ctx.readResource(handles[0]!);
+    if (!source) throw new Error(`resource "${handles[0]}" not found in this run`);
+
+    const fps = clampInt(config.fps, 0, 120, 0);
+    return runWorkflow(
+      ctx,
+      'video_edit',
+      'video',
+      config,
+      promptOf(config, asText(inputs.prompt)),
+      { ...parseSize(config.size), ...(fps > 0 ? { fps } : {}) },
+      await inputImagesFrom(ctx, asHandles(inputs.image)),
+      1800,
+      undefined,
+      { bytes: source.bytes, mime: source.mime, filename: source.filename || `${handles[0]}.mp4` },
     );
   },
 };

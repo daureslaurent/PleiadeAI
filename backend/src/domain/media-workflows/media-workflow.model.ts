@@ -2,7 +2,12 @@ import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mong
 import type { ComfyGraph, ComfyInputSpec } from '../../media/comfy/types';
 
 /** The content a workflow produces. Drives which tool can select it. */
-export const WORKFLOW_KINDS = ['image', 'video', 'audio', 'edit'] as const;
+/**
+ * What a workflow produces, and from what. `edit` is image→image; `video_edit` is video→video
+ * (restyle, upscale, interpolate) — a separate kind because a tool must never hand a clip to a
+ * text-to-video graph that has no `LoadVideo` to receive it.
+ */
+export const WORKFLOW_KINDS = ['image', 'video', 'audio', 'edit', 'video_edit'] as const;
 export type WorkflowKind = (typeof WORKFLOW_KINDS)[number];
 
 /**
@@ -28,6 +33,8 @@ export const BINDING_KEYS = [
   // input image is.
   'audio1',
   'audio2',
+  /** Source clip for a video→video graph, bound from `LoadVideo` / VideoHelperSuite's loader. */
+  'video1',
   'filename_prefix',
 ] as const;
 export type BindingKey = (typeof BINDING_KEYS)[number];

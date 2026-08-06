@@ -130,6 +130,9 @@ interface FlowNodeHandler {
 | `generate_video` | media | Same, kind `video`. → `video` handle. |
 | `generate_sound` | media | Same, kind `audio`. → `audio` handle. |
 | `edit_image` | media | Same, kind `edit`; takes a source `image` input. → `image` handles. |
+| `animate_image` | media | Image-to-video: a **required** still plus a motion instruction. `generate_video` can also take an image, but its list offers every video graph, and a text-to-video one ignores or refuses the picture — here the pairing is explicit. |
+| `edit_video` | media | Video→video (restyle, upscale, interpolate), on its own `video_edit` workflow kind. Separate because a t2v graph has no `LoadVideo` to receive a clip, so offering it would only buy a run that fails after the queue wait. |
+| `mix_video_audio` | media | Adds a track to a clip with a level for each side, optional ducking and looping. Unlike `video_compose mux` — which *replaces* the audio — both survive, which is what a clip that already speaks needs. The picture is stream-copied, so changing a volume never re-encodes a ten-minute render. |
 | `tool` | tool | Any registered core tool or enabled skill. Args come from the tool's own JSON schema, rendered as templated fields. Runs through a `ToolContext` built like the runner's, honouring `run_as_agent` isolation. |
 | `condition` | control | `expr.ts` over upstream outputs → `true` / `false` signal ports. |
 | `approval` | control | Human gate: persists `pending` on the run, status → `awaiting_input`, blocks on `FlowApprovalBroker` until answered over HTTP. → `approved` / `rejected` signal ports. |
