@@ -127,7 +127,7 @@ interface FlowNodeHandler {
 | `ask_agent` | agent | `agentRunner.run()` as the configured agent. `userText` = prompt template + text inputs; `images` resolved from image-port handles. Outputs `text` + `images`. Yields to a live user session via `sessionLock`, like cron does. |
 | `router` | agent | Agent judgement: a question plus N labelled choices; the answer picks one of N `signal` outputs. Unparseable answer → first choice, recorded on the node state. |
 | `generate_image` | media | `generateMedia()` on the chosen `media_workflows` image workflow. → `image` handles. |
-| `generate_video` | media | Same, kind `video`. → `video` handle. |
+| `generate_video` | media | Kind `video`, from a prompt, a start frame, an optional soundtrack, **or a source clip** — a video workflow may bind `LoadVideo` (subtitling, restyling, interpolation), and the node offers every input its workflows might need. The service refuses clearly when the chosen graph binds none of them. A supplied clip also relaxes the empty-prompt guard: that guard stops a blank field regenerating the author's prompt, which cannot happen when the clip and the graph define the operation. |
 | `generate_sound` | media | Same, kind `audio`. → `audio` handle. |
 | `edit_image` | media | Same, kind `edit`; takes a source `image` input. → `image` handles. |
 | `animate_image` | media | Image-to-video: a **required** still plus a motion instruction. `generate_video` can also take an image, but its list offers every video graph, and a text-to-video one ignores or refuses the picture — here the pairing is explicit. |

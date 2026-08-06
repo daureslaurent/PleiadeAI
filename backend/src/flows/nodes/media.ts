@@ -106,7 +106,11 @@ async function runWorkflow(
 ): Promise<Record<string, FlowValue>> {
   const workflowId = String(config.workflow ?? '').trim();
   if (!workflowId) throw new Error('no ComfyUI workflow is selected for this node (pick one in the inspector)');
-  if (!prompt.trim()) throw new Error('the prompt is empty');
+  // The empty-prompt guard exists so a blank field can't silently regenerate the workflow author's
+  // own prompt. That reasoning does not hold when a source clip is supplied: the operation is defined
+  // by the clip and the graph, and the prompt slot is often an optional hint — Whisper's, for
+  // instance, is a vocabulary nudge that is meant to be empty.
+  if (!prompt.trim() && !inputVideo) throw new Error('the prompt is empty');
 
   const seed = seedFrom(config);
   const started = Date.now();
@@ -221,7 +225,8 @@ export const generateVideoNode: FlowNodeHandler = {
   type: 'generate_video',
   label: 'Generate Video',
   group: 'media',
-  description: 'Renders a video clip on ComfyUI. Slow and GPU-expensive — minutes, not seconds.',
+  description:
+    'Runs a video workflow on ComfyUI — from a prompt, a start frame, or an existing clip. Slow and GPU-expensive.',
   inputs: [
     ...SHARED_INPUTS,
     { name: 'image', types: ['image'], description: 'Start frame, if the workflow takes one.' },
@@ -230,6 +235,12 @@ export const generateVideoNode: FlowNodeHandler = {
       types: ['audio'],
       description:
         'Soundtrack the model paces its motion to (LTX-style A/V models). Only for a workflow with a LoadAudio node.',
+    },
+    {
+      name: 'video',
+      types: ['video', 'file'],
+      description:
+        'Source clip, for a workflow that transforms video rather than creating it (subtitling, restyling, interpolation). Only for a workflow with a LoadVideo node.',
     },
   ],
   outputs: outputsFor('video'),
@@ -253,16 +264,25 @@ export const generateVideoNode: FlowNodeHandler = {
   async run(ctx, inputs, config) {
     const seconds = clampInt(config.seconds, 1, 60, 5);
     const fps = clampInt(config.fps, 1, 60, 24);
+    // A workflow that transforms a clip sizes and times itself from that clip, so width/height/length
+    // are left alone — forcing them would fight the source and, for a subtitling pass, silently
+    // re-crop the film.
+    const source = await inputVideoFrom(ctx, asHandles(inputs.video));
+    const values = source
+      ? { ...parseSize(config.size), fps }
+      : { ...parseSize(config.size), seconds, fps, length: seconds * fps };
+
     return runWorkflow(
       ctx,
       'video',
       'video',
       config,
       promptOf(config, asText(inputs.prompt)),
-      { ...parseSize(config.size), seconds, fps, length: seconds * fps },
+      values,
       await inputImagesFrom(ctx, asHandles(inputs.image)),
       1800,
       await inputImagesFrom(ctx, asHandles(inputs.audio)),
+      source,
     );
   },
 };
@@ -399,10 +419,8 @@ export const editVideoNode: FlowNodeHandler = {
   ],
 
   async run(ctx, inputs, config) {
-    const handles = asHandles(inputs.video);
-    if (!handles.length) throw new Error('no clip is wired into this node');
-    const source = await ctx.readResource(handles[0]!);
-    if (!source) throw new Error(`resource "${handles[0]}" not found in this run`);
+    const source = await inputVideoFrom(ctx, asHandles(inputs.video));
+    if (!source) throw new Error('no clip is wired into this node');
 
     const fps = clampInt(config.fps, 0, 120, 0);
     return runWorkflow(
@@ -415,7 +433,7 @@ export const editVideoNode: FlowNodeHandler = {
       await inputImagesFrom(ctx, asHandles(inputs.image)),
       1800,
       undefined,
-      { bytes: source.bytes, mime: source.mime, filename: source.filename || `${handles[0]}.mp4` },
+      source,
     );
   },
 };
@@ -443,6 +461,14 @@ export const editImageNode: FlowNodeHandler = {
     return runWorkflow(ctx, 'edit', 'image', config, promptOf(config, asText(inputs.prompt)), {}, sources, 300);
   },
 };
+
+/** Load one clip handle back into bytes, for a workflow whose `LoadVideo` needs a real file. */
+async function inputVideoFrom(ctx: FlowNodeContext, handles: string[]): Promise<InputImage | undefined> {
+  if (!handles.length) return undefined;
+  const res = await ctx.readResource(handles[0]!);
+  if (!res) throw new Error(`resource "${handles[0]}" not found in this run`);
+  return { bytes: res.bytes, mime: res.mime, filename: res.filename || `${handles[0]}.mp4` };
+}
 
 /** Load handles back into raw bytes for upload to ComfyUI (`LoadImage` needs a real file). */
 async function inputImagesFrom(ctx: FlowNodeContext, handles: string[]): Promise<InputImage[] | undefined> {
