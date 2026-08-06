@@ -56,6 +56,13 @@ card. The ComfyUI endpoint is configured in **Settings → Connections**.
   to `NoPreviews`, so a run emitting nothing is normal, not a fault. Observed live at
   `--preview-method auto`: ~60-70KB JPEGs, several per second, throughout sampling.
 - **ComfyUI history is in RAM** and dies with the process → discovery must *snapshot* into Mongo.
+- **Sizing trap**: an image-to-video graph often computes `width`/`height` for itself, and that
+  computation is frequently a *constant*. MiniMax H3's feeds them from a `ResolutionSelector` pinned
+  to `1:1 (Square)`, so a 16:9 still renders as a square clip no matter what you hand it. When the
+  caller asks for no explicit size and there *is* a driving image, the service now derives the size
+  from that image — aspect from the picture, pixel budget capped at the workflow's own declared
+  default so matching the ratio cannot silently multiply the cost of a render, both edges snapped to
+  the model's step grid.
 - **Output-shape trap**: `SaveVideo` results come back under the `images` key
   (`{"92":{"images":[{"filename":"MiniMax_H3_00002_.mp4","subfolder":"video"}],"animated":[true]}}`).
   Classify by filename extension, never by the outputs key name.

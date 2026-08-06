@@ -2,10 +2,12 @@ import { createLogger } from '../config/logger';
 import { alertEngine } from '../alerts/AlertEngine';
 import { settingsService } from '../domain/settings/settings.service';
 import { resourceRepository } from '../domain/resources/resource.repository';
+import { probeImageSize } from './ffmpeg.service';
 import {
   bindingsOf,
   graphOf,
   type MediaWorkflowDoc,
+  type WorkflowBindings,
   type WorkflowKind,
 } from '../domain/media-workflows/media-workflow.model';
 import { mediaWorkflowRepository } from '../domain/media-workflows/media-workflow.repository';
@@ -125,6 +127,46 @@ async function resolveWorkflow(id: string, expectKind: WorkflowKind): Promise<Me
     );
   }
   return doc;
+}
+
+/**
+ * Shape the render to the still that drives it.
+ *
+ * An image-to-video graph usually computes its own size, and that computation is often a *constant* —
+ * MiniMax H3's feeds `width`/`height` from a `ResolutionSelector` pinned to "1:1 (Square)", so a
+ * 16:9 still becomes a square clip whatever you hand it. The picture the operator generated is the
+ * better authority on the aspect ratio, so when the caller hasn't asked for a specific size we derive
+ * one from the image.
+ *
+ * The pixel budget is capped at the workflow's own declared default (`spec.default` for width and
+ * height), because matching the aspect ratio should not silently multiply the cost of a render: a
+ * graph built around 0.4MP must not be handed 1MP just because the still was large. Both edges are
+ * snapped to the model's step grid, since an off-grid value wastes the whole job.
+ */
+async function sizeFromImage(
+  image: InputImage,
+  bindings: WorkflowBindings,
+): Promise<{ width: number; height: number } | null> {
+  const widthSpec = bindings.width?.spec;
+  const heightSpec = bindings.height?.spec;
+  const size = await probeImageSize(image.bytes, image.filename);
+  if (!size || size.width <= 0 || size.height <= 0) return null;
+
+  const budget =
+    Number(widthSpec?.default ?? 0) * Number(heightSpec?.default ?? 0) || size.width * size.height;
+  const scale = Math.min(1, Math.sqrt(budget / (size.width * size.height)));
+
+  const snap = (value: number, spec: typeof widthSpec): number => {
+    const step = Number(spec?.step) || 8;
+    const min = Number(spec?.min) || step;
+    const max = Number(spec?.max) || 16384;
+    return Math.max(min, Math.min(max, Math.round(value / step) * step));
+  };
+
+  return {
+    width: snap(size.width * scale, widthSpec),
+    height: snap(size.height * scale, heightSpec),
+  };
 }
 
 /** ComfyUI's own default seed is fixed, so an unset seed would return the same picture forever. */
@@ -256,8 +298,28 @@ export async function generateMedia(req: GenerateRequest): Promise<GenerateOutco
   }
 
   const seed = typeof req.values?.seed === 'number' ? req.values.seed : randomSeed();
+
+  // No explicit size asked for, but there is a driving image and the graph exposes width/height:
+  // follow the picture rather than whatever constant the graph computes for itself.
+  let derivedSize: { width: number; height: number } | undefined;
+  const wantsAutoSize =
+    req.values?.width === undefined &&
+    req.values?.height === undefined &&
+    Boolean(bindings.width && bindings.height) &&
+    Boolean(req.inputImages?.length);
+  if (wantsAutoSize) {
+    derivedSize = (await sizeFromImage(req.inputImages![0]!, bindings)) ?? undefined;
+    if (derivedSize) {
+      log.info(
+        { workflow: workflow.name, ...derivedSize },
+        'sized the render from its input image',
+      );
+    }
+  }
+
   const values: BindingValues = {
     ...req.values,
+    ...(derivedSize ?? {}),
     prompt: req.prompt,
     seed,
     ...(req.negativePrompt ? { negative_prompt: req.negativePrompt } : {}),

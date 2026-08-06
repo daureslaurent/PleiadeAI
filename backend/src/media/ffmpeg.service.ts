@@ -417,6 +417,31 @@ function even(n: number): number {
   return Math.floor(n / 2) * 2;
 }
 
+/**
+ * Pixel dimensions of an image, via ffprobe.
+ *
+ * Used to shape a video render to the still that drives it. ffprobe rather than a hand-rolled header
+ * parser because it already handles every format a generative pipeline can produce (PNG, JPEG, WebP)
+ * and one subprocess is nothing against a render measured in minutes. Returns `null` rather than
+ * throwing: an unreadable image is a reason to fall back to the workflow's own sizing, not to fail a
+ * job that would otherwise succeed.
+ */
+export async function probeImageSize(
+  bytes: Buffer,
+  filename: string,
+): Promise<{ width: number; height: number } | null> {
+  try {
+    return await withWorkspace(async (dir) => {
+      const [file] = await writeInputs(dir, [{ bytes, filename }]);
+      const info = await probe(file!);
+      if (!info.width || !info.height) return null;
+      return { width: info.width, height: info.height };
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** Whether ffmpeg is present, so a node can fail with an operator-readable message. */
 export async function ffmpegAvailable(): Promise<boolean> {
   try {
