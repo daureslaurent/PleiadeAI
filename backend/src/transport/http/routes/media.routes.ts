@@ -5,13 +5,18 @@ import { ComfyError } from '../../../media/comfy/errors';
 import {
   autoBind,
   describeNodes,
+  hydrateBindings,
   loadSchemas,
+  modelFiles,
+  outputKindOf,
   relevantKeys,
   structureHash,
   validateWorkflow,
+  type SchemaMap,
 } from '../../../media/comfy/graph-introspect';
 import { discoverWorkflows, loadCandidate } from '../../../media/discovery.service';
 import { testRunWorkflow } from '../../../media/media-generate.service';
+import { bindingCatalog } from '../../../domain/media-workflows/binding-meta';
 import {
   bindingsOf,
   graphOf,
@@ -20,6 +25,8 @@ import {
   type WorkflowKind,
 } from '../../../domain/media-workflows/media-workflow.model';
 import { mediaWorkflowRepository } from '../../../domain/media-workflows/media-workflow.repository';
+import { flowRepository } from '../../../domain/flows/flow.repository';
+import { ToolConfigModel } from '../../../domain/tools/tool-config.model';
 import type { ComfyGraph } from '../../../media/comfy/types';
 
 const log = createLogger('media-route');
@@ -42,6 +49,53 @@ function fail(res: Parameters<Parameters<typeof mediaRouter.get>[1]>[1], err: un
 
 function isKind(value: unknown): value is WorkflowKind {
   return typeof value === 'string' && (WORKFLOW_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Node schemas for a graph, or an empty map when ComfyUI is unreachable.
+ *
+ * Every read path degrades this way on purpose: a stored workflow is a snapshot, so it stays
+ * inspectable and re-bindable with the server down. Only validate and run genuinely need the live
+ * schemas, and both say so in their own error.
+ */
+async function schemasFor(graph: ComfyGraph): Promise<SchemaMap> {
+  try {
+    return await loadSchemas(await comfyClient(), graph);
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Who runs this workflow: the media tools whose Tools-page config selects it, and every node of every
+ * saved flow that does.
+ *
+ * The Media page could previously tell an operator a binding was wrong but not *what* would run with
+ * it — the workflow id lives in a tool config and in flow node configs, three pages away. Answering it
+ * here is what turns "the prompt binding is on the negative encoder" into "…and that is why the
+ * Storyboard flow's Generate Image node ignores you".
+ */
+async function consumersOf(workflowId: string): Promise<{ kind: 'tool' | 'flow'; name: string; detail: string }[]> {
+  const out: { kind: 'tool' | 'flow'; name: string; detail: string }[] = [];
+
+  const toolConfigs = await ToolConfigModel.find({}, { name: 1, config: 1, enabled: 1 }).lean();
+  for (const doc of toolConfigs) {
+    const config = (doc.config ?? {}) as Record<string, unknown>;
+    if (String(config.workflow ?? '') !== workflowId) continue;
+    out.push({ kind: 'tool', name: doc.name, detail: doc.enabled === false ? 'tool disabled' : 'Tools page' });
+  }
+
+  for (const flow of await flowRepository.list()) {
+    for (const node of flow.nodes ?? []) {
+      if (String((node.config as Record<string, unknown>)?.workflow ?? '') !== workflowId) continue;
+      out.push({
+        kind: 'flow',
+        name: flow.name,
+        detail: `${node.label || node.type} node${flow.enabled ? '' : ' · flow disabled'}`,
+      });
+    }
+  }
+  return out;
 }
 
 /** Shape a workflow doc for the UI — the graph itself is only sent on the detail route. */
@@ -108,7 +162,16 @@ mediaRouter.get('/workflows', async (req, res) => {
   res.json(docs.map(summarize));
 });
 
-/** Full detail: the graph, its bindings, and every node/input the binding editor can offer. */
+/**
+ * The catalog of logical parameters, with labels, port types and where each value comes from at run
+ * time. Static per kind, so the mapping canvas fetches it once and renders its app-side ports from it
+ * rather than hard-coding a key list that drifts from the backend's.
+ */
+mediaRouter.get('/binding-keys', (req, res) => {
+  res.json(bindingCatalog(isKind(req.query.kind) ? req.query.kind : undefined));
+});
+
+/** Full detail: the graph, its bindings, every node/input the canvas draws, and who runs it. */
 mediaRouter.get('/workflows/:id', async (req, res) => {
   const doc = await mediaWorkflowRepository.findById(req.params.id);
   if (!doc) {
@@ -116,15 +179,48 @@ mediaRouter.get('/workflows/:id', async (req, res) => {
     return;
   }
   const graph = graphOf(doc);
-  let nodes: ReturnType<typeof describeNodes> = [];
+  // No ComfyUI right now: still show the workflow, just without schema-driven input hints.
+  const nodes = describeNodes(graph, await schemasFor(graph));
+  res.json({
+    ...summarize(doc),
+    bindings: bindingsOf(doc),
+    graph,
+    nodes,
+    models: modelFiles(graph),
+    notes: doc.notes,
+    graph_hash: doc.graph_hash,
+    source_prompt_id: doc.source_prompt_id,
+    consumers: await consumersOf(String(doc._id)),
+  });
+});
+
+/**
+ * Re-run the auto-binder and return what it *would* bind, without saving.
+ *
+ * Two cases need this: a workflow imported while ComfyUI was down (bound with no schemas, so every
+ * numeric constraint is missing), and one whose graph the operator has since re-imported. Returning a
+ * proposal rather than writing it keeps the operator's hand-corrected bindings safe — the canvas shows
+ * the diff and they choose.
+ */
+mediaRouter.post('/workflows/:id/autobind', async (req, res) => {
   try {
-    const client = await comfyClient();
-    nodes = describeNodes(graph, await loadSchemas(client, graph));
-  } catch {
-    // No ComfyUI right now: still show the workflow, just without schema-driven input hints.
-    nodes = describeNodes(graph, new Map());
+    const doc = await mediaWorkflowRepository.findById(req.params.id);
+    if (!doc) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const graph = graphOf(doc);
+    const bound = autoBind(graph, doc.output_node_id ? [doc.output_node_id] : [], await schemasFor(graph));
+    res.json({
+      bindings: bound.bindings,
+      output_node_id: bound.output_node_id,
+      output_kind: bound.output_kind,
+      kind: bound.kind,
+      unbound: bound.unbound,
+    });
+  } catch (err) {
+    fail(res, err);
   }
-  res.json({ ...summarize(doc), bindings: bindingsOf(doc), graph, nodes });
 });
 
 /**
@@ -172,26 +268,54 @@ mediaRouter.post('/workflows/import', async (req, res) => {
   }
 });
 
+/**
+ * Unwrap whatever the operator pasted into an API-format graph.
+ *
+ * Three things legitimately arrive here: the bare `{nodeId: {class_type…}}` map that *Export (API)*
+ * writes, the same thing under a `prompt` key (which is how it looks when copied out of a `/history`
+ * entry or a `POST /prompt` body), and the editor's own save format — which has a `nodes` array and is
+ * *not* submittable, so it gets its own error rather than a confusing one about `class_type`.
+ */
+function unwrapGraph(
+  body: Record<string, unknown> | undefined,
+): { graph: ComfyGraph; error?: undefined } | { error: string; graph?: undefined } {
+  const candidates = [body?.graph, body?.prompt, body].filter(
+    (c): c is Record<string, unknown> => Boolean(c) && typeof c === 'object',
+  );
+  for (const candidate of candidates) {
+    if (Array.isArray((candidate as { nodes?: unknown }).nodes)) {
+      return {
+        error:
+          "That is the ComfyUI editor's own workflow format (it has a `nodes` array), which can't be " +
+          'submitted as-is. In ComfyUI use Workflow → Export (API) and paste that file instead.',
+      };
+    }
+    const entries = Object.entries(candidate).filter(([key]) => !key.startsWith('_'));
+    if (entries.length === 0) continue;
+    if (entries.every(([, node]) => typeof (node as { class_type?: unknown })?.class_type === 'string')) {
+      return { graph: Object.fromEntries(entries) as ComfyGraph };
+    }
+  }
+  return {
+    error:
+      'No API-format graph found in that JSON. It should be a map of node id → { class_type, inputs } ' +
+      '(ComfyUI → Workflow → Export (API)).',
+  };
+}
+
 /** Create from a pasted API-format graph (ComfyUI's *Export (API)*), auto-binding it the same way. */
 mediaRouter.post('/workflows', async (req, res) => {
   try {
-    const graph = req.body?.graph as ComfyGraph | undefined;
-    if (!graph || typeof graph !== 'object' || Object.keys(graph).length === 0) {
-      res.status(400).json({ error: 'graph is required (ComfyUI → Workflow → Export (API))' });
-      return;
-    }
-    const bad = Object.entries(graph).find(([, node]) => typeof node?.class_type !== 'string');
-    if (bad) {
-      res.status(400).json({
-        error:
-          `Node ${bad[0]} has no class_type — this looks like the editor's own workflow format. ` +
-          'Use Workflow → Export (API) instead.',
-      });
+    const { graph, error } = unwrapGraph(req.body as Record<string, unknown> | undefined);
+    if (!graph) {
+      res.status(400).json({ error });
       return;
     }
 
-    const client = await comfyClient();
-    const schemas = await loadSchemas(client, graph);
+    // Import must not depend on a reachable ComfyUI: the graph is a snapshot, and binding it with no
+    // schemas still produces a usable workflow — Validate fills in the constraints once the server is
+    // back, and Auto-map re-runs the binder with them.
+    const schemas = await schemasFor(graph);
     const bound = autoBind(graph, [], schemas);
     const doc = await mediaWorkflowRepository.create({
       name: String(req.body?.name ?? '').trim() || 'Pasted workflow',
@@ -212,15 +336,40 @@ mediaRouter.post('/workflows', async (req, res) => {
 
 /** Rename, re-kind, enable/disable, or correct the bindings. */
 mediaRouter.put('/workflows/:id', async (req, res) => {
+  const existing = await mediaWorkflowRepository.findById(req.params.id);
+  if (!existing) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+
   const patch: Record<string, unknown> = {};
   if (typeof req.body?.name === 'string') patch.name = req.body.name.trim();
   if (typeof req.body?.description === 'string') patch.description = req.body.description;
   if (typeof req.body?.notes === 'string') patch.notes = req.body.notes;
   if (isKind(req.body?.kind)) patch.kind = req.body.kind;
   if (typeof req.body?.enabled === 'boolean') patch.enabled = req.body.enabled;
-  if (typeof req.body?.output_node_id === 'string') patch.output_node_id = req.body.output_node_id;
+
+  const graph = graphOf(existing);
+  const needsSchemas =
+    (req.body?.bindings && typeof req.body.bindings === 'object') ||
+    typeof req.body?.output_node_id === 'string';
+  const schemas = needsSchemas ? await schemasFor(graph) : new Map();
+
+  if (req.body?.bindings && typeof req.body.bindings === 'object') {
+    // Hydrated rather than stored as sent: the editor knows the node and input, the server knows the
+    // schema constraints that make a numeric binding safe to clamp.
+    patch.bindings = hydrateBindings(graph, req.body.bindings as WorkflowBindings, schemas);
+  }
+  if (typeof req.body?.output_node_id === 'string') {
+    patch.output_node_id = req.body.output_node_id;
+    // The result node decides the media type, so re-derive it here. Otherwise repointing a graph at
+    // its `SaveVideo` would leave `output_kind: image`, and the run would pick the wrong artifact.
+    if (req.body.output_node_id) {
+      patch.output_kind = outputKindOf(graph[req.body.output_node_id]?.class_type ?? '');
+    }
+  }
+  // An explicit choice still wins over the derivation above.
   if (['image', 'video', 'audio'].includes(req.body?.output_kind)) patch.output_kind = req.body.output_kind;
-  if (req.body?.bindings && typeof req.body.bindings === 'object') patch.bindings = req.body.bindings;
 
   const doc = await mediaWorkflowRepository.update(req.params.id, patch);
   if (!doc) {

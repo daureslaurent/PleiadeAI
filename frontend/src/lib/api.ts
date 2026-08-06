@@ -913,15 +913,72 @@ export interface MediaWorkflow {
   updated_at: string;
 }
 
+/** One input of a workflow node, as the mapping canvas draws and binds it. */
+export interface WorkflowNodeInput {
+  name: string;
+  type: 'INT' | 'FLOAT' | 'STRING' | 'BOOLEAN' | 'ENUM' | 'LINK';
+  is_link: boolean;
+  value: string | number | boolean | null;
+  options?: string[];
+  /** `[sourceNodeId, slot]` when another node feeds it — drawn as a graph edge. */
+  link?: [string, number];
+  /** False for tensor inputs (MODEL/CLIP/LATENT…): no literal can ever be written there. */
+  bindable: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  tooltip?: string;
+}
+
+export interface WorkflowNode {
+  id: string;
+  class_type: string;
+  title: string;
+  category: string;
+  inputs: WorkflowNodeInput[];
+  outputs: { name: string; type: string; slot: number }[];
+  is_output: boolean;
+}
+
+/** A tool or flow node that runs this workflow — the Tools/Flows side of the mapping. */
+export interface WorkflowConsumer {
+  kind: 'tool' | 'flow';
+  name: string;
+  detail: string;
+}
+
 export interface MediaWorkflowDetail extends MediaWorkflow {
   bindings: Record<string, WorkflowBinding>;
   graph: Record<string, { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } }>;
-  nodes: {
-    id: string;
-    class_type: string;
-    title: string;
-    inputs: { name: string; type: string; is_link: boolean; value: unknown; options?: string[] }[];
-  }[];
+  nodes: WorkflowNode[];
+  models: string[];
+  notes: string;
+  graph_hash: string;
+  source_prompt_id: string;
+  consumers: WorkflowConsumer[];
+}
+
+/**
+ * The app half of a binding: what a logical parameter is and which tool/flow setting fills it.
+ * Served by the backend so the canvas' app-side ports can't drift from `BINDING_KEYS`.
+ */
+export interface BindingMeta {
+  key: string;
+  label: string;
+  port: 'text' | 'number' | 'image' | 'audio' | 'video';
+  description: string;
+  source: string;
+  kinds: WorkflowKind[];
+  expected: boolean;
+}
+
+/** What the auto-binder proposes for a workflow, before the operator accepts it. */
+export interface AutoBindProposal {
+  bindings: Record<string, WorkflowBinding>;
+  output_node_id: string;
+  output_kind: 'image' | 'video' | 'audio';
+  kind: WorkflowKind;
+  unbound: string[];
 }
 
 export interface DiscoveryCandidate {
@@ -965,11 +1022,17 @@ export const mediaApi = {
   get: (id: string) => api.get<MediaWorkflowDetail>(`/media/workflows/${id}`).then((r) => r.data),
   import: (body: { prompt_id: string; name: string; kind?: WorkflowKind }) =>
     api.post<MediaWorkflow>('/media/workflows/import', body).then((r) => r.data),
-  create: (body: { name: string; graph: unknown; kind?: WorkflowKind }) =>
+  create: (body: { name: string; graph: unknown; kind?: WorkflowKind; description?: string }) =>
     api.post<MediaWorkflow>('/media/workflows', body).then((r) => r.data),
+  bindingKeys: (kind?: WorkflowKind) =>
+    api.get<BindingMeta[]>('/media/binding-keys', { params: kind ? { kind } : {} }).then((r) => r.data),
+  autobind: (id: string) =>
+    api.post<AutoBindProposal>(`/media/workflows/${id}/autobind`).then((r) => r.data),
   update: (id: string, patch: Partial<Pick<MediaWorkflow, 'name' | 'kind' | 'enabled' | 'description'>> & {
     bindings?: Record<string, WorkflowBinding>;
     output_node_id?: string;
+    output_kind?: 'image' | 'video' | 'audio';
+    notes?: string;
   }) => api.put<MediaWorkflow>(`/media/workflows/${id}`, patch).then((r) => r.data),
   remove: (id: string) => api.delete(`/media/workflows/${id}`).then((r) => r.data),
   validate: (id: string) =>

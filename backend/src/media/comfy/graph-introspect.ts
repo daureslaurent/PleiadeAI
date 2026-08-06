@@ -153,7 +153,7 @@ function pickOutputNode(graph: ComfyGraph, outputsToExecute: string[], schemas: 
   return declared[0] ?? sortedNodeIds(graph)[0] ?? '';
 }
 
-function outputKindOf(className: string): 'image' | 'video' | 'audio' {
+export function outputKindOf(className: string): 'image' | 'video' | 'audio' {
   if (VIDEO_SAVE_CLASS.test(className)) return 'video';
   if (AUDIO_SAVE_CLASS.test(className)) return 'audio';
   return 'image';
@@ -417,6 +417,12 @@ export function relevantKeys(kind: WorkflowKind): BindingKey[] {
       return ['prompt', 'seed', 'seconds'];
     case 'edit':
       return ['prompt', 'seed', 'image1'];
+    // A video→video graph is defined by its source clip: `video1` is the one binding without which
+    // `edit_video` cannot run at all. Its size and frame count come from the clip, so reporting
+    // width/height/length as missing — which is what falling through to the image keys did — sent
+    // the operator hunting for inputs the graph is right not to expose.
+    case 'video_edit':
+      return ['prompt', 'video1', 'seed'];
     default:
       return ['prompt', 'negative_prompt', 'seed', 'width', 'height', 'batch'];
   }
@@ -591,6 +597,38 @@ export function clampToSpec(value: number, spec?: ComfyInputSpec): number {
   return out;
 }
 
+/**
+ * Re-derive each binding's `spec` and `overrides_link` from the graph it points at.
+ *
+ * The editor sends `{node_id, input}` — it has no business inventing a schema snapshot — but the run
+ * path *needs* the spec: `clampToSpec` uses it to snap `length` onto MiniMax H3's 17-frame grid, and
+ * an off-grid value wastes a ten-minute render. Hydrating on save is what keeps a hand-corrected
+ * binding as capable as an auto-bound one; it also drops bindings whose node or input no longer
+ * exists, so a stale mapping can't survive a re-import.
+ */
+export function hydrateBindings(
+  graph: ComfyGraph,
+  bindings: WorkflowBindings,
+  schemas: SchemaMap,
+): WorkflowBindings {
+  const out: WorkflowBindings = {};
+  for (const [key, binding] of Object.entries(bindings) as [BindingKey, WorkflowBinding | undefined][]) {
+    if (!binding?.node_id || !binding.input) continue;
+    const node = graph[binding.node_id];
+    if (!node) continue;
+    const spec = specFor(schemas.get(node.class_type) ?? null, binding.input);
+    out[key] = {
+      node_id: binding.node_id,
+      input: binding.input,
+      // Keep whatever the caller sent when this ComfyUI can't be asked — losing a known step grid to a
+      // temporary outage would be worse than trusting a slightly stale snapshot.
+      ...(spec ? { spec } : binding.spec ? { spec: binding.spec } : {}),
+      overrides_link: isLink(node.inputs[binding.input]),
+    };
+  }
+  return out;
+}
+
 export type BindingValues = Partial<Record<BindingKey, string | number>>;
 
 /**
@@ -615,41 +653,112 @@ export function applyBindings(
   return clone;
 }
 
-/** Per-node summary for the binding editor: what can be bound, and what it currently holds. */
+/** One input of a node, as the mapping canvas needs to draw and bind it. */
+export interface NodeInputDescription {
+  name: string;
+  type: ComfyInputSpec['type'];
+  is_link: boolean;
+  value: string | number | boolean | null;
+  options?: string[];
+  /** `[sourceNodeId, slot]` when fed by another node — this is what the canvas draws as an edge. */
+  link?: ComfyLink;
+  /**
+   * Whether a literal can be written here. A `LINK`-typed input (MODEL, CLIP, LATENT…) carries a
+   * tensor between nodes and can never hold a value, so the canvas offers no handle for it — the one
+   * distinction the old two-dropdown editor never made, which is how bindings ended up pointed at
+   * inputs that silently did nothing.
+   */
+  bindable: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+  tooltip?: string;
+}
+
+/** Per-node summary for the mapping canvas: how it's wired, and what can be bound on it. */
 export interface NodeDescription {
   id: string;
   class_type: string;
   title: string;
-  inputs: {
-    name: string;
-    type: ComfyInputSpec['type'];
-    is_link: boolean;
-    value: string | number | boolean | null;
-    options?: string[];
-  }[];
+  /** ComfyUI's own category for the class (`sampling`, `loaders`…). Empty when the schema is absent. */
+  category: string;
+  inputs: NodeInputDescription[];
+  /** Declared output slots, named as the schema names them — the canvas' source handles. */
+  outputs: { name: string; type: string; slot: number }[];
+  /** True when the class writes files: the candidate for the workflow's result node. */
+  is_output: boolean;
+}
+
+/** Best guess at an input's type from the value it holds, for when no schema is available. */
+function inferredType(raw: unknown, isLinked: boolean): ComfyInputSpec['type'] {
+  if (isLinked || raw === undefined || raw === null) return 'LINK';
+  if (typeof raw === 'boolean') return 'BOOLEAN';
+  if (typeof raw === 'number') return Number.isInteger(raw) ? 'INT' : 'FLOAT';
+  if (typeof raw === 'string') return 'STRING';
+  return 'LINK';
 }
 
 export function describeNodes(graph: ComfyGraph, schemas: SchemaMap): NodeDescription[] {
+  // Which output slots other nodes actually consume. Without a schema (ComfyUI unreachable) this is
+  // the only evidence a node *has* outputs — and the mapping canvas draws the graph's wiring from
+  // them, so losing it would leave the operator with a pile of unconnected cards exactly when the
+  // server is down and they can least check anything against ComfyUI itself.
+  const usedSlots = new Map<string, Set<number>>();
+  for (const node of Object.values(graph)) {
+    for (const value of Object.values(node.inputs)) {
+      if (!isLink(value)) continue;
+      const [source, slot] = value;
+      if (!usedSlots.has(source)) usedSlots.set(source, new Set());
+      usedSlots.get(source)!.add(slot);
+    }
+  }
+
   return sortedNodeIds(graph).map((id) => {
     const node = graph[id]!;
-    const declared = schemaInputs(schemas.get(node.class_type) ?? null);
+    const schema = schemas.get(node.class_type) ?? null;
+    const declared = schemaInputs(schema);
     const names = [...new Set([...Object.keys(node.inputs), ...Object.keys(declared)])];
+    const types = schema?.output ?? [];
+    const outputNames = schema?.output_name ?? [];
+    const outputs = types.map((type, slot) => ({
+      name: String(outputNames[slot] ?? type),
+      type: String(type),
+      slot,
+    }));
+    for (const slot of [...(usedSlots.get(id) ?? [])].sort((a, b) => a - b)) {
+      if (!outputs.some((o) => o.slot === slot)) outputs.push({ name: `out ${slot}`, type: '', slot });
+    }
+
     return {
       id,
       class_type: node.class_type,
       title: node._meta?.title || node.class_type,
+      category: schema?.category ?? '',
       inputs: names.map((name) => {
         const spec = parseInputSpec(declared[name]);
         const raw = node.inputs[name];
         const link = isLink(raw);
+        // With no schema, the literal a graph was saved with is the only evidence of an input's type
+        // — and a wrong "LINK" there would hide the input from the canvas entirely.
+        const type = spec?.type ?? inferredType(raw, link);
         return {
           name,
-          type: spec?.type ?? 'LINK',
+          type,
           is_link: link,
           value: link || raw === undefined ? null : (raw as string | number | boolean | null),
           ...(spec?.options ? { options: spec.options } : {}),
+          ...(link ? { link: raw as ComfyLink } : {}),
+          // Without a schema (ComfyUI unreachable) everything reads as LINK, so fall back to "it
+          // currently holds a literal" — a stored workflow must stay editable offline.
+          bindable: type !== 'LINK' || (!link && raw !== undefined),
+          ...(spec?.min !== undefined ? { min: spec.min } : {}),
+          ...(spec?.max !== undefined ? { max: spec.max } : {}),
+          ...(spec?.step !== undefined ? { step: spec.step } : {}),
+          ...(spec?.tooltip ? { tooltip: spec.tooltip } : {}),
         };
       }),
+      outputs,
+      is_output: schema?.output_node === true || SAVE_CLASS.test(node.class_type),
     };
   });
 }

@@ -8,7 +8,7 @@ import { AgentWorkspace } from './views/AgentWorkspace';
 import { AgentsView } from './views/AgentsView';
 import { SkillsView } from './views/SkillsView';
 import { ToolsView } from './views/ToolsView';
-import { MediaView } from './views/MediaView';
+import { MediaView } from './views/media/MediaView';
 import { FlowsView } from './views/flows/FlowsView';
 import { IsolationsView } from './views/IsolationsView';
 import { ImagesView } from './views/ImagesView';
