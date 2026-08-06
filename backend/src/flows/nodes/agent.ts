@@ -3,7 +3,7 @@ import { sessionLock } from '../../core/session/SessionLock';
 import { agentRepository } from '../../domain/agents/agent.repository';
 import { agentRunner } from '../../orchestrator/AgentRunner';
 import type { ImageBlock } from '../../core/event-bus/events.types';
-import { asHandles, asText, handleValue, jsonValue, textValue } from '../port-types';
+import { asHandles, asText, handleValue, jsonValue, textValue, type FlowValue } from '../port-types';
 import type { FlowNodeContext, FlowNodeHandler, PortSpec } from '../types';
 
 const log = createLogger('flow:agent-node');
@@ -128,6 +128,15 @@ export const askAgentNode: FlowNodeHandler = {
         'json parses the answer into structured data, so a For Each can iterate it and later nodes can ' +
         'read {{item.field}}. The answer must be JSON — say so in the prompt.',
     },
+    {
+      key: 'output_fields',
+      label: 'Output ports',
+      type: 'string',
+      default: '',
+      hint:
+        'JSON mode only. Comma-separated field names — each becomes its own text output port, so one ' +
+        'agent can feed several nodes by wire instead of every node quoting {{this.json.field}}.',
+    },
   ],
 
   dynamicOutputs(config) {
@@ -137,6 +146,16 @@ export const askAgentNode: FlowNodeHandler = {
     const json = String(config.response_format ?? 'text') === 'json';
     return [
       { name: 'default', types: [json ? 'json' : 'text'] },
+      // One port per declared field. This is what turns "an agent writes the prompts" into visible
+      // wiring: the dependency sits on the canvas, is type-checked, and orders the graph — instead of
+      // living invisibly inside four different nodes' text boxes.
+      ...(json
+        ? parseChoices(config.output_fields).map((field) => ({
+            name: field,
+            types: ['text' as const],
+            description: `The answer's "${field}" field.`,
+          }))
+        : []),
       { name: 'images', types: ['image'] },
       { name: 'done', types: ['signal'] },
     ];
@@ -165,8 +184,10 @@ export const askAgentNode: FlowNodeHandler = {
     // Images the agent produced are already stored under the run's session by the runner, so they
     // travel on as handles rather than being re-persisted here.
     const handles = result.images.map((i) => i.id).filter((id): id is string => Boolean(id));
+    const parsed = wantsJson ? parseJsonAnswer(result.text, ctx) : undefined;
     return {
-      default: wantsJson ? jsonValue(parseJsonAnswer(result.text, ctx)) : textValue(result.text),
+      default: wantsJson ? jsonValue(parsed) : textValue(result.text),
+      ...(wantsJson ? fieldOutputs(parsed, parseChoices(config.output_fields), ctx) : {}),
       ...(handles.length ? { images: handleValue('image', handles) } : {}),
       done: { type: 'signal' as const },
     };
@@ -252,6 +273,47 @@ export const routerNode: FlowNodeHandler = {
     };
   },
 };
+
+/**
+ * Split the parsed answer across the declared output ports.
+ *
+ * A missing field yields an empty port and says so in the node log rather than failing the run: the
+ * usual cause is a model dropping one key, and losing the other three prompts — plus everything
+ * already rendered this iteration — over that is the wrong trade. A downstream node with a genuinely
+ * empty prompt still refuses on its own.
+ */
+function fieldOutputs(
+  parsed: unknown,
+  fields: string[],
+  ctx: FlowNodeContext,
+): Record<string, FlowValue> {
+  if (fields.length === 0) return {};
+
+  // Models routinely wrap a single object in an array when asked for JSON; unwrap that rather than
+  // making the operator care.
+  const source =
+    Array.isArray(parsed) && parsed.length === 1 && parsed[0] && typeof parsed[0] === 'object'
+      ? (parsed[0] as Record<string, unknown>)
+      : parsed;
+
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    ctx.emitOutput(
+      `output ports are declared but the answer is ${Array.isArray(parsed) ? 'a list' : typeof parsed}, not an object — they will be empty\n`,
+    );
+    return Object.fromEntries(fields.map((f) => [f, textValue('')]));
+  }
+
+  const record = source as Record<string, unknown>;
+  const out: Record<string, FlowValue> = {};
+  const missing: string[] = [];
+  for (const field of fields) {
+    const value = record[field];
+    if (value === undefined || value === null) missing.push(field);
+    out[field] = textValue(typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value));
+  }
+  if (missing.length) ctx.emitOutput(`the answer had no ${missing.join(', ')} — those ports are empty\n`);
+  return out;
+}
 
 /**
  * Parse a model's answer as JSON, forgiving the two things every model does anyway: wrapping it in a

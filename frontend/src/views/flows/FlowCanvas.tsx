@@ -325,15 +325,40 @@ function groupColorOf(node: Node): string {
  */
 export function outputsOf(node: FlowNode, type: FlowNodeType | undefined) {
   if (!type) return [];
-  if (node.type !== 'router') return type.outputs;
-  const choices = String(node.config.choices ?? '')
+
+  // The router declares one signal branch per choice…
+  if (node.type === 'router') {
+    return [...type.outputs, ...commaList(node.config.choices).map((c) => port(c, 'signal'))];
+  }
+
+  // …and an agent answering in JSON declares one text port per field it was asked to emit. Both are
+  // mirrored here rather than refetched, so the canvas keeps up with the keystroke instead of the
+  // round trip. The backend's `dynamicOutputs` remains the authority at validate and run time.
+  if (node.type === 'ask_agent' && String(node.config.response_format ?? 'text') === 'json') {
+    const fields = commaList(node.config.output_fields);
+    const base = type.outputs.map((o) => (o.name === 'default' ? port('default', 'json') : o));
+    const tail = base.filter((o) => o.name !== 'default');
+    return [
+      ...base.filter((o) => o.name === 'default'),
+      ...fields.map((f) => port(f, 'text')),
+      ...tail,
+    ];
+  }
+
+  return type.outputs;
+}
+
+function commaList(value: unknown): string[] {
+  const seen = new Set<string>();
+  return String(value ?? '')
     .split(',')
-    .map((c) => c.trim())
-    .filter(Boolean);
-  return [
-    ...type.outputs,
-    ...choices.map((choice) => ({ name: choice, types: ['signal' as PortType] })),
-  ];
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .filter((v) => (seen.has(v.toLowerCase()) ? false : (seen.add(v.toLowerCase()), true)));
+}
+
+function port(name: string, type: PortType) {
+  return { name, types: [type] };
 }
 
 /** The one config value that says what this node actually does, shown under its title. */
