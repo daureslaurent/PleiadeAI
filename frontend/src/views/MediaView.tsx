@@ -98,7 +98,11 @@ export function MediaView() {
   if (!workflows) return <Spinner />;
 
   return (
-    <div className="animate-fade-up space-y-5 p-6">
+    // `h-full overflow-auto` because the app's <main> is `overflow-hidden` — a routed page owns its
+    // own scrolling, and without this everything past the fold (the workflow list once a few are
+    // imported, and the whole discovery panel below it) is simply unreachable.
+    <div className="h-full overflow-auto">
+      <div className="animate-fade-up space-y-5 p-6">
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-medium text-slate-100">Media workflows</h1>
         {status?.ok ? (
@@ -146,7 +150,8 @@ export function MediaView() {
         )}
       </Section>
 
-      <DiscoverPanel onImported={load} enabled={Boolean(status?.ok)} />
+        <DiscoverPanel onImported={load} enabled={Boolean(status?.ok)} />
+      </div>
     </div>
   );
 }
