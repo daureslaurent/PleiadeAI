@@ -898,6 +898,8 @@ export interface ToolConfigField {
   optionLabels?: Record<string, string>;
   hint?: string;
   default: string | number | boolean;
+  /** True when the operator can lock this field so an agent's tool-call argument for it is ignored. */
+  lockable?: boolean;
 }
 
 export interface ToolInfo {
@@ -906,11 +908,13 @@ export interface ToolInfo {
   configSchema: ToolConfigField[];
   config: Record<string, string | number | boolean>;
   enabled: boolean;
+  /** Field keys the operator has locked — see `ToolConfigField.lockable`. */
+  locked: string[];
 }
 
 export const toolsApi = {
   list: () => api.get<ToolInfo[]>('/tools').then((r) => r.data),
-  update: (name: string, patch: { enabled?: boolean; config?: Record<string, unknown> }) =>
+  update: (name: string, patch: { enabled?: boolean; config?: Record<string, unknown>; locked?: string[] }) =>
     api.put<ToolInfo>(`/tools/${encodeURIComponent(name)}`, patch).then((r) => r.data),
 };
 

@@ -15,7 +15,7 @@ toolsRouter.get('/', async (_req, res) => {
   const payload = await Promise.all(
     tools.map(async (tool) => {
       const schema = tool.configSchema ?? [];
-      const { enabled, config } = await toolConfigService.resolve(tool.name, schema);
+      const { enabled, config, locked } = await toolConfigService.resolve(tool.name, schema);
       return {
         name: tool.name,
         description: tool.description,
@@ -24,6 +24,7 @@ toolsRouter.get('/', async (_req, res) => {
         configSchema: await resolveDynamicOptions(schema, config),
         config,
         enabled,
+        locked: [...locked],
       };
     }),
   );
@@ -40,14 +41,16 @@ toolsRouter.put('/:name', async (req, res) => {
   await toolConfigService.update(req.params.name, {
     enabled: req.body?.enabled,
     config: req.body?.config,
+    locked: req.body?.locked,
   });
   const schema = tool.configSchema ?? [];
-  const { enabled, config } = await toolConfigService.resolve(tool.name, schema);
+  const { enabled, config, locked } = await toolConfigService.resolve(tool.name, schema);
   res.json({
     name: tool.name,
     description: tool.description,
     configSchema: await resolveDynamicOptions(schema, config),
     config,
     enabled,
+    locked: [...locked],
   });
 });

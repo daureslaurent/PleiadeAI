@@ -27,7 +27,8 @@ export interface BindingMeta {
 const ALL: WorkflowKind[] = [];
 const VIDEOISH: WorkflowKind[] = ['video', 'video_edit'];
 
-const META: Record<BindingKey, Omit<BindingMeta, 'key' | 'expected'>> = {
+/** Exported so tool schema builders (`tools/core/media-schema.ts`) can reuse the same label/description text. */
+export const META: Record<BindingKey, Omit<BindingMeta, 'key' | 'expected'>> = {
   prompt: {
     label: 'prompt',
     port: 'text',

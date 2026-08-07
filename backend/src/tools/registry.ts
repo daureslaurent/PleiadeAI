@@ -139,7 +139,14 @@ export async function resolveTools(toolsAllowed: string[]): Promise<Tool[]> {
     const core = CORE_TOOLS[name];
     if (core) {
       // Honour the operator's global kill-switch from the Tools page.
-      if (!disabled.has(name)) resolved.push(core);
+      if (!disabled.has(name)) {
+        // A dynamic tool (e.g. a media tool reflecting its configured ComfyUI workflow's bindings)
+        // gets a shallow-copied schema each call — CORE_TOOLS entries are shared across every
+        // concurrent agent turn and must never be mutated in place.
+        resolved.push(
+          core.resolveParameters ? { ...core, parameters: await core.resolveParameters() } : core,
+        );
+      }
     } else skillNames.push(name);
   }
 

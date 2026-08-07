@@ -202,6 +202,13 @@ export interface ToolConfigField {
   optionLabels?: Record<string, string>;
   hint?: string;
   default: string | number | boolean;
+  /**
+   * Marks a field the operator can lock (Tools page). A locked field's stored value always wins
+   * over anything an agent passes as a tool argument, and the field drops out of the agent's
+   * dynamic JSON schema entirely. Only meaningful for fields a tool's `resolveParameters` also
+   * exposes as an overridable argument (see `media-schema.ts`'s `CONFIG_FIELD_BINDINGS`).
+   */
+  lockable?: boolean;
 }
 
 /** A callable tool exposed to an agent — either a static core tool or a wrapped dynamic skill. */
@@ -215,5 +222,12 @@ export interface Tool {
    * A tool reads its effective values at run time via `toolConfigService.resolve`.
    */
   configSchema?: ToolConfigField[];
+  /**
+   * When present, called once per turn (by `resolveTools`) to produce this call's JSON schema in
+   * place of the static `parameters` — e.g. reflecting which optional params the currently
+   * configured ComfyUI workflow actually binds, so the agent only sees knobs that do something.
+   * Falls back to `parameters` when absent.
+   */
+  resolveParameters?: () => Promise<Record<string, unknown>>;
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }

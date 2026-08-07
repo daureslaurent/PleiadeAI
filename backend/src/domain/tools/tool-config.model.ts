@@ -11,6 +11,8 @@ const ToolConfigSchema = new Schema(
     name: { type: String, required: true, unique: true, trim: true },
     enabled: { type: Boolean, default: true },
     config: { type: Schema.Types.Mixed, default: () => ({}) },
+    /** Config field keys the operator has pinned — an agent's tool-call argument for one is ignored. */
+    locked: { type: [String], default: [] },
   },
   { collection: 'tool_configs', timestamps: { createdAt: false, updatedAt: 'updated_at' } },
 );

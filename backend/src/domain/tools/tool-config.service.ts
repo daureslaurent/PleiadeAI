@@ -4,6 +4,8 @@ import type { ToolConfigField } from '../../tools/types';
 export interface ResolvedToolConfig {
   enabled: boolean;
   config: Record<string, string | number | boolean>;
+  /** Config field keys the operator has locked — see `ToolConfigField.lockable`. */
+  locked: Set<string>;
 }
 
 /** Coerce a stored/raw value to the type its field declares (Mongo Mixed is untyped). */
@@ -35,7 +37,7 @@ export const toolConfigService = {
     for (const field of schema) {
       config[field.key] = coerce(field, stored[field.key]);
     }
-    return { enabled: doc?.enabled ?? true, config };
+    return { enabled: doc?.enabled ?? true, config, locked: new Set(doc?.locked ?? []) };
   },
 
   /** Names of tools the operator has explicitly disabled (used to filter an agent's toolset). */
@@ -47,13 +49,14 @@ export const toolConfigService = {
   /** Upsert the enable flag and/or option values for a tool. */
   async update(
     name: string,
-    patch: { enabled?: boolean; config?: Record<string, unknown> },
+    patch: { enabled?: boolean; config?: Record<string, unknown>; locked?: string[] },
   ): Promise<void> {
     const set: Record<string, unknown> = { name };
     if (patch.enabled !== undefined) set.enabled = patch.enabled;
     if (patch.config !== undefined) {
       for (const [k, v] of Object.entries(patch.config)) set[`config.${k}`] = v;
     }
+    if (patch.locked !== undefined) set.locked = patch.locked;
     await ToolConfigModel.updateOne({ name }, { $set: set }, { upsert: true });
   },
 };

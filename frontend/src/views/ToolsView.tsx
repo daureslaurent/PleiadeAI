@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Wrench } from 'lucide-react';
+import { AlertTriangle, Check, Lock, Unlock, Wrench } from 'lucide-react';
 import { toolsApi, type ToolConfigField, type ToolInfo } from '../lib/api';
 import {
   Button,
@@ -63,6 +63,7 @@ export function ToolsView() {
 function ToolCard({ tool, onSaved }: { tool: ToolInfo; onSaved: (t: ToolInfo) => void }) {
   const [enabled, setEnabled] = useState(tool.enabled);
   const [values, setValues] = useState<Values>(tool.config);
+  const [locked, setLocked] = useState<Set<string>>(new Set(tool.locked));
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   function set(key: string, value: string | number | boolean) {
@@ -70,12 +71,23 @@ function ToolCard({ tool, onSaved }: { tool: ToolInfo; onSaved: (t: ToolInfo) =>
     setStatus('idle');
   }
 
+  function toggleLock(key: string) {
+    setLocked((l) => {
+      const next = new Set(l);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setStatus('idle');
+  }
+
   async function save() {
     setStatus('saving');
     try {
-      const updated = await toolsApi.update(tool.name, { enabled, config: values });
+      const updated = await toolsApi.update(tool.name, { enabled, config: values, locked: [...locked] });
       setValues(updated.config);
       setEnabled(updated.enabled);
+      setLocked(new Set(updated.locked));
       onSaved(updated);
       setStatus('saved');
     } catch {
@@ -104,15 +116,42 @@ function ToolCard({ tool, onSaved }: { tool: ToolInfo; onSaved: (t: ToolInfo) =>
 
       {hasOptions ? (
         <div className="space-y-4 p-5">
-          {tool.configSchema.map((field) => (
-            <Field key={field.key} label={field.label} hint={field.hint}>
-              <ConfigInput
-                field={field}
-                value={values[field.key]}
-                onChange={(v) => set(field.key, v)}
-              />
-            </Field>
-          ))}
+          {tool.configSchema.map((field) => {
+            const isLocked = locked.has(field.key);
+            return (
+              <Field
+                key={field.key}
+                label={
+                  field.lockable ? (
+                    <span className="flex items-center gap-1.5">
+                      {field.label}
+                      <button
+                        type="button"
+                        onClick={() => toggleLock(field.key)}
+                        title={isLocked ? 'Locked — agents cannot override this' : 'Unlocked — agents may override this'}
+                        className={`rounded p-0.5 transition-colors ${isLocked ? 'text-amber-400 hover:text-amber-300' : 'text-slate-600 hover:text-slate-400'}`}
+                      >
+                        {isLocked ? <Lock size={11} /> : <Unlock size={11} />}
+                      </button>
+                    </span>
+                  ) : (
+                    field.label
+                  )
+                }
+                hint={
+                  field.lockable
+                    ? `${field.hint ?? ''}${isLocked ? ' Locked: agent-supplied values are ignored.' : ''}`
+                    : field.hint
+                }
+              >
+                <ConfigInput
+                  field={field}
+                  value={values[field.key]}
+                  onChange={(v) => set(field.key, v)}
+                />
+              </Field>
+            );
+          })}
           <SaveBar status={status} onSave={save} />
         </div>
       ) : (
