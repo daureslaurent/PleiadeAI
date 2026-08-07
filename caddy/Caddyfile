@@ -17,7 +17,13 @@
 }
 
 :80 {
-	encode gzip
+	# Gzip everything except the live media flux: that response is endless by construction, and
+	# encode buffers writes to fill its compression window before flushing, which stalls a live
+	# stream's bytes indefinitely with no error on either end — it just never appends to the
+	# player's SourceBuffer. The mp4 payload is already encoded, so compressing it bought nothing
+	# anyway.
+	@notflux not path /api/streams/*/live.mp4
+	encode @notflux gzip
 
 	# Security headers on every response, and stripping of software-version disclosure. Applied at the
 	# edge so it covers both the proxied nginx SPA and the backend. See the security notes below.
