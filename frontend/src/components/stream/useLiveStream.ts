@@ -142,6 +142,14 @@ export function useLiveStream(
         drain();
       });
 
+      // A segment the demuxer refuses fails *here*, asynchronously — `appendBuffer` itself returned
+      // without throwing. Left unhandled it looks exactly like a slow stream: bytes keep arriving,
+      // nothing ever decodes, and the player sits on "connecting" for good. Say so instead.
+      sourceBuffer.addEventListener('error', () => {
+        setStatus('error');
+        setError(decodeMessage(media));
+      });
+
       void (async () => {
         try {
           const response = await fetch(url, { signal: abort.signal, cache: 'no-store' });
@@ -203,12 +211,19 @@ export function useLiveStream(
 
     // `progress` fires as soon as the first fragment is buffered, which is when the initial seek
     // has to happen; the interval then handles drift for the rest of the session.
+    const onMediaError = () => {
+      setStatus('error');
+      setError(decodeMessage(media));
+    };
+
     media.addEventListener('progress', align);
+    media.addEventListener('error', onMediaError);
     const monitor = window.setInterval(align, 1000);
 
     return () => {
       disposed = true;
       media.removeEventListener('progress', align);
+      media.removeEventListener('error', onMediaError);
       window.clearInterval(monitor);
       if (retryTimer) window.clearTimeout(retryTimer);
       abort.abort();
@@ -227,4 +242,14 @@ export function useLiveStream(
   }, [media, url, mime, enabled, attempt]);
 
   return { status, error, aheadSec, behind, seekLive, reconnect };
+}
+
+/**
+ * Why the element gave up. `media.error.message` is the pipeline's own diagnostic
+ * (`CHUNK_DEMUXER_ERROR_APPEND_FAILED`, …) — ugly, but the only thing that distinguishes a
+ * malformed flux from a dropped one, so it is kept and merely prefixed.
+ */
+function decodeMessage(media: HTMLMediaElement): string {
+  const detail = media.error?.message?.trim();
+  return detail ? `the flux could not be decoded — ${detail}` : 'the flux could not be decoded';
 }

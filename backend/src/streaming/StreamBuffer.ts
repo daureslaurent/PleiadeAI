@@ -279,11 +279,21 @@ export class StreamBuffer {
       '-f', 'mp4',
       // An fMP4 the browser's MediaSource can consume: a header with no sample table, fragments cut
       // at keyframes (~1s, matching the ingest GOP) so a late joiner starts decoding immediately.
+      //
+      // `delay_moov` is load-bearing, not tidiness. AAC arrives from the TS input as ADTS, and the
+      // AudioSpecificConfig the `esds` box must carry exists nowhere in the input — `aac_adtstoasc`
+      // synthesises it from the first frame it filters. Under `empty_moov` alone the header is
+      // written *before* any packet reaches the filter, so the muxer emits a DecoderConfigDescriptor
+      // with no DecoderSpecificInfo at all: an AAC track with no decoder configuration. ffprobe
+      // reads that back happily, and Chromium rejects the init segment outright
+      // (CHUNK_DEMUXER_ERROR_APPEND_FAILED / RunSegmentParserLoop) — so every append fails, the
+      // player never buffers a byte, and the flux hangs on "connecting" forever. Delaying the moov
+      // to the first fragment flush lets the real config land in it.
+      //
       // NOTE: deliberately *without* `omit_tfhd_offset` — paired with `default_base_moof` it made
-      // Chromium's ChunkDemuxer reject every fragment (CHUNK_DEMUXER_ERROR_APPEND_FAILED /
-      // RunSegmentParserLoop) despite ffprobe reading the output as well-formed; `default_base_moof`
-      // alone is the well-supported combo and is all MSE actually requires.
-      '-movflags', 'empty_moov+frag_keyframe+default_base_moof',
+      // Chromium reject every fragment for the same opaque reason; `default_base_moof` alone is the
+      // well-supported combo and is all MSE actually requires.
+      '-movflags', 'empty_moov+frag_keyframe+default_base_moof+delay_moov',
       '-frag_duration', '1000000',
       'pipe:1',
     ];
