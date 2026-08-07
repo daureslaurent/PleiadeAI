@@ -35,6 +35,9 @@ import { useFlowRun } from './useFlowRun';
 type Tab = 'design' | 'runs';
 type RailTab = 'run' | 'debug' | 'media' | 'params';
 
+/** Remembers the last-opened flow across reloads/navigation, scoped to this page. */
+const LAST_FLOW_KEY = 'pleiades.flows.lastSelectedId';
+
 const RAIL_TABS = [
   { key: 'run' as const, label: 'Run', icon: Play },
   { key: 'debug' as const, label: 'Debug', icon: Terminal },
@@ -53,7 +56,22 @@ const RAIL_TABS = [
 export function FlowsView() {
   const confirm = useConfirm();
   const [flows, setFlows] = useState<FlowSummary[] | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedIdState] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_FLOW_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const setSelectedId = useCallback((id: string | null) => {
+    setSelectedIdState(id);
+    try {
+      if (id) localStorage.setItem(LAST_FLOW_KEY, id);
+      else localStorage.removeItem(LAST_FLOW_KEY);
+    } catch {
+      /* storage unavailable — selection just won't survive a reload */
+    }
+  }, []);
   const [flow, setFlow] = useState<FlowDetail | null>(null);
   const [nodeTypes, setNodeTypes] = useState<FlowNodeType[]>([]);
 
@@ -88,7 +106,17 @@ export function FlowsView() {
       .list()
       .then((list) => {
         setFlows(list);
-        setSelectedId((current) => current ?? list[0]?.id ?? null);
+        // Keep the current/persisted selection if it still exists; otherwise fall back to the first flow.
+        setSelectedIdState((current) => {
+          const next = (current && list.some((f) => f.id === current) ? current : list[0]?.id) ?? null;
+          try {
+            if (next) localStorage.setItem(LAST_FLOW_KEY, next);
+            else localStorage.removeItem(LAST_FLOW_KEY);
+          } catch {
+            /* storage unavailable */
+          }
+          return next;
+        });
       })
       .catch(() => setFlows([]));
 
