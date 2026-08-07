@@ -30,10 +30,12 @@
 		# Lock the SPA down against XSS injection. `script-src 'self'` is safe: the Vite build emits only
 		# external module scripts (no inline scripts). `'unsafe-inline'` is kept for styles only (React /
 		# Tailwind inject inline styles at runtime). `img-src`/`font-src` allow data:/blob: for avatars,
-		# rendered screenshots, and inlined fonts; `connect-src 'self'` covers /api + the same-origin
-		# socket.io websocket; `worker-src blob:` covers library-spawned workers (e.g. noVNC).
+		# rendered screenshots, and inlined fonts; `media-src blob:` covers the <audio>/<video> elements
+		# playing generated media and live flow streams from object URLs; `connect-src 'self'` covers
+		# /api + the same-origin socket.io websocket; `worker-src blob:` covers library-spawned workers
+		# (e.g. noVNC).
 		# NOTE: remote images pasted into chat markdown are blocked — add `https:` to img-src if needed.
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 
 		# Baseline hardening that complements the two headers above.
 		X-Content-Type-Options "nosniff"

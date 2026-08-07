@@ -179,16 +179,9 @@ export class StreamBuffer {
 
         const isReplay = next === this.lastAired;
         this.starved = isReplay;
-        if (isReplay) next.info.replays += 1;
-        else {
-          next.info.airedAt = new Date().toISOString();
-          this.history = [next.info, ...this.history].slice(0, HISTORY_LIMIT);
-        }
-
-        await this.air(next).catch((err) => {
+        await this.air(next, isReplay).catch((err) => {
           log.error({ err, flow: this.flowName, clip: next.info.id }, 'failed to air a clip');
         });
-        this.lastAired = next;
       }
     } finally {
       this.pumping = false;
@@ -220,10 +213,21 @@ export class StreamBuffer {
   }
 
   /** Shift one clip onto the running timeline and write it into the muxer. */
-  private async air(clip: QueuedClip): Promise<void> {
+  private async air(clip: QueuedClip, isReplay: boolean): Promise<void> {
     await this.pace(clip.info.durationSec);
     if (this.stopped) return;
     await this.ensurePlayout();
+
+    // Mark the clip on air *here*, not in the pump: the write below occupies the clip's whole
+    // duration, so recording it afterwards would leave `nowPlaying` a clip behind for two minutes,
+    // and recording it before `pace` would announce it while its predecessor was still playing.
+    if (isReplay) clip.info.replays += 1;
+    else {
+      clip.info.airedAt = new Date().toISOString();
+      this.history = [clip.info, ...this.history].slice(0, HISTORY_LIMIT);
+    }
+    this.lastAired = clip;
+
     const ts = path.join(this.dir, `air_${clip.info.id}_${this.timelineSec.toFixed(0)}.ts`);
     try {
       await remuxToTimeline(clip.file, ts, this.timelineSec);
