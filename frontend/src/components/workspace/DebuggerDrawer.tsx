@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Bug, X, Play, Square, CornerDownRight, Brain, TriangleAlert, Box, Database } from 'lucide-react';
 import { useStream, type TraceEntry } from '../../store/stream';
 import type { Agent } from '../../lib/api';
 import { IsolationPanel } from './IsolationPanel';
 import { DataPanel } from './DataPanel';
+import { useStickyScroll } from '../../hooks/useStickyScroll';
 
 const KIND_META: Record<
   TraceEntry['kind'],
@@ -63,11 +64,10 @@ type Tab = 'trace' | 'isolation' | 'data';
 export function DebuggerDrawer({ onClose, agent }: Props) {
   const { trace, streaming } = useStream();
   const [tab, setTab] = useState<Tab>('trace');
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (tab === 'trace') bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [trace, tab]);
+  const { ref: scrollRef, onScroll } = useStickyScroll<HTMLDivElement>([trace, tab], {
+    enabled: tab === 'trace',
+    behavior: 'smooth',
+  });
 
   const empty = !trace.length;
 
@@ -97,7 +97,7 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
       ) : tab === 'data' ? (
         <DataPanel />
       ) : (
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         {/* Reasoning is threaded into `trace` in call order as it streams, so each thinking span
             renders as its own card between the tools it sits between — no trailing catch-all block. */}
         {trace.map((e, i) => (
@@ -110,7 +110,6 @@ export function DebuggerDrawer({ onClose, agent }: Props) {
             <p className="text-xs">No trace yet. Send a message to watch live execution.</p>
           </div>
         )}
-        <div ref={bottomRef} />
         </div>
       )}
     </aside>

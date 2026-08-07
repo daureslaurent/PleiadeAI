@@ -8,6 +8,7 @@ import { usePrefs } from '../../store/prefs';
 import { ScoreBadge } from '../ScoreBadge';
 import { MemoriesBadge } from '../MemoriesBadge';
 import { TodoList } from './TodoPanel';
+import { useStickyScroll } from '../../hooks/useStickyScroll';
 import type { Block } from '../../store/stream';
 
 type AgentBlock = Extract<Block, { kind: 'agent' }>;
@@ -65,6 +66,9 @@ export function Blocks({
 function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? active;
+  const { ref: scrollRef, onScroll } = useStickyScroll<HTMLDivElement>([text], {
+    enabled: active && open,
+  });
   return (
     <div
       className={[
@@ -88,7 +92,11 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
         {active && <Loader2 size={11} className="ml-auto shrink-0 animate-spin text-reasoning/70" />}
       </button>
       {open && (
-        <div className="max-h-72 overflow-y-auto whitespace-pre-wrap px-3 pb-2 pt-0.5 font-mono text-[11px] leading-relaxed text-slate-400">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="max-h-72 overflow-y-auto whitespace-pre-wrap px-3 pb-2 pt-0.5 font-mono text-[11px] leading-relaxed text-slate-400"
+        >
           {text}
         </div>
       )}

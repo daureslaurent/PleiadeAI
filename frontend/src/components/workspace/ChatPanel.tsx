@@ -8,6 +8,7 @@ import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
 import { ScoreBadge } from '../ScoreBadge';
 import { MemoriesBadge } from '../MemoriesBadge';
+import { useStickyScroll } from '../../hooks/useStickyScroll';
 import type { Agent } from '../../lib/api';
 
 /**
@@ -255,7 +256,6 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
   // Budget for consecutive auto-continues; reset on any manual send / toggle-off.
   const autoCountRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const agentName = agent?.name ?? 'agent';
 
   async function addFiles(files: Iterable<File>) {
@@ -278,9 +278,10 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
   const activeAgent =
     activeFrameId && activeFrameId !== 'root' ? liveFrames[activeFrameId]?.agent : undefined;
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [turns, liveBlocks, liveReasoning, streaming]);
+  const { ref: scrollRef, onScroll } = useStickyScroll<HTMLDivElement>(
+    [turns, liveBlocks, liveReasoning, streaming],
+    { behavior: 'smooth' },
+  );
 
   // Persist the continue phrase so the operator's wording survives reloads.
   useEffect(() => {
@@ -407,7 +408,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
       <ContainerBanner agent={agent} />
 
       {/* Messages — a centered reading column floating over the starfield */}
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
+      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
         {!hasSession ? (
           <div className="flex h-full flex-col items-center justify-center text-center text-slate-500">
             <div className="relative mb-4">
@@ -464,7 +465,6 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
                 )}
               </MessageRow>
             )}
-            <div ref={bottomRef} />
           </div>
         )}
       </div>
