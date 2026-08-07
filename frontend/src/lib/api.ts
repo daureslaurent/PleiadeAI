@@ -373,6 +373,41 @@ export interface Notification {
 /** A new agent's notebook always starts empty — the agent writes it itself via `update_notebook`. */
 export type NewAgent = Omit<Agent, '_id' | 'notebook'>;
 
+const EXT_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mkv: 'video/x-matroska',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+  m4a: 'audio/mp4',
+};
+
+/** Guess a mime type from a filename's extension. Falls back to a generic binary type. */
+function mimeFromExt(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  return EXT_MIME[ext] ?? 'application/octet-stream';
+}
+
+async function fetchContainerFileBlob(id: string, path: string): Promise<Blob> {
+  const token = localStorage.getItem('pleiades_token');
+  const res = await fetch(
+    `${API_BASE}/api/agents/${id}/container/download?path=${encodeURIComponent(path)}`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+  );
+  if (!res.ok) throw new Error(`download failed (${res.status})`);
+  return res.blob();
+}
+
 export const agentsApi = {
   list: () => api.get<Agent[]>('/agents').then((r) => r.data),
   create: (body: NewAgent) => api.post<Agent>('/agents', body).then((r) => r.data),
@@ -438,13 +473,7 @@ export const agentsApi = {
   },
   /** Fetch a file as a blob and trigger a browser download. */
   async downloadFile(id: string, path: string): Promise<void> {
-    const token = localStorage.getItem('pleiades_token');
-    const res = await fetch(
-      `${API_BASE}/api/agents/${id}/container/download?path=${encodeURIComponent(path)}`,
-      { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
-    );
-    if (!res.ok) throw new Error(`download failed (${res.status})`);
-    const blob = await res.blob();
+    const blob = await fetchContainerFileBlob(id, path);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -453,6 +482,17 @@ export const agentsApi = {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  },
+  /**
+   * Fetch a file's bytes as an object URL for inline media preview (images/video/audio). The
+   * container download route always answers `application/octet-stream`, so the blob is re-tagged
+   * with the mime guessed from the file's extension — otherwise `<img>`/`<video>` won't render it.
+   * Caller revokes the URL.
+   */
+  async fileObjectUrl(id: string, path: string): Promise<string> {
+    const blob = await fetchContainerFileBlob(id, path);
+    const typed = blob.type ? blob : new Blob([blob], { type: mimeFromExt(path) });
+    return URL.createObjectURL(typed);
   },
   setAgentsMd: (id: string, content: string) =>
     api.put<Agent>(`/agents/${id}/agents-md`, { content }).then((r) => r.data),

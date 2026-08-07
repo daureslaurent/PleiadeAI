@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  AudioLines,
   Box,
   ChevronRight,
+  Clapperboard,
   Cpu,
   Download,
   File as FileIcon,
   FileText,
   Folder,
   HardDrive,
+  Image as ImageIcon,
   Loader2,
   MemoryStick,
   Network,
@@ -17,6 +20,7 @@ import {
   Square,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import {
   agentsApi,
@@ -48,6 +52,21 @@ function fmtTime(epochSec: number): string {
 function errCode(e: unknown): string | null {
   const r = (e as { response?: { data?: { error?: string } } })?.response;
   return r?.data?.error ?? null;
+}
+
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp']);
+const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'mkv']);
+const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a']);
+
+type MediaKind = 'image' | 'video' | 'audio' | null;
+
+/** Classify a filename by extension so media files open in the lightbox instead of the text preview. */
+function mediaKind(name: string): MediaKind {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  if (IMAGE_EXT.has(ext)) return 'image';
+  if (VIDEO_EXT.has(ext)) return 'video';
+  if (AUDIO_EXT.has(ext)) return 'audio';
+  return null;
 }
 
 interface Props {
@@ -282,6 +301,7 @@ function FileExplorer({ agentId }: { agentId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ContainerFilePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [media, setMedia] = useState<{ path: string; kind: Exclude<MediaKind, null> } | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
@@ -307,6 +327,11 @@ function FileExplorer({ agentId }: { agentId: string }) {
 
   async function openFile(entry: ContainerFile) {
     const full = `${path}/${entry.name}`;
+    const kind = mediaKind(entry.name);
+    if (kind) {
+      setMedia({ path: full, kind });
+      return;
+    }
     setPreviewLoading(true);
     try {
       setPreview(await agentsApi.readFile(agentId, full));
@@ -350,7 +375,15 @@ function FileExplorer({ agentId }: { agentId: string }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {media && (
+        <MediaLightbox
+          agentId={agentId}
+          path={media.path}
+          kind={media.kind}
+          onClose={() => setMedia(null)}
+        />
+      )}
       {/* Toolbar: breadcrumb + upload */}
       <div className="flex items-center gap-1 border-b border-border px-2.5 py-1.5 text-xs">
         <button
@@ -423,7 +456,18 @@ function Row({
   onDelete: () => void;
 }) {
   const isDir = entry.type === 'dir';
-  const Icon = isDir ? Folder : entry.type === 'link' ? FileIcon : FileText;
+  const kind = isDir ? null : mediaKind(entry.name);
+  const Icon = isDir
+    ? Folder
+    : entry.type === 'link'
+      ? FileIcon
+      : kind === 'image'
+        ? ImageIcon
+        : kind === 'video'
+          ? Clapperboard
+          : kind === 'audio'
+            ? AudioLines
+            : FileText;
   return (
     <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-panel">
       <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2 text-left">
@@ -512,6 +556,96 @@ function FilePreview({
               </span>
             )}
           </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Overlay preview for image/video/audio files. The whole file is fetched as a blob (the container
+ * download route doesn't support Range, so there's no seeking on large clips — good enough for a
+ * workspace scratch file, unlike a generated media artifact).
+ */
+function MediaLightbox({
+  agentId,
+  path,
+  kind,
+  onClose,
+}: {
+  agentId: string;
+  path: string;
+  kind: Exclude<MediaKind, null>;
+  onClose: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const name = path.split('/').pop() ?? path;
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let alive = true;
+    setUrl(null);
+    setError(false);
+    agentsApi
+      .fileObjectUrl(agentId, path)
+      .then((u) => {
+        objectUrl = u;
+        if (alive) setUrl(u);
+        else URL.revokeObjectURL(u);
+      })
+      .catch(() => alive && setError(true));
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [agentId, path]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="absolute inset-0 z-20 flex flex-col bg-black/90 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex items-center gap-2 border-b border-white/10 px-2.5 py-1.5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200">{name}</span>
+        <button
+          onClick={() => agentsApi.downloadFile(agentId, path)}
+          title="Download"
+          className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+        >
+          <Download size={14} />
+        </button>
+        <button
+          onClick={onClose}
+          title="Close"
+          className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+        >
+          <X size={15} />
+        </button>
+      </div>
+      <div
+        className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {error ? (
+          <p className="text-xs text-slate-500">Failed to load file.</p>
+        ) : !url ? (
+          <Loader2 size={22} className="animate-spin text-slate-600" />
+        ) : kind === 'image' ? (
+          <img src={url} alt={name} className="max-h-full max-w-full object-contain" />
+        ) : kind === 'video' ? (
+          <video src={url} controls autoPlay className="max-h-full max-w-full" />
+        ) : (
+          <audio src={url} controls autoPlay className="w-full max-w-md" />
         )}
       </div>
     </div>
