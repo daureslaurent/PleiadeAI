@@ -279,7 +279,11 @@ export class StreamBuffer {
       '-f', 'mp4',
       // An fMP4 the browser's MediaSource can consume: a header with no sample table, fragments cut
       // at keyframes (~1s, matching the ingest GOP) so a late joiner starts decoding immediately.
-      '-movflags', 'empty_moov+frag_keyframe+default_base_moof+omit_tfhd_offset',
+      // NOTE: deliberately *without* `omit_tfhd_offset` — paired with `default_base_moof` it made
+      // Chromium's ChunkDemuxer reject every fragment (CHUNK_DEMUXER_ERROR_APPEND_FAILED /
+      // RunSegmentParserLoop) despite ffprobe reading the output as well-formed; `default_base_moof`
+      // alone is the well-supported combo and is all MSE actually requires.
+      '-movflags', 'empty_moov+frag_keyframe+default_base_moof',
       '-frag_duration', '1000000',
       'pipe:1',
     ];
