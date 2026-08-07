@@ -25,6 +25,8 @@ export interface FlowNodeData extends Record<string, unknown> {
   outputs: PortSpec[];
   run?: NodeRunState;
   issue?: 'error' | 'warning';
+  /** True for one beat after the operator clicks a link touching this node — see FlowCanvas. */
+  pulse?: boolean;
 }
 
 const STATUS_RING: Record<FlowNodeStatus, string> = {
@@ -61,7 +63,7 @@ export const FlowNodeCard = memo(function FlowNodeCard({ data, selected }: NodeP
     <div
       className={`min-w-[190px] max-w-[240px] rounded-xl bg-[#0d1424]/95 shadow-lg ring-1 backdrop-blur-sm transition-shadow ${ring} ${
         run?.status === 'skipped' ? 'opacity-45' : ''
-      }`}
+      } ${d.pulse ? 'node-pulse' : ''}`}
       style={{ borderTop: `2px solid ${accent}` }}
     >
       <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-2">

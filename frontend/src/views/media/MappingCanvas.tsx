@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -7,6 +7,7 @@ import {
   ReactFlow,
   type Connection,
   type Edge,
+  type EdgeMouseHandler,
   type Node,
   type NodeChange,
 } from '@xyflow/react';
@@ -140,6 +141,21 @@ export function MappingCanvas({
   /** Positions the operator has dragged, layered over the computed layout. */
   const [moved, setMoved] = useState<Map<string, { x: number; y: number }>>(new Map());
 
+  /**
+   * Endpoints to pulse after a link click, so "where does this wire go" is answered by a glow on
+   * both ends rather than by eye-tracing the line across a crowded graph.
+   */
+  const [pulseNodeIds, setPulseNodeIds] = useState<Set<string>>(new Set());
+  const pulseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onEdgeClick = useCallback<EdgeMouseHandler>((_, edge) => {
+    if (pulseTimeout.current) clearTimeout(pulseTimeout.current);
+    setPulseNodeIds(new Set([edge.source, edge.target]));
+    pulseTimeout.current = setTimeout(() => setPulseNodeIds(new Set()), 2100);
+  }, []);
+  useEffect(() => () => {
+    if (pulseTimeout.current) clearTimeout(pulseTimeout.current);
+  }, []);
+
   const metaByKey = useMemo(() => new Map(catalog.map((m) => [m.key, m])), [catalog]);
 
   const boundNodeIds = useMemo(
@@ -181,7 +197,13 @@ export function MappingCanvas({
         type: 'comfyNode',
         position,
         selected: node.id === selectedNodeId,
-        data: { node, boundBy, isResult: node.id === outputNodeId, onUnbind } satisfies ComfyNodeData,
+        data: {
+          node,
+          boundBy,
+          isResult: node.id === outputNodeId,
+          onUnbind,
+          pulse: pulseNodeIds.has(node.id),
+        } satisfies ComfyNodeData,
       };
     });
 
@@ -190,7 +212,7 @@ export function MappingCanvas({
         id: APP_IN_ID,
         type: 'appIn',
         position: moved.get(APP_IN_ID) ?? { x: 0, y: Math.max(0, centre - 140) },
-        data: { catalog, bound } satisfies AppInputsData,
+        data: { catalog, bound, pulse: pulseNodeIds.has(APP_IN_ID) } satisfies AppInputsData,
         deletable: false,
       },
       ...cards,
@@ -198,11 +220,27 @@ export function MappingCanvas({
         id: APP_OUT_ID,
         type: 'appOut',
         position: moved.get(APP_OUT_ID) ?? { x: layout.width, y: Math.max(0, centre - 40) },
-        data: { outputKind, connected: Boolean(outputNodeId) } satisfies AppOutputData,
+        data: {
+          outputKind,
+          connected: Boolean(outputNodeId),
+          pulse: pulseNodeIds.has(APP_OUT_ID),
+        } satisfies AppOutputData,
         deletable: false,
       },
     ];
-  }, [visible, layout, bindings, metaByKey, catalog, outputNodeId, outputKind, selectedNodeId, onUnbind, moved]);
+  }, [
+    visible,
+    layout,
+    bindings,
+    metaByKey,
+    catalog,
+    outputNodeId,
+    outputKind,
+    selectedNodeId,
+    onUnbind,
+    moved,
+    pulseNodeIds,
+  ]);
 
   const rfEdges = useMemo<Edge[]>(() => {
     const shown = new Set(visible.map((n) => n.id));
@@ -307,6 +345,7 @@ export function MappingCanvas({
       onConnect={onConnect}
       isValidConnection={isValidConnection}
       onPaneClick={() => onSelectNode(null)}
+      onEdgeClick={onEdgeClick}
       // Deleting a *node* here would mean editing the ComfyUI graph, which this page deliberately
       // doesn't do — the graph is a snapshot of what runs on the server.
       deleteKeyCode={null}

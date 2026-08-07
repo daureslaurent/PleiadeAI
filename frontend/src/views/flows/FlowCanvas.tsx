@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -66,6 +66,24 @@ export function FlowCanvas({
   /** Selected link, for the same reason: it must be restated onto the rebuilt edge objects. */
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
+  /**
+   * Endpoints to pulse after a link click, so "where does this wire go" is answered by a glow on
+   * both ends rather than by eye-tracing the line. Cleared on a timer rather than tied to edge
+   * selection, so clicking the same link again re-triggers the animation instead of doing nothing.
+   */
+  const [pulseNodeIds, setPulseNodeIds] = useState<Set<string>>(new Set());
+  const pulseTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pulseEdgeEndpoints = useCallback((edge: { source: string; target: string }) => {
+    if (pulseTimeout.current) clearTimeout(pulseTimeout.current);
+    setPulseNodeIds(new Set([edge.source, edge.target]));
+    pulseTimeout.current = setTimeout(() => setPulseNodeIds(new Set()), 2100);
+  }, []);
+
+  useEffect(() => () => {
+    if (pulseTimeout.current) clearTimeout(pulseTimeout.current);
+  }, []);
+
   const issueByNode = useMemo(() => {
     const map = new Map<string, 'error' | 'warning'>();
     for (const issue of issues) {
@@ -96,10 +114,11 @@ export function FlowCanvas({
             outputs: outputsOf(node, type),
             run: runStates?.get(node.id),
             issue: issueByNode.get(node.id),
+            pulse: pulseNodeIds.has(node.id),
           },
         };
       }),
-    [nodes, nodeTypes, selectedId, runStates, issueByNode, readOnly, sizes],
+    [nodes, nodeTypes, selectedId, runStates, issueByNode, readOnly, sizes, pulseNodeIds],
   );
 
   const deleteEdge = useCallback(
@@ -272,6 +291,7 @@ export function FlowCanvas({
         setSelectedEdgeId(edge.id);
         // Clear the node selection so the toolbar's delete acts on the link you just clicked.
         onSelect(null);
+        pulseEdgeEndpoints(edge);
       }}
       nodesConnectable={!readOnly}
       elementsSelectable

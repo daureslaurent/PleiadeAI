@@ -22,6 +22,8 @@ export interface AppInputsData extends Record<string, unknown> {
   catalog: BindingMeta[];
   /** Keys currently wired to something, so a bound-but-irrelevant key still shows. */
   bound: Set<string>;
+  /** True for one beat after the operator clicks a link touching this node. */
+  pulse?: boolean;
 }
 
 /**
@@ -39,7 +41,11 @@ export const AppInputsNode = memo(function AppInputsNode({ data }: NodeProps) {
   const extra = d.catalog.filter((m) => !primary.includes(m));
 
   return (
-    <div className="w-[210px] rounded-xl bg-[#0d1424]/95 shadow-lg ring-1 ring-accent/30 backdrop-blur-sm">
+    <div
+      className={`w-[210px] rounded-xl bg-[#0d1424]/95 shadow-lg ring-1 ring-accent/30 backdrop-blur-sm ${
+        d.pulse ? 'node-pulse' : ''
+      }`}
+    >
       <div className="flex items-center gap-1.5 border-b border-white/[0.06] px-2.5 py-2">
         <Sparkles size={12} className="text-accent" />
         <span className="text-xs font-medium text-slate-100">App inputs</span>
@@ -104,6 +110,8 @@ export interface ComfyNodeData extends Record<string, unknown> {
   /** True when this node's files are the workflow's result. */
   isResult: boolean;
   onUnbind: (key: string) => void;
+  /** True for one beat after the operator clicks a link touching this node. */
+  pulse?: boolean;
 }
 
 /**
@@ -125,7 +133,7 @@ export const ComfyNodeCard = memo(function ComfyNodeCard({ data, selected }: Nod
     <div
       className={`w-[230px] rounded-xl bg-[#0d1424]/95 shadow-lg ring-1 backdrop-blur-sm transition-shadow ${
         selected ? 'ring-accent/60' : d.boundBy.size > 0 ? 'ring-white/[0.16]' : 'ring-white/[0.08]'
-      }`}
+      } ${d.pulse ? 'node-pulse' : ''}`}
       style={{ borderTop: `2px solid ${accent}` }}
     >
       <div className="px-2.5 pb-1 pt-2">
@@ -287,6 +295,8 @@ export interface AppOutputData extends Record<string, unknown> {
   outputKind: 'image' | 'video' | 'audio';
   /** False when no node has been named as the result — the run would have nothing to return. */
   connected: boolean;
+  /** True for one beat after the operator clicks a link touching this node. */
+  pulse?: boolean;
 }
 
 const OUTPUT_ICON = { image: ImageIcon, video: Film, audio: AudioLines };
@@ -299,7 +309,7 @@ export const AppOutputNode = memo(function AppOutputNode({ data }: NodeProps) {
     <div
       className={`relative w-[170px] rounded-xl bg-[#0d1424]/95 px-2.5 py-2 shadow-lg ring-1 backdrop-blur-sm ${
         d.connected ? 'ring-emerald-500/30' : 'ring-amber-500/40'
-      }`}
+      } ${d.pulse ? 'node-pulse' : ''}`}
     >
       <Handle
         id={RESULT_HANDLE}
