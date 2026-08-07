@@ -7,11 +7,10 @@
  * is staged and bump **only** the apps whose folder was touched: a frontend-only commit leaves
  * backend and finetune untouched, and vice-versa.
  *
- * Numbering (DIRECT decision): patch = the number of commits that have touched that app's folder,
- * i.e. `git rev-list --count HEAD -- <path>` + 1 for the commit being created. This is deterministic
- * and self-correcting — it never drifts even across amend/rebase, and cannot run away, because a
- * bump only happens when the app already has non-version changes staged. major/minor are preserved
- * from the existing file so they can be hand-rolled for real releases.
+ * Numbering: patch increments by 1 from whatever's committed at HEAD — unless major/minor was
+ * hand-rolled (the working copy's major.minor no longer matches HEAD's), in which case patch resets
+ * to 0 so a fresh x.y line always starts clean. This is deterministic and self-correcting — it never
+ * drifts even across amend/rebase, since it's read from git history rather than tracked separately.
  *
  * The freshly written version.json travels inside the very commit that triggered it (we re-stage it).
  *
@@ -45,12 +44,13 @@ function stagedFiles() {
   }
 }
 
-/** Commits already in history that touched `path` (excludes the in-progress commit). */
-function historyCount(path) {
+/** The version last committed at HEAD for `file`, or null if it doesn't exist there yet. */
+function headVersion(file) {
   try {
-    return parseInt(execSync(`git rev-list --count HEAD -- "${path}"`, { cwd: root }).toString().trim(), 10) || 0;
+    const raw = execSync(`git show HEAD:"${file}"`, { cwd: root, stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+    return JSON.parse(raw);
   } catch {
-    return 0; // first commit — no HEAD yet
+    return null; // no HEAD yet, or file didn't exist at HEAD
   }
 }
 
@@ -75,8 +75,13 @@ for (const app of APPS) {
     .split('.')
     .map((n) => parseInt(n, 10) || 0);
 
-  // history + the commit being created now (which, by definition, touches this app).
-  const patch = historyCount(app.path) + 1;
+  // Hand-rolling major/minor in the working copy (ahead of what's committed at HEAD) means a fresh
+  // x.y line — patch restarts at 0. Otherwise keep incrementing from HEAD's committed patch.
+  const head = headVersion(app.file);
+  const [headMajor, headMinor, headPatch] = head
+    ? String(head.version || '0.0.0').split('.').map((n) => parseInt(n, 10) || 0)
+    : [null, null, -1];
+  const patch = major === headMajor && minor === headMinor ? headPatch + 1 : 0;
 
   const next = { version: `${major}.${minor}.${patch}`, build: patch, date: today };
   writeFileSync(file, JSON.stringify(next, null, 2) + '\n');
