@@ -11,6 +11,7 @@ import {
   generateSoundNode,
   generateVideoNode,
 } from './media';
+import { streamOutNode, timerNode } from './stream';
 import { toolNode } from './tool';
 import type { FlowNodeHandler, PortSpec } from '../types';
 import type { FlowNode } from '../../domain/flows/flow.model';
@@ -40,7 +41,9 @@ const HANDLERS: FlowNodeHandler[] = [
   videoComposeNode,
   audioMixNode,
   mixVideoAudioNode,
+  streamOutNode,
   toolNode,
+  timerNode,
   conditionNode,
   approvalNode,
   forEachNode,

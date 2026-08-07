@@ -1195,7 +1195,8 @@ export interface FlowRunSummary {
   flowId: string;
   flowName: string;
   status: FlowRunStatus;
-  trigger: 'manual' | 'agent' | 'cron' | 'api';
+  /** `timer` is the sub-minute Time trigger that keeps a live stream fed (STREAMING_PLAN.md §4). */
+  trigger: 'manual' | 'agent' | 'cron' | 'api' | 'timer';
   sessionId: string;
   startedAt: string;
   endedAt?: string | null;
@@ -2373,4 +2374,53 @@ export const monitorApi = {
     api.get<MonitorSample[]>(`/monitor/targets/${id}/history`, { params: { since } }).then((r) => r.data),
   /** Live size of the history buffer, for the Settings → Monitor readout. */
   stats: () => api.get<MonitorStats>('/monitor/stats').then((r) => r.data),
+};
+
+// ---------------------------------------------------------------- live streaming
+
+/** One clip that has been (or is being) aired on a live stream. */
+export interface StreamClip {
+  id: string;
+  title: string;
+  durationSec: number;
+  queuedAt: string;
+  airedAt?: string;
+  replays: number;
+}
+
+/** A live stream, keyed by the flow feeding it (STREAMING_PLAN.md). */
+export interface StreamInfo {
+  flowId: string;
+  flowName: string;
+  kind: 'audio' | 'video';
+  /** The MSE codec string the player must hand to `MediaSource.addSourceBuffer`. */
+  mime: string;
+  startedAt: string;
+  nowPlaying: string | null;
+  /** True while the last clip is being re-aired because nothing new has landed. */
+  starved: boolean;
+  bufferedSec: number;
+  queuedClips: number;
+  totalClips: number;
+  listeners: number;
+  recent: StreamClip[];
+}
+
+/** A stream plus the signed URL a media element can actually fetch. */
+export interface StreamSession extends StreamInfo {
+  timerArmed: boolean;
+  token: string;
+  tokenExpiresInSeconds: number;
+  /** Already carries `?t=<token>` — a `<video src>` can't send an Authorization header. */
+  url: string;
+}
+
+export const streamsApi = {
+  list: () => api.get<{ streams: StreamInfo[] }>('/streams').then((r) => r.data.streams),
+  /** Fetches the stream *and* mints a playback token, so the player needs exactly one call. */
+  get: (flowId: string) => api.get<StreamSession>(`/streams/${flowId}`).then((r) => r.data),
+  stop: (flowId: string) => api.delete(`/streams/${flowId}`).then((r) => r.data),
+  /** Arm or disarm the flow's Time trigger — "keep feeding this stream" / "stop feeding it". */
+  setTimer: (flowId: string, armed: boolean) =>
+    api.post<{ ok: boolean; armed: boolean }>(`/streams/${flowId}/timer`, { armed }).then((r) => r.data),
 };

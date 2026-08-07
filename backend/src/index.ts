@@ -43,6 +43,9 @@ import { imagesRouter } from './transport/http/routes/images.routes';
 import { resourcesRouter } from './transport/http/routes/resources.routes';
 import { mediaRouter } from './transport/http/routes/media.routes';
 import { flowsRouter } from './transport/http/routes/flows.routes';
+import { streamsPlaybackRouter, streamsRouter } from './transport/http/routes/streams.routes';
+import { flowTimerScheduler } from './flows/TimerScheduler';
+import { streamRegistry } from './streaming/StreamRegistry';
 import { allowQueryToken } from './transport/http/middleware/query-token';
 import { transferRouter } from './transport/http/routes/transfer.routes';
 import { hostRouter } from './transport/http/routes/host.routes';
@@ -139,6 +142,11 @@ async function main(): Promise<void> {
   app.use('/api/media', allowQueryToken, requireAuth, mediaRouter);
   // Same reason as the two above: the run panel previews a flow's artifacts with bare media elements.
   app.use('/api/flows', allowQueryToken, requireAuth, flowsRouter);
+  // The live media flux carries its own signed, flow-scoped token in the URL (STREAMING_PLAN.md §3),
+  // so its router is mounted openly ahead of the authed one — the same shape as the OAuth callback
+  // below. Everything else about streams stays header-authenticated.
+  app.use('/api/streams', streamsPlaybackRouter);
+  app.use('/api/streams', requireAuth, streamsRouter);
   app.use('/api/transfer', requireAuth, transferRouter);
   app.use('/api/monitor', requireAuth, monitorRouter);
   app.use('/api/host', requireAuth, hostRouter);
@@ -162,6 +170,9 @@ async function main(): Promise<void> {
   // Any flow run still marked live belongs to an executor that died with the previous process
   // (FLOWS_PLAN.md §4) — fail them so the UI never shows a run that nothing is driving.
   await flowRunner.sweepInterrupted().catch((err) => rootLogger.error({ err }, 'flow run sweep failed'));
+  // Streaming flows are armed state, not in-flight work: a radio that was on air before the restart
+  // should be ticking again a second after boot (STREAMING_PLAN.md §4).
+  await flowTimerScheduler.restore().catch((err) => rootLogger.error({ err }, 'flow timer restore failed'));
   // Interactive Telegram bot (long-poll). The DB-backed settings (env fallback) are pushed into
   // the runtime config first so a token saved from the UI survives restarts. Best-effort: a
   // Telegram outage never blocks boot.
@@ -188,6 +199,10 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     rootLogger.info({ signal }, 'shutting down');
     telegramBot.stop();
+    // Kill the playout muxers explicitly: an ffmpeg holding a pipe outlives the parent otherwise,
+    // and the next boot would find its temp directory and a zombie encoder still on the CPU.
+    await flowTimerScheduler.stopAll().catch(() => undefined);
+    await streamRegistry.stopAll().catch(() => undefined);
     httpServer.close();
     await disconnectMongo();
     process.exit(0);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bot, CalendarClock, Cloud, Hand, RefreshCw } from 'lucide-react';
+import { Bot, CalendarClock, Cloud, Hand, RefreshCw, Timer } from 'lucide-react';
 import { Button, EmptyState } from '../../components/ui';
 import { flowsApi, type FlowRunSummary } from '../../lib/api';
 
@@ -8,6 +8,7 @@ const TRIGGER_ICON = {
   agent: Bot,
   cron: CalendarClock,
   api: Cloud,
+  timer: Timer,
 } as const;
 
 const STATUS_TONE: Record<string, string> = {

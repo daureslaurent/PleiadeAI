@@ -87,6 +87,11 @@ const FlowSchema = new Schema(
     description: { type: String, default: '' },
     /** Off means the flow can't be run by an agent or a schedule (manual runs still work, for testing). */
     enabled: { type: Boolean, default: true },
+    /**
+     * Whether this flow's `timer` node is armed (STREAMING_PLAN.md §4). Persisted rather than kept
+     * in `FlowTimerScheduler`'s memory alone so a backend restart puts the streams back on air.
+     */
+    timer_armed: { type: Boolean, default: false },
     nodes: { type: [NodeSchema], default: [] },
     edges: { type: [EdgeSchema], default: [] },
     created_at: { type: Date, default: () => new Date() },

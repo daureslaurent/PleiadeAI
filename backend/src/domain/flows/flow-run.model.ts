@@ -7,7 +7,7 @@ export type FlowRunStatus = (typeof FLOW_RUN_STATUSES)[number];
 export const FLOW_NODE_STATUSES = ['pending', 'running', 'success', 'error', 'skipped'] as const;
 export type FlowNodeStatus = (typeof FLOW_NODE_STATUSES)[number];
 
-export const FLOW_TRIGGERS = ['manual', 'agent', 'cron', 'api'] as const;
+export const FLOW_TRIGGERS = ['manual', 'agent', 'cron', 'api', 'timer'] as const;
 export type FlowTrigger = (typeof FLOW_TRIGGERS)[number];
 
 /** Per-node trace for one run: what it did, how long it took, and what came out. */

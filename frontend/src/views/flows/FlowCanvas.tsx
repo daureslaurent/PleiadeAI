@@ -400,6 +400,12 @@ function subtitleOf(node: FlowNode, type: FlowNodeType | undefined): string {
       return `${String(config.port_type ?? 'text')} · ${String(config.value ?? '').slice(0, 24) || 'empty'}`;
     case 'note':
       return String(config.text ?? '');
+    case 'stream_out':
+      // A media-group node with no workflow of its own — it would otherwise fall into the default
+      // branch below and claim no workflow is selected.
+      return `${String(config.kind ?? 'audio')} · live`;
+    case 'timer':
+      return `every ${String(config.interval_seconds ?? 30)}s`;
     default:
       if (type?.group === 'media') {
         const label = type.config.find((f) => f.key === 'workflow')?.optionLabels?.[String(config.workflow ?? '')];

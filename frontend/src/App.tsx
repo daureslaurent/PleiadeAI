@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './store/auth';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { EndpointBadge } from './components/EndpointBadge';
+import { StreamsBadge } from './components/StreamsBadge';
 import { ConfirmProvider } from './components/ui';
 import { AuthGuard } from './views/AuthGuard';
 import { AgentWorkspace } from './views/AgentWorkspace';
@@ -24,6 +25,7 @@ import { SettingsView, SettingsCategoryPage } from './views/settings/SettingsLay
 import { SettingsHome } from './views/settings/SettingsHome';
 import { VisualDesktopWindow } from './views/VisualDesktopWindow';
 import { AndroidPhoneWindow } from './views/AndroidPhoneWindow';
+import { StreamWindow } from './views/StreamWindow';
 
 function PageHeader() {
   const { pathname } = useLocation();
@@ -38,7 +40,8 @@ function PageHeader() {
     <header className="glass relative z-20 flex h-14 shrink-0 items-center gap-2 border-b px-6">
       {Icon && <Icon size={18} className="text-slate-400" />}
       <h1 className="text-sm font-semibold text-slate-100">{current?.label ?? 'PleiadesAI'}</h1>
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-2">
+        <StreamsBadge />
         <EndpointBadge />
       </div>
     </header>
@@ -78,6 +81,8 @@ export default function App() {
         <Route path="/desktop/:agentId" element={<VisualDesktopWindow />} />
         {/* Same, for a popped-out Android device mirror. */}
         <Route path="/phone/:agentId" element={<AndroidPhoneWindow />} />
+        {/* Same again for a live media stream: a page about one flux and nothing else. */}
+        <Route path="/stream/:flowId" element={<StreamWindow />} />
         <Route element={<MainLayout />}>
           <Route path="/workspace" element={<AgentWorkspace />} />
           <Route path="/agents" element={<AgentsView />} />
