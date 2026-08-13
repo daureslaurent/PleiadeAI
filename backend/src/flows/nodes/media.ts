@@ -53,6 +53,60 @@ const SHARED_INPUTS: PortSpec[] = [
   { name: 'run', types: ['signal'], description: 'Optional ordering-only trigger.' },
 ];
 
+/**
+ * Port names a workflow parameter may not take, because the node already means something by them.
+ * The inspector filters these out too; this is the backstop.
+ */
+const RESERVED_PARAM_NAMES = new Set(['prompt', 'run', 'image', 'audio', 'video', 'default', 'done']);
+
+/**
+ * The custom parameters the operator has taken up on this node, from `config.params`.
+ *
+ * Which parameters *exist* is a property of the selected ComfyUI workflow (its `custom:` bindings),
+ * and the backend is the authority on that at run time. But ports have to be derivable from the node
+ * alone, synchronously, for both the canvas and validation — so the inspector copies the ones in use
+ * into `config.params` when the workflow is picked, exactly as the router stores its choices.
+ */
+function paramKeys(config: Record<string, unknown>): string[] {
+  const params = config.params;
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return [];
+  return Object.keys(params as Record<string, unknown>).filter(
+    (k) => /^[a-z][a-z0-9_]{0,31}$/.test(k) && !RESERVED_PARAM_NAMES.has(k),
+  );
+}
+
+/** One extra input port per custom parameter, so an agent node can decide it per run. */
+function withParamPorts(base: PortSpec[]): (config: Record<string, unknown>) => PortSpec[] {
+  return (config) => [
+    ...base,
+    ...paramKeys(config).map((name) => ({
+      name,
+      types: ['text' as const],
+      description: `Workflow parameter "${name}" — overrides the value set on this node.`,
+    })),
+  ];
+}
+
+/**
+ * Values for the selected workflow's custom parameters: the node's own field, overridden by whatever
+ * arrives on the matching port. Keyed the way the workflow's bindings are (`custom:<name>`); a name
+ * the workflow doesn't declare is simply ignored downstream.
+ */
+function customParams(
+  config: Record<string, unknown>,
+  inputs: Record<string, FlowValue>,
+): BindingValues {
+  const stored = (config.params ?? {}) as Record<string, unknown>;
+  const out: BindingValues = {};
+  for (const key of paramKeys(config)) {
+    const wired = inputs[key] ? asText(inputs[key]).trim() : '';
+    const value = wired || stored[key];
+    if (value === undefined || value === null || value === '') continue;
+    out[`custom:${key}`] = typeof value === 'number' ? value : String(value);
+  }
+  return out;
+}
+
 function outputsFor(type: 'image' | 'video' | 'audio'): PortSpec[] {
   return [
     { name: 'default', types: [type] },
@@ -189,6 +243,7 @@ export const generateImageNode: FlowNodeHandler = {
   group: 'media',
   description: 'Renders an image on ComfyUI with the selected workflow.',
   inputs: SHARED_INPUTS,
+  dynamicInputs: withParamPorts(SHARED_INPUTS),
   outputs: outputsFor('image'),
   config: [
     workflowField('image'),
@@ -214,12 +269,29 @@ export const generateImageNode: FlowNodeHandler = {
       'image',
       config,
       promptOf(config, asText(inputs.prompt)),
-      { ...parseSize(config.size), batch: clampInt(config.batch, 1, MAX_BATCH, 1) },
+      { ...customParams(config, inputs), ...parseSize(config.size), batch: clampInt(config.batch, 1, MAX_BATCH, 1) },
       undefined,
       300,
     );
   },
 };
+
+const VIDEO_INPUTS: PortSpec[] = [
+  ...SHARED_INPUTS,
+  { name: 'image', types: ['image'], description: 'Start frame, if the workflow takes one.' },
+  {
+    name: 'audio',
+    types: ['audio'],
+    description:
+      'Soundtrack the model paces its motion to (LTX-style A/V models). Only for a workflow with a LoadAudio node.',
+  },
+  {
+    name: 'video',
+    types: ['video', 'file'],
+    description:
+      'Source clip, for a workflow that transforms video rather than creating it (subtitling, restyling, interpolation). Only for a workflow with a LoadVideo node.',
+  },
+];
 
 export const generateVideoNode: FlowNodeHandler = {
   type: 'generate_video',
@@ -227,22 +299,8 @@ export const generateVideoNode: FlowNodeHandler = {
   group: 'media',
   description:
     'Runs a video workflow on ComfyUI — from a prompt, a start frame, or an existing clip. Slow and GPU-expensive.',
-  inputs: [
-    ...SHARED_INPUTS,
-    { name: 'image', types: ['image'], description: 'Start frame, if the workflow takes one.' },
-    {
-      name: 'audio',
-      types: ['audio'],
-      description:
-        'Soundtrack the model paces its motion to (LTX-style A/V models). Only for a workflow with a LoadAudio node.',
-    },
-    {
-      name: 'video',
-      types: ['video', 'file'],
-      description:
-        'Source clip, for a workflow that transforms video rather than creating it (subtitling, restyling, interpolation). Only for a workflow with a LoadVideo node.',
-    },
-  ],
+  inputs: VIDEO_INPUTS,
+  dynamicInputs: withParamPorts(VIDEO_INPUTS),
   outputs: outputsFor('video'),
   config: [
     workflowField('video'),
@@ -269,8 +327,8 @@ export const generateVideoNode: FlowNodeHandler = {
     // re-crop the film.
     const source = await inputVideoFrom(ctx, asHandles(inputs.video));
     const values = source
-      ? { ...parseSize(config.size), fps }
-      : { ...parseSize(config.size), seconds, fps, length: seconds * fps };
+      ? { ...customParams(config, inputs), ...parseSize(config.size), fps }
+      : { ...customParams(config, inputs), ...parseSize(config.size), seconds, fps, length: seconds * fps };
 
     return runWorkflow(
       ctx,
@@ -293,6 +351,7 @@ export const generateSoundNode: FlowNodeHandler = {
   group: 'media',
   description: 'Renders audio on ComfyUI with the selected workflow.',
   inputs: SHARED_INPUTS,
+  dynamicInputs: withParamPorts(SHARED_INPUTS),
   outputs: outputsFor('audio'),
   config: [
     workflowField('audio'),
@@ -310,7 +369,7 @@ export const generateSoundNode: FlowNodeHandler = {
       'audio',
       config,
       promptOf(config, asText(inputs.prompt)),
-      { seconds: clampInt(config.seconds, 1, 600, 30) },
+      { ...customParams(config, inputs), seconds: clampInt(config.seconds, 1, 600, 30) },
       undefined,
       600,
     );
@@ -325,20 +384,23 @@ export const generateSoundNode: FlowNodeHandler = {
  * is **required** and the node is named for the job, so the pairing is obvious on the canvas: the
  * image node feeds this, and this is what moves it.
  */
+const ANIMATE_INPUTS: PortSpec[] = [
+  { name: 'image', types: ['image'], required: true, description: 'The frame to animate.' },
+  ...SHARED_INPUTS,
+  {
+    name: 'audio',
+    types: ['audio'],
+    description: 'Soundtrack the model paces its motion to, if the workflow takes one.',
+  },
+];
+
 export const animateImageNode: FlowNodeHandler = {
   type: 'animate_image',
   label: 'Animate Image',
   group: 'media',
   description: 'Turns a still into a clip with a generative video model (image-to-video).',
-  inputs: [
-    { name: 'image', types: ['image'], required: true, description: 'The frame to animate.' },
-    ...SHARED_INPUTS,
-    {
-      name: 'audio',
-      types: ['audio'],
-      description: 'Soundtrack the model paces its motion to, if the workflow takes one.',
-    },
-  ],
+  inputs: ANIMATE_INPUTS,
+  dynamicInputs: withParamPorts(ANIMATE_INPUTS),
   outputs: outputsFor('video'),
   config: [
     workflowField('video'),
@@ -372,7 +434,7 @@ export const animateImageNode: FlowNodeHandler = {
       'video',
       config,
       promptOf(config, asText(inputs.prompt)),
-      { ...parseSize(config.size), seconds, fps, length: seconds * fps },
+      { ...customParams(config, inputs), ...parseSize(config.size), seconds, fps, length: seconds * fps },
       sources,
       1800,
       await inputImagesFrom(ctx, asHandles(inputs.audio)),
@@ -387,16 +449,19 @@ export const animateImageNode: FlowNodeHandler = {
  * not interchangeable: a text-to-video graph has no `LoadVideo` to receive a clip, and offering it
  * here would only produce a run that fails after the queue wait.
  */
+const EDIT_VIDEO_INPUTS: PortSpec[] = [
+  { name: 'video', types: ['video', 'file'], required: true, description: 'The clip to transform.' },
+  ...SHARED_INPUTS,
+  { name: 'image', types: ['image'], description: 'Style or identity reference, if the workflow takes one.' },
+];
+
 export const editVideoNode: FlowNodeHandler = {
   type: 'edit_video',
   label: 'Edit Video',
   group: 'media',
   description: 'Transforms an existing clip with a ComfyUI workflow (restyle, upscale, interpolate).',
-  inputs: [
-    { name: 'video', types: ['video', 'file'], required: true, description: 'The clip to transform.' },
-    ...SHARED_INPUTS,
-    { name: 'image', types: ['image'], description: 'Style or identity reference, if the workflow takes one.' },
-  ],
+  inputs: EDIT_VIDEO_INPUTS,
+  dynamicInputs: withParamPorts(EDIT_VIDEO_INPUTS),
   outputs: outputsFor('video'),
   config: [
     workflowField('video_edit'),
@@ -429,7 +494,7 @@ export const editVideoNode: FlowNodeHandler = {
       'video',
       config,
       promptOf(config, asText(inputs.prompt)),
-      { ...parseSize(config.size), ...(fps > 0 ? { fps } : {}) },
+      { ...customParams(config, inputs), ...parseSize(config.size), ...(fps > 0 ? { fps } : {}) },
       await inputImagesFrom(ctx, asHandles(inputs.image)),
       1800,
       undefined,
@@ -438,15 +503,18 @@ export const editVideoNode: FlowNodeHandler = {
   },
 };
 
+const EDIT_IMAGE_INPUTS: PortSpec[] = [
+  { name: 'image', types: ['image'], required: true, description: 'The image to edit.' },
+  ...SHARED_INPUTS,
+];
+
 export const editImageNode: FlowNodeHandler = {
   type: 'edit_image',
   label: 'Edit Image',
   group: 'media',
   description: 'Transforms an existing image on ComfyUI (image + instruction in, image out).',
-  inputs: [
-    { name: 'image', types: ['image'], required: true, description: 'The image to edit.' },
-    ...SHARED_INPUTS,
-  ],
+  inputs: EDIT_IMAGE_INPUTS,
+  dynamicInputs: withParamPorts(EDIT_IMAGE_INPUTS),
   outputs: outputsFor('image'),
   config: [
     workflowField('edit'),
@@ -458,7 +526,7 @@ export const editImageNode: FlowNodeHandler = {
   async run(ctx, inputs, config) {
     const sources = await inputImagesFrom(ctx, asHandles(inputs.image));
     if (!sources?.length) throw new Error('no source image is wired into this node');
-    return runWorkflow(ctx, 'edit', 'image', config, promptOf(config, asText(inputs.prompt)), {}, sources, 300);
+    return runWorkflow(ctx, 'edit', 'image', config, promptOf(config, asText(inputs.prompt)), customParams(config, inputs), sources, 300);
   },
 };
 

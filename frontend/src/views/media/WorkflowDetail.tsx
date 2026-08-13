@@ -17,6 +17,7 @@ import {
   type WorkflowBinding,
   type WorkflowKind,
 } from '../../lib/api';
+import { customCatalog, isCustomKey } from './bindingPorts';
 import { MappingCanvas } from './MappingCanvas';
 import { MappingInspector } from './MappingInspector';
 
@@ -29,6 +30,11 @@ const KIND_HINT: Record<WorkflowKind, string> = {
   edit: 'Image + instruction → image. Needs a Load Image node. Offered to edit_image.',
   video_edit: 'Video + instruction → video. Needs a Load Video node. Offered to edit_video.',
 };
+
+/** Only the parameters this workflow invented — the half the auto-binder knows nothing about. */
+function pickCustom(bindings: Record<string, WorkflowBinding>): Record<string, WorkflowBinding> {
+  return Object.fromEntries(Object.entries(bindings).filter(([key]) => isCustomKey(key)));
+}
 
 function secs(ms: number): string {
   if (!ms) return 'untimed';
@@ -95,9 +101,25 @@ export function WorkflowDetail({
   }, [kind]);
 
   const bind = useCallback((key: string, nodeId: string, input: string) => {
-    setBindings((prev) => ({ ...prev, [key]: { node_id: nodeId, input } }));
+    setBindings((prev) => ({
+      ...prev,
+      // Moving a custom parameter to another input must not drop what the operator wrote about it.
+      [key]: { ...(isCustomKey(key) ? prev[key] : {}), node_id: nodeId, input },
+    }));
     setDirty(true);
   }, []);
+
+  const declareCustom = useCallback((key: string, binding: WorkflowBinding) => {
+    setBindings((prev) => ({ ...prev, [key]: binding }));
+    setDirty(true);
+  }, []);
+
+  /**
+   * Built-in parameters plus the ones this workflow invents. Kept in one list because everything
+   * downstream — the canvas' app-side ports, the bind dropdown, the summary — treats a parameter as a
+   * parameter, and the only difference is who declared it.
+   */
+  const fullCatalog = useMemo(() => [...catalog, ...customCatalog(bindings)], [catalog, bindings]);
 
   const unbind = useCallback((key: string) => {
     setBindings((prev) => {
@@ -150,7 +172,9 @@ export function WorkflowDetail({
           bindings[key]?.node_id !== proposal.bindings[key]?.node_id ||
           bindings[key]?.input !== proposal.bindings[key]?.input,
       );
-      setBindings(proposal.bindings);
+      // The auto-binder only knows the built-in catalog, so its proposal would silently erase every
+      // parameter the operator declared on this workflow. Those are hand-written and unrecoverable.
+      setBindings({ ...proposal.bindings, ...pickCustom(bindings) });
       if (!outputNodeId) setOutputNodeId(proposal.output_node_id);
       setDirty(true);
       setNote(
@@ -328,7 +352,7 @@ export function WorkflowDetail({
             <MappingCanvas
               nodes={detail.nodes}
               bindings={bindings}
-              catalog={catalog}
+              catalog={fullCatalog}
               outputNodeId={outputNodeId}
               outputKind={detail.output_kind}
               selectedNodeId={selectedNodeId}
@@ -341,11 +365,12 @@ export function WorkflowDetail({
           <MappingInspector
             node={selectedNode}
             nodes={detail.nodes}
-            catalog={catalog}
+            catalog={fullCatalog}
             bindings={bindings}
             outputNodeId={outputNodeId}
             onBind={bind}
             onUnbind={unbind}
+            onDeclareCustom={declareCustom}
             onOutputNode={pickOutput}
             onSelectNode={setSelectedNodeId}
           />

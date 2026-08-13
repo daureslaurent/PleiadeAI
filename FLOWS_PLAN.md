@@ -113,6 +113,7 @@ interface FlowNodeHandler {
   outputs: PortSpec[];           // { name, type }
   config: ToolConfigField[];     // the Tools-page field type, reused verbatim
   dynamicOutputs?(config): PortSpec[];   // router: one port per choice
+  dynamicInputs?(config): PortSpec[];    // media: one port per custom workflow parameter
   run(ctx, inputs, config): Promise<FlowValue | Record<string, FlowValue>>;
 }
 ```
@@ -127,6 +128,7 @@ interface FlowNodeHandler {
 | `ask_agent` | agent | `agentRunner.run()` as the configured agent. In JSON mode it can declare **output ports** — one text port per named field — so one agent can feed several nodes by wire instead of each node quoting `{{writer.json.field}}`. The dependency then sits on the canvas, is type-checked, and orders the graph. `userText` = prompt template + text inputs; `images` resolved from image-port handles. Outputs `text` + `images`. Yields to a live user session via `sessionLock`, like cron does. |
 | `router` | agent | Agent judgement: a question plus N labelled choices; the answer picks one of N `signal` outputs. Unparseable answer → first choice, recorded on the node state. |
 | `generate_image` | media | `generateMedia()` on the chosen `media_workflows` image workflow. → `image` handles. |
+| *(every media node)* | media | Beyond its declared fields, a media node offers whatever **custom parameters** the selected ComfyUI workflow declares (`MEDIA_MAPPING_PLAN.md` §5) — a category selector, a style preset. Taking one up in the inspector stores it in `config.params`, which both sets its default *and* gives the node an input port for it (`dynamicInputs`), so an `ask_agent` node answering in JSON can decide it per run. |
 | `generate_video` | media | Kind `video`, from a prompt, a start frame, an optional soundtrack, **or a source clip** — a video workflow may bind `LoadVideo` (subtitling, restyling, interpolation), and the node offers every input its workflows might need. The service refuses clearly when the chosen graph binds none of them. A supplied clip also relaxes the empty-prompt guard: that guard stops a blank field regenerating the author's prompt, which cannot happen when the clip and the graph define the operation. |
 | `generate_sound` | media | Same, kind `audio`. → `audio` handle. |
 | `edit_image` | media | Same, kind `edit`; takes a source `image` input. → `image` handles. |

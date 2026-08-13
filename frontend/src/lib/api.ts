@@ -937,6 +937,17 @@ export interface WorkflowBinding {
   };
   /** The input was fed by another node — binding it overrides whatever that node computed. */
   overrides_link?: boolean;
+
+  // ---- custom parameters only (a `custom:` key) ----
+  /** Operator-facing name; defaults to the key without its prefix. */
+  label?: string;
+  description?: string;
+  /** Allowed values, when the operator declares them (a ComfyUI combo whose list is built by its widget). */
+  choices?: string[];
+  /** Used when nothing else supplies a value. */
+  default?: string | number;
+  /** Whether the media tools let an agent set this on a tool call. */
+  agent_editable?: boolean;
 }
 
 export interface MediaWorkflow {
@@ -993,6 +1004,8 @@ export interface WorkflowConsumer {
 
 export interface MediaWorkflowDetail extends MediaWorkflow {
   bindings: Record<string, WorkflowBinding>;
+  /** App-side ports for this workflow's own custom parameters, to append to the static catalog. */
+  custom_catalog: BindingMeta[];
   graph: Record<string, { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } }>;
   nodes: WorkflowNode[];
   models: string[];
@@ -1014,6 +1027,11 @@ export interface BindingMeta {
   source: string;
   kinds: WorkflowKind[];
   expected: boolean;
+  /** Set on a parameter this one workflow invents (a `custom:` key), as opposed to the static catalog. */
+  custom?: true;
+  choices?: string[];
+  default?: string | number;
+  agent_editable?: boolean;
 }
 
 /** What the auto-binder proposes for a workflow, before the operator accepts it. */
@@ -1072,6 +1090,9 @@ export const mediaApi = {
     api.get<BindingMeta[]>('/media/binding-keys', { params: kind ? { kind } : {} }).then((r) => r.data),
   autobind: (id: string) =>
     api.post<AutoBindProposal>(`/media/workflows/${id}/autobind`).then((r) => r.data),
+  /** Just one workflow's custom parameters — what a flow's media node needs to render its fields. */
+  params: (id: string) =>
+    api.get<BindingMeta[]>(`/media/workflows/${id}/params`).then((r) => r.data),
   update: (id: string, patch: Partial<Pick<MediaWorkflow, 'name' | 'kind' | 'enabled' | 'description'>> & {
     bindings?: Record<string, WorkflowBinding>;
     output_node_id?: string;

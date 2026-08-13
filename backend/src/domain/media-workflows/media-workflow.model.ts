@@ -55,9 +55,62 @@ export interface WorkflowBinding {
    * warns and the operator gets to decide.
    */
   overrides_link?: boolean;
+
+  // ---- custom parameters only (`custom:` keys). See {@link isCustomKey}. ----
+  /** Operator-facing name. Defaults to the key with its prefix stripped. */
+  label?: string;
+  /** What the value does, shown in the inspector and given to the agent as the argument's doc. */
+  description?: string;
+  /**
+   * The values this input accepts, when the operator has to say so.
+   *
+   * A ComfyUI node whose dropdown is built by its own frontend widget — `CustomCombo`, the one that
+   * picks Stable Audio's category — publishes an `ENUM` with an *empty* option list in
+   * `/object_info`, so the choices genuinely cannot be discovered. Declaring them here is what turns
+   * a free-text field into a dropdown, and what lets an off-list value be refused before a ten-minute
+   * job is queued instead of after.
+   */
+  choices?: string[];
+  /** Used when no caller supplies a value. Absent → the graph's own literal survives the run. */
+  default?: string | number;
+  /** Whether the media tools expose this parameter to the agent as a callable argument. */
+  agent_editable?: boolean;
 }
 
-export type WorkflowBindings = Partial<Record<BindingKey, WorkflowBinding>>;
+/** Prefix marking a binding key the operator invented, as opposed to one of {@link BINDING_KEYS}. */
+export const CUSTOM_PREFIX = 'custom:';
+
+/** Key shape enforced on save — kept narrow because it becomes a flow port name and a tool argument. */
+export const CUSTOM_KEY_RE = /^custom:[a-z][a-z0-9_]{0,31}$/;
+
+/** How many custom parameters one workflow may declare. */
+export const MAX_CUSTOM_BINDINGS = 8;
+
+export function isCustomKey(key: string): boolean {
+  return key.startsWith(CUSTOM_PREFIX);
+}
+
+/** `custom:category` → `category`: the name the flow port and the tool argument use. */
+export function customName(key: string): string {
+  return key.slice(CUSTOM_PREFIX.length);
+}
+
+/**
+ * A workflow's parameter map.
+ *
+ * The built-in keys stay typed (`bindings.prompt` is still checked), but the map is deliberately open:
+ * an operator can pin any `graph[node].inputs[x]` under a `custom:` key, which is the only way to reach
+ * the knobs a particular graph invents — a category selector, a LoRA strength, a style preset.
+ */
+export type WorkflowBindings = Partial<Record<BindingKey, WorkflowBinding>> &
+  Record<string, WorkflowBinding | undefined>;
+
+/** The custom entries of a binding map, in declaration order. */
+export function customBindings(bindings: WorkflowBindings): [string, WorkflowBinding][] {
+  return Object.entries(bindings).filter(
+    (entry): entry is [string, WorkflowBinding] => isCustomKey(entry[0]) && Boolean(entry[1]),
+  );
+}
 
 /**
  * `media_workflows` — an operator-curated ComfyUI workflow the media tools can run.

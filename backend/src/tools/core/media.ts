@@ -10,7 +10,7 @@ import {
   type InputImage,
 } from '../../media/media-generate.service';
 import { readFileBytes } from './fs/env-fs';
-import { buildDynamicParams } from './media-schema';
+import { buildDynamicParams, customArgValues } from './media-schema';
 import type { BindingValues } from '../../media/comfy/graph-introspect';
 import type { WorkflowKind } from '../../domain/media-workflows/media-workflow.model';
 import type { ImageBlock } from '../../core/event-bus/events.types';
@@ -301,6 +301,11 @@ async function runMediaTool(
     values: BindingValues;
     negativePrompt: string | null;
     params: Record<string, string | number>;
+    /**
+     * The agent's raw arguments, forwarded so the workflow's own custom parameters reach the graph.
+     * Which of them are real is the workflow's business, not the tool's — see `customArgValues`.
+     */
+    args: Record<string, unknown>;
     inputImages?: InputImage[];
     sourceId?: string | null;
   },
@@ -317,6 +322,7 @@ async function runMediaTool(
       // A tool that already resolved an effective seed (operator default or agent override) puts it
       // in `opts.values`; only fall back to the config's fixed seed when nothing set one yet.
       values: {
+        ...customArgValues(opts.args),
         ...opts.values,
         ...(opts.values.seed === undefined && seedFrom(config) !== undefined ? { seed: seedFrom(config) } : {}),
       },
@@ -446,6 +452,7 @@ export const generateImage: Tool = {
       : seedFrom(config);
 
     return runMediaTool(ctx, {
+      args,
       toolName: generateImage.name,
       expectKind: 'image',
       schema: IMAGE_CONFIG,
@@ -520,6 +527,7 @@ export const generateVideo: Tool = {
       : seedFrom(config);
 
     return runMediaTool(ctx, {
+      args,
       toolName: generateVideo.name,
       expectKind: 'video',
       schema: VIDEO_CONFIG,
@@ -583,6 +591,7 @@ export const generateSound: Tool = {
       : seedFrom(config);
 
     return runMediaTool(ctx, {
+      args,
       toolName: generateSound.name,
       expectKind: 'audio',
       schema: SOUND_CONFIG,
@@ -690,6 +699,7 @@ export const editImage: Tool = {
       : seedFrom(config);
 
     return runMediaTool(ctx, {
+      args,
       toolName: editImage.name,
       expectKind: 'edit',
       schema: EDIT_CONFIG,

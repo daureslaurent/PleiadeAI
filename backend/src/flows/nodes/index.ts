@@ -68,9 +68,11 @@ export function outputPorts(node: FlowNode): PortSpec[] {
   return handler.dynamicOutputs?.(node.config ?? {}) ?? handler.outputs;
 }
 
-/** A node's effective input ports. (No handler varies these today; the seam exists for symmetry.) */
+/** A node's effective input ports, after any config-driven ones (a media node's custom parameters). */
 export function inputPorts(node: FlowNode): PortSpec[] {
-  return getHandler(node.type)?.inputs ?? [];
+  const handler = getHandler(node.type);
+  if (!handler) return [];
+  return handler.dynamicInputs?.(node.config ?? {}) ?? handler.inputs;
 }
 
 /** Node types the runner never executes as ordinary steps (they carry no work). */

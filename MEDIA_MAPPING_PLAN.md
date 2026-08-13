@@ -108,3 +108,46 @@ frontend/src/views/media/
 Art direction (`DIRECT_ART.md`): glass rail, `bg-black/25` in-flow cards, white-alpha hairlines,
 port colours from `views/flows/portStyle.ts` (same palette, same meaning), `animate-fade-up`
 entrances, motion only on live things (the test run, a validating button).
+
+## 5. Custom inputs — the parameters one graph invents
+
+`BINDING_KEYS` is a closed list because it describes what *every* workflow has: a prompt, a seed, a
+size. It cannot describe what a single graph invented. Stable Audio 3's graph is the case that forces
+the point: node `52:43` (`CustomCombo`) picks the category — Music / Instrument / SFX / One-shot —
+and that choice selects which system prompt the graph rewrites the user's brief with. Nothing in the
+static catalog can reach it, so the operator could see the input and not drive it.
+
+A **custom input** is an ordinary entry in `bindings` under a `custom:<name>` key, carrying the
+operator-authored half a built-in doesn't need:
+
+```ts
+bindings['custom:category'] = {
+  node_id: '52:43', input: 'choice', spec, overrides_link,
+  label: 'Category',
+  description: 'Which kind of audio the graph writes.',
+  choices: ['Music', 'Instrument', 'SFX', 'One-shot'],
+  default: 'Music',
+  agent_editable: true,
+};
+```
+
+`choices` is the field that earns its place. A ComfyUI node whose dropdown is built by its own
+frontend widget publishes an `ENUM` with an **empty** option list in `/object_info` — the allowed
+values genuinely cannot be discovered, so the operator writes them down, and an off-list value is
+then refused (`resolveCustomValues`) before a job is queued rather than several minutes into one.
+
+Where the value comes from, in order: whoever ran it → the binding's `default` → the graph's own
+literal, untouched. Three callers can supply one:
+
+- **the Media page** — declare it on the selected input ("+ new custom input"), and it becomes an
+  app-side port on the mapping canvas like any other parameter;
+- **a flow node** — every media node grows one field *and one input port* per parameter the operator
+  takes up (`config.params` → `dynamicInputs`), so an `ask_agent` node answering in JSON can decide
+  it per run. This is what lets the Music Radio flow ask its director for a category per clip;
+- **an agent**, when `agent_editable` is set — the parameter joins the tool's JSON schema with its
+  choices as an `enum`, so a request for a sound effect stops coming back as a three-minute song.
+
+Still no migration: `bindings` is a `Mixed` field and the built-in keys are untouched. The route
+rejects a key that isn't `custom:<lower_snake_case>`, shadows a built-in, or has a default outside
+its own choices, and caps a workflow at `MAX_CUSTOM_BINDINGS`. Auto-map preserves them — it only
+knows the static catalog, and its proposal would otherwise erase hand-written declarations.

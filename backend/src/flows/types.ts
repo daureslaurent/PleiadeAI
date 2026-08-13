@@ -94,6 +94,12 @@ export interface FlowNodeHandler {
    * with the *stored* config (never templated), by both validation and the canvas.
    */
   dynamicOutputs?(config: Record<string, unknown>): PortSpec[];
+  /**
+   * Ports that depend on the node's own config, input side — a media node gets one per custom
+   * parameter its selected workflow declares. Same contract as {@link dynamicOutputs}: called with the
+   * *stored* config, synchronously, by both validation and the canvas.
+   */
+  dynamicInputs?(config: Record<string, unknown>): PortSpec[];
   /** Extra validation beyond ports and required fields. Returns error strings. */
   validate?(node: FlowNode): string[];
   /**

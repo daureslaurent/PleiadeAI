@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto';
 import type { ComfyHttpClient } from './ComfyHttpClient';
-import type {
-  BindingKey,
-  WorkflowBinding,
-  WorkflowBindings,
-  WorkflowKind,
+import {
+  customBindings,
+  customName,
+  isCustomKey,
+  type BindingKey,
+  type WorkflowBinding,
+  type WorkflowBindings,
+  type WorkflowKind,
 } from '../../domain/media-workflows/media-workflow.model';
+import { ComfyError } from './errors';
 import type { ComfyGraph, ComfyInputSpec, ComfyLink, ComfyNodeSchema } from './types';
 
 /** Node classes whose files are the run's result. `Preview*` deliberately excluded — it saves nothing. */
@@ -513,7 +517,9 @@ export function validateWorkflow(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const boundInputs = new Set(
-    Object.values(bindings).map((b) => `${b.node_id} ${b.input}`),
+    Object.values(bindings)
+      .filter((b): b is WorkflowBinding => Boolean(b))
+      .map((b) => `${b.node_id} ${b.input}`),
   );
 
   for (const nodeId of sortedNodeIds(graph)) {
@@ -557,7 +563,7 @@ export function validateWorkflow(
     }
   }
 
-  for (const [key, binding] of Object.entries(bindings) as [BindingKey, WorkflowBinding][]) {
+  for (const [key, binding] of Object.entries(bindings) as [string, WorkflowBinding][]) {
     const node = graph[binding.node_id];
     if (!node) {
       issues.push({
@@ -612,7 +618,7 @@ export function hydrateBindings(
   schemas: SchemaMap,
 ): WorkflowBindings {
   const out: WorkflowBindings = {};
-  for (const [key, binding] of Object.entries(bindings) as [BindingKey, WorkflowBinding | undefined][]) {
+  for (const [key, binding] of Object.entries(bindings) as [string, WorkflowBinding | undefined][]) {
     if (!binding?.node_id || !binding.input) continue;
     const node = graph[binding.node_id];
     if (!node) continue;
@@ -624,12 +630,70 @@ export function hydrateBindings(
       // temporary outage would be worse than trusting a slightly stale snapshot.
       ...(spec ? { spec } : binding.spec ? { spec: binding.spec } : {}),
       overrides_link: isLink(node.inputs[binding.input]),
+      // A custom parameter's label, choices and default are the operator's own writing, not something
+      // re-derivable from the graph — rebuilding the binding without them would erase the declaration
+      // every time the mapping is saved.
+      ...(isCustomKey(key) ? customMeta(binding) : {}),
     };
   }
   return out;
 }
 
-export type BindingValues = Partial<Record<BindingKey, string | number>>;
+/** The operator-authored half of a custom binding, copied through untouched. */
+function customMeta(binding: WorkflowBinding): Partial<WorkflowBinding> {
+  return {
+    ...(binding.label ? { label: binding.label } : {}),
+    ...(binding.description ? { description: binding.description } : {}),
+    ...(binding.choices?.length ? { choices: [...binding.choices] } : {}),
+    ...(binding.default !== undefined && binding.default !== '' ? { default: binding.default } : {}),
+    ...(binding.agent_editable !== undefined ? { agent_editable: binding.agent_editable } : {}),
+  };
+}
+
+/** Keyed by binding key — `prompt`, `width`, or any `custom:*` the workflow declares. */
+export type BindingValues = Record<string, string | number | undefined>;
+
+/**
+ * Fill in the values a run didn't specify, and refuse the ones the workflow can't accept.
+ *
+ * Only custom parameters need this: a built-in has a tool config field behind it, whereas a custom one
+ * is declared on the workflow itself and that declaration is the only place its default and its
+ * allowed values live. Checking `choices` here — rather than letting ComfyUI discover the bad value —
+ * is what turns a typo into an immediate error instead of a failed job several minutes in.
+ */
+export function resolveCustomValues(bindings: WorkflowBindings, values: BindingValues): BindingValues {
+  const out: BindingValues = { ...values };
+  for (const [key, binding] of customBindings(bindings)) {
+    const supplied = out[key];
+    const value = supplied === undefined || supplied === '' ? binding.default : supplied;
+    if (value === undefined || value === '') {
+      delete out[key];
+      continue;
+    }
+    if (binding.choices?.length) {
+      const text = String(value);
+      const match = binding.choices.find((c) => c.toLowerCase() === text.toLowerCase());
+      if (!match) {
+        throw new ComfyError(
+          `"${text}" is not a valid ${binding.label || customName(key)} for this workflow. ` +
+            `Choose one of: ${binding.choices.join(', ')}.`,
+        );
+      }
+      // Case-corrected: an agent that answers "sfx" means the graph's "SFX", and a combo input
+      // matches by exact string.
+      out[key] = match;
+      continue;
+    }
+    out[key] =
+      binding.spec?.type === 'INT' || binding.spec?.type === 'FLOAT' ? Number(value) : value;
+    if (typeof out[key] === 'number' && !Number.isFinite(out[key] as number)) {
+      throw new ComfyError(
+        `${binding.label || customName(key)} must be a number, got "${String(value)}".`,
+      );
+    }
+  }
+  return out;
+}
 
 /**
  * Produce a submittable graph with the caller's values written into the bound inputs. The original is
@@ -641,7 +705,7 @@ export function applyBindings(
   values: BindingValues,
 ): ComfyGraph {
   const clone = structuredClone(graph) as ComfyGraph;
-  for (const [key, value] of Object.entries(values) as [BindingKey, string | number | undefined][]) {
+  for (const [key, value] of Object.entries(resolveCustomValues(bindings, values))) {
     if (value === undefined || value === null || value === '') continue;
     const binding = bindings[key];
     if (!binding) continue;

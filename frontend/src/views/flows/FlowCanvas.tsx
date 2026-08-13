@@ -110,7 +110,7 @@ export function FlowCanvas({
             nodeType: type,
             label: node.label || type?.label || node.type,
             subtitle: subtitleOf(node, type),
-            inputs: type?.inputs ?? [],
+            inputs: inputsOf(node, type),
             outputs: outputsOf(node, type),
             run: runStates?.get(node.id),
             issue: issueByNode.get(node.id),
@@ -162,7 +162,7 @@ export function FlowCanvas({
       const node = nodes.find((n) => n.id === nodeId);
       if (!node) return null;
       const type = nodeTypes.get(node.type);
-      const ports = side === 'out' ? outputsOf(node, type) : (type?.inputs ?? []);
+      const ports = side === 'out' ? outputsOf(node, type) : inputsOf(node, type);
       const port = ports.find((p) => p.name === handle);
       return (port?.types[0] as PortType) ?? null;
     },
@@ -343,6 +343,24 @@ function groupColorOf(node: Node): string {
  * choice, so its ports change as you type them — mirrored here rather than refetched, so the canvas
  * keeps up with the keystroke instead of the round trip.
  */
+/**
+ * Input ports, including the config-driven ones: a media node grows one port per workflow parameter
+ * the operator took up in the inspector, so an agent can decide it per run. Mirrored here rather than
+ * refetched for the same reason the outputs are — the port has to appear as the box is ticked.
+ */
+export function inputsOf(node: FlowNode, type: FlowNodeType | undefined) {
+  if (!type) return [];
+  const params = node.config?.params;
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return type.inputs;
+  const taken = new Set(type.inputs.map((p) => p.name));
+  return [
+    ...type.inputs,
+    ...Object.keys(params as Record<string, unknown>)
+      .filter((name) => /^[a-z][a-z0-9_]{0,31}$/.test(name) && !taken.has(name))
+      .map((name) => port(name, 'text')),
+  ];
+}
+
 export function outputsOf(node: FlowNode, type: FlowNodeType | undefined) {
   if (!type) return [];
 

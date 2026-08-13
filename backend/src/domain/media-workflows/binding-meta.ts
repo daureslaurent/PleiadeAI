@@ -1,5 +1,13 @@
-import { BINDING_KEYS, type BindingKey, type WorkflowKind } from './media-workflow.model';
+import {
+  BINDING_KEYS,
+  customBindings,
+  customName,
+  type BindingKey,
+  type WorkflowBindings,
+  type WorkflowKind,
+} from './media-workflow.model';
 import { relevantKeys } from '../../media/comfy/graph-introspect';
+import type { ComfyInputSpec } from '../../media/comfy/types';
 
 /**
  * The app half of a binding, described well enough to draw.
@@ -10,7 +18,7 @@ import { relevantKeys } from '../../media/comfy/graph-introspect';
  * answer to "where does this value come from?" existed only in the tool source.
  */
 export interface BindingMeta {
-  key: BindingKey;
+  key: string;
   label: string;
   /** Port colour class, shared with the Flows canvas palette; `number` is media-only. */
   port: 'text' | 'number' | 'image' | 'audio' | 'video';
@@ -22,6 +30,14 @@ export interface BindingMeta {
   kinds: WorkflowKind[];
   /** True when a workflow of a matching kind is expected to expose it (drives the unbound warning). */
   expected: boolean;
+  /** Set on a parameter the operator invented on this one workflow (a `custom:` key). */
+  custom?: true;
+  /** A custom parameter's allowed values, when it declares them: the dropdown the UI draws. */
+  choices?: string[];
+  /** A custom parameter's value when nothing supplies one. */
+  default?: string | number;
+  /** Whether the media tools let the agent set this custom parameter. */
+  agent_editable?: boolean;
 }
 
 const ALL: WorkflowKind[] = [];
@@ -150,5 +166,39 @@ export function bindingCatalog(kind?: WorkflowKind): BindingMeta[] {
     key,
     ...META[key],
     expected: expected.has(key),
+  }));
+}
+
+/** Port colour for a custom parameter, from whatever kind of input it was pinned to. */
+function portForSpec(spec: ComfyInputSpec | undefined): BindingMeta['port'] {
+  return spec?.type === 'INT' || spec?.type === 'FLOAT' ? 'number' : 'text';
+}
+
+/**
+ * The app half of each parameter this one workflow invented.
+ *
+ * The built-in catalog is the same for every graph, which is exactly why it can be a constant — and
+ * exactly why it can't describe a knob only this graph has. These entries are read off the workflow's
+ * own bindings so the mapping canvas draws a port for them, the flow node offers them, and the summary
+ * lists them beside the built-ins. `expected` is always false: nothing is missing when a workflow
+ * declares no custom parameters.
+ */
+export function customCatalog(bindings: WorkflowBindings): BindingMeta[] {
+  return customBindings(bindings).map(([key, binding]) => ({
+    key,
+    label: binding.label || customName(key),
+    port: portForSpec(binding.spec),
+    description:
+      binding.description ||
+      `Custom parameter, written into ${binding.node_id}.${binding.input}.`,
+    source:
+      'This workflow\'s own default, the flow node\'s field, or the port wired into it' +
+      (binding.agent_editable ? ' — and the agent may set it on a tool call.' : '.'),
+    kinds: ALL,
+    expected: false,
+    custom: true as const,
+    ...(binding.choices?.length ? { choices: [...binding.choices] } : {}),
+    ...(binding.default !== undefined ? { default: binding.default } : {}),
+    ...(binding.agent_editable !== undefined ? { agent_editable: binding.agent_editable } : {}),
   }));
 }

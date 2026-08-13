@@ -1,6 +1,7 @@
 import { Link2, Trash2, X } from 'lucide-react';
-import { Button, Field, Input, Select, Textarea, Toggle } from '../../components/ui';
-import type { FlowNode, FlowNodeType, PortType, ToolConfigField } from '../../lib/api';
+import { useEffect, useState } from 'react';
+import { Button, Checkbox, Field, Input, Select, Textarea, Toggle } from '../../components/ui';
+import { mediaApi, type BindingMeta, type FlowNode, type FlowNodeType, type PortType, type ToolConfigField } from '../../lib/api';
 import { GROUP_COLORS } from './portStyle';
 import { ResourceInput } from './ResourceInput';
 
@@ -96,6 +97,16 @@ export function NodeInspector({
           ),
         )}
 
+        {nodeType?.config.some((f) => f.key === 'workflow') && (
+          <WorkflowParams
+            workflowId={String(node.config.workflow ?? '')}
+            params={(node.config.params ?? {}) as Record<string, unknown>}
+            nodes={nodes}
+            selfId={node.id}
+            onChange={(params) => setConfig('params', params)}
+          />
+        )}
+
         {nodeType && nodeType.config.length === 0 && (
           <p className="text-xs text-slate-600">This node has no settings.</p>
         )}
@@ -109,6 +120,89 @@ export function NodeInspector({
         </div>
       )}
     </aside>
+  );
+}
+
+/**
+ * The parameters the selected ComfyUI workflow invents, as fields on this node.
+ *
+ * They can't be part of the node type's declared `config`, because which ones exist depends on the
+ * workflow the operator just picked. Taking one up writes it into `config.params`, and that is also
+ * what gives the node an input port for it (`dynamicInputs` in the backend's media node) — so a value
+ * set here is the default, and an agent wired into the port overrides it per run.
+ */
+function WorkflowParams({
+  workflowId,
+  params,
+  nodes,
+  selfId,
+  onChange,
+}: {
+  workflowId: string;
+  params: Record<string, unknown>;
+  nodes: FlowNode[];
+  selfId: string;
+  onChange: (params: Record<string, unknown>) => void;
+}) {
+  const [catalog, setCatalog] = useState<BindingMeta[] | null>(null);
+
+  useEffect(() => {
+    if (!workflowId) {
+      setCatalog([]);
+      return;
+    }
+    let live = true;
+    void mediaApi
+      .params(workflowId)
+      .then((list) => live && setCatalog(list))
+      .catch(() => live && setCatalog([]));
+    return () => {
+      live = false;
+    };
+  }, [workflowId]);
+
+  if (!catalog || catalog.length === 0) return null;
+
+  const toggle = (name: string, on: boolean, fallback: unknown) => {
+    const next = { ...params };
+    if (on) next[name] = fallback ?? '';
+    else delete next[name];
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-3 border-t border-white/[0.06] pt-3">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500">Workflow parameters</div>
+      {catalog.map((meta) => {
+        const name = meta.key.replace(/^custom:/, '');
+        const active = name in params;
+        return (
+          <div key={meta.key} className="space-y-1.5">
+            <Checkbox checked={active} onChange={(v) => toggle(name, v, meta.default)}>
+              {meta.label}
+            </Checkbox>
+            {active ? (
+              <ConfigField
+                field={{
+                  key: name,
+                  label: name,
+                  type: meta.choices?.length ? 'select' : meta.port === 'number' ? 'number' : 'string',
+                  ...(meta.choices?.length ? { options: meta.choices } : {}),
+                  default: meta.default ?? '',
+                  hint: `${meta.description} A value arriving on the "${name}" port wins over this one.`,
+                }}
+                value={params[name]}
+                nodes={nodes}
+                selfId={selfId}
+                onChange={(v) => onChange({ ...params, [name]: v })}
+              />
+            ) : (
+              <p className="pl-5 text-[10px] leading-tight text-slate-600">{meta.description}</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

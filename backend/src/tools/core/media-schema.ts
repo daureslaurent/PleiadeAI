@@ -1,6 +1,13 @@
 import { toolConfigService } from '../../domain/tools/tool-config.service';
 import { mediaWorkflowRepository } from '../../domain/media-workflows/media-workflow.repository';
-import { bindingsOf, type BindingKey, type MediaWorkflowDoc } from '../../domain/media-workflows/media-workflow.model';
+import {
+  bindingsOf,
+  customBindings,
+  customName,
+  CUSTOM_PREFIX,
+  type BindingKey,
+  type MediaWorkflowDoc,
+} from '../../domain/media-workflows/media-workflow.model';
 import { META } from '../../domain/media-workflows/binding-meta';
 import type { ComfyInputSpec } from '../../media/comfy/types';
 import type { ToolConfigField } from '../types';
@@ -80,7 +87,39 @@ function overridableProperties(
       properties[key] = propertyFor(key, binding.spec);
     }
   }
+
+  // Whatever this particular graph invents. `agent_editable` is the operator's decision, made per
+  // parameter on the Media page: a category selector is exactly the sort of thing an agent should pick
+  // (a request for a sound effect should not come back as a three-minute song), while a LoRA strength
+  // usually is not.
+  for (const [key, binding] of customBindings(bindings)) {
+    if (!binding.agent_editable) continue;
+    const numeric = binding.spec?.type === 'INT' || binding.spec?.type === 'FLOAT';
+    properties[customName(key)] = {
+      type: numeric ? (binding.spec?.type === 'FLOAT' ? 'number' : 'integer') : 'string',
+      description: binding.description || `${binding.label || customName(key)} for this workflow.`,
+      ...(binding.choices?.length ? { enum: [...binding.choices] } : {}),
+      ...(binding.spec?.min !== undefined ? { minimum: binding.spec.min } : {}),
+      ...(binding.spec?.max !== undefined ? { maximum: binding.spec.max } : {}),
+    };
+  }
   return properties;
+}
+
+/**
+ * The custom-parameter half of a tool call's values.
+ *
+ * The agent addresses a custom parameter by its bare name (`category`), because that is what the
+ * schema advertises; the binding map keys it as `custom:category`. Every other argument is mapped
+ * too and simply ignored downstream — `applyBindings` writes nothing for a key the workflow doesn't
+ * declare — which keeps this free of a per-tool list of "known" argument names to drift out of date.
+ */
+export function customArgValues(args: Record<string, unknown>): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  for (const [name, value] of Object.entries(args)) {
+    if (typeof value === 'string' || typeof value === 'number') out[`${CUSTOM_PREFIX}${name}`] = value;
+  }
+  return out;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { BindingMeta, WorkflowNodeInput } from '../../lib/api';
+import type { BindingMeta, WorkflowBinding, WorkflowNodeInput } from '../../lib/api';
 
 /**
  * Port colours for the mapping canvas.
@@ -18,6 +18,46 @@ export const BINDING_PORT_COLORS: Record<BindingMeta['port'], string> = {
 
 export function bindingPortColor(port: BindingMeta['port'] | undefined): string {
   return BINDING_PORT_COLORS[port ?? 'text'];
+}
+
+/** Prefix marking an operator-invented parameter. Mirrors `CUSTOM_PREFIX` in the backend's model. */
+export const CUSTOM_PREFIX = 'custom:';
+
+export function isCustomKey(key: string): boolean {
+  return key.startsWith(CUSTOM_PREFIX);
+}
+
+/** `custom:category` → `category`: the name a flow port and a tool argument use. */
+export function customName(key: string): string {
+  return key.slice(CUSTOM_PREFIX.length);
+}
+
+/**
+ * The catalog entries for the parameters this workflow invents.
+ *
+ * Derived from the *draft* bindings rather than taken from the server's `custom_catalog`, because the
+ * operator declares a custom input and wires it in the same unsaved edit — the port has to exist on
+ * the canvas before there is anything to save.
+ */
+export function customCatalog(bindings: Record<string, WorkflowBinding>): BindingMeta[] {
+  return Object.entries(bindings)
+    .filter(([key, binding]) => isCustomKey(key) && binding)
+    .map(([key, binding]) => ({
+      key,
+      label: binding.label || customName(key),
+      port: (binding.spec?.type === 'INT' || binding.spec?.type === 'FLOAT' ? 'number' : 'text') as
+        BindingMeta['port'],
+      description: binding.description || `Custom parameter → ${binding.node_id}.${binding.input}.`,
+      source: binding.agent_editable
+        ? 'This workflow\'s default, a flow node, or the agent on a tool call.'
+        : 'This workflow\'s default, or the flow node driving it.',
+      kinds: [],
+      expected: false,
+      custom: true as const,
+      ...(binding.choices?.length ? { choices: binding.choices } : {}),
+      ...(binding.default !== undefined ? { default: binding.default } : {}),
+      ...(binding.agent_editable !== undefined ? { agent_editable: binding.agent_editable } : {}),
+    }));
 }
 
 /**

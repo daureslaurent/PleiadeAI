@@ -16,10 +16,15 @@ import {
 } from '../../../media/comfy/graph-introspect';
 import { discoverWorkflows, loadCandidate } from '../../../media/discovery.service';
 import { testRunWorkflow } from '../../../media/media-generate.service';
-import { bindingCatalog } from '../../../domain/media-workflows/binding-meta';
+import { bindingCatalog, customCatalog } from '../../../domain/media-workflows/binding-meta';
 import {
+  BINDING_KEYS,
   bindingsOf,
+  customBindings,
+  customName,
+  CUSTOM_KEY_RE,
   graphOf,
+  MAX_CUSTOM_BINDINGS,
   WORKFLOW_KINDS,
   type WorkflowBindings,
   type WorkflowKind,
@@ -184,6 +189,8 @@ mediaRouter.get('/workflows/:id', async (req, res) => {
   res.json({
     ...summarize(doc),
     bindings: bindingsOf(doc),
+    /** The app-side ports for this workflow's own invented parameters, beside the static catalog. */
+    custom_catalog: customCatalog(bindingsOf(doc)),
     graph,
     nodes,
     models: modelFiles(graph),
@@ -334,6 +341,62 @@ mediaRouter.post('/workflows', async (req, res) => {
   }
 });
 
+/**
+ * Check the custom half of a binding map the client sent.
+ *
+ * Built-in keys are a closed set and need no checking, but a `custom:` key is operator-invented and
+ * travels a long way — it becomes a flow node's port name and, when `agent_editable`, a JSON-schema
+ * property in a tool's arguments. Both of those want a plain identifier, and neither can be fixed
+ * later without breaking the flows already wired to it. Returns the first problem, or null.
+ */
+function customBindingError(bindings: WorkflowBindings): string | null {
+  const custom = customBindings(bindings);
+  if (custom.length > MAX_CUSTOM_BINDINGS) {
+    return `A workflow may declare at most ${MAX_CUSTOM_BINDINGS} custom inputs.`;
+  }
+  for (const [key, binding] of custom) {
+    if (!CUSTOM_KEY_RE.test(key)) {
+      return `"${key}" is not a valid custom input name — use custom:<lower_snake_case>, e.g. custom:category.`;
+    }
+    if ((BINDING_KEYS as readonly string[]).includes(customName(key))) {
+      return `"${customName(key)}" is already a built-in parameter — pick another name.`;
+    }
+    if (binding.choices !== undefined) {
+      if (!Array.isArray(binding.choices) || binding.choices.some((c) => typeof c !== 'string')) {
+        return `The choices for "${customName(key)}" must be a list of strings.`;
+      }
+      const cleaned = binding.choices.map((c) => c.trim()).filter(Boolean);
+      if (cleaned.length !== binding.choices.length) {
+        return `The choices for "${customName(key)}" contain a blank entry.`;
+      }
+      if (
+        binding.default !== undefined &&
+        binding.default !== '' &&
+        !cleaned.includes(String(binding.default))
+      ) {
+        return `The default for "${customName(key)}" must be one of its choices (${cleaned.join(', ')}).`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Just the parameters one workflow invents, without its graph.
+ *
+ * The flows inspector needs these to draw a media node's per-workflow fields and ports, and asking for
+ * the full detail route would drag a whole ComfyUI graph — plus a `/object_info` round trip per node
+ * class — across the wire on every workflow change.
+ */
+mediaRouter.get('/workflows/:id/params', async (req, res) => {
+  const doc = await mediaWorkflowRepository.findById(req.params.id);
+  if (!doc) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  res.json(customCatalog(bindingsOf(doc)));
+});
+
 /** Rename, re-kind, enable/disable, or correct the bindings. */
 mediaRouter.put('/workflows/:id', async (req, res) => {
   const existing = await mediaWorkflowRepository.findById(req.params.id);
@@ -356,6 +419,11 @@ mediaRouter.put('/workflows/:id', async (req, res) => {
   const schemas = needsSchemas ? await schemasFor(graph) : new Map();
 
   if (req.body?.bindings && typeof req.body.bindings === 'object') {
+    const problem = customBindingError(req.body.bindings as WorkflowBindings);
+    if (problem) {
+      res.status(400).json({ error: problem });
+      return;
+    }
     // Hydrated rather than stored as sent: the editor knows the node and input, the server knows the
     // schema constraints that make a numeric binding safe to clamp.
     patch.bindings = hydrateBindings(graph, req.body.bindings as WorkflowBindings, schemas);
