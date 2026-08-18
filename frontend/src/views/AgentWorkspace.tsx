@@ -193,19 +193,27 @@ export function AgentWorkspace() {
     }
   }
 
+  /**
+   * The active session id, creating the session on first use. Factored out of `handleSend` because
+   * arming an auto loop needs one too — and unlike a chat, a loop can be started on a conversation
+   * the operator has never typed into (its first turn is the loop's own kickoff message).
+   */
+  async function ensureSession(): Promise<string> {
+    if (!activeAgent) throw new Error('no agent selected');
+    if (activeSessionId) return activeSessionId;
+    const sn = await sessionsApi.create(activeAgent._id);
+    setSessionsByAgent((prev) => ({
+      ...prev,
+      [activeAgent._id]: [sn, ...(prev[activeAgent._id] ?? [])],
+    }));
+    setActiveSessionId(sn._id);
+    hydrate(sn._id, [], activeAgent._id);
+    return sn._id;
+  }
+
   async function handleSend(text: string, images?: string[], forumReplies?: boolean) {
     if (!activeAgent) return;
-    let sid = activeSessionId;
-    if (!sid) {
-      const sn = await sessionsApi.create(activeAgent._id);
-      setSessionsByAgent((prev) => ({
-        ...prev,
-        [activeAgent._id]: [sn, ...(prev[activeAgent._id] ?? [])],
-      }));
-      setActiveSessionId(sn._id);
-      hydrate(sn._id, [], activeAgent._id);
-      sid = sn._id;
-    }
+    const sid = await ensureSession();
     send(activeAgent.name, text, sid, images, forumReplies);
   }
 
@@ -248,6 +256,7 @@ export function AgentWorkspace() {
         onOpenVisual={() => setVisualOpen(true)}
         onOpenAndroid={() => setAndroidOpen(true)}
         onSend={handleSend}
+        onEnsureSession={ensureSession}
       />
       {drawer && <DebuggerDrawer onClose={() => setDrawer(false)} agent={activeAgent} />}
       {visualOpen && activeAgent && (

@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { autoLoopRunner } from '../../../autonomy/AutoLoopRunner';
+import { autoLoopRepository } from '../../../domain/auto-loops/auto-loop.repository';
 import { sessionRepository } from '../../../domain/sessions/session.repository';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { todoRepository } from '../../../domain/todos/todo.repository';
@@ -48,6 +50,11 @@ sessionsRouter.delete('/:id', async (req, res) => {
     res.status(404).json({ error: 'not found' });
     return;
   }
+  // A self-driving conversation keeps a timer in this process (AUTO_AGENT_PLAN.md §4). Deleting the
+  // session without disarming it would leave the loop ticking against a history that no longer
+  // exists — turns written into a void, once per interval, until the next restart.
+  autoLoopRunner.forget(req.params.id);
+  await autoLoopRepository.removeBySession(req.params.id);
   res.status(204).end();
 });
 

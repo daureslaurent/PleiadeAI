@@ -36,6 +36,13 @@ const AgentSchema = new Schema(
      */
     builtin: { type: String, default: '', index: true },
     system_prompt: { type: String, required: true },
+    /**
+     * Auto agent mode (`AUTO_AGENT_PLAN.md`): unlocks the Workspace composer's Loop panel, where the
+     * operator hands this agent a standing goal and an interval and leaves it to drive its own
+     * conversation. Purely a capability gate — a loop is armed per conversation, never fleet-wide, so
+     * flipping this on does not by itself make the agent do anything.
+     */
+    auto_mode: { type: Boolean, default: false },
     tools_allowed: { type: [String], default: [] },
     qdrant_namespace: { type: String, required: true, unique: true },
     parameters: { type: Map, of: String, default: () => new Map<string, string>() },

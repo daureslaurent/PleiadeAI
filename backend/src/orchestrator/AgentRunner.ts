@@ -8,6 +8,7 @@ import {
   buildMemoryMessage,
   buildUserMessage,
   type ChatMessage,
+  type AutoLoopPromptState,
 } from '../domain/agents/jit-builder';
 import { agentMemory, embedRecallQuery } from '../domain/memory/agent-memory.service';
 import { memoryDistiller } from '../domain/memory/memory-distiller';
@@ -26,6 +27,7 @@ import { analyzeImage } from '../tools/core/analyzeImage';
 import { data } from '../tools/core/data';
 import { guide } from '../tools/core/guide';
 import { todoWrite } from '../tools/core/todo';
+import { loopDone } from '../tools/core/loopDone';
 import { todoRepository } from '../domain/todos/todo.repository';
 import { remember } from '../tools/core/remember';
 import { forget } from '../tools/core/forget';
@@ -122,6 +124,14 @@ export interface RunInput {
    * a question the operator asks deliberately when they want the agent to go finish a conversation.
    */
   forumReplies?: boolean;
+  /**
+   * Set when this run is one iteration of a self-driving conversation (`AUTO_AGENT_PLAN.md`), by
+   * `AutoLoopRunner` — never by the socket layer. Carries the standing goal and the progress recap
+   * folded into the prompt, plus the watermark for the "new on the forum since your last turn"
+   * digest. Its presence is also what grants `loop_done`: only the loop's own turns may end it, so
+   * an ordinary message typed into the same conversation can't.
+   */
+  autoLoop?: AutoLoopPromptState & { forumSeenAt: Date };
   /** Prior turns in this session (excludes the new user message). */
   history?: ChatMessage[];
   /**
@@ -280,6 +290,7 @@ export class AgentRunner {
         data.name,
         guide.name,
         todoWrite.name,
+        ...(input.autoLoop ? [loopDone.name] : []),
         ...(input.caller ? [askParent.name] : []),
       ]),
     ].filter(
@@ -311,14 +322,23 @@ export class AgentRunner {
     // agent still has to call `forum` to read one, which is what keeps the board from flooding the
     // context. `forumReplies` is opt-in per message (the composer's toggle), because "who replied to
     // me" is a question the operator asks on purpose, not something worth paying for every turn.
+    //
+    // An auto-loop turn is the exception to the opt-in: it forces the reply pointers on and adds a
+    // time-scoped digest of everything new since its last turn. A looping agent has no operator to
+    // tick a box for it, and the whole reason it can follow a *shared* goal is that it notices what
+    // the other agents posted while it was working.
     const hasForum = tools.some((t) => t.name === forum.name);
-    const [forumRelated, forumReplyPointers] = hasForum
+    const wantsReplies = input.forumReplies || Boolean(input.autoLoop);
+    const [forumRelated, forumReplyPointers, forumDigest] = hasForum
       ? await Promise.all([
           forumRecall.pointers(recallVector),
-          input.forumReplies ? forumRecall.unansweredReplies(ctx.agentId, agent.name) : Promise.resolve([]),
+          wantsReplies ? forumRecall.unansweredReplies(ctx.agentId, agent.name) : Promise.resolve([]),
+          input.autoLoop
+            ? forumRecall.digest(input.autoLoop.forumSeenAt, agent.name)
+            : Promise.resolve([]),
         ])
-      : [[], []];
-    const forumBlock = buildForumBlock(forumRelated, forumReplyPointers);
+      : [[], [], []];
+    const forumBlock = buildForumBlock(forumRelated, forumReplyPointers, forumDigest);
 
     // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
     // recall instead of guessing. Only fires when something was injected — the badge's presence in
@@ -352,7 +372,7 @@ export class AgentRunner {
     // doc) because `todowrite` mutates it mid-turn — and because an item left `in_progress` when the
     // last turn ended is exactly what this block exists to put back in front of the model.
     const todos = await todoRepository.get(ctx.sessionId, ctx.agentId);
-    const systemMessage = buildSystemMessage(agent, houseRules, todos);
+    const systemMessage = buildSystemMessage(agent, houseRules, todos, input.autoLoop ?? null);
     if (
       memoryMessage &&
       typeof systemMessage.content === 'string' &&

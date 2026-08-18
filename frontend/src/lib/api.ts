@@ -307,6 +307,12 @@ export interface Agent {
    */
   subagent: boolean;
   /**
+   * Auto agent mode (`AUTO_AGENT_PLAN.md`): unlocks the composer's Loop panel, where this agent can
+   * be handed a standing goal and an interval and left to drive its own conversation. A capability
+   * gate only — loops are armed per conversation.
+   */
+  auto_mode: boolean;
+  /**
    * Role slug when the app owns this agent (`''` for operator-made ones). A built-in cannot be
    * deleted or renamed — privileged tools authorise against the slug — but is otherwise editable.
    */
@@ -424,6 +430,7 @@ export const agentsApi = {
         | 'name'
         | 'description'
         | 'subagent'
+        | 'auto_mode'
         | 'system_prompt'
         | 'tools_allowed'
         | 'isolation_id'
@@ -800,6 +807,44 @@ export interface NewMessage {
   turn_id?: string;
   run_id?: string;
 }
+
+/** One self-driving conversation (`AUTO_AGENT_PLAN.md` §3), as the API returns it. */
+export interface AutoLoop {
+  _id: string;
+  session_id: string;
+  agent_name: string;
+  status: 'idle' | 'running' | 'waiting' | 'done' | 'stopped' | 'error';
+  goal: string;
+  seed: string;
+  continue_text: string;
+  interval_sec: number;
+  iteration: number;
+  progress: { n: number; at: string; summary: string }[];
+  done_reason: string;
+  last_error: string;
+  next_run_at: string | null;
+}
+
+export interface StartAutoLoopInput {
+  goal: string;
+  seed: string;
+  continueText: string;
+  intervalSec: number;
+}
+
+/**
+ * Arming and disarming a loop is durable state the operator sets once, so it goes over REST; the
+ * live half (status, iteration, countdown) streams back as the `auto_loop` socket event.
+ */
+export const autoLoopsApi = {
+  /** `null` for a conversation that has never looped — the normal case when the panel opens. */
+  get: (sessionId: string) =>
+    api.get<AutoLoop | null>(`/auto-loops/${sessionId}`).then((r) => r.data),
+  start: (sessionId: string, body: StartAutoLoopInput) =>
+    api.post<AutoLoop>(`/auto-loops/${sessionId}/start`, body).then((r) => r.data),
+  stop: (sessionId: string) =>
+    api.post<AutoLoop>(`/auto-loops/${sessionId}/stop`).then((r) => r.data),
+};
 
 export const sessionsApi = {
   /**

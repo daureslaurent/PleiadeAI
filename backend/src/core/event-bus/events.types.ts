@@ -637,6 +637,25 @@ export interface ForumPostCreatedPayload {
   createdAt: string;
 }
 
+/**
+ * State of a self-driving conversation (`AUTO_AGENT_PLAN.md`). Emitted whenever the loop changes
+ * phase — armed, running, ended — so the composer's Loop panel shows the truth rather than what the
+ * client last asked for. Scoped to the session room by the bridge: a loop belongs to one conversation.
+ */
+export interface AutoLoopStatePayload {
+  sessionId: string;
+  agentName: string;
+  status: 'idle' | 'running' | 'waiting' | 'done' | 'stopped' | 'error';
+  iteration: number;
+  intervalSec: number;
+  goal: string;
+  /** ISO timestamp of the next tick, or null while a turn is running / the loop has ended. */
+  nextRunAt: string | null;
+  /** The agent's own closing summary (status `done`). */
+  doneReason?: string;
+  lastError?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Event name → payload map
 // ---------------------------------------------------------------------------
@@ -645,6 +664,7 @@ export interface EventMap {
   'chat:user_message': UserMessagePayload;
   'conversation:session_created': ConversationSessionCreatedPayload;
   'conversation:turn_complete': ConversationTurnCompletePayload;
+  'autoloop:state': AutoLoopStatePayload;
   'agent:stream_chunk': StreamChunkPayload;
   'agent:tool_invoke': ToolInvokePayload;
   'tool:output_chunk': ToolOutputChunkPayload;

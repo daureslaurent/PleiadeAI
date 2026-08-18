@@ -33,6 +33,7 @@ import { forumAdmin } from './core/forumAdmin';
 import { listMail, readMail } from './core/mail';
 import { guide } from './core/guide';
 import { todoWrite } from './core/todo';
+import { loopDone } from './core/loopDone';
 import { read } from './core/fs/read';
 import { write } from './core/fs/write';
 import { edit } from './core/fs/edit';
@@ -116,6 +117,9 @@ const CORE_TOOLS: Record<string, Tool> = {
   [guide.name]: guide,
   // The agent's own working checklist — auto-granted to every agent (see AgentRunner).
   [todoWrite.name]: todoWrite,
+  // Ends a self-driving conversation. Auto-granted only while an auto loop is running (see
+  // AgentRunner) — in an ordinary chat there is nothing for it to stop.
+  [loopDone.name]: loopDone,
   // OpenCode-compatible file tools (opt-in per agent via tools_allowed).
   [read.name]: read,
   [write.name]: write,

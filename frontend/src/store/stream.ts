@@ -13,6 +13,7 @@ import type {
   ToolOutputEvent,
   ToolStartEvent,
   TruncatedEvent,
+  AutoLoopEvent,
   TurnScoredEvent,
   MemoryRecallEvent,
   TodoUpdateEvent,
@@ -371,6 +372,14 @@ interface StreamState {
    * finish. Cleared when a new turn starts.
    */
   lastTurnTruncated: boolean;
+  /**
+   * Live state of the active session's auto loop (`AUTO_AGENT_PLAN.md`), or null when it isn't
+   * looping. The loop runs on the backend, so this is a mirror, never the source of truth — the
+   * panel renders what the server last said rather than what the operator last clicked.
+   */
+  autoLoop: AutoLoopEvent | null;
+  /** Seed the mirror from the REST read when the panel opens on an already-running loop. */
+  setAutoLoop: (loop: AutoLoopEvent | null) => void;
   streaming: boolean;
   /** Session ids with an in-flight agent run — drives the per-session "working" shimmer. */
   workingSessions: string[];
@@ -453,6 +462,7 @@ export const useStream = create<StreamState>((set, get) => ({
   pendingAsk: null,
   lastVisualAct: null,
   lastTurnTruncated: false,
+  autoLoop: null,
   streaming: false,
   workingSessions: [],
   workingAgents: {},
@@ -794,6 +804,13 @@ export const useStream = create<StreamState>((set, get) => ({
       set({ lastTurnTruncated: true });
     });
 
+    // The active session's auto loop changed phase. Session-scoped like every other turn event, so a
+    // loop running in another conversation never overwrites the panel you are looking at.
+    socket.on('auto_loop', (e: AutoLoopEvent) => {
+      if (e.sessionId !== get().activeSessionId) return;
+      set({ autoLoop: e });
+    });
+
     // A `user` turn this client did not send: the Conversation Generator's interviewer asking the
     // agent its next question. Locally-sent messages are appended by `send()`, so this only ever
     // fires for a generated conversation the operator happens to be watching.
@@ -1066,13 +1083,19 @@ export const useStream = create<StreamState>((set, get) => ({
       streaming: false,
       pendingAsk: null,
       lastTurnTruncated: false,
+      // Cleared, not carried: the panel refetches the loop for the session being opened, and a
+      // leftover mirror would briefly show the previous conversation's countdown on this one.
+      autoLoop: null,
       turnTraceStart: trace.length,
     });
   },
 
+  setAutoLoop: (loop) => set({ autoLoop: loop }),
+
   clearActive: () =>
     set({
       activeSessionId: null,
+      autoLoop: null,
       turns: [],
       trace: [],
       contextUsage: null,

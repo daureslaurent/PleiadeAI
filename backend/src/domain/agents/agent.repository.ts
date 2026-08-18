@@ -52,6 +52,7 @@ export const agentRepository = {
     name: string;
     description?: string;
     subagent?: boolean;
+    auto_mode?: boolean;
     system_prompt: string;
     tools_allowed?: string[];
     qdrant_namespace: string;
@@ -95,6 +96,7 @@ export const agentRepository = {
         | 'name'
         | 'description'
         | 'subagent'
+        | 'auto_mode'
         | 'agents_md'
         | 'notebook'
         | 'isolation_id'

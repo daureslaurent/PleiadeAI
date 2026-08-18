@@ -178,6 +178,25 @@ export interface TruncatedEvent {
   agent: string;
 }
 
+/**
+ * Phase change of a self-driving conversation (`AUTO_AGENT_PLAN.md`). The loop itself lives on the
+ * backend, so this — not the client's own timer — is what the Loop panel renders: `waiting` counts
+ * down to `nextRunAt`, `running` shows the turn in flight, and the three terminal states say who
+ * ended it (the agent, the operator, or the error breaker).
+ */
+export interface AutoLoopEvent {
+  type: 'auto_loop';
+  sessionId: string;
+  agentName: string;
+  status: 'idle' | 'running' | 'waiting' | 'done' | 'stopped' | 'error';
+  iteration: number;
+  intervalSec: number;
+  goal: string;
+  nextRunAt: string | null;
+  doneReason?: string;
+  lastError?: string;
+}
+
 /** An agent is blocked asking the operator a question; the run resumes on `ask_user:response`. */
 export interface AskUserEvent {
   type: 'ask_user';
@@ -455,6 +474,7 @@ export type WsEvent =
   | SystemAlertEvent
   | AskUserEvent
   | TruncatedEvent
+  | AutoLoopEvent
   | ContextUsageEvent
   | MemoryRecallEvent
   | TodoUpdateEvent

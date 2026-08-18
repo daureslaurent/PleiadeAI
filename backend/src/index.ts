@@ -6,6 +6,7 @@ import { rootLogger } from './config/logger';
 import { connectMongo, disconnectMongo } from './db/mongoose';
 import { runMigrations } from './db/migrate';
 import { setupAgenda } from './autonomy/agenda.setup';
+import { autoLoopRunner } from './autonomy/AutoLoopRunner';
 import { flowRunner } from './flows/FlowRunner';
 import { attachSocket } from './transport/ws/socket';
 import { attachVisualProxy } from './transport/ws/visual-proxy';
@@ -20,6 +21,7 @@ import { skillsRouter } from './transport/http/routes/skills.routes';
 import { memoryRouter } from './transport/http/routes/memory.routes';
 import { inboxRouter } from './transport/http/routes/inbox.routes';
 import { autonomyRouter } from './transport/http/routes/autonomy.routes';
+import { autoLoopsRouter } from './transport/http/routes/auto-loops.routes';
 import { conversationGenRouter } from './transport/http/routes/conversation-gen.routes';
 import { settingsRouter } from './transport/http/routes/settings.routes';
 import { endpointsRouter } from './transport/http/routes/endpoints.routes';
@@ -123,6 +125,7 @@ async function main(): Promise<void> {
   app.use('/api/memory', requireAuth, memoryRouter);
   app.use('/api/inbox', requireAuth, inboxRouter);
   app.use('/api/autonomy', requireAuth, autonomyRouter);
+  app.use('/api/auto-loops', requireAuth, autoLoopsRouter);
   app.use('/api/telegram', requireAuth, telegramRouter);
   app.use('/api/conversation-gen', requireAuth, conversationGenRouter);
   app.use('/api/settings', requireAuth, settingsRouter);
@@ -172,6 +175,9 @@ async function main(): Promise<void> {
   // Any flow run still marked live belongs to an executor that died with the previous process
   // (FLOWS_PLAN.md §4) — fail them so the UI never shows a run that nothing is driving.
   await flowRunner.sweepInterrupted().catch((err) => rootLogger.error({ err }, 'flow run sweep failed'));
+  // Self-driving conversations are durable state: a loop the operator left running must come back on
+  // its own after a restart, or "backend-driven" means nothing (AUTO_AGENT_PLAN.md §4).
+  await autoLoopRunner.resume().catch((err) => rootLogger.error({ err }, 'auto loop resume failed'));
   // Streaming flows are armed state, not in-flight work: a radio that was on air before the restart
   // should be ticking again a second after boot (STREAMING_PLAN.md §4).
   await flowTimerScheduler.restore().catch((err) => rootLogger.error({ err }, 'flow timer restore failed'));

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText } from 'lucide-react';
+import { RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
+import { LoopPanel } from './LoopPanel';
 import { useStream, buildBlocks, type ContextUsage, type RecalledMemory, type Turn, type TurnScore } from '../../store/stream';
 import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
@@ -94,6 +95,12 @@ interface Props {
   onOpenVisual: () => void;
   onOpenAndroid: () => void;
   onSend: (text: string, images?: string[], forumReplies?: boolean) => void;
+  /**
+   * Creates (and activates) a session, returning its id. The Loop panel needs it because a loop is
+   * armed against a conversation, and the operator may arm one on a chat they haven't typed into yet
+   * — an auto agent's first turn is normally the loop's own kickoff message, not a message from them.
+   */
+  onEnsureSession: () => Promise<string>;
 }
 
 /**
@@ -242,8 +249,8 @@ function AskUserPrompt({
 }
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
-export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, onOpenVisual, onOpenAndroid, onSend }: Props) {
-  const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, todos, activeSessionId, answerAsk, stop } =
+export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, onOpenVisual, onOpenAndroid, onSend, onEnsureSession }: Props) {
+  const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, autoLoop, todos, activeSessionId, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<string[]>([]);
@@ -256,6 +263,8 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
   // Persisted: an operator who works through the forum wants the toggle to stay where they left it.
   const [forumReplies, setForumReplies] = usePersistentState('forum:pickup', false);
   const [editingContinue, setEditingContinue] = useState(false);
+  // Auto-loop panel, offered only for an `auto_mode` agent (see the Agents page).
+  const [loopOpen, setLoopOpen] = useState(false);
   // Budget for consecutive auto-continues; reset on any manual send / toggle-off.
   const autoCountRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -520,6 +529,18 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
             </div>
           )}
 
+          {/* Auto loop (AUTO_AGENT_PLAN.md). Above the composer rather than in a modal: arming a loop
+              is a thing you do *instead of* typing this turn, and its live status belongs next to
+              the conversation it is driving. */}
+          {loopOpen && agent?.auto_mode && (
+            <LoopPanel
+              agent={agent}
+              sessionId={activeSessionId}
+              onEnsureSession={onEnsureSession}
+              onClose={() => setLoopOpen(false)}
+            />
+          )}
+
           <div className="flex items-end gap-2">
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -585,6 +606,25 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
             >
               <MessageSquareText size={15} />
             </button>
+            {/* Loop button — only for an agent the operator put in auto mode on the Agents page. */}
+            {agent?.auto_mode && (
+              <button
+                onClick={() => setLoopOpen((o) => !o)}
+                aria-pressed={loopOpen}
+                title="Auto loop: give this agent a standing goal and let it drive the conversation itself"
+                className={[
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+                  loopOpen || autoLoop
+                    ? 'bg-accent/15 text-accent hover:bg-accent/25'
+                    : 'text-slate-600 hover:bg-white/[0.06] hover:text-slate-300',
+                ].join(' ')}
+              >
+                <RefreshCw
+                  size={15}
+                  className={autoLoop?.status === 'running' ? 'animate-spin' : undefined}
+                />
+              </button>
+            )}
             {streaming ? (
               <button
                 onClick={stop}

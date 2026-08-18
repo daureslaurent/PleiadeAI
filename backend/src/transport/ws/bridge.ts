@@ -37,6 +37,13 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  // Auto-loop phase changes (AUTO_AGENT_PLAN.md). Session-scoped: the Loop panel that cares about
+  // this is the one open on that conversation. Everything else about a loop turn already flows
+  // through the ordinary chat events above, so this carries only the loop's own bookkeeping.
+  eventBus.on('autoloop:state', (payload) => {
+    io.to(payload.sessionId).emit('auto_loop', { type: 'auto_loop', ...payload });
+  });
+
   // A brand-new generated session: broadcast, since no client can be in its room yet — every open
   // Workspace adds the row to the agent's session list without a reload.
   eventBus.on('conversation:session_created', ({ sessionId, agentId, agentName, title }) => {

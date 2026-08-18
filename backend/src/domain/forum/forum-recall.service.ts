@@ -34,6 +34,8 @@ export interface ForumPointer {
   title: string;
   /** Present for reply pointers: who posted the reply the agent hasn't seen. */
   lastPostAuthor?: string;
+  /** Present for digest pointers: whether the thread itself is new, or just newly replied to. */
+  opening?: boolean;
 }
 
 function clip(title: string): string {
@@ -107,6 +109,42 @@ export const forumRecall = {
       return [];
     }
   },
+
+  /**
+   * What has happened on the board *since a moment in time* — for the auto-loop agent
+   * (`AUTO_AGENT_PLAN.md` §4), which wakes up every few minutes and would otherwise have no way to
+   * notice work it was never directly addressed in.
+   *
+   * Time-scoped rather than similarity-scoped, and that difference is deliberate: `pointers()` asks
+   * "what relates to this task?", which is the right question for a turn the operator drove. A
+   * looping agent's question is "what changed while I was working?", and semantic similarity would
+   * hide exactly the thread whose subject it hasn't thought of yet. The agent's own threads are
+   * excluded — its own posts are not news to it, and `unansweredReplies` already covers answers to
+   * them.
+   */
+  async digest(since: Date, agentName: string, limit = MAX_POINTERS): Promise<ForumPointer[]> {
+    try {
+      const threads = await ForumThreadModel.find({
+        last_post_at: { $gt: since },
+        status: 'open',
+        last_post_author: { $ne: agentName },
+      })
+        .sort({ last_post_at: -1 })
+        .limit(limit)
+        .exec();
+
+      return threads.map((t) => ({
+        threadId: String(t._id),
+        title: clip(t.title),
+        lastPostAuthor: t.last_post_author,
+        // A thread whose only post is the opening one is new since the watermark, not merely bumped.
+        opening: t.post_count <= 1,
+      }));
+    } catch (err) {
+      log.warn({ err }, 'forum digest unavailable this turn');
+      return [];
+    }
+  },
 };
 
 /**
@@ -118,8 +156,12 @@ export const forumRecall = {
  * every turn files "task completed successfully" a hundred times, and a board of that is one no
  * agent has any reason to read again.
  */
-export function buildForumBlock(related: ForumPointer[], replies: ForumPointer[]): string | null {
-  if (!related.length && !replies.length) return null;
+export function buildForumBlock(
+  related: ForumPointer[],
+  replies: ForumPointer[],
+  digest: ForumPointer[] = [],
+): string | null {
+  if (!related.length && !replies.length && !digest.length) return null;
 
   const lines = ['## Forum'];
 
@@ -137,6 +179,17 @@ export function buildForumBlock(related: ForumPointer[], replies: ForumPointer[]
       '',
       'Someone has replied to a thread you took part in, and you have not answered:',
       ...replies.map((p) => `- \`${p.threadId}\` — ${p.title} (last reply by ${p.lastPostAuthor})`),
+    );
+  }
+
+  if (digest.length) {
+    lines.push(
+      '',
+      'New on the board since your last turn (you were not addressed — read only what bears on your goal):',
+      ...digest.map(
+        (p) =>
+          `- \`${p.threadId}\` — ${p.title} (${p.opening ? 'new thread' : 'new reply'} by ${p.lastPostAuthor})`,
+      ),
     );
   }
 

@@ -47,6 +47,7 @@ interface Draft {
   name: string;
   description: string;
   subagent: boolean;
+  auto_mode: boolean;
   system_prompt: string;
   tools_allowed: string[];
   qdrant_namespace: string;
@@ -77,6 +78,7 @@ const blank = (): Draft => ({
   name: '',
   description: '',
   subagent: true,
+  auto_mode: false,
   builtin: '',
   system_prompt: '',
   tools_allowed: [],
@@ -150,6 +152,7 @@ export function AgentsView() {
       name: a.name,
       description: a.description ?? '',
       subagent: a.subagent ?? true,
+      auto_mode: a.auto_mode ?? false,
       system_prompt: a.system_prompt,
       tools_allowed: a.tools_allowed ?? [],
       qdrant_namespace: a.qdrant_namespace,
@@ -204,6 +207,7 @@ export function AgentsView() {
         name: draft.name,
         description: draft.description,
         subagent: draft.subagent,
+        auto_mode: draft.auto_mode,
         system_prompt: draft.system_prompt,
         tools_allowed: draft.tools_allowed,
         qdrant_namespace: draft.qdrant_namespace || draft.name,
@@ -226,6 +230,7 @@ export function AgentsView() {
         name: draft.name,
         description: draft.description,
         subagent: draft.subagent,
+        auto_mode: draft.auto_mode,
         system_prompt: draft.system_prompt,
         tools_allowed: draft.tools_allowed,
         max_tool_iterations: draft.max_tool_iterations,
@@ -443,6 +448,24 @@ export function AgentsView() {
                     subagents.
                   </>
                 )}
+              </span>
+            </span>
+          </label>
+
+          <label className="mt-2 flex items-start gap-3 rounded-md border border-border bg-panel px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.auto_mode}
+              onChange={(e) => setDraft({ ...draft, auto_mode: e.target.checked })}
+              className="mt-0.5 accent-accent"
+            />
+            <span className="leading-snug text-slate-300">
+              <span className="font-medium text-slate-200">Auto mode</span>
+              <span className="block text-xs text-slate-500">
+                Adds a <span className="text-slate-400">Loop</span> button to this agent's composer:
+                give it a standing goal and an interval and it drives its own conversation — one turn
+                per interval, checking the forum as it goes — until it decides the goal is met or you
+                stop it. The loop runs on the backend, so it keeps going with the browser closed.
               </span>
             </span>
           </label>
