@@ -11,6 +11,9 @@ import { SkillsView } from './views/SkillsView';
 import { ToolsView } from './views/ToolsView';
 import { MediaView } from './views/media/MediaView';
 import { FlowsView } from './views/flows/FlowsView';
+import { ForumView } from './views/forum/ForumView';
+import { CategoryView } from './views/forum/CategoryView';
+import { ThreadView } from './views/forum/ThreadView';
 import { IsolationsView } from './views/IsolationsView';
 import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
@@ -90,6 +93,10 @@ export default function App() {
           <Route path="/tools" element={<ToolsView />} />
           <Route path="/media" element={<MediaView />} />
           <Route path="/flows" element={<FlowsView />} />
+          {/* `PageHeader` matches on prefix, so the nested board pages keep the "Forum" title. */}
+          <Route path="/forum" element={<ForumView />} />
+          <Route path="/forum/c/:categoryId" element={<CategoryView />} />
+          <Route path="/forum/t/:threadId" element={<ThreadView />} />
           <Route path="/images" element={<ImagesView />} />
           <Route path="/isolation" element={<IsolationsView />} />
           <Route path="/memory" element={<MemoryVault />} />

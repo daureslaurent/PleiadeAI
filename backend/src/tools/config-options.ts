@@ -1,6 +1,7 @@
 import { createLogger } from '../config/logger';
 import { agentRepository } from '../domain/agents/agent.repository';
 import { flowRepository } from '../domain/flows/flow.repository';
+import { forumCategoryRepository } from '../domain/forum/forum-category.repository';
 import { mediaWorkflowRepository } from '../domain/media-workflows/media-workflow.repository';
 import { WORKFLOW_KINDS, type WorkflowKind } from '../domain/media-workflows/media-workflow.model';
 import { skillRepository } from '../domain/skills/skill.repository';
@@ -42,6 +43,13 @@ const PROVIDERS: Record<string, () => Promise<ConfigOption[]>> = {
   // The three below exist for the Flows node registry (FLOWS_PLAN.md §3), whose config schemas go
   // through this same resolver: a node picks the agent it delegates to, the tool it calls, or the
   // flow it nests — all lists that change without a redeploy.
+  // Which category the `forum` tool posts into when an agent names none — a list the operator (and,
+  // if allowed, the agents) edit at runtime.
+  forum_categories: async () => {
+    const categories = await forumCategoryRepository.listEnabled();
+    return categories.map((c) => ({ value: String(c._id), label: c.name }));
+  },
+
   agents: async () => {
     const agents = await agentRepository.list();
     return agents.map((a) => ({

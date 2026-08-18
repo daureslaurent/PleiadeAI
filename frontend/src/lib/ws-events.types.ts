@@ -423,6 +423,25 @@ export interface FlowAwaitingApprovalEvent {
   artifacts: string[];
 }
 
+/**
+ * A post landed on the agent forum (FORUM_PLAN.md §6). Broadcast to the global `forum` room, not a
+ * session room: agents post from sessions the operator is not watching, and the board should still
+ * update. Carries no body — the client refetches the thread it is showing.
+ */
+export interface ForumPostCreatedEvent {
+  type: 'forum_post_created';
+  postId: string;
+  threadId: string;
+  categoryId: string;
+  threadTitle: string;
+  author: string;
+  authorKind: 'agent' | 'operator';
+  snippet: string;
+  /** True when this post opened the thread, distinguishing "new thread" from "reply". */
+  opening: boolean;
+  createdAt: string;
+}
+
 export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
@@ -452,4 +471,5 @@ export type WsEvent =
   | FlowRunEndEvent
   | FlowArtifactEvent
   | FlowIterationStartEvent
-  | FlowAwaitingApprovalEvent;
+  | FlowAwaitingApprovalEvent
+  | ForumPostCreatedEvent;

@@ -2445,3 +2445,104 @@ export const streamsApi = {
   setTimer: (flowId: string, armed: boolean) =>
     api.post<{ ok: boolean; armed: boolean }>(`/streams/${flowId}/timer`, { armed }).then((r) => r.data),
 };
+
+// --- Forum (FORUM_PLAN.md) --------------------------------------------------
+
+/** Who wrote a thread or post. Built server-side from the run's identity — never client-supplied. */
+export interface ForumAuthor {
+  kind: 'agent' | 'operator';
+  agent_id: string | null;
+  display_name: string;
+}
+
+export interface ForumCategory {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  position: number;
+  enabled: boolean;
+  agentsCanPost: boolean;
+  createdAt: string;
+  threadCount: number;
+  postCount: number;
+  lastThread: { id: string; title: string; lastPostAt: string; lastPostAuthor: string } | null;
+}
+
+export interface ForumThread {
+  id: string;
+  categoryId: string;
+  title: string;
+  author: ForumAuthor;
+  status: 'open' | 'locked' | 'archived';
+  pinned: boolean;
+  tags: string[];
+  postCount: number;
+  viewCount: number;
+  lastPostAt: string;
+  lastPostAuthor: string;
+  resolvedPostId: string | null;
+  createdAt: string;
+}
+
+export interface ForumPost {
+  id: string;
+  threadId: string;
+  author: ForumAuthor;
+  body: string;
+  replyTo: string | null;
+  editedAt: string | null;
+  editedBy: string;
+  createdAt: string;
+}
+
+/** A thread page: the thread, one page of posts, and each author's total post count. */
+export interface ForumThreadDetail extends ForumThread {
+  posts: ForumPost[];
+  total: number;
+  offset: number;
+  authorPostCounts: Record<string, number>;
+}
+
+export interface ForumSearchHit {
+  threadId: string;
+  postId: string | null;
+  title: string;
+  categoryId: string;
+  author: string;
+  createdAt: string;
+  snippet: string;
+  score: number;
+  /** Which index matched — `both` means keyword and semantic agreed, the strongest signal. */
+  source: 'keyword' | 'semantic' | 'both';
+}
+
+export const forumApi = {
+  categories: () => api.get<ForumCategory[]>('/forum/categories').then((r) => r.data),
+  createCategory: (body: { name: string; description?: string; position?: number; agentsCanPost?: boolean }) =>
+    api.post<ForumCategory>('/forum/categories', body).then((r) => r.data),
+  saveCategory: (id: string, patch: Partial<{ name: string; description: string; position: number; enabled: boolean; agentsCanPost: boolean }>) =>
+    api.patch<ForumCategory>(`/forum/categories/${id}`, patch).then((r) => r.data),
+  removeCategory: (id: string, force = false) =>
+    api.delete(`/forum/categories/${id}`, { params: force ? { force: 1 } : {} }).then((r) => r.data),
+
+  threads: (categoryId?: string, limit = 50) =>
+    api.get<ForumThread[]>('/forum/threads', { params: { category: categoryId, limit } }).then((r) => r.data),
+  createThread: (body: { category: string; title: string; body: string; tags?: string[] }) =>
+    api.post<ForumThread & { posts: ForumPost[] }>('/forum/threads', body).then((r) => r.data),
+  thread: (id: string, limit = 50, offset = 0) =>
+    api.get<ForumThreadDetail>(`/forum/threads/${id}`, { params: { limit, offset } }).then((r) => r.data),
+  saveThread: (
+    id: string,
+    patch: Partial<{ title: string; pinned: boolean; status: string; categoryId: string; resolvedPostId: string | null }>,
+  ) => api.patch<ForumThread>(`/forum/threads/${id}`, patch).then((r) => r.data),
+  removeThread: (id: string) => api.delete(`/forum/threads/${id}`).then((r) => r.data),
+
+  reply: (threadId: string, body: string, replyTo?: string | null) =>
+    api.post<ForumPost>(`/forum/threads/${threadId}/posts`, { body, replyTo }).then((r) => r.data),
+  savePost: (id: string, body: string) => api.patch<ForumPost>(`/forum/posts/${id}`, { body }).then((r) => r.data),
+  removePost: (id: string) => api.delete(`/forum/posts/${id}`).then((r) => r.data),
+
+  search: (q: string, mode: 'keyword' | 'semantic' | 'both' = 'both', category?: string) =>
+    api.get<ForumSearchHit[]>('/forum/search', { params: { q, mode, category } }).then((r) => r.data),
+};

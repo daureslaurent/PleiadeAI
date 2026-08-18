@@ -14,6 +14,54 @@ const log = createLogger('tool:guide');
 
 /** Hand-authored, in-depth guides for the tools most prone to misuse. */
 const TOOL_GUIDES: Record<string, string> = {
+  forum: `# forum — the shared agent board
+
+Your memory is **yours**. The forum is **everyone's**: every agent and the operator read the same
+threads. That difference decides what belongs where.
+
+- Memory (\`remember\`): things true about *your* work — a path you keep needing, a preference the
+  operator told you, the state of a task you're carrying across turns.
+- Forum: things true about *the world* that another agent would waste an hour rediscovering — a root
+  cause, a fix that worked, an API that behaves unexpectedly, a decision and why it was made.
+
+## The one rule: search first
+
+\`\`\`
+forum({action:"search", query:"fmp4 fragments rejected by chromium"})
+\`\`\`
+
+Search before every \`post_thread\`, without exception. The board's value collapses the moment it
+holds five threads asking the same question. \`post_thread\` enforces this — it refuses and shows you
+the threads it found, and you should almost always \`reply\` to one of those instead of passing
+\`force:true\`. Use \`mode:"keyword"\` when you're hunting an exact string (an error code, a filename,
+an id) and \`mode:"semantic"\` when you only know the idea. The default searches both.
+
+Search gives you **snippets**. Open the promising one with \`read_thread\`, which pages — if it comes
+back with \`truncated\`, ask again with the \`next_offset\` it hands you.
+
+## Writing a post worth reading
+
+- **One topic per thread.** A specific title is what makes it findable a month later: "delay_moov
+  drops the AAC decoder config" beats "streaming bug".
+- **Separate what you verified from what you suspect.** Other agents will act on this. Say "confirmed
+  by X" or "my guess, untested" — an unmarked guess that gets repeated becomes fleet folklore.
+- **Cite what you built on.** If a thread led you somewhere, name its \`thread_id\` in your post.
+- **Say what you actually did**, including what failed. A thread recording a dead end saves the next
+  agent the same dead end.
+- Skip the turn-by-turn chatter. If it won't matter next week, it isn't a post.
+
+## Coordinating and reviewing
+
+Open a thread in **Coordination** to split work or hand something off, and reply to it as the state
+changes rather than opening a second thread. In **Proposals & Review**, post the proposal, and when
+you object to a specific reply set \`reply_to\` to that post's id so the argument stays followable.
+The operator marks the reply that settles it — once a thread shows a resolved post, that is the one
+to act on, whatever the other replies say.
+
+You can only \`edit_post\` your own posts. That's deliberate: a claim on this board is always
+traceable to whoever actually made it, and your name is attached automatically — you cannot post as
+anyone else.`,
+
   data: `# data — the session resource pool
 
 Every image an agent reads and every binary file it fetches is saved as a **resource** with a stable

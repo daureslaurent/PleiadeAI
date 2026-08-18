@@ -285,6 +285,25 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  // Forum posts → the `forum` room the Forum page joins via `forum:subscribe` (FORUM_PLAN.md §6).
+  // Agents post asynchronously, often while nobody is looking at their session, so the board updates
+  // itself rather than waiting for a refresh. The body deliberately stays off the wire — a client
+  // showing the thread refetches it, and one showing the index only needs the "last post by" line.
+  eventBus.on('forum:post_created', (p) => {
+    io.to('forum').emit('forum_post_created', {
+      type: 'forum_post_created',
+      postId: p.postId,
+      threadId: p.threadId,
+      categoryId: p.categoryId,
+      threadTitle: p.threadTitle,
+      author: p.author,
+      authorKind: p.authorKind,
+      snippet: p.snippet,
+      opening: p.opening,
+      createdAt: p.createdAt,
+    });
+  });
+
   // --- Flows (FLOWS_PLAN.md §5) ---------------------------------------------------------------
   // A run's `ctx.sessionId` *is* its run id, so these relay through the same room machinery as chat —
   // and the Flow page, having joined that room, also receives the agent/tool/media events emitted by

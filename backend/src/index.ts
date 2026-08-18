@@ -43,6 +43,7 @@ import { imagesRouter } from './transport/http/routes/images.routes';
 import { resourcesRouter } from './transport/http/routes/resources.routes';
 import { mediaRouter } from './transport/http/routes/media.routes';
 import { flowsRouter } from './transport/http/routes/flows.routes';
+import { forumRouter } from './transport/http/routes/forum.routes';
 import { streamsPlaybackRouter, streamsRouter } from './transport/http/routes/streams.routes';
 import { flowTimerScheduler } from './flows/TimerScheduler';
 import { streamRegistry } from './streaming/StreamRegistry';
@@ -142,6 +143,7 @@ async function main(): Promise<void> {
   app.use('/api/media', allowQueryToken, requireAuth, mediaRouter);
   // Same reason as the two above: the run panel previews a flow's artifacts with bare media elements.
   app.use('/api/flows', allowQueryToken, requireAuth, flowsRouter);
+  app.use('/api/forum', requireAuth, forumRouter);
   // The live media flux carries its own signed, flow-scoped token in the URL (STREAMING_PLAN.md §3),
   // so its router is mounted openly ahead of the authed one — the same shape as the OAuth callback
   // below. Everything else about streams stays header-authenticated.

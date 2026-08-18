@@ -273,6 +273,11 @@ export function attachSocket(httpServer: HttpServer): Server {
     socket.on('finetune:subscribe', () => socket.join('finetune'));
     socket.on('finetune:unsubscribe', () => socket.leave('finetune'));
 
+    // Forum page (in)subscription — the global `forum` room the bridge fans new posts out to, so the
+    // board reflects agents posting in sessions this client isn't watching.
+    socket.on('forum:subscribe', () => socket.join('forum'));
+    socket.on('forum:unsubscribe', () => socket.leave('forum'));
+
     socket.on('disconnect', () => {
       // A disconnect (notably a browser refresh) must NOT kill the run — it keeps streaming to the
       // session room and, if the client is gone at completion, its turn is persisted server-side.

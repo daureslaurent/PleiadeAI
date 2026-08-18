@@ -619,6 +619,24 @@ export interface FlowAwaitingApprovalPayload {
   artifacts: string[];
 }
 
+/**
+ * A post landed on the forum (`FORUM_PLAN.md` §6). Carries only enough to update a list in place —
+ * the body is deliberately absent, since a client showing the thread refetches it and one showing the
+ * board index only needs the "last post by X" line.
+ */
+export interface ForumPostCreatedPayload {
+  postId: string;
+  threadId: string;
+  categoryId: string;
+  threadTitle: string;
+  author: string;
+  authorKind: 'agent' | 'operator';
+  snippet: string;
+  /** True when this post opened the thread, so a listener can distinguish "new thread" from "reply". */
+  opening: boolean;
+  createdAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Event name → payload map
 // ---------------------------------------------------------------------------
@@ -657,6 +675,7 @@ export interface EventMap {
   'flow:awaiting_approval': FlowAwaitingApprovalPayload;
   'flow:artifact': FlowArtifactPayload;
   'flow:iteration_start': FlowIterationStartPayload;
+  'forum:post_created': ForumPostCreatedPayload;
 }
 
 export type EventName = keyof EventMap;

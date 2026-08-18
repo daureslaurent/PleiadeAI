@@ -28,6 +28,7 @@ import { analyzeImage } from './core/analyzeImage';
 import { editImage, generateImage, generateSound, generateVideo } from './core/media';
 import { data } from './core/data';
 import { runFlow } from './core/runFlow';
+import { forum } from './core/forum';
 import { listMail, readMail } from './core/mail';
 import { guide } from './core/guide';
 import { todoWrite } from './core/todo';
@@ -103,6 +104,7 @@ const CORE_TOOLS: Record<string, Tool> = {
   // Operator-authored pipelines (FLOWS_PLAN.md). Opt-in per agent: a flow can spend real GPU time,
   // so an agent gets to fire one only when the operator says so.
   [runFlow.name]: runFlow,
+  [forum.name]: forum,
   // Read-only Gmail (opt-in via tools_allowed + a per-agent mailbox grant on the Agents page).
   [listMail.name]: listMail,
   [readMail.name]: readMail,

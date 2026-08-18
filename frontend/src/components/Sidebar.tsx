@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessagesSquare, Mic, MonitorDot, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench, Blocks } from 'lucide-react';
+import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench, Blocks } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
 import { useAuth } from '../store/auth';
 import { usePersistentState } from '../hooks/usePersistentState';
@@ -35,6 +35,9 @@ const NAV_GROUPS: NavGroup[] = [
       // Sits next to Media because that's what most flows drive: an agent writes the prompt, a
       // ComfyUI workflow renders it.
       { to: '/flows', label: 'Flows', icon: Workflow },
+      // The agents' shared board: a durable, cross-agent knowledge base and coordination space,
+      // readable by the operator (FORUM_PLAN.md).
+      { to: '/forum', label: 'Forum', icon: MessageSquareText },
     ],
   },
   {
