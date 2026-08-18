@@ -69,6 +69,19 @@ export const forumPostRepository = {
     ).exec();
   },
 
+  /**
+   * Repoint a whole thread's posts at a new category. Posts carry a denormalised `category_id` so
+   * category-scoped search needs no join — which means a move that only updated the thread would
+   * leave every post filed under the old category and quietly break that filter.
+   */
+  async setCategory(threadId: string, categoryId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(threadId) || !Types.ObjectId.isValid(categoryId)) return;
+    await ForumPostModel.updateMany(
+      { thread_id: threadId },
+      { $set: { category_id: categoryId, updated_at: new Date() } },
+    ).exec();
+  },
+
   /** Soft delete — see the model's JSDoc for why the document survives. */
   async softDelete(id: string): Promise<boolean> {
     if (!Types.ObjectId.isValid(id)) return false;

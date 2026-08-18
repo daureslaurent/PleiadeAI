@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Box, Cpu, FileLock2, Mail, NotebookPen, Save, Smartphone, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { Box, Cpu, FileLock2, Lock, Mail, NotebookPen, Save, Smartphone, Sparkles, Trash2, Loader2 } from 'lucide-react';
 import {
   agentsApi,
   mailApi,
@@ -69,12 +69,15 @@ interface Draft {
   android_device_id: string | null;
   /** Server-computed: the assigned isolation image carries the Android layer (adb + scrcpy-server). */
   android_image: boolean;
+  /** Role slug when the app owns this agent — locks the name and hides Delete. Never sent on save. */
+  builtin?: string;
 }
 
 const blank = (): Draft => ({
   name: '',
   description: '',
   subagent: true,
+  builtin: '',
   system_prompt: '',
   tools_allowed: [],
   qdrant_namespace: '',
@@ -164,6 +167,7 @@ export function AgentsView() {
       android_device_id: a.android_device_id ?? null,
       android_image: a.android_image ?? false,
       visual: Boolean(a.visual),
+      builtin: a.builtin ?? '',
     });
   }
 
@@ -295,15 +299,29 @@ export function AgentsView() {
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               placeholder="agent_name"
-              className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent"
+              disabled={Boolean(draft.builtin)}
+              title={draft.builtin ? 'Built-in agents cannot be renamed' : undefined}
+              className="flex-1 rounded-md border border-border bg-panel px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60"
             />
-            {!isNew && (
-              <button
-                onClick={remove}
-                className="flex items-center gap-1 rounded-md border border-red-900 px-3 py-2 text-xs text-red-400 hover:bg-red-950"
+            {/* Built-ins are app-owned: the server refuses the delete, so don't offer it. Everything
+                else on this page still edits normally — a moderator you can't retune is one you
+                can't fix. */}
+            {draft.builtin ? (
+              <span
+                title="Built-in agent — cannot be deleted or renamed, but is otherwise fully editable"
+                className="flex items-center gap-1 rounded-md border border-white/[0.09] px-3 py-2 text-xs text-slate-400"
               >
-                <Trash2 size={14} /> Delete
-              </button>
+                <Lock size={13} /> Built-in
+              </span>
+            ) : (
+              !isNew && (
+                <button
+                  onClick={remove}
+                  className="flex items-center gap-1 rounded-md border border-red-900 px-3 py-2 text-xs text-red-400 hover:bg-red-950"
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              )
             )}
             <button
               onClick={save}

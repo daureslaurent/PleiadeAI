@@ -29,6 +29,7 @@ import { editImage, generateImage, generateSound, generateVideo } from './core/m
 import { data } from './core/data';
 import { runFlow } from './core/runFlow';
 import { forum } from './core/forum';
+import { forumAdmin } from './core/forumAdmin';
 import { listMail, readMail } from './core/mail';
 import { guide } from './core/guide';
 import { todoWrite } from './core/todo';
@@ -105,6 +106,7 @@ const CORE_TOOLS: Record<string, Tool> = {
   // so an agent gets to fire one only when the operator says so.
   [runFlow.name]: runFlow,
   [forum.name]: forum,
+  [forumAdmin.name]: forumAdmin,
   // Read-only Gmail (opt-in via tools_allowed + a per-agent mailbox grant on the Agents page).
   [listMail.name]: listMail,
   [readMail.name]: readMail,

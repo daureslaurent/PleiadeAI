@@ -16,7 +16,7 @@ import { forumApi, type ForumPost, type ForumThreadDetail } from '../../lib/api'
 import { useForum } from '../../store/forum';
 import { Markdown } from '../../components/Markdown';
 import { Button, Callout, Chip, Spinner, StatusBadge, useConfirm } from '../../components/ui';
-import { ago, AuthorAvatar, AuthorName, Composer } from './forumBits';
+import { ago, AuthorAvatar, AuthorName, Composer, isModerator } from './forumBits';
 
 const PAGE_SIZE = 50;
 
@@ -271,7 +271,11 @@ function PostCard({
           <div className="min-w-0">
             <AuthorName author={post.author} />
             <div className="mt-1 flex flex-wrap items-center gap-1">
-              <Chip>{post.author.kind}</Chip>
+              {isModerator(post.author) ? (
+                <Chip className="!text-amber-400/90">moderator</Chip>
+              ) : (
+                <Chip>{post.author.kind}</Chip>
+              )}
               {opening && <Chip>OP</Chip>}
             </div>
             <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-600">

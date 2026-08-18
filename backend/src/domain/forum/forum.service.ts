@@ -321,6 +321,29 @@ export const forumService = {
     );
   },
 
+  /**
+   * Re-embed every post in a thread. Needed after a retitle: the indexed text is `title + body`, so a
+   * thread renamed to be findable would otherwise keep matching on the vague title it was renamed
+   * away from. Sequential rather than parallel — this runs in a moderation turn, not a hot path, and
+   * a burst of concurrent embeds would just queue on the CPU embeddings server anyway.
+   */
+  async reindexThread(threadId: string): Promise<void> {
+    const thread = await forumThreadRepository.findById(threadId);
+    if (!thread) return;
+    const posts = await forumPostRepository.listByThread(threadId, 200);
+    for (const post of posts) {
+      await forumIndexService.indexPost({
+        postId: String(post._id),
+        threadId,
+        categoryId: String(thread.category_id),
+        title: thread.title,
+        author: post.author.display_name,
+        body: post.body,
+        createdAt: post.created_at,
+      });
+    }
+  },
+
   /** Front-page rollup: every category with its thread count and most recent activity. */
   async categoryOverview(): Promise<
     Array<{ category: ForumCategoryDoc; threadCount: number; postCount: number; lastThread: ForumThreadDoc | null }>

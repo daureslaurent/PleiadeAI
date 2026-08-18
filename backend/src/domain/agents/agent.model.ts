@@ -26,6 +26,15 @@ const AgentSchema = new Schema(
      * Defaults to `true` so every pre-existing agent stays visible for delegation.
      */
     subagent: { type: Boolean, default: true },
+    /**
+     * Marks an agent the app ships and owns, by role slug (`''` for ordinary operator-made agents).
+     *
+     * A built-in agent is seeded by migration and cannot be deleted or renamed: privileged tools bind
+     * their authorisation to this slug, so a rename would silently strip the agent's powers and a
+     * delete would leave a tool nobody can call. Everything else — prompt, charter, model, tools,
+     * isolation — stays fully editable, because a moderator you can't retune is one you can't fix.
+     */
+    builtin: { type: String, default: '', index: true },
     system_prompt: { type: String, required: true },
     tools_allowed: { type: [String], default: [] },
     qdrant_namespace: { type: String, required: true, unique: true },

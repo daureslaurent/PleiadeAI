@@ -82,6 +82,16 @@ agentsRouter.patch('/:id', async (req, res) => {
   // under the new profile / volume mode on next use).
   const before = await agentRepository.findById(req.params.id);
   const body = req.body ?? {};
+
+  // A built-in's name is half its identity — `forum_admin` authorises against the slug, and the name
+  // is what appears on the board as the author of every moderation action. Everything else is fair
+  // game: a moderator whose prompt you can't retune is one you can't fix. The slug itself is never
+  // client-writable, on any agent.
+  if (before?.builtin && typeof body.name === 'string' && body.name !== before.name) {
+    res.status(409).json({ error: `"${before.name}" is a built-in agent and cannot be renamed` });
+    return;
+  }
+  delete body.builtin;
   // Normalise an empty/absent isolation to null (= "no isolation", runs on the backend).
   if ('isolation_id' in body && !body.isolation_id) body.isolation_id = null;
   // Same for the optional inference endpoint (empty → null = use the fleet default endpoint).
@@ -157,6 +167,17 @@ agentsRouter.delete('/:id/parameters/:key', async (req, res) => {
 });
 
 agentsRouter.delete('/:id', async (req, res) => {
+  // Built-in agents are owned by the app: privileged tools authorise against the `builtin` slug, so
+  // deleting one would leave a tool nobody can call and a forum nobody moderates.
+  const existing = await agentRepository.findById(req.params.id);
+  if (existing?.builtin) {
+    res.status(409).json({
+      error: `"${existing.name}" is a built-in agent and cannot be deleted`,
+      detail: 'Its prompt, model and tools are still editable.',
+    });
+    return;
+  }
+
   const agent = await agentRepository.delete(req.params.id);
   if (!agent) {
     res.status(404).json({ error: 'not found' });

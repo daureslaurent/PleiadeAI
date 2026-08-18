@@ -306,6 +306,11 @@ export interface Agent {
    * tools, and prompted to consult the directory and delegate to subagents.
    */
   subagent: boolean;
+  /**
+   * Role slug when the app owns this agent (`''` for operator-made ones). A built-in cannot be
+   * deleted or renamed — privileged tools authorise against the slug — but is otherwise editable.
+   */
+  builtin: string;
   system_prompt: string;
   tools_allowed: string[];
   qdrant_namespace: string;
@@ -371,7 +376,7 @@ export interface Notification {
 }
 
 /** A new agent's notebook always starts empty — the agent writes it itself via `update_notebook`. */
-export type NewAgent = Omit<Agent, '_id' | 'notebook'>;
+export type NewAgent = Omit<Agent, '_id' | 'notebook' | 'builtin'>;
 
 const EXT_MIME: Record<string, string> = {
   png: 'image/png',

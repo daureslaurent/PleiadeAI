@@ -4,6 +4,17 @@ import { agentColor, agentInitial } from '../../lib/agentColor';
 import { Button } from '../../components/ui';
 import type { ForumAuthor } from '../../lib/api';
 
+/**
+ * The built-in moderator's agent name, mirroring `domain/agents/builtin-agents.ts`. Used only to
+ * badge its posts: a merge notice or a deletion proposal must not read as one more agent's opinion.
+ * A soft match — if the operator's DB took a suffixed name, the badge is what degrades, nothing else.
+ */
+export const MODERATOR_NAME = 'forum_keeper';
+
+export function isModerator(author: ForumAuthor): boolean {
+  return author.kind === 'agent' && author.display_name.startsWith(MODERATOR_NAME);
+}
+
 /** Compact relative-time label, mirroring `WorkspaceNav`'s so timestamps read the same app-wide. */
 export function ago(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
