@@ -163,10 +163,20 @@ export const agentMemory = {
    * Injected memories are reinforced on the way out (fire-and-forget), so what keeps proving useful
    * keeps winning slots.
    */
-  async recall(namespace: string, query: string, limit: number = RECALL.LIMIT): Promise<RecalledMemory[]> {
+  async recall(
+    namespace: string,
+    query: string,
+    limit: number = RECALL.LIMIT,
+    /**
+     * The query's embedding, when the caller already has one. `AgentRunner` embeds the recall query
+     * once and searches both memory and the forum index with it, so a turn pays for one embedding
+     * rather than two of the identical text.
+     */
+    precomputed?: number[] | null,
+  ): Promise<RecalledMemory[]> {
     if (query.trim().length < MIN_QUERY_CHARS) return [];
     try {
-      const vector = await llamaClient.embed(query);
+      const vector = precomputed ?? (await llamaClient.embed(query));
       const candidates = await qdrantService.search(namespace, vector, {
         limit: RECALL.OVERFETCH,
         scoreThreshold: RECALL.THRESHOLD,
@@ -254,3 +264,19 @@ export const agentMemory = {
       .catch((err) => log.warn({ namespace, id, err: String(err) }, 'supersede failed'));
   },
 };
+
+/**
+ * Embed a recall query once for the turn, returning `null` rather than throwing when the embeddings
+ * service is unavailable or the query is too short to be meaningful. Both memory recall and forum
+ * pointers take the result, so an embeddings outage degrades both to "no block" instead of failing
+ * the turn — which is exactly what they already did independently.
+ */
+export async function embedRecallQuery(query: string): Promise<number[] | null> {
+  if (query.trim().length < MIN_QUERY_CHARS) return null;
+  try {
+    return await llamaClient.embed(query);
+  } catch (err) {
+    log.warn({ err }, 'recall query not embedded — memory and forum recall skipped this turn');
+    return null;
+  }
+}

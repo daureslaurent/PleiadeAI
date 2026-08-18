@@ -193,7 +193,7 @@ export function AgentWorkspace() {
     }
   }
 
-  async function handleSend(text: string, images?: string[]) {
+  async function handleSend(text: string, images?: string[], forumReplies?: boolean) {
     if (!activeAgent) return;
     let sid = activeSessionId;
     if (!sid) {
@@ -206,7 +206,7 @@ export function AgentWorkspace() {
       hydrate(sn._id, [], activeAgent._id);
       sid = sn._id;
     }
-    send(activeAgent.name, text, sid, images);
+    send(activeAgent.name, text, sid, images, forumReplies);
   }
 
   const workingAgentNames = new Set(Object.keys(workingAgents));

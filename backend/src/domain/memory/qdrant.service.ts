@@ -40,20 +40,66 @@ export interface SearchOptions {
 
 const DEFAULT_VECTOR_SIZE = 768; // llama.cpp embedding dimension; override per deployment.
 
+/** Qdrant statuses worth another attempt: a freshly-created collection is briefly not yet writable. */
+const RETRYABLE_STATUSES = new Set([409, 500, 503]);
+const RETRY_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = 150;
+
+/**
+ * Retry a write that failed for a transient reason.
+ *
+ * The case this exists for: the first two writes to a namespace race, one creates the collection,
+ * and the other's upsert lands while its replica is still activating — Qdrant answers 500 with
+ * "Failed to apply operation to at least one `Active` replica ... Please retry", and the point is
+ * silently lost. That is easy to hit wherever indexing is fire-and-forget (two forum posts in the
+ * same tick), and equally reachable on an agent's first-ever pair of memory writes.
+ *
+ * Bounded and narrow on purpose: only these statuses, only a few attempts. A genuine failure still
+ * surfaces to the caller, which logs and degrades rather than failing the turn.
+ */
+async function retryTransient<T>(op: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await op();
+    } catch (err) {
+      lastErr = err;
+      const status = (err as { status?: number }).status;
+      if (!status || !RETRYABLE_STATUSES.has(status)) throw err;
+      log.debug({ status, attempt }, 'qdrant write retried after a transient failure');
+      await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 class QdrantService {
   private readonly client = new QdrantClient({
     url: env.QDRANT_URL,
     apiKey: env.QDRANT_API_KEY,
   });
 
-  /** Idempotently ensure an agent's isolated collection exists. */
+  /**
+   * Idempotently ensure an agent's isolated collection exists.
+   *
+   * The exists-then-create pair is not atomic, so two concurrent first writes to the same namespace
+   * both see "missing" and both try to create it; the loser gets a 409 and, before this was handled,
+   * lost its point entirely. That is easy to hit wherever indexing is fire-and-forget — two forum
+   * posts landing in the same tick is enough — so a 409 is treated as success: the collection
+   * existing is precisely what this method is for.
+   */
   async ensureNamespace(namespace: string, vectorSize = DEFAULT_VECTOR_SIZE): Promise<void> {
     const { exists } = await this.client.collectionExists(namespace);
     if (exists) return;
-    await this.client.createCollection(namespace, {
-      vectors: { size: vectorSize, distance: 'Cosine' },
-    });
-    log.info({ namespace, vectorSize }, 'qdrant namespace created');
+    try {
+      await this.client.createCollection(namespace, {
+        vectors: { size: vectorSize, distance: 'Cosine' },
+      });
+      log.info({ namespace, vectorSize }, 'qdrant namespace created');
+    } catch (err) {
+      if ((err as { status?: number }).status !== 409) throw err;
+      log.debug({ namespace }, 'qdrant namespace created concurrently — continuing');
+    }
   }
 
   async upsert(
@@ -61,7 +107,7 @@ class QdrantService {
     points: Array<{ id: string | number; vector: number[]; payload: Record<string, unknown> }>,
   ): Promise<void> {
     await this.ensureNamespace(namespace, points[0]?.vector.length ?? DEFAULT_VECTOR_SIZE);
-    await this.client.upsert(namespace, { wait: true, points });
+    await retryTransient(() => this.client.upsert(namespace, { wait: true, points }));
   }
 
   async search(namespace: string, vector: number[], opts: SearchOptions = {}): Promise<MemoryPoint[]> {

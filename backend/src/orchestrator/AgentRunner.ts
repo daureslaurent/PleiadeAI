@@ -9,8 +9,9 @@ import {
   buildUserMessage,
   type ChatMessage,
 } from '../domain/agents/jit-builder';
-import { agentMemory } from '../domain/memory/agent-memory.service';
+import { agentMemory, embedRecallQuery } from '../domain/memory/agent-memory.service';
 import { memoryDistiller } from '../domain/memory/memory-distiller';
+import { forumRecall, buildForumBlock } from '../domain/forum/forum-recall.service';
 import { settingsService } from '../domain/settings/settings.service';
 import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { scoringService } from '../domain/scoring/scoring.service';
@@ -28,6 +29,7 @@ import { todoWrite } from '../tools/core/todo';
 import { todoRepository } from '../domain/todos/todo.repository';
 import { remember } from '../tools/core/remember';
 import { forget } from '../tools/core/forget';
+import { forum } from '../tools/core/forum';
 import { read } from '../tools/core/fs/read';
 import { askParent } from '../tools/core/askParent';
 import { askUser } from '../tools/core/askUser';
@@ -114,6 +116,12 @@ export interface RunInput {
   runId?: string;
   userText: string;
   images?: ImageBlock[];
+  /**
+   * Include "someone replied to your thread and you haven't answered" pointers in the forum block.
+   * Driven by the composer's forum toggle rather than always-on: it costs an extra query, and it is
+   * a question the operator asks deliberately when they want the agent to go finish a conversation.
+   */
+  forumReplies?: boolean;
   /** Prior turns in this session (excludes the new user message). */
   history?: ChatMessage[];
   /**
@@ -292,8 +300,25 @@ export class AgentRunner {
     // ahead of the conversation. Recall now applies a similarity floor and a composite rerank
     // (see agent-memory.service), so an irrelevant turn legitimately retrieves *nothing* — the
     // block is absent rather than padded with noise. Best-effort: an embeddings outage yields none.
-    const recalled = await agentMemory.recall(agent.qdrant_namespace, buildRecallQuery(input));
+    // One embedding, two searches: memory and the forum index are both queried with this vector.
+    const recallQuery = buildRecallQuery(input);
+    const recallVector = await embedRecallQuery(recallQuery);
+    const recalled = await agentMemory.recall(agent.qdrant_namespace, recallQuery, undefined, recallVector);
     const memoryMessage = buildMemoryMessage(recalled);
+
+    // Passive forum awareness (FORUM_PLAN.md §8), for agents that actually hold the `forum` tool —
+    // never point an agent at a thread it has no way to open. Pointers only (thread id + title): the
+    // agent still has to call `forum` to read one, which is what keeps the board from flooding the
+    // context. `forumReplies` is opt-in per message (the composer's toggle), because "who replied to
+    // me" is a question the operator asks on purpose, not something worth paying for every turn.
+    const hasForum = tools.some((t) => t.name === forum.name);
+    const [forumRelated, forumReplyPointers] = hasForum
+      ? await Promise.all([
+          forumRecall.pointers(recallVector),
+          input.forumReplies ? forumRecall.unansweredReplies(ctx.agentId, agent.name) : Promise.resolve([]),
+        ])
+      : [[], []];
+    const forumBlock = buildForumBlock(forumRelated, forumReplyPointers);
 
     // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
     // recall instead of guessing. Only fires when something was injected — the badge's presence in
@@ -334,6 +359,9 @@ export class AgentRunner {
       typeof memoryMessage.content === 'string'
     ) {
       systemMessage.content = `${systemMessage.content}\n\n${memoryMessage.content}`;
+    }
+    if (forumBlock && typeof systemMessage.content === 'string') {
+      systemMessage.content = `${systemMessage.content}\n\n${forumBlock}`;
     }
 
     // Tell the model, in the user turn, what images it can act on and how — otherwise it has no

@@ -29,6 +29,8 @@ interface ChatMessageInput {
   sessionId?: string;
   /** Prior turns of this session (text-only) so the agent has conversational context. */
   history?: ChatMessage[];
+  /** Composer's forum toggle: also surface threads awaiting this agent's reply (FORUM_PLAN.md §8). */
+  forumReplies?: boolean;
 }
 
 /**
@@ -97,6 +99,7 @@ export function attachSocket(httpServer: HttpServer): Server {
           userText: input.content,
           images: input.images,
           history: input.history,
+          forumReplies: input.forumReplies,
           signal: controller.signal,
         });
         if (socket.connected) {

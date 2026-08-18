@@ -389,7 +389,14 @@ interface StreamState {
   /** Load a persisted session's messages into the panel (reconstructs chat + debugger). */
   hydrate: (sessionId: string, messages: StoredMessage[], agentId: string) => void;
   clearActive: () => void;
-  send: (agentName: string, content: string, sessionId: string, images?: string[]) => void;
+  send: (
+    agentName: string,
+    content: string,
+    sessionId: string,
+    images?: string[],
+    /** Composer's forum toggle: ask the agent to also pick up threads awaiting its reply. */
+    forumReplies?: boolean,
+  ) => void;
   /** Ask the backend to stop the in-flight run for the active session (the "stop" button). */
   stop: () => void;
   /** Send the operator's answer to a pending `ask_user`, unblocking the waiting agent run. */
@@ -1080,7 +1087,7 @@ export const useStream = create<StreamState>((set, get) => ({
       turnTraceStart: 0,
     }),
 
-  send: (agentName, content, sessionId, images) => {
+  send: (agentName, content, sessionId, images, forumReplies) => {
     get().wire();
     const history = turnsToHistory(get().turns);
     const imgs = images?.length ? images : undefined;
@@ -1120,6 +1127,7 @@ export const useStream = create<StreamState>((set, get) => ({
       sessionId,
       history,
       images: imgs?.map((dataUrl) => ({ dataUrl })),
+      forumReplies,
     });
   },
 

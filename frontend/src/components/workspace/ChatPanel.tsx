@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic } from 'lucide-react';
+import { SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
@@ -9,6 +9,7 @@ import { iconFor } from '../../lib/agentIcons';
 import { ScoreBadge } from '../ScoreBadge';
 import { MemoriesBadge } from '../MemoriesBadge';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
+import { usePersistentState } from '../../hooks/usePersistentState';
 import type { Agent } from '../../lib/api';
 
 /**
@@ -92,7 +93,7 @@ interface Props {
   onToggleDebugger: () => void;
   onOpenVisual: () => void;
   onOpenAndroid: () => void;
-  onSend: (text: string, images?: string[]) => void;
+  onSend: (text: string, images?: string[], forumReplies?: boolean) => void;
 }
 
 /**
@@ -252,6 +253,8 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
     () => localStorage.getItem(CONTINUE_KEY) || DEFAULT_CONTINUE,
   );
   const [autoContinue, setAutoContinue] = useState(false);
+  // Persisted: an operator who works through the forum wants the toggle to stay where they left it.
+  const [forumReplies, setForumReplies] = usePersistentState('forum:pickup', false);
   const [editingContinue, setEditingContinue] = useState(false);
   // Budget for consecutive auto-continues; reset on any manual send / toggle-off.
   const autoCountRef = useRef(0);
@@ -319,7 +322,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
     const text = input.trim();
     if (!agent || (!text && attachments.length === 0)) return;
     autoCountRef.current = 0; // a fresh manual message refreshes the auto budget
-    onSend(text, attachments.length ? attachments : undefined);
+    onSend(text, attachments.length ? attachments : undefined, forumReplies);
     setInput('');
     setAttachments([]);
   }
@@ -561,6 +564,27 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
                 }
               }}
             />
+            {/* Forum pickup. Off by default: "has anyone replied to me?" costs an extra query and is a
+                question the operator asks deliberately, unlike the topic pointers an agent holding the
+                `forum` tool gets on every turn regardless. */}
+            <button
+              onClick={() => setForumReplies((v) => !v)}
+              aria-pressed={forumReplies}
+              disabled={!hasSession}
+              title={
+                forumReplies
+                  ? 'Forum pickup on: the agent is also shown threads it took part in that someone has since replied to'
+                  : 'Forum pickup: also show the agent threads awaiting its reply'
+              }
+              className={[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-40',
+                forumReplies
+                  ? 'bg-accent/15 text-accent hover:bg-accent/25'
+                  : 'text-slate-600 hover:bg-white/[0.06] hover:text-slate-300',
+              ].join(' ')}
+            >
+              <MessageSquareText size={15} />
+            </button>
             {streaming ? (
               <button
                 onClick={stop}

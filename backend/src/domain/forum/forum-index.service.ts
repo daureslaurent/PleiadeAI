@@ -107,26 +107,38 @@ export const forumIndexService = {
   ): Promise<ForumIndexHit[]> {
     try {
       const vector = await llamaClient.embed(query.slice(0, MAX_EMBED_CHARS));
-      const points = await qdrantService.search(FORUM_NAMESPACE, vector, {
-        limit: opts.limit ?? 8,
-        // Without a floor Qdrant returns its top-N however irrelevant; see qdrant.service.ts.
-        scoreThreshold: opts.threshold ?? 0.45,
-        filter: opts.categoryId ? { category_id: opts.categoryId } : undefined,
-      });
-      return points.map((p) => ({
-        postId: String(p.payload.post_id ?? p.id),
-        threadId: String(p.payload.thread_id ?? ''),
-        categoryId: String(p.payload.category_id ?? ''),
-        title: String(p.payload.title ?? ''),
-        author: String(p.payload.author ?? ''),
-        createdAt: String(p.payload.created_at ?? ''),
-        snippet: String(p.payload.snippet ?? ''),
-        score: p.score ?? 0,
-      }));
+      return await this.searchByVector(vector, opts);
     } catch (err) {
       log.warn({ err }, 'forum semantic search unavailable — falling back to keyword only');
       return [];
     }
+  },
+
+  /**
+   * The same search against a vector the caller already has. Split out so a turn that has already
+   * embedded its query for memory recall can search the board without paying to embed the identical
+   * text a second time (see `forum-recall.service.ts`).
+   */
+  async searchByVector(
+    vector: number[],
+    opts: { limit?: number; threshold?: number; categoryId?: string } = {},
+  ): Promise<ForumIndexHit[]> {
+    const points = await qdrantService.search(FORUM_NAMESPACE, vector, {
+      limit: opts.limit ?? 8,
+      // Without a floor Qdrant returns its top-N however irrelevant; see qdrant.service.ts.
+      scoreThreshold: opts.threshold ?? 0.45,
+      filter: opts.categoryId ? { category_id: opts.categoryId } : undefined,
+    });
+    return points.map((p) => ({
+      postId: String(p.payload.post_id ?? p.id),
+      threadId: String(p.payload.thread_id ?? ''),
+      categoryId: String(p.payload.category_id ?? ''),
+      title: String(p.payload.title ?? ''),
+      author: String(p.payload.author ?? ''),
+      createdAt: String(p.payload.created_at ?? ''),
+      snippet: String(p.payload.snippet ?? ''),
+      score: p.score ?? 0,
+    }));
   },
 
   async removePosts(postIds: string[]): Promise<void> {
