@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { createLogger } from '../../config/logger';
 import { ForumPostModel } from './forum-post.model';
 import { ForumThreadModel } from './forum-thread.model';
@@ -36,10 +37,40 @@ export interface ForumPointer {
   lastPostAuthor?: string;
   /** Present for digest pointers: whether the thread itself is new, or just newly replied to. */
   opening?: boolean;
+  /** Files attached anywhere in the thread. A pointer that says "2 files" is worth opening. */
+  attachments?: number;
 }
 
 function clip(title: string): string {
   return title.length <= MAX_TITLE_CHARS ? title : `${title.slice(0, MAX_TITLE_CHARS)}…`;
+}
+
+/**
+ * Annotate pointers with how many files their threads carry — one aggregation for the whole block,
+ * costing ~4 tokens a line. Worth it: "this thread has the crash bundle attached" is exactly the
+ * kind of thing that decides whether a pointer is worth opening, and it is invisible from a title.
+ * Best-effort: a failure here degrades the pointer, it never fails the turn.
+ */
+async function withAttachmentCounts(pointers: ForumPointer[]): Promise<ForumPointer[]> {
+  const ids = pointers.map((p) => p.threadId).filter((id) => Types.ObjectId.isValid(id));
+  if (!ids.length) return pointers;
+  try {
+    const rows = await ForumPostModel.aggregate<{ _id: Types.ObjectId; n: number }>([
+      {
+        $match: {
+          thread_id: { $in: ids.map((id) => new Types.ObjectId(id)) },
+          deleted: false,
+          'attachments.0': { $exists: true },
+        },
+      },
+      { $group: { _id: '$thread_id', n: { $sum: { $size: '$attachments' } } } },
+    ]).exec();
+    const byThread = new Map(rows.map((r) => [String(r._id), r.n]));
+    return pointers.map((p) => (byThread.get(p.threadId) ? { ...p, attachments: byThread.get(p.threadId) } : p));
+  } catch (err) {
+    log.warn({ err }, 'attachment counts unavailable for forum pointers');
+    return pointers;
+  }
 }
 
 export const forumRecall = {
@@ -65,7 +96,7 @@ export const forumRecall = {
         out.push({ threadId: hit.threadId, title: clip(hit.title) });
         if (out.length >= limit) break;
       }
-      return out;
+      return withAttachmentCounts(out);
     } catch (err) {
       log.warn({ err }, 'forum pointers unavailable this turn');
       return [];
@@ -133,13 +164,15 @@ export const forumRecall = {
         .limit(limit)
         .exec();
 
-      return threads.map((t) => ({
-        threadId: String(t._id),
-        title: clip(t.title),
-        lastPostAuthor: t.last_post_author,
-        // A thread whose only post is the opening one is new since the watermark, not merely bumped.
-        opening: t.post_count <= 1,
-      }));
+      return withAttachmentCounts(
+        threads.map((t) => ({
+          threadId: String(t._id),
+          title: clip(t.title),
+          lastPostAuthor: t.last_post_author,
+          // A thread whose only post is the opening one is new since the watermark, not merely bumped.
+          opening: t.post_count <= 1,
+        })),
+      );
     } catch (err) {
       log.warn({ err }, 'forum digest unavailable this turn');
       return [];
@@ -156,6 +189,11 @@ export const forumRecall = {
  * every turn files "task completed successfully" a hundred times, and a board of that is one no
  * agent has any reason to read again.
  */
+/** ` · 2 files` — omitted entirely when a thread has none, so the common line stays as short as it was. */
+function files(p: ForumPointer): string {
+  return p.attachments ? ` · ${p.attachments} file${p.attachments === 1 ? '' : 's'}` : '';
+}
+
 export function buildForumBlock(
   related: ForumPointer[],
   replies: ForumPointer[],
@@ -170,7 +208,7 @@ export function buildForumBlock(
       '',
       'Threads on the shared agent forum that look related to this task. These are pointers, not',
       'content — call `forum` with `read_thread` to actually read one before relying on it:',
-      ...related.map((p) => `- \`${p.threadId}\` — ${p.title}`),
+      ...related.map((p) => `- \`${p.threadId}\` — ${p.title}${files(p)}`),
     );
   }
 
@@ -178,7 +216,7 @@ export function buildForumBlock(
     lines.push(
       '',
       'Someone has replied to a thread you took part in, and you have not answered:',
-      ...replies.map((p) => `- \`${p.threadId}\` — ${p.title} (last reply by ${p.lastPostAuthor})`),
+      ...replies.map((p) => `- \`${p.threadId}\` — ${p.title} (last reply by ${p.lastPostAuthor})${files(p)}`),
     );
   }
 
@@ -188,7 +226,7 @@ export function buildForumBlock(
       'New on the board since your last turn (you were not addressed — read only what bears on your goal):',
       ...digest.map(
         (p) =>
-          `- \`${p.threadId}\` — ${p.title} (${p.opening ? 'new thread' : 'new reply'} by ${p.lastPostAuthor})`,
+          `- \`${p.threadId}\` — ${p.title} (${p.opening ? 'new thread' : 'new reply'} by ${p.lastPostAuthor})${files(p)}`,
       ),
     );
   }

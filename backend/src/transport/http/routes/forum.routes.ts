@@ -1,14 +1,17 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { createLogger } from '../../../config/logger';
 import { forumCategoryRepository } from '../../../domain/forum/forum-category.repository';
 import { forumThreadRepository } from '../../../domain/forum/forum-thread.repository';
 import { forumPostRepository } from '../../../domain/forum/forum-post.repository';
+import { forumFileRepository } from '../../../domain/forum/forum-file.repository';
 import { forumService, ForumRuleError, type ForumSearchMode } from '../../../domain/forum/forum.service';
 import { OPERATOR_AUTHOR } from '../../../domain/forum/forum-author';
 import { FORUM_THREAD_STATUSES } from '../../../domain/forum/forum-thread.model';
 import type { ForumCategoryDoc } from '../../../domain/forum/forum-category.model';
 import type { ForumThreadDoc } from '../../../domain/forum/forum-thread.model';
 import type { ForumPostDoc } from '../../../domain/forum/forum-post.model';
+import type { ForumFileDoc } from '../../../domain/forum/forum-file.model';
 
 const log = createLogger('forum-route');
 
@@ -21,6 +24,33 @@ const log = createLogger('forum-route');
  * operator-only by construction: no agent-facing tool action reaches these handlers.
  */
 export const forumRouter = Router();
+
+/**
+ * Operator uploads to the file registry. Held in memory, then straight into GridFS. The ceiling is
+ * generous on purpose (spec §10): the board is a trusted single-operator fleet, and a rendered clip
+ * or a log bundle is the realistic payload.
+ */
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 * 1024 } });
+
+function shapeFile(doc: ForumFileDoc, refs?: number) {
+  return {
+    id: String(doc._id),
+    filename: doc.filename,
+    mime: doc.mime,
+    size: doc.size,
+    kind: doc.kind,
+    sha256: doc.sha256,
+    uploadedBy: doc.uploaded_by,
+    createdAt: doc.created_at,
+    ...(refs === undefined ? {} : { refCount: refs }),
+  };
+}
+
+/** Attachment ids off a request body, tolerant of a single string (a form-encoded client). */
+function attachmentIds(raw: unknown): string[] | undefined {
+  if (raw === undefined) return undefined;
+  return (Array.isArray(raw) ? raw : [raw]).map(String).filter(Boolean);
+}
 
 function shapeCategory(doc: ForumCategoryDoc) {
   return {
@@ -53,12 +83,13 @@ function shapeThread(doc: ForumThreadDoc) {
   };
 }
 
-function shapePost(doc: ForumPostDoc) {
+function shapePost(doc: ForumPostDoc, files: ForumFileDoc[] = []) {
   return {
     id: String(doc._id),
     threadId: String(doc.thread_id),
     author: doc.author,
     body: doc.body,
+    attachments: files.map((f) => shapeFile(f)),
     replyTo: doc.reply_to ? String(doc.reply_to) : null,
     editedAt: doc.edited_at,
     editedBy: doc.edited_by,
@@ -169,9 +200,13 @@ forumRouter.post('/threads', async (req, res) => {
       body,
       author: OPERATOR_AUTHOR,
       tags: Array.isArray(req.body?.tags) ? req.body.tags.map(String) : [],
+      attachments: attachmentIds(req.body?.attachments),
       byAgent: false,
     });
-    res.status(201).json({ ...shapeThread(thread), posts: [shapePost(post)] });
+    res.status(201).json({
+      ...shapeThread(thread),
+      posts: [shapePost(post, await forumFileRepository.findByIds(post.attachments ?? []))],
+    });
   } catch (err) {
     const status = ruleStatus(err);
     if (status === null) throw err;
@@ -197,9 +232,20 @@ forumRouter.get('/threads/:id', async (req, res) => {
   ]);
   void forumThreadRepository.incrementViews(req.params.id);
 
+  // Resolve every attached file for the page in one query rather than one per post.
+  const files = await forumFileRepository.findByIds(posts.flatMap((p) => p.attachments ?? []));
+  const fileById = new Map(files.map((f) => [String(f._id), f]));
+
   res.json({
     ...shapeThread(thread),
-    posts: posts.map(shapePost),
+    posts: posts.map((p) =>
+      shapePost(
+        p,
+        (p.attachments ?? [])
+          .map((id) => fileById.get(String(id)))
+          .filter((f): f is ForumFileDoc => Boolean(f)),
+      ),
+    ),
     total,
     offset,
     authorPostCounts: postCounts,
@@ -254,8 +300,9 @@ forumRouter.post('/threads/:id/posts', async (req, res) => {
       body,
       author: OPERATOR_AUTHOR,
       replyTo: typeof req.body?.replyTo === 'string' ? req.body.replyTo : null,
+      attachments: attachmentIds(req.body?.attachments),
     });
-    res.status(201).json(shapePost(post));
+    res.status(201).json(shapePost(post, await forumFileRepository.findByIds(post.attachments ?? [])));
   } catch (err) {
     const status = ruleStatus(err);
     if (status === null) throw err;
@@ -274,14 +321,150 @@ forumRouter.patch('/posts/:id', async (req, res) => {
     res.status(404).json({ error: 'post not found' });
     return;
   }
-  const updated = await forumService.editPost(post, body, OPERATOR_AUTHOR.display_name);
-  res.json(shapePost(updated ?? post));
+  try {
+    const updated = await forumService.editPost(
+      post,
+      body,
+      OPERATOR_AUTHOR.display_name,
+      attachmentIds(req.body?.attachments),
+    );
+    const shown = updated ?? post;
+    res.json(shapePost(shown, await forumFileRepository.findByIds(shown.attachments ?? [])));
+  } catch (err) {
+    const status = ruleStatus(err);
+    if (status === null) throw err;
+    res.status(status).json({ error: (err as Error).message });
+  }
 });
 
 forumRouter.delete('/posts/:id', async (req, res) => {
   const ok = await forumService.deletePost(req.params.id);
   if (!ok) {
     res.status(404).json({ error: 'post not found' });
+    return;
+  }
+  res.status(204).end();
+});
+
+// --- files (the registry, spec §10) ----------------------------------------
+
+/** The whole registry, newest first, with how many live posts reference each file. */
+forumRouter.get('/files', async (req, res) => {
+  const files = await forumFileRepository.list({
+    q: typeof req.query.q === 'string' ? req.query.q : undefined,
+    kind: typeof req.query.kind === 'string' && req.query.kind ? req.query.kind : undefined,
+    limit: Number(req.query.limit) || 200,
+  });
+  const refs = await forumFileRepository.usageCounts(files.map((f) => f._id));
+  res.json(files.map((f) => shapeFile(f, refs[String(f._id)] ?? 0)));
+});
+
+/** Where a file is used — the "what references this" panel, and what makes a delete safe to judge. */
+forumRouter.get('/files/:id/usage', async (req, res) => {
+  const file = await forumFileRepository.findById(req.params.id);
+  if (!file) {
+    res.status(404).json({ error: 'file not found' });
+    return;
+  }
+  res.json(await forumFileRepository.usage(req.params.id));
+});
+
+/** Operator upload. Deduped by content hash, so re-uploading the same bytes is free and idempotent. */
+forumRouter.post('/files', upload.single('file'), async (req, res) => {
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ error: 'a file is required (multipart field "file")' });
+    return;
+  }
+  const { file: stored, deduped } = await forumFileRepository.store({
+    bytes: file.buffer,
+    filename: file.originalname || 'file',
+    mime: file.mimetype || 'application/octet-stream',
+    uploadedBy: OPERATOR_AUTHOR,
+  });
+  log.info({ fileId: String(stored._id), filename: stored.filename, deduped }, 'forum file uploaded by operator');
+  res.status(201).json({ ...shapeFile(stored), deduped });
+});
+
+/**
+ * Stream a file's bytes. Range support is what makes an attached video usable — a player HEADs, then
+ * issues partial reads to seek; serving the whole clip for each of those makes scrubbing re-download
+ * it every time. Disposition follows the media type so a video plays rather than downloading, unless
+ * `?download=1` asks otherwise.
+ */
+const INLINE_MIME = /^(image|video|audio)\/|^(application\/pdf|text\/plain)$/;
+
+function parseRange(header: string | undefined, size: number): { start: number; end: number } | null {
+  if (!header || size <= 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return null;
+  const [, rawStart, rawEnd] = match;
+  // `bytes=-500` means the *last* 500 bytes — how a player reads a trailing mp4 index.
+  if (!rawStart) {
+    const length = Number(rawEnd);
+    if (!Number.isFinite(length) || length <= 0) return null;
+    return { start: Math.max(0, size - length), end: size - 1 };
+  }
+  const start = Number(rawStart);
+  const end = rawEnd ? Number(rawEnd) : size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) return null;
+  return { start, end: Math.min(end, size - 1) };
+}
+
+forumRouter.get('/files/:id/content', async (req, res) => {
+  const doc = await forumFileRepository.findById(req.params.id);
+  if (!doc) {
+    res.status(404).json({ error: 'file not found' });
+    return;
+  }
+  const mime = doc.mime || 'application/octet-stream';
+  const size = doc.size ?? 0;
+  const name = doc.filename.replace(/"/g, '');
+  const inline = req.query.download !== '1' && INLINE_MIME.test(mime);
+
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${name}"`);
+
+  if (req.method === 'HEAD') {
+    if (size) res.setHeader('Content-Length', String(size));
+    res.status(200).end();
+    return;
+  }
+
+  const range = parseRange(req.headers.range, size);
+  if (req.headers.range && !range && size > 0) {
+    res.setHeader('Content-Range', `bytes */${size}`);
+    res.status(416).end();
+    return;
+  }
+  if (range) {
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
+    res.setHeader('Content-Length', String(range.end - range.start + 1));
+    forumFileRepository.openDownloadRange(doc, range.start, range.end).pipe(res);
+    return;
+  }
+  if (size) res.setHeader('Content-Length', String(size));
+  forumFileRepository.openDownload(doc).pipe(res);
+});
+
+/** Soft-delete a file and detach it from every post — a chip that 404s is worse than a missing chip. */
+forumRouter.delete('/files/:id', async (req, res) => {
+  const ok = await forumFileRepository.remove(req.params.id);
+  if (!ok) {
+    res.status(404).json({ error: 'file not found' });
+    return;
+  }
+  log.info({ fileId: req.params.id }, 'forum file deleted by operator');
+  res.status(204).end();
+});
+
+/** Detach one file from one post, leaving it in the registry (the reversible half of the delete). */
+forumRouter.delete('/posts/:postId/attachments/:fileId', async (req, res) => {
+  const ok = await forumFileRepository.detach(req.params.postId, req.params.fileId);
+  if (!ok) {
+    res.status(404).json({ error: 'post or attachment not found' });
     return;
   }
   res.status(204).end();

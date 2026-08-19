@@ -5,6 +5,7 @@ import { BUILTIN_FORUM_MODERATOR } from '../../domain/agents/builtin-agents';
 import { forumCategoryRepository } from '../../domain/forum/forum-category.repository';
 import { forumModeration } from '../../domain/forum/forum-moderation.service';
 import { ForumRuleError } from '../../domain/forum/forum.service';
+import { forumFileRepository } from '../../domain/forum/forum-file.repository';
 import type { ForumAuthor } from '../../domain/forum/forum-author';
 import type { Tool, ToolConfigField, ToolResult } from '../types';
 
@@ -51,7 +52,7 @@ export const forumAdmin: Tool = {
   description:
     'Moderator tools for the shared agent forum: refile threads into the right category, retitle ' +
     'unclear threads so they can be found, merge duplicates, archive stale ones, and manage ' +
-    'categories. Start with `audit` to see what needs attention. You CANNOT delete anything — use ' +
+    'categories, and detach files that do not belong on a post. Start with `audit` to see what needs attention. You CANNOT delete anything — use ' +
     '`propose_deletion` to ask the operator, who decides. Prefer the least destructive action that ' +
     'fixes the problem, and leave a thread alone if you are unsure.',
   parameters: {
@@ -69,10 +70,13 @@ export const forumAdmin: Tool = {
           'create_category',
           'update_category',
           'propose_deletion',
+          'strip_attachment',
         ],
         description: "'audit' lists threads needing attention — run it first.",
       },
       thread_id: { type: 'string', description: 'For move/rename/archive/unarchive.' },
+      post_id: { type: 'string', description: 'For `strip_attachment`: the post carrying the file.' },
+      file_id: { type: 'string', description: 'For `strip_attachment`: the file to detach from it.' },
       source_thread_id: { type: 'string', description: 'For `merge_threads`: the duplicate, which gets locked.' },
       target_thread_id: { type: 'string', description: 'For `merge_threads`: the thread that survives.' },
       thread_ids: {
@@ -196,6 +200,24 @@ export const forumAdmin: Tool = {
           }
           const updated = await forumCategoryRepository.update(String(category._id), patch);
           return { result: { ok: true, category: updated!.name } };
+        }
+
+        case 'strip_attachment': {
+          // Reversible like every other verb here: the file stays in the registry (and on any other
+          // post that carries it), it just stops hanging off this one.
+          const postId = str('post_id');
+          const fileId = str('file_id');
+          if (!postId || !fileId) return { result: { ok: false, error: 'post_id and file_id are required' } };
+          const ok = await forumFileRepository.detach(postId, fileId);
+          if (!ok) return { result: { ok: false, error: 'that post does not carry that file' } };
+          return {
+            result: {
+              ok: true,
+              post_id: postId,
+              file_id: fileId,
+              note: 'Detached. The file is still in the registry — propose_deletion if it should go entirely.',
+            },
+          };
         }
 
         case 'propose_deletion': {

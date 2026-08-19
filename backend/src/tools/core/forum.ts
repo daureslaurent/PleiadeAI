@@ -1,11 +1,18 @@
+import { basename, extname } from 'path';
 import { createLogger } from '../../config/logger';
 import { toolConfigService } from '../../domain/tools/tool-config.service';
 import { forumCategoryRepository } from '../../domain/forum/forum-category.repository';
 import { forumThreadRepository } from '../../domain/forum/forum-thread.repository';
 import { forumPostRepository } from '../../domain/forum/forum-post.repository';
+import { forumFileRepository } from '../../domain/forum/forum-file.repository';
+import { resourceRepository } from '../../domain/resources/resource.repository';
 import { forumService, ForumRuleError, type ForumSearchMode } from '../../domain/forum/forum.service';
 import type { ForumAuthor } from '../../domain/forum/forum-author';
-import type { Tool, ToolConfigField, ToolResult } from '../types';
+import { FileOpError, IsolationBlockedError, readFileBytes } from './fs/env-fs';
+import { readResourceBytes } from './resource-bytes';
+import type { ImageBlock } from '../../core/event-bus/events.types';
+import type { ForumFileDoc } from '../../domain/forum/forum-file.model';
+import type { Tool, ToolConfigField, ToolContext, ToolResult } from '../types';
 
 const log = createLogger('tool:forum');
 
@@ -45,6 +52,20 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     hint: 'Minimum cosine similarity for a semantic hit. Below ~0.4 unrelated posts start matching.',
   },
   {
+    key: 'max_file_mb',
+    label: 'Max attachment size (MB)',
+    type: 'number',
+    default: 100,
+    hint: 'Per file. Permissive by default — the failure worth avoiding is an agent unable to share evidence.',
+  },
+  {
+    key: 'max_attachments_per_post',
+    label: 'Attachments per post',
+    type: 'number',
+    default: 10,
+    hint: 'Ceiling on how many files one post may carry.',
+  },
+  {
     key: 'duplicate_threshold',
     label: 'Duplicate-thread cutoff',
     type: 'number',
@@ -55,6 +76,139 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
 
 /** Hard ceiling on `read_thread`, independent of what the agent asks for. See the tool JSDoc. */
 const MAX_POSTS_PER_READ = 30;
+
+/** A 24-hex string is a registry file id; anything else is a handle or a path. */
+const OBJECT_ID = /^[0-9a-f]{24}$/i;
+/** A resource handle from this session's pool (`img_3`, `blob_1`). */
+const HANDLE = /^(?:img|blob)_\d+$/;
+
+/**
+ * Above this, `get_attachment` mints a *blob* handle for an image rather than an inline one. A 30 MB
+ * frame folded into a multimodal context is a turn nobody can afford; as a blob it is still writable
+ * to disk and forwardable, just not automatically looked at.
+ */
+const MAX_INLINE_IMAGE_BYTES = 6 * 1024 * 1024;
+
+const MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  svg: 'image/svg+xml', bmp: 'image/bmp',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
+  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', m4a: 'audio/mp4',
+  zip: 'application/zip', gz: 'application/gzip', tgz: 'application/gzip', tar: 'application/x-tar',
+  '7z': 'application/x-7z-compressed', rar: 'application/vnd.rar',
+  pdf: 'application/pdf', json: 'application/json', csv: 'text/csv', md: 'text/markdown',
+  txt: 'text/plain', log: 'text/plain', yaml: 'text/yaml', yml: 'text/yaml', html: 'text/html',
+  ts: 'text/plain', js: 'text/plain', py: 'text/plain', sh: 'text/plain', patch: 'text/x-diff',
+  diff: 'text/x-diff',
+};
+
+/** Best-effort MIME from a filename. Only affects how the UI previews it, never whether it stores. */
+function mimeFromName(name: string): string {
+  const ext = extname(name).replace('.', '').toLowerCase();
+  return MIME_BY_EXT[ext] ?? 'application/octet-stream';
+}
+
+/** The metadata shape an agent sees for a file — never bytes. `get_attachment` fetches those. */
+function shapeFile(f: ForumFileDoc) {
+  return {
+    file_id: String(f._id),
+    filename: f.filename,
+    mime: f.mime,
+    size: f.size,
+    kind: f.kind,
+    uploaded_by: f.uploaded_by.display_name,
+  };
+}
+
+/**
+ * Put one artifact into the registry, from whichever of the three sources the agent used.
+ *
+ * All three exist because each covers a class the others can't reach: a `handle` is anything already
+ * in the session's resource pool (a generated image, a fetched PDF), a `path` goes through
+ * `readFileBytes` and therefore through the agent's `AgentExecutor` — so a build artifact inside an
+ * isolation container or on the far side of an SSH profile uploads without ever touching the
+ * backend's disk — and `content` covers a file the agent just composed in its head.
+ */
+async function uploadOne(
+  ctx: ToolContext,
+  source: { handle?: string; path?: string; content?: string; filename?: string; mime?: string },
+  author: ForumAuthor,
+  maxBytes: number,
+): Promise<ForumFileDoc> {
+  let bytes: Buffer;
+  let filename = (source.filename ?? '').trim();
+  let mime = (source.mime ?? '').trim();
+
+  if (source.handle) {
+    const found = await readResourceBytes(ctx, source.handle);
+    if (!found) throw new ForumRuleError(`no resource with handle "${source.handle}" in this session`, 404);
+    bytes = found;
+    // The handle may name a *pooled* resource (an image the operator dropped into the chat) rather
+    // than a stored one; those never reach the resource store, so their type has to come off the
+    // pool's data URL. Without this an attached screenshot lands on the board as an unnamed
+    // octet-stream and renders as a download chip instead of a picture.
+    const stored = await resourceRepository.findByHandle(ctx.sessionId, source.handle);
+    const pooled = ctx.attachedImages?.find((i) => i.id === source.handle);
+    const pooledMime = pooled?.mime || /^data:([^;,]+)/.exec(pooled?.dataUrl ?? '')?.[1] || '';
+    mime = mime || stored?.mime || pooledMime || 'application/octet-stream';
+    const ext = Object.entries(MIME_BY_EXT).find(([, m]) => m === mime)?.[0];
+    filename = filename || stored?.filename || pooled?.filename || `${source.handle}${ext ? `.${ext}` : ''}`;
+  } else if (source.path) {
+    bytes = await readFileBytes(ctx, source.path);
+    filename = filename || basename(source.path) || 'file';
+    mime = mime || mimeFromName(filename);
+  } else if (source.content != null) {
+    bytes = Buffer.from(source.content, 'utf8');
+    filename = filename || 'note.txt';
+    mime = mime || mimeFromName(filename);
+  } else {
+    throw new ForumRuleError('upload_file needs one of: handle, path, content');
+  }
+
+  if (bytes.length > maxBytes) {
+    throw new ForumRuleError(
+      `"${filename}" is ${(bytes.length / 1e6).toFixed(1)} MB — over the ${(maxBytes / 1e6).toFixed(0)} MB limit`,
+      413,
+    );
+  }
+  const { file } = await forumFileRepository.store({ bytes, filename, mime, uploadedBy: author });
+  return file;
+}
+
+/**
+ * Turn the `attachments` argument of a post/reply into registry ids.
+ *
+ * Accepting registry ids *and* handles *and* paths in one array is what keeps the common case a
+ * single call: an agent that just rendered a chart says `attachments: ["img_1"]` rather than
+ * uploading first and threading an id through. Anything already in the registry is passed straight
+ * through, so `upload_file` → `reply` still works and costs nothing extra.
+ */
+async function resolveAttachmentArg(
+  ctx: ToolContext,
+  raw: unknown,
+  author: ForumAuthor,
+  limits: { maxBytes: number; maxCount: number },
+): Promise<ForumFileDoc[]> {
+  const specs = (Array.isArray(raw) ? raw : raw == null ? [] : [raw]).map((v) => String(v).trim()).filter(Boolean);
+  if (!specs.length) return [];
+  if (specs.length > limits.maxCount) {
+    throw new ForumRuleError(`too many attachments (${specs.length}); the limit is ${limits.maxCount}`);
+  }
+
+  const files: ForumFileDoc[] = [];
+  for (const spec of specs) {
+    if (OBJECT_ID.test(spec)) {
+      const existing = await forumFileRepository.findById(spec);
+      if (!existing) throw new ForumRuleError(`no such file in the registry: "${spec}"`, 404);
+      files.push(existing);
+    } else if (HANDLE.test(spec)) {
+      files.push(await uploadOne(ctx, { handle: spec }, author, limits.maxBytes));
+    } else {
+      files.push(await uploadOne(ctx, { path: spec }, author, limits.maxBytes));
+    }
+  }
+  return files;
+}
 
 /**
  * `forum` — the agents' shared board (spec `FORUM_PLAN.md` §5).
@@ -85,7 +239,9 @@ export const forum: Tool = {
     'Unlike your private memory, everything here is visible to every other agent and to the operator. ' +
     'ALWAYS `search` before you `post_thread` — the answer is often already on the board, and posting ' +
     'a duplicate is worse than not posting. Cite the thread id when you build on something you read. ' +
-    'Post findings that will still matter next week (causes, fixes, gotchas), not turn-by-turn chatter.',
+    'Post findings that will still matter next week (causes, fixes, gotchas), not turn-by-turn chatter. ' +
+    'Posts can carry files — attach the chart, the log bundle, the rendered clip rather than describing ' +
+    'it, and use `get_attachment` to pull a file another agent attached into your own session.',
   parameters: {
     type: 'object',
     properties: {
@@ -100,10 +256,14 @@ export const forum: Tool = {
           'reply',
           'edit_post',
           'create_category',
+          'upload_file',
+          'list_files',
+          'get_attachment',
         ],
         description:
           "'search' finds existing threads (do this first); 'read_thread' opens one; 'post_thread' " +
-          "starts a new topic; 'reply' adds to an existing one; 'edit_post' revises your own post.",
+          "starts a new topic; 'reply' adds to an existing one; 'edit_post' revises your own post; " +
+          "'get_attachment' downloads a file someone attached so you can actually use it.",
       },
       query: { type: 'string', description: 'For `search`: what you are looking for, in plain words.' },
       mode: {
@@ -134,7 +294,21 @@ export const forum: Tool = {
       },
       name: { type: 'string', description: 'For `create_category`.' },
       description: { type: 'string', description: 'For `create_category`: what belongs in it.' },
-      limit: { type: 'number', description: 'Page size for `search`/`list_threads`/`read_thread`.' },
+      attachments: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'For `post_thread`/`reply`/`edit_post`: files to attach. Each entry is a resource handle ' +
+          '(`img_1`, `blob_2`), a file path in your environment (`/work/out/report.zip`), or a ' +
+          'file_id already in the registry. Handles and paths are uploaded for you.',
+      },
+      handle: { type: 'string', description: 'For `upload_file`: a resource handle to upload (`img_1`).' },
+      path: { type: 'string', description: 'For `upload_file`: a file path in your environment.' },
+      content: { type: 'string', description: 'For `upload_file`: inline text to store as a file.' },
+      filename: { type: 'string', description: 'For `upload_file`: the name it appears under on the board.' },
+      mime: { type: 'string', description: 'For `upload_file`: MIME type, if the extension does not imply it.' },
+      file_id: { type: 'string', description: 'For `get_attachment`: the file to download into your session.' },
+      limit: { type: 'number', description: 'Page size for `search`/`list_threads`/`read_thread`/`list_files`.' },
       offset: { type: 'number', description: 'For `read_thread`: skip this many posts (paging).' },
     },
     required: ['action'],
@@ -148,6 +322,10 @@ export const forum: Tool = {
     const searchLimit = Number(config.search_limit) || 8;
     const semanticThreshold = Number(config.semantic_threshold) || 0.45;
     const duplicateThreshold = Number(config.duplicate_threshold) || 0.88;
+    const attachmentLimits = {
+      maxBytes: Math.max(1, Number(config.max_file_mb) || 100) * 1024 * 1024,
+      maxCount: Math.max(1, Number(config.max_attachments_per_post) || 10),
+    };
 
     /** Identity is taken from the run, never from `args` — an agent cannot post as someone else. */
     const author: ForumAuthor = {
@@ -243,6 +421,16 @@ export const forum: Tool = {
             forumPostRepository.listByThread(threadId, limit, offset),
             forumPostRepository.countByThread(threadId),
           ]);
+          // Metadata only — a thread can carry a gigabyte of build output, and none of it belongs in
+          // a context window until the agent decides it wants a specific file.
+          const filesByPost = new Map<string, ForumFileDoc[]>(
+            await Promise.all(
+              posts.map(async (p) => [
+                String(p._id),
+                p.attachments?.length ? await forumFileRepository.findByIds(p.attachments) : [],
+              ] as [string, ForumFileDoc[]]),
+            ),
+          );
           const remaining = Math.max(0, total - (offset + posts.length));
           return {
             result: {
@@ -260,10 +448,16 @@ export const forum: Tool = {
                 body: p.body,
                 in_reply_to: p.reply_to ? String(p.reply_to) : undefined,
                 edited: p.edited_at ? true : undefined,
+                attachments: filesByPost.get(String(p._id))?.length
+                  ? filesByPost.get(String(p._id))!.map(shapeFile)
+                  : undefined,
               })),
               // Explicit, so the model knows it is looking at a page and can ask for the next one.
               ...(remaining
                 ? { truncated: true, remaining, next_offset: offset + posts.length }
+                : {}),
+              ...([...filesByPost.values()].some((f) => f.length)
+                ? { hint: 'Use get_attachment with a file_id to pull one of these files into your session.' }
                 : {}),
             },
           };
@@ -300,17 +494,25 @@ export const forum: Tool = {
             }
           }
 
+          const files = await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
           const { thread, post } = await forumService.createThread({
             category,
             title,
             body,
             author,
             tags: Array.isArray(args.tags) ? args.tags.map(String) : [],
+            attachments: files.map((f) => String(f._id)),
             byAgent: true,
           });
           log.info({ agent: ctx.agentName, threadId: String(thread._id) }, 'agent opened a forum thread');
           return {
-            result: { ok: true, thread_id: String(thread._id), post_id: String(post._id), title: thread.title },
+            result: {
+              ok: true,
+              thread_id: String(thread._id),
+              post_id: String(post._id),
+              title: thread.title,
+              ...(files.length ? { attachments: files.map(shapeFile) } : {}),
+            },
           };
         }
 
@@ -319,14 +521,22 @@ export const forum: Tool = {
           const body = str('body');
           if (!threadId || !body) return { result: { ok: false, error: 'thread_id and body are required' } };
           const thread = await forumService.requireOpenThread(threadId);
+          const files = await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
           const post = await forumService.addPost({
             thread,
             body,
             author,
             replyTo: str('reply_to') || null,
+            attachments: files.map((f) => String(f._id)),
           });
           return {
-            result: { ok: true, post_id: String(post._id), thread_id: threadId, title: thread.title },
+            result: {
+              ok: true,
+              post_id: String(post._id),
+              thread_id: threadId,
+              title: thread.title,
+              ...(files.length ? { attachments: files.map(shapeFile) } : {}),
+            },
           };
         }
 
@@ -340,8 +550,15 @@ export const forum: Tool = {
           if (post.author.kind !== 'agent' || post.author.agent_id !== ctx.agentId) {
             return { result: { ok: false, error: 'you can only edit your own posts' } };
           }
-          await forumService.editPost(post, body, ctx.agentName);
-          return { result: { ok: true, post_id: postId } };
+          // Omitting `attachments` leaves the post's files alone; passing `[]` clears them.
+          const files =
+            args.attachments === undefined
+              ? undefined
+              : await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
+          await forumService.editPost(post, body, ctx.agentName, files?.map((f) => String(f._id)));
+          return {
+            result: { ok: true, post_id: postId, ...(files ? { attachments: files.map(shapeFile) } : {}) },
+          };
         }
 
         case 'create_category': {
@@ -365,12 +582,97 @@ export const forum: Tool = {
           return { result: { ok: true, category: created.name } };
         }
 
+        case 'upload_file': {
+          const file = await uploadOne(
+            ctx,
+            {
+              handle: str('handle') || undefined,
+              path: str('path') || undefined,
+              content: args.content != null ? String(args.content) : undefined,
+              filename: str('filename') || undefined,
+              mime: str('mime') || undefined,
+            },
+            author,
+            attachmentLimits.maxBytes,
+          );
+          log.info({ agent: ctx.agentName, fileId: String(file._id), filename: file.filename }, 'forum file uploaded');
+          return {
+            result: {
+              ok: true,
+              ...shapeFile(file),
+              hint: 'Pass this file_id (or the same handle/path) as `attachments` on a post or reply.',
+            },
+          };
+        }
+
+        case 'list_files': {
+          const files = await forumFileRepository.list({
+            q: str('query') || undefined,
+            limit: Number(args.limit) || 25,
+          });
+          return { result: { ok: true, count: files.length, files: files.map(shapeFile) } };
+        }
+
+        case 'get_attachment': {
+          const fileId = str('file_id');
+          const file = await forumFileRepository.findById(fileId);
+          if (!file) return { result: { ok: false, error: `no such file: "${fileId}"` } };
+          const bytes = await forumFileRepository.readBytes(fileId);
+          if (!bytes) return { result: { ok: false, error: `file "${fileId}" has no stored bytes` } };
+
+          // Copy it into *this* session's resource pool. That is the whole point of the action: from
+          // here on it is an ordinary handle, so `analyze_image`, `write from_handle` and `bash` on
+          // the written file all work on a teammate's artifact with no forum-specific plumbing.
+          const inlineImage = file.kind === 'image' && bytes.length <= MAX_INLINE_IMAGE_BYTES;
+          const stored = await resourceRepository.store({
+            sessionId: ctx.sessionId,
+            agentId: ctx.agentId,
+            bytes,
+            kind: inlineImage ? 'image' : 'blob',
+            mime: file.mime,
+            filename: file.filename,
+            source: 'tool',
+          });
+          const block: ImageBlock = {
+            id: stored.handle,
+            kind: inlineImage ? 'image' : 'blob',
+            mime: file.mime,
+            size: bytes.length,
+            filename: file.filename,
+            storageId: String(stored.gridfs_id),
+            source: 'tool',
+            ...(inlineImage ? { dataUrl: `data:${file.mime};base64,${bytes.toString('base64')}` } : {}),
+          };
+          log.info(
+            { agent: ctx.agentName, fileId, handle: stored.handle, size: bytes.length },
+            'forum attachment pulled into session',
+          );
+          return {
+            result: {
+              ok: true,
+              handle: stored.handle,
+              filename: file.filename,
+              mime: file.mime,
+              size: bytes.length,
+              kind: inlineImage ? 'image' : 'blob',
+              hint: inlineImage
+                ? `Use analyze_image with image_id="${stored.handle}" to look at it, or write from_handle to save it.`
+                : `Use write with from_handle="${stored.handle}" to save it to a file.`,
+            },
+            ...(inlineImage ? { images: [block] } : { resources: [block] }),
+          };
+        }
+
         default:
           return { result: { ok: false, error: `unknown action: "${action}"` } };
       }
     } catch (err) {
-      // Rule violations are the agent's problem to route around, so they come back as results.
+      // Rule violations are the agent's problem to route around, so they come back as results — as
+      // is a file it asked to upload that isn't there, or an isolation container that isn't ready.
       if (err instanceof ForumRuleError) return { result: { ok: false, error: err.message } };
+      if (err instanceof FileOpError || err instanceof IsolationBlockedError) {
+        return { result: { ok: false, error: (err as Error).message } };
+      }
       throw err;
     }
   },

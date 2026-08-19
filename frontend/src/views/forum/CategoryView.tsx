@@ -155,13 +155,18 @@ function NewThreadForm({
         placeholder="Write the opening post…"
         submitLabel="Post thread"
         onCancel={onCancel}
-        onSubmit={async (body) => {
+        onSubmit={async (body, attachments) => {
           if (!title.trim()) {
             setErr('A title is required.');
             return;
           }
           try {
-            const thread = await forumApi.createThread({ category: categoryId, title: title.trim(), body });
+            const thread = await forumApi.createThread({
+              category: categoryId,
+              title: title.trim(),
+              body,
+              attachments,
+            });
             onCreated(thread.id);
           } catch (e) {
             setErr((e as { response?: { data?: { error?: string } } }).response?.data?.error ?? 'Could not post it.');

@@ -4,11 +4,13 @@ import { eventBus } from '../../core/event-bus/EventBus';
 import { forumCategoryRepository } from './forum-category.repository';
 import { forumThreadRepository } from './forum-thread.repository';
 import { forumPostRepository } from './forum-post.repository';
+import { forumFileRepository } from './forum-file.repository';
 import { forumIndexService, snippetOf } from './forum-index.service';
 import type { ForumAuthor } from './forum-author';
 import type { ForumCategoryDoc } from './forum-category.model';
 import type { ForumThreadDoc } from './forum-thread.model';
 import type { ForumPostDoc } from './forum-post.model';
+import type { ForumFileDoc } from './forum-file.model';
 
 const log = createLogger('forum');
 
@@ -76,6 +78,30 @@ function titleSimilarity(a: string, b: string): number {
   return shared / (ta.size + tb.size - shared);
 }
 
+/**
+ * Resolve attachment ids into live registry files, refusing the whole post if any of them is bogus.
+ *
+ * Strict on purpose: a post that silently dropped the file it was written to explain is worse than a
+ * failed call the agent can retry, and the author is the only party who still knows what the missing
+ * id was meant to be.
+ */
+async function resolveAttachments(ids: string[] | undefined): Promise<ForumFileDoc[]> {
+  const wanted = (ids ?? []).map((id) => String(id).trim()).filter(Boolean);
+  if (!wanted.length) return [];
+  const files = await forumFileRepository.findByIds(wanted);
+  if (files.length !== wanted.length) {
+    const found = new Set(files.map((f) => String(f._id)));
+    const missing = wanted.filter((id) => !found.has(id));
+    throw new ForumRuleError(`unknown attachment id(s): ${missing.join(', ')}`, 404);
+  }
+  return files;
+}
+
+/** The text fed to both indexes for a post's files. Names only — bytes never enter search. */
+function attachmentNames(files: ForumFileDoc[]): string {
+  return files.map((f) => f.filename).join(' ');
+}
+
 export const forumService = {
   /**
    * Resolve a category and assert it can be posted into. `byAgent` applies the two operator switches
@@ -110,6 +136,7 @@ export const forumService = {
     body: string;
     author: ForumAuthor;
     tags?: string[];
+    attachments?: string[];
     byAgent: boolean;
   }): Promise<{ thread: ForumThreadDoc; post: ForumPostDoc }> {
     const category = await this.requirePostableCategory(input.category, input.byAgent);
@@ -123,6 +150,7 @@ export const forumService = {
       thread,
       body: input.body,
       author: input.author,
+      attachments: input.attachments,
       opening: true,
     });
     log.info({ threadId: String(thread._id), author: input.author.display_name }, 'forum thread created');
@@ -139,14 +167,18 @@ export const forumService = {
     body: string;
     author: ForumAuthor;
     replyTo?: string | null;
+    attachments?: string[];
     opening?: boolean;
   }): Promise<ForumPostDoc> {
+    const files = await resolveAttachments(input.attachments);
     const post = await forumPostRepository.create({
       thread_id: input.thread._id,
       category_id: input.thread.category_id,
       author: input.author,
       body: input.body,
       reply_to: input.replyTo ?? null,
+      attachments: files.map((f) => f._id),
+      attachment_names: attachmentNames(files),
     });
     await forumThreadRepository.registerPost(input.thread._id, input.author.display_name, post.created_at);
 
@@ -158,6 +190,7 @@ export const forumService = {
       author: input.author.display_name,
       authorKind: input.author.kind,
       snippet: snippetOf(input.body, 160),
+      attachmentCount: files.length,
       opening: Boolean(input.opening),
       createdAt: post.created_at.toISOString(),
     });
@@ -168,7 +201,9 @@ export const forumService = {
       categoryId: String(input.thread.category_id),
       title: input.thread.title,
       author: input.author.display_name,
-      body: input.body,
+      // Filenames ride along in the embedded text: an agent searching "the crash log Scout posted"
+      // should find the post that carries it, not just the one that spells the name out in prose.
+      body: files.length ? `${input.body}\n\nAttachments: ${attachmentNames(files)}` : input.body,
       createdAt: post.created_at,
     });
 
@@ -176,11 +211,21 @@ export const forumService = {
   },
 
   /** Edit a body in place, re-indexing so semantic search doesn't keep serving the old text. */
-  async editPost(post: ForumPostDoc, body: string, editor: string): Promise<ForumPostDoc | null> {
+  async editPost(
+    post: ForumPostDoc,
+    body: string,
+    editor: string,
+    attachments?: string[],
+  ): Promise<ForumPostDoc | null> {
+    // `undefined` leaves the existing files alone; an explicit array (even empty) replaces them.
+    const files = attachments === undefined ? null : await resolveAttachments(attachments);
     const updated = await forumPostRepository.update(String(post._id), {
       body,
       edited_at: new Date(),
       edited_by: editor,
+      ...(files
+        ? { attachments: files.map((f) => f._id), attachment_names: attachmentNames(files) }
+        : {}),
     });
     const thread = await forumThreadRepository.findById(String(post.thread_id));
     if (updated && thread) {
@@ -190,7 +235,7 @@ export const forumService = {
         categoryId: String(thread.category_id),
         title: thread.title,
         author: updated.author.display_name,
-        body,
+        body: updated.attachment_names ? `${body}\n\nAttachments: ${updated.attachment_names}` : body,
         createdAt: updated.created_at,
       });
     }

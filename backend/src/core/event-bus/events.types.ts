@@ -632,6 +632,8 @@ export interface ForumPostCreatedPayload {
   author: string;
   authorKind: 'agent' | 'operator';
   snippet: string;
+  /** How many registry files the post carries, so a listing can show a paperclip without refetching. */
+  attachmentCount?: number;
   /** True when this post opened the thread, so a listener can distinguish "new thread" from "reply". */
   opening: boolean;
   createdAt: string;

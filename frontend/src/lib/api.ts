@@ -2540,11 +2540,37 @@ export interface ForumThread {
   createdAt: string;
 }
 
+/** A file in the board's registry (`FORUM_PLAN.md` §10). Bytes are fetched by id, never inlined. */
+export interface ForumFile {
+  id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  kind: 'image' | 'video' | 'audio' | 'archive' | 'document' | 'other';
+  sha256: string;
+  uploadedBy: ForumAuthor;
+  createdAt: string;
+  /** Live posts referencing it. Present on the Files page listing; absent on a post's own chips. */
+  refCount?: number;
+  /** Set on upload when the bytes were already in the registry, so the UI can say "reused". */
+  deduped?: boolean;
+}
+
+/** Where a registry file is referenced — the Files page's "used by" panel. */
+export interface ForumFileUsage {
+  postId: string;
+  threadId: string;
+  threadTitle: string;
+  author: string;
+  createdAt: string;
+}
+
 export interface ForumPost {
   id: string;
   threadId: string;
   author: ForumAuthor;
   body: string;
+  attachments: ForumFile[];
   replyTo: string | null;
   editedAt: string | null;
   editedBy: string;
@@ -2583,7 +2609,7 @@ export const forumApi = {
 
   threads: (categoryId?: string, limit = 50) =>
     api.get<ForumThread[]>('/forum/threads', { params: { category: categoryId, limit } }).then((r) => r.data),
-  createThread: (body: { category: string; title: string; body: string; tags?: string[] }) =>
+  createThread: (body: { category: string; title: string; body: string; tags?: string[]; attachments?: string[] }) =>
     api.post<ForumThread & { posts: ForumPost[] }>('/forum/threads', body).then((r) => r.data),
   thread: (id: string, limit = 50, offset = 0) =>
     api.get<ForumThreadDetail>(`/forum/threads/${id}`, { params: { limit, offset } }).then((r) => r.data),
@@ -2593,11 +2619,46 @@ export const forumApi = {
   ) => api.patch<ForumThread>(`/forum/threads/${id}`, patch).then((r) => r.data),
   removeThread: (id: string) => api.delete(`/forum/threads/${id}`).then((r) => r.data),
 
-  reply: (threadId: string, body: string, replyTo?: string | null) =>
-    api.post<ForumPost>(`/forum/threads/${threadId}/posts`, { body, replyTo }).then((r) => r.data),
-  savePost: (id: string, body: string) => api.patch<ForumPost>(`/forum/posts/${id}`, { body }).then((r) => r.data),
+  reply: (threadId: string, body: string, replyTo?: string | null, attachments?: string[]) =>
+    api.post<ForumPost>(`/forum/threads/${threadId}/posts`, { body, replyTo, attachments }).then((r) => r.data),
+  savePost: (id: string, body: string, attachments?: string[]) =>
+    api.patch<ForumPost>(`/forum/posts/${id}`, { body, attachments }).then((r) => r.data),
   removePost: (id: string) => api.delete(`/forum/posts/${id}`).then((r) => r.data),
 
   search: (q: string, mode: 'keyword' | 'semantic' | 'both' = 'both', category?: string) =>
     api.get<ForumSearchHit[]>('/forum/search', { params: { q, mode, category } }).then((r) => r.data),
+
+  // --- the file registry ---------------------------------------------------
+
+  files: (params: { q?: string; kind?: string; limit?: number } = {}) =>
+    api.get<ForumFile[]>('/forum/files', { params }).then((r) => r.data),
+  fileUsage: (id: string) => api.get<ForumFileUsage[]>(`/forum/files/${id}/usage`).then((r) => r.data),
+  removeFile: (id: string) => api.delete(`/forum/files/${id}`).then((r) => r.data),
+  /** Detach a file from one post, leaving it in the registry — the reversible half of a delete. */
+  detachFile: (postId: string, fileId: string) =>
+    api.delete(`/forum/posts/${postId}/attachments/${fileId}`).then((r) => r.data),
+
+  async uploadFile(file: File, onProgress?: (percent: number) => void): Promise<ForumFile> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post<ForumFile>('/forum/files', form, {
+      onUploadProgress: (e) =>
+        onProgress?.(e.total ? Math.round((e.loaded / e.total) * 100) : 0),
+    });
+    return data;
+  },
+
+  /**
+   * Direct URL for an `<img>`/`<video>`/download link. Those fetch their own bytes and can't carry an
+   * Authorization header, so the token rides as a query param — the forum router accepts it, exactly
+   * as the resources router does for session media.
+   */
+  fileUrl(id: string, download = false): string {
+    const token = localStorage.getItem('pleiades_token') ?? '';
+    const q = new URLSearchParams();
+    if (token) q.set('token', token);
+    if (download) q.set('download', '1');
+    const query = q.toString();
+    return `${API_BASE}/api/forum/files/${id}/content${query ? `?${query}` : ''}`;
+  },
 };

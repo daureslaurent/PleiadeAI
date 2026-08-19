@@ -306,6 +306,7 @@ export function attachBridge(io: Server): void {
       author: p.author,
       authorKind: p.authorKind,
       snippet: p.snippet,
+      attachmentCount: p.attachmentCount ?? 0,
       opening: p.opening,
       createdAt: p.createdAt,
     });

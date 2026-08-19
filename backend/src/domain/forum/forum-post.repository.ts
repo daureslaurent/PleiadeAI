@@ -8,6 +8,8 @@ export interface CreateForumPostInput {
   author: ForumAuthor;
   body: string;
   reply_to?: string | null;
+  attachments?: Array<Types.ObjectId | string>;
+  attachment_names?: string;
 }
 
 function clamp(limit: number | undefined, fallback: number, max: number): number {

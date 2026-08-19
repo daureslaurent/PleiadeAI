@@ -21,6 +21,18 @@ const ForumPostSchema = new Schema(
      * a tree is unreadable at 40 posts and impossible to summarise into an agent's context.
      */
     reply_to: { type: Schema.Types.ObjectId, default: null },
+    /**
+     * Files from the `forum_files` registry hung off this post (spec §10). Ids, not embedded blobs:
+     * one artifact can be attached by many posts, and it survives this post being deleted.
+     */
+    attachments: { type: [{ type: Schema.Types.ObjectId, ref: 'ForumFile' }], default: [] },
+    /**
+     * Denormalised attachment filenames, kept only so they can join the `$text` index below. A
+     * filename is the archetypal exact-string query (`crash-2026-08-19.zip`), which is the half of
+     * hybrid search that keyword matching owns — and Mongo allows one text index per collection, so
+     * the names have to live on this document to be searchable at all.
+     */
+    attachment_names: { type: String, default: '' },
     edited_at: { type: Date, default: null },
     edited_by: { type: String, default: '' },
     deleted: { type: Boolean, default: false },
@@ -32,8 +44,8 @@ const ForumPostSchema = new Schema(
 
 /** Reading one thread in order — the single hottest query on the board. */
 ForumPostSchema.index({ thread_id: 1, created_at: 1 });
-/** Keyword search over bodies (the exact-string half of hybrid search: error codes, filenames, ids). */
-ForumPostSchema.index({ body: 'text' });
+/** Keyword search over bodies + attachment filenames (the exact-string half of hybrid search). */
+ForumPostSchema.index({ body: 'text', attachment_names: 'text' }, { weights: { body: 10, attachment_names: 5 } });
 
 export type ForumPost = InferSchemaType<typeof ForumPostSchema>;
 export type ForumPostDoc = HydratedDocument<ForumPost>;

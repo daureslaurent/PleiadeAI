@@ -146,7 +146,9 @@ async function main(): Promise<void> {
   app.use('/api/media', allowQueryToken, requireAuth, mediaRouter);
   // Same reason as the two above: the run panel previews a flow's artifacts with bare media elements.
   app.use('/api/flows', allowQueryToken, requireAuth, flowsRouter);
-  app.use('/api/forum', requireAuth, forumRouter);
+  // `allowQueryToken` for the same reason as resources: an <img>/<video> pointing at an attachment
+  // can't carry an Authorization header, so the token rides in the query string on this router.
+  app.use('/api/forum', allowQueryToken, requireAuth, forumRouter);
   // The live media flux carries its own signed, flow-scoped token in the URL (STREAMING_PLAN.md §3),
   // so its router is mounted openly ahead of the authed one — the same shape as the OAuth callback
   // below. Everything else about streams stays header-authenticated.

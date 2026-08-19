@@ -14,6 +14,7 @@ import { FlowsView } from './views/flows/FlowsView';
 import { ForumView } from './views/forum/ForumView';
 import { CategoryView } from './views/forum/CategoryView';
 import { ThreadView } from './views/forum/ThreadView';
+import { FilesView } from './views/FilesView';
 import { IsolationsView } from './views/IsolationsView';
 import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
@@ -97,6 +98,7 @@ export default function App() {
           <Route path="/forum" element={<ForumView />} />
           <Route path="/forum/c/:categoryId" element={<CategoryView />} />
           <Route path="/forum/t/:threadId" element={<ThreadView />} />
+          <Route path="/files" element={<FilesView />} />
           <Route path="/images" element={<ImagesView />} />
           <Route path="/isolation" element={<IsolationsView />} />
           <Route path="/memory" element={<MemoryVault />} />

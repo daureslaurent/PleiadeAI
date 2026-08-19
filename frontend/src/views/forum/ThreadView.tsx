@@ -12,11 +12,11 @@ import {
   Pin,
   Trash2,
 } from 'lucide-react';
-import { forumApi, type ForumPost, type ForumThreadDetail } from '../../lib/api';
+import { forumApi, type ForumFile, type ForumPost, type ForumThreadDetail } from '../../lib/api';
 import { useForum } from '../../store/forum';
 import { Markdown } from '../../components/Markdown';
 import { Button, Callout, Chip, Spinner, StatusBadge, useConfirm } from '../../components/ui';
-import { ago, AuthorAvatar, AuthorName, Composer, isModerator } from './forumBits';
+import { ago, AttachmentList, AuthorAvatar, AuthorName, Composer, isModerator } from './forumBits';
 
 const PAGE_SIZE = 50;
 
@@ -158,9 +158,13 @@ export function ThreadView() {
               editing={editing?.id === post.id}
               onEdit={() => setEditing(post)}
               onCancelEdit={() => setEditing(null)}
-              onSaved={async (body) => {
-                await forumApi.savePost(post.id, body);
+              onSaved={async (body, attachments) => {
+                await forumApi.savePost(post.id, body, attachments);
                 setEditing(null);
+                await load();
+              }}
+              onDetach={async (file) => {
+                await forumApi.detachFile(post.id, file.id);
                 await load();
               }}
               onReply={() => setReplyTo(post)}
@@ -207,8 +211,8 @@ export function ThreadView() {
             <Composer
               placeholder="Write a reply…"
               submitLabel="Reply"
-              onSubmit={async (body) => {
-                await forumApi.reply(threadId, body, replyTo?.id ?? null);
+              onSubmit={async (body, attachments) => {
+                await forumApi.reply(threadId, body, replyTo?.id ?? null, attachments);
                 setReplyTo(null);
                 // Jump to the last page so the operator sees what they just wrote.
                 const nextOffset = Math.floor(detail.total / PAGE_SIZE) * PAGE_SIZE;
@@ -234,6 +238,7 @@ function PostCard({
   onEdit,
   onCancelEdit,
   onSaved,
+  onDetach,
   onReply,
   onResolve,
   onDelete,
@@ -247,7 +252,8 @@ function PostCard({
   editing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
-  onSaved: (body: string) => Promise<void>;
+  onSaved: (body: string, attachments: string[]) => Promise<void>;
+  onDetach: (file: ForumFile) => Promise<void>;
   onReply: () => void;
   onResolve: () => void;
   onDelete: () => Promise<void>;
@@ -318,6 +324,7 @@ function PostCard({
               placeholder="Edit the post…"
               submitLabel="Save"
               initial={post.body}
+              initialFiles={post.attachments ?? []}
               autoFocus
               onCancel={onCancelEdit}
               onSubmit={onSaved}
@@ -325,6 +332,7 @@ function PostCard({
           ) : (
             <div className="text-sm leading-relaxed text-slate-200">
               <Markdown>{post.body}</Markdown>
+              <AttachmentList files={post.attachments ?? []} onDetach={(f) => void onDetach(f)} />
             </div>
           )}
         </div>
