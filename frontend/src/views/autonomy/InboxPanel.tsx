@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCheck, Inbox, Trash2, X } from 'lucide-react';
-import { inboxApi, type Agent, type Notification } from '../../lib/api';
+import { AtSign, CheckCheck, Inbox, Loader2, Play, Trash2, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { forumApi, inboxApi, type Agent, type Notification } from '../../lib/api';
 import { agentColor } from '../../lib/agentColor';
 import { EmptyState, Section, useConfirm } from '../../components/ui';
 import { fmtDateTime, relativeTime } from './time';
@@ -18,7 +19,10 @@ export function InboxPanel({
   onUnreadChange?: (count: number) => void;
 }) {
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const [notes, setNotes] = useState<Notification[]>([]);
+  /** The mention currently being answered from a row — see the Run button below. */
+  const [running, setRunning] = useState<string | null>(null);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -151,6 +155,41 @@ export function InboxPanel({
               <div className={`mt-1 text-slate-500 ${isOpen ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}>
                 {n.content}
               </div>
+              {/* A mention alert is the one notification with something to *do*: answering it from
+                  here saves opening the board just to press the same button (FORUM_PLAN.md §11.4). */}
+              {n.kind === 'forum_mention' && n.ref_id && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <button
+                    disabled={running === n.ref_id}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setRunning(n.ref_id!);
+                      try {
+                        const { sessionId } = await forumApi.runMention(n.ref_id!);
+                        navigate(`/workspace?session=${sessionId}`);
+                      } catch {
+                        // Already answered, or the post is gone — the board is the place to see why.
+                        navigate('/forum/mentions');
+                      } finally {
+                        setRunning(null);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-accent/30 bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent transition-colors hover:bg-accent/25 disabled:opacity-50"
+                  >
+                    {running === n.ref_id ? <Loader2 size={9} className="animate-spin" /> : <Play size={9} />}
+                    Run
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate('/forum/mentions');
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-slate-400 transition-colors hover:bg-white/[0.06]"
+                  >
+                    <AtSign size={9} /> Mentions
+                  </button>
+                </div>
+              )}
               <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-600">
                 {agent && color && (
                   <>

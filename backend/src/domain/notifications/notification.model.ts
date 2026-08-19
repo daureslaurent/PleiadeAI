@@ -12,6 +12,14 @@ const NotificationSchema = new Schema(
     title: { type: String, required: true },
     content: { type: String, required: true },
     status: { type: String, enum: ['unread', 'read'], default: 'unread', index: true },
+    /**
+     * What this notification is *about*, when it is about a specific object the UI can act on.
+     * `''` — an ordinary text alert (a finished headless task), which is all this collection carried
+     * before. `forum_mention` — somebody was @-mentioned (`FORUM_PLAN.md` §11.4), and `ref_id` is the
+     * `forum_mentions` row, so the inbox row can offer Run without the operator opening the board.
+     */
+    kind: { type: String, default: '' },
+    ref_id: { type: String, default: '' },
     created_at: { type: Date, default: () => new Date() },
   },
   { collection: 'notifications' },

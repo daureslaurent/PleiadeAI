@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench, Blocks } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
 import { useAuth } from '../store/auth';
+import { useForum } from '../store/forum';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { hostApi, inboxApi } from '../lib/api';
 import { APP_VERSION } from '../version';
@@ -89,6 +90,14 @@ export function Sidebar() {
     };
   }, []);
 
+  // Open @-mentions badge on the Forum item (FORUM_PLAN.md §11.4). The store keeps this live off the
+  // socket, so an agent paging somebody mid-session shows up here without the Forum page being open.
+  const pendingMentions = useForum((st) => st.pendingMentions);
+  const wireForum = useForum((st) => st.wire);
+  useEffect(() => {
+    wireForum();
+  }, [wireForum]);
+
   // Unread notifications badge on the Autonomy item — completed headless tasks land in the inbox
   // whether or not the page is open, so surface the count from the nav.
   const [inboxUnread, setInboxUnread] = useState(0);
@@ -142,6 +151,7 @@ export function Sidebar() {
       {({ isActive }) => {
         const showPin = to === '/settings' && updateCount > 0;
         const showInbox = to === '/autonomy' && inboxUnread > 0;
+        const showMentions = to === '/forum' && pendingMentions > 0;
         return (
           <>
             {/* 2px inset accent rail on the active item (DIRECT_ART §7 nav treatment). */}
@@ -161,6 +171,9 @@ export function Sidebar() {
               {showInbox && collapsed && (
                 <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-[#161b22]" />
               )}
+              {showMentions && collapsed && (
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#161b22]" />
+              )}
             </span>
             {!collapsed && <span className="truncate">{label}</span>}
             {showPin && !collapsed && (
@@ -177,6 +190,14 @@ export function Sidebar() {
                 className="ml-auto rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent"
               >
                 {inboxUnread}
+              </span>
+            )}
+            {showMentions && !collapsed && (
+              <span
+                title={`${pendingMentions} mention${pendingMentions === 1 ? '' : 's'} waiting on an answer`}
+                className="ml-auto rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400"
+              >
+                {pendingMentions}
               </span>
             )}
           </>

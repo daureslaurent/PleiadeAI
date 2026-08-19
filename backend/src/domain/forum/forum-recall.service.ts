@@ -3,6 +3,7 @@ import { createLogger } from '../../config/logger';
 import { ForumPostModel } from './forum-post.model';
 import { ForumThreadModel } from './forum-thread.model';
 import { forumIndexService } from './forum-index.service';
+import { ForumMentionModel } from './forum-mention.model';
 
 const log = createLogger('forum-recall');
 
@@ -33,6 +34,8 @@ const MAX_TITLE_CHARS = 90;
 export interface ForumPointer {
   threadId: string;
   title: string;
+  /** Present for mention pointers: who addressed the agent by name. */
+  mentionedBy?: string;
   /** Present for reply pointers: who posted the reply the agent hasn't seen. */
   lastPostAuthor?: string;
   /** Present for digest pointers: whether the thread itself is new, or just newly replied to. */
@@ -142,6 +145,44 @@ export const forumRecall = {
   },
 
   /**
+   * Threads where somebody addressed this agent by name and it hasn't answered (spec §11.2).
+   *
+   * This is the half of a mention that reaches the *agent*. The operator's alert legs fire the
+   * instant the mention lands, but an agent doesn't poll and an unread row in a collection is
+   * invisible to a model — so the pending mentions ride into its next turn as pointers, worded as
+   * the direct address they are.
+   *
+   * Reading the row is not answering it: `status` only flips when the operator runs the mention, so
+   * an agent that happens to run first is reminded rather than silently absolved.
+   */
+  async mentions(agentId: string, limit = MAX_POINTERS): Promise<ForumPointer[]> {
+    if (!agentId) return [];
+    try {
+      const rows = await ForumMentionModel.find({
+        'target.agent_id': agentId,
+        status: 'pending',
+      })
+        .sort({ created_at: -1 })
+        .limit(limit)
+        .exec();
+
+      // One pointer per thread: being named three times in one thread is still one thing to answer.
+      const seen = new Set<string>();
+      const out: ForumPointer[] = [];
+      for (const row of rows) {
+        const threadId = String(row.thread_id);
+        if (seen.has(threadId)) continue;
+        seen.add(threadId);
+        out.push({ threadId, title: clip(row.thread_title), mentionedBy: row.author.display_name });
+      }
+      return out;
+    } catch (err) {
+      log.warn({ err, agentId }, 'forum mention pointers unavailable this turn');
+      return [];
+    }
+  },
+
+  /**
    * What has happened on the board *since a moment in time* — for the auto-loop agent
    * (`AUTO_AGENT_PLAN.md` §4), which wakes up every few minutes and would otherwise have no way to
    * notice work it was never directly addressed in.
@@ -198,10 +239,20 @@ export function buildForumBlock(
   related: ForumPointer[],
   replies: ForumPointer[],
   digest: ForumPointer[] = [],
+  mentions: ForumPointer[] = [],
 ): string | null {
-  if (!related.length && !replies.length && !digest.length) return null;
+  if (!related.length && !replies.length && !digest.length && !mentions.length) return null;
 
   const lines = ['## Forum'];
+
+  // Mentions lead: being asked something directly outranks a thread that merely looked topical.
+  if (mentions.length) {
+    lines.push(
+      '',
+      'You were mentioned by name on the forum and have not answered yet:',
+      ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
+    );
+  }
 
   if (related.length) {
     lines.push(

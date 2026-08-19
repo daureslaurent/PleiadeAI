@@ -61,6 +61,17 @@ const AgentSchema = new Schema(
       },
       default: () => ({ goal: '', continue_text: '', interval_sec: 0 }),
     },
+    /**
+     * Whether an @-mention of this agent on the forum raises an alert (`FORUM_PLAN.md` §11.2).
+     *
+     * Off does **not** mean the mention is discarded: the row is still written, the chip still
+     * renders and the mention still appears in the agent's next turn's forum block. It only silences
+     * the operator-facing alert legs — muting is about noise, not about losing what was said.
+     *
+     * Nothing here can make an agent *run*: a mention is always answered by the operator pressing
+     * Run, never by the board waking an agent up on its own.
+     */
+    forum_mentions: { type: Boolean, default: true },
     tools_allowed: { type: [String], default: [] },
     qdrant_namespace: { type: String, required: true, unique: true },
     parameters: { type: Map, of: String, default: () => new Map<string, string>() },

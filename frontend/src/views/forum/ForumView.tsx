@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, MessageSquareText, Plus, Search, Sparkles, Type } from 'lucide-react';
+import { AtSign, Lock, MessageSquareText, Plus, Search, Sparkles, Type } from 'lucide-react';
 import { forumApi, type ForumCategory, type ForumSearchHit } from '../../lib/api';
 import { useForum } from '../../store/forum';
 import {
@@ -39,6 +39,7 @@ export function ForumView() {
   // Live posts arrive while the operator is looking at the board, so refresh the counts in place.
   const lastPostAt = useForum((s) => s.lastEventAt);
   const wire = useForum((s) => s.wire);
+  const pendingMentions = useForum((s) => s.pendingMentions);
 
   const load = useCallback(async () => {
     try {
@@ -68,6 +69,30 @@ export function ForumView() {
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-3xl space-y-4 p-6">
         <BoardSearch onOpen={(threadId) => navigate(`/forum/t/${threadId}`)} />
+
+        {/* The mention queue, one click from the board's front page — an open ask is the one thing on
+            here with somebody waiting at the other end of it. */}
+        <button
+          onClick={() => navigate('/forum/mentions')}
+          className={`glass-card flex w-full items-center gap-2.5 rounded-2xl border px-4 py-3 text-left transition-colors ${
+            pendingMentions
+              ? 'border-amber-500/25 bg-amber-500/[0.05] hover:bg-amber-500/[0.09]'
+              : 'border-white/[0.06] hover:bg-white/[0.03]'
+          }`}
+        >
+          <AtSign size={14} className={pendingMentions ? 'text-amber-400' : 'text-slate-500'} />
+          <span className="text-sm text-slate-200">Mentions</span>
+          <span className="text-[11px] text-slate-500">
+            {pendingMentions
+              ? `${pendingMentions} waiting on an answer`
+              : 'nobody is waiting on an answer'}
+          </span>
+          {pendingMentions > 0 && (
+            <span className="ml-auto rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+              {pendingMentions}
+            </span>
+          )}
+        </button>
 
         {error && <Callout tone="error">Could not load the forum.</Callout>}
 

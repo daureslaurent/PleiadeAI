@@ -7,6 +7,10 @@ import { forumPostRepository } from '../../../domain/forum/forum-post.repository
 import { forumFileRepository } from '../../../domain/forum/forum-file.repository';
 import { forumService, ForumRuleError, type ForumSearchMode } from '../../../domain/forum/forum.service';
 import { OPERATOR_AUTHOR } from '../../../domain/forum/forum-author';
+import { forumMentionRepository } from '../../../domain/forum/forum-mention.repository';
+import { forumMentionService } from '../../../domain/forum/forum-mention.service';
+import { forumMentionRunner, MentionRunError } from '../../../domain/forum/forum-mention-runner';
+import type { ForumMentionDoc, ForumMentionStatus } from '../../../domain/forum/forum-mention.model';
 import { FORUM_THREAD_STATUSES } from '../../../domain/forum/forum-thread.model';
 import type { ForumCategoryDoc } from '../../../domain/forum/forum-category.model';
 import type { ForumThreadDoc } from '../../../domain/forum/forum-thread.model';
@@ -93,6 +97,25 @@ function shapePost(doc: ForumPostDoc, files: ForumFileDoc[] = []) {
     replyTo: doc.reply_to ? String(doc.reply_to) : null,
     editedAt: doc.edited_at,
     editedBy: doc.edited_by,
+    createdAt: doc.created_at,
+  };
+}
+
+function shapeMention(doc: ForumMentionDoc) {
+  return {
+    id: String(doc._id),
+    postId: String(doc.post_id),
+    threadId: String(doc.thread_id),
+    categoryId: String(doc.category_id),
+    threadTitle: doc.thread_title,
+    excerpt: doc.excerpt,
+    target: doc.target,
+    author: doc.author,
+    status: doc.status,
+    notified: doc.notified,
+    sessionId: doc.session_id ? String(doc.session_id) : null,
+    replyPostId: doc.reply_post_id ? String(doc.reply_post_id) : null,
+    answeredAt: doc.answered_at,
     createdAt: doc.created_at,
   };
 }
@@ -249,6 +272,9 @@ forumRouter.get('/threads/:id', async (req, res) => {
     total,
     offset,
     authorPostCounts: postCounts,
+    // The mentions raised by the posts on this page, so every `@name` chip knows its own state and
+    // can offer Run without the thread firing one request per chip.
+    mentions: (await forumMentionRepository.listByPosts(posts.map((p) => p._id))).map(shapeMention),
   });
 });
 
@@ -347,6 +373,71 @@ forumRouter.delete('/posts/:id', async (req, res) => {
 });
 
 // --- files (the registry, spec §10) ----------------------------------------
+
+// --- mentions (FORUM_PLAN.md §11) ------------------------------------------
+
+/**
+ * Who can be addressed, for the composer's `@` autocomplete. Muted agents stay in the list, marked:
+ * you can still address an agent whose alerts you turned off, and the UI should say so rather than
+ * quietly dropping it from the roster.
+ */
+forumRouter.get('/mentions/roster', async (_req, res) => {
+  res.json(await forumMentionService.roster());
+});
+
+/** Pending count for the sidebar badge (`agentId` narrows it to one agent's queue). */
+forumRouter.get('/mentions/count', async (req, res) => {
+  const agentId = typeof req.query.agentId === 'string' ? req.query.agentId : undefined;
+  res.json({
+    count: await forumMentionRepository.countPending(agentId),
+    byAgent: agentId ? undefined : await forumMentionRepository.pendingByAgent(),
+  });
+});
+
+/** The triage list, and the per-agent and per-thread views of the same rows. */
+forumRouter.get('/mentions', async (req, res) => {
+  const raw = req.query.status;
+  const status =
+    raw === 'all' || raw === 'answered' || raw === 'dismissed' || raw === 'pending'
+      ? (raw as ForumMentionStatus | 'all')
+      : 'pending';
+  const rows = await forumMentionRepository.list({
+    status,
+    agentId: typeof req.query.agentId === 'string' ? req.query.agentId : undefined,
+    operator: req.query.operator === '1',
+    threadId: typeof req.query.threadId === 'string' ? req.query.threadId : undefined,
+    limit: Number(req.query.limit) || undefined,
+  });
+  res.json(rows.map(shapeMention));
+});
+
+/**
+ * Answer a mention: spawn a `forum`-origin session, run one turn, post the answer back to the thread
+ * (spec §11.3). Returns as soon as the session exists — the operator watches the turn stream in the
+ * Chat page rather than waiting on this request.
+ */
+forumRouter.post('/mentions/:id/run', async (req, res) => {
+  try {
+    res.status(202).json(await forumMentionRunner.start(req.params.id));
+  } catch (err) {
+    if (err instanceof MentionRunError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+/** Triage: this one didn't need a turn. Reversible — `pending` puts it back in the queue. */
+forumRouter.post('/mentions/:id/status', async (req, res) => {
+  const status = req.body?.status === 'pending' ? 'pending' : 'dismissed';
+  const ok = await forumMentionService.setStatus(req.params.id, status);
+  if (!ok) {
+    res.status(404).json({ error: 'mention not found' });
+    return;
+  }
+  res.json({ ok: true, status });
+});
 
 /** The whole registry, newest first, with how many live posts reference each file. */
 forumRouter.get('/files', async (req, res) => {

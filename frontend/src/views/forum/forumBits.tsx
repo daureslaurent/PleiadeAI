@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  AtSign,
+  BellOff,
   CornerDownLeft,
   Download,
   FileArchive,
@@ -12,7 +14,7 @@ import {
 } from 'lucide-react';
 import { agentColor, agentInitial } from '../../lib/agentColor';
 import { Button } from '../../components/ui';
-import { forumApi, type ForumAuthor, type ForumFile } from '../../lib/api';
+import { forumApi, type ForumAuthor, type ForumFile, type MentionTarget } from '../../lib/api';
 
 /**
  * The built-in moderator's agent name, mirroring `domain/agents/builtin-agents.ts`. Used only to
@@ -78,6 +80,108 @@ export function AuthorName({ author }: { author: ForumAuthor }) {
 }
 
 /**
+ * The mention roster, fetched once per page load and shared by every composer on it.
+ *
+ * A module-level promise rather than per-component state: a thread page mounts one composer plus one
+ * more for each post being edited, and none of them should each cost a roster request.
+ */
+let rosterPromise: Promise<MentionTarget[]> | null = null;
+
+export function useMentionRoster(): MentionTarget[] {
+  const [roster, setRoster] = useState<MentionTarget[]>([]);
+  useEffect(() => {
+    let alive = true;
+    rosterPromise = rosterPromise ?? forumApi.mentionRoster().catch(() => []);
+    void rosterPromise.then((list) => alive && setRoster(list));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return roster;
+}
+
+/** Drop the cached roster — after an agent is created or renamed elsewhere in the app. */
+export function invalidateMentionRoster(): void {
+  rosterPromise = null;
+}
+
+/** What the caret is currently typing after an `@`, or null when it isn't in a mention. */
+function mentionQuery(value: string, caret: number): { query: string; start: number } | null {
+  const upto = value.slice(0, caret);
+  const at = upto.lastIndexOf('@');
+  if (at < 0) return null;
+  // Must start a word, and must not run past the end of a line — a mention is one token, not a
+  // paragraph, and a stale picker hanging around three lines later is worse than none.
+  if (at > 0 && !/[\s([{<,;:"']/.test(upto[at - 1]!)) return null;
+  const query = upto.slice(at + 1);
+  if (/[\n]/.test(query) || query.length > 40) return null;
+  return { query, start: at };
+}
+
+/**
+ * The `@` picker (`FORUM_PLAN.md` §11.4). Inserts the *exact* agent name, which is what makes the
+ * chip and the backend's resolution agree on who was addressed — a hand-typed near-miss silently
+ * addresses nobody.
+ *
+ * Muted agents stay in the list, marked: you can still address an agent whose alerts you turned off,
+ * and saying so beats dropping it and leaving the operator to wonder why it isn't there.
+ */
+function MentionPicker({
+  targets,
+  active,
+  onPick,
+  onHover,
+}: {
+  targets: MentionTarget[];
+  active: number;
+  onPick: (t: MentionTarget) => void;
+  onHover: (i: number) => void;
+}) {
+  return (
+    <div className="glass-card absolute bottom-full left-0 z-30 mb-1.5 max-h-64 w-72 overflow-auto rounded-xl border border-white/[0.08] p-1 shadow-2xl">
+      {targets.map((t, i) => {
+        const operator = t.kind === 'operator';
+        const color = agentColor(t.name);
+        return (
+          <button
+            key={t.name}
+            onMouseEnter={() => onHover(i)}
+            onMouseDown={(e) => {
+              // mousedown, not click: the textarea must not lose focus before the insert lands.
+              e.preventDefault();
+              onPick(t);
+            }}
+            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
+              i === active ? 'bg-accent/15' : 'hover:bg-white/[0.05]'
+            }`}
+          >
+            <span
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[11px] font-semibold"
+              style={{
+                color: operator ? 'rgb(147 197 253)' : color.accent,
+                background: operator ? 'rgba(59,130,246,0.12)' : color.soft,
+                borderColor: operator ? 'rgba(59,130,246,0.35)' : color.border,
+              }}
+            >
+              {agentInitial(t.name)}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-xs text-slate-200">{t.name}</span>
+            {!t.notify && (
+              <span title="mentions muted — recorded, but raises no alert">
+                <BellOff size={11} className="shrink-0 text-amber-400/70" />
+              </span>
+            )}
+            <span className="text-[10px] uppercase tracking-wider text-slate-600">
+              {operator ? 'you' : 'agent'}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * The reply box. Auto-grows and submits on Enter (Shift+Enter for a newline), matching the chat
  * composer in `components/workspace/ChatPanel.tsx` so the two text surfaces behave identically.
  */
@@ -101,6 +205,11 @@ export function Composer({
 }) {
   const [value, setValue] = useState(initial);
   const [busy, setBusy] = useState(false);
+  // The `@` picker: `at` is where the mention starts in `value`, so an insert replaces exactly the
+  // partial handle rather than appending next to it.
+  const [mention, setMention] = useState<{ at: number; query: string } | null>(null);
+  const [activeMention, setActiveMention] = useState(0);
+  const roster = useMentionRoster();
   const [files, setFiles] = useState<ForumFile[]>(initialFiles);
   const [uploading, setUploading] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -137,6 +246,34 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
   }, [value]);
 
+  // Prefix match on the partial handle, capped — a roster of forty agents must not become a wall.
+  const matches = mention
+    ? roster
+        .filter((t) => t.name.toLowerCase().startsWith(mention.query.toLowerCase()))
+        .slice(0, 8)
+    : [];
+
+  function syncMention(next: string, caret: number) {
+    const found = mentionQuery(next, caret);
+    setMention(found ? { at: found.start, query: found.query } : null);
+    setActiveMention(0);
+  }
+
+  /** Replace the partial `@handle` with the picked name, and leave the caret after the space. */
+  function insertMention(target: MentionTarget) {
+    if (!mention) return;
+    const before = value.slice(0, mention.at);
+    const after = value.slice(mention.at + 1 + mention.query.length);
+    const next = `${before}@${target.name} ${after.startsWith(' ') ? after.slice(1) : after}`;
+    setValue(next);
+    setMention(null);
+    const caret = before.length + target.name.length + 2;
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(caret, caret);
+    });
+  }
+
   async function submit() {
     const body = value.trim();
     // A post can be attachments plus a one-word note, but never an empty body — a bare file with no
@@ -168,21 +305,55 @@ export function Composer({
         void addFiles(e.dataTransfer.files);
       }}
     >
-      <textarea
-        ref={ref}
-        autoFocus={autoFocus}
-        rows={1}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-        className="max-h-80 w-full resize-none bg-transparent py-1 text-sm leading-relaxed text-slate-100 outline-none placeholder:text-slate-600"
-      />
+      <div className="relative">
+        {mention && matches.length > 0 && (
+          <MentionPicker
+            targets={matches}
+            active={activeMention}
+            onPick={insertMention}
+            onHover={setActiveMention}
+          />
+        )}
+        <textarea
+          ref={ref}
+          autoFocus={autoFocus}
+          rows={1}
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setValue(e.target.value);
+            syncMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          }}
+          onClick={(e) => syncMention(value, e.currentTarget.selectionStart ?? 0)}
+          onBlur={() => setMention(null)}
+          onKeyDown={(e) => {
+            // While the picker is open it owns the navigation keys — Enter picks a name rather than
+            // posting a half-typed handle, which is the mistake this whole affordance exists to stop.
+            if (mention && matches.length) {
+              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActiveMention((i) => (i + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length);
+                return;
+              }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                insertMention(matches[activeMention] ?? matches[0]!);
+                return;
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setMention(null);
+                return;
+              }
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              void submit();
+            }
+          }}
+          className="max-h-80 w-full resize-none bg-transparent py-1 text-sm leading-relaxed text-slate-100 outline-none placeholder:text-slate-600"
+        />
+      </div>
       {(files.length > 0 || uploading.length > 0) && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {files.map((f) => (
@@ -234,8 +405,26 @@ export function Composer({
         >
           <Paperclip size={13} />
         </button>
+        <button
+          title="Mention someone"
+          className="rounded-md p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const el = ref.current;
+            const caret = el?.selectionStart ?? value.length;
+            const next = `${value.slice(0, caret)}@${value.slice(caret)}`;
+            setValue(next);
+            requestAnimationFrame(() => {
+              el?.focus();
+              el?.setSelectionRange(caret + 1, caret + 1);
+              syncMention(next, caret + 1);
+            });
+          }}
+        >
+          <AtSign size={13} />
+        </button>
         <span className="text-[11px] text-slate-600">
-          Markdown · Enter to post · drop files to attach
+          Markdown · @ to mention · Enter to post
         </span>
         <div className="ml-auto flex items-center gap-2">
           {onCancel && (

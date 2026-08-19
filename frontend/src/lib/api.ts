@@ -322,6 +322,12 @@ export interface Agent {
    * deleted or renamed — privileged tools authorise against the slug — but is otherwise editable.
    */
   builtin: string;
+  /**
+   * Whether an @-mention of this agent on the forum raises an alert (`FORUM_PLAN.md` §11.2). Off
+   * only silences the alert: the mention is still recorded, still shown, and still reaches the agent
+   * in its next turn's forum block. Nothing here makes an agent run on its own.
+   */
+  forum_mentions?: boolean;
   system_prompt: string;
   tools_allowed: string[];
   qdrant_namespace: string;
@@ -383,6 +389,9 @@ export interface Notification {
   title: string;
   content: string;
   status: 'unread' | 'read';
+  /** `forum_mention` → `ref_id` is a `forum_mentions` row and the row can offer Run. */
+  kind?: string;
+  ref_id?: string;
   created_at: string;
 }
 
@@ -436,6 +445,7 @@ export const agentsApi = {
         | 'description'
         | 'subagent'
         | 'auto_mode'
+        | 'forum_mentions'
         | 'system_prompt'
         | 'tools_allowed'
         | 'isolation_id'
@@ -769,8 +779,14 @@ export interface Session {
   agent_id: string;
   agent_name: string;
   title: string;
-  /** `synthetic` → produced by the Conversation Generator, not a chat the operator had. */
-  origin?: 'user' | 'synthetic';
+  /**
+   * `synthetic` → produced by the Conversation Generator; `forum` → spawned by the operator running
+   * an @-mention (`FORUM_PLAN.md` §11.3), which is an ordinary conversation they can continue.
+   */
+  origin?: 'user' | 'synthetic' | 'forum';
+  /** Forum-origin only: the thread the mention came from, so the Workspace can link back to it. */
+  forum_thread_id?: string | null;
+  forum_mention_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -856,8 +872,10 @@ export const sessionsApi = {
    * Sessions for one agent. `origin` defaults to `all` — the Workspace shows generated conversations
    * alongside the operator's own, marked as such (the Conversation Generator is meant to be read).
    */
-  listByAgent: (agentId: string, origin: 'user' | 'synthetic' | 'all' = 'all') =>
+  listByAgent: (agentId: string, origin: 'user' | 'synthetic' | 'forum' | 'all' = 'all') =>
     api.get<Session[]>('/sessions', { params: { agentId, origin } }).then((r) => r.data),
+  /** One session — resolves the owning agent when a `?session=` deep link opens the Workspace. */
+  get: (id: string) => api.get<Session>(`/sessions/${id}`).then((r) => r.data),
   create: (agentId: string) => api.post<Session>('/sessions', { agentId }).then((r) => r.data),
   rename: (id: string, title: string) =>
     api.patch<Session>(`/sessions/${id}`, { title }).then((r) => r.data),
@@ -2595,12 +2613,45 @@ export interface ForumPost {
   createdAt: string;
 }
 
+/**
+ * One `@somebody` written into a post (`FORUM_PLAN.md` §11). A row, not a substring: it carries the
+ * status the operator moves it through, and the session/reply a Run produced.
+ */
+export interface ForumMention {
+  id: string;
+  postId: string;
+  threadId: string;
+  categoryId: string;
+  threadTitle: string;
+  excerpt: string;
+  target: ForumAuthor;
+  author: ForumAuthor;
+  status: 'pending' | 'answered' | 'dismissed';
+  /** False when the target agent has mentions muted — the row exists, it just raised no alert. */
+  notified: boolean;
+  sessionId: string | null;
+  replyPostId: string | null;
+  answeredAt: string | null;
+  createdAt: string;
+}
+
+/** Who can be addressed, for the composer's `@` autocomplete. */
+export interface MentionTarget {
+  kind: 'agent' | 'operator';
+  agentId: string | null;
+  name: string;
+  /** False → muted: still addressable, but the mention raises no alert. The UI says so. */
+  notify: boolean;
+}
+
 /** A thread page: the thread, one page of posts, and each author's total post count. */
 export interface ForumThreadDetail extends ForumThread {
   posts: ForumPost[];
   total: number;
   offset: number;
   authorPostCounts: Record<string, number>;
+  /** Mentions raised by the posts on this page, so each `@name` chip knows its own state. */
+  mentions: ForumMention[];
 }
 
 export interface ForumSearchHit {
@@ -2645,6 +2696,27 @@ export const forumApi = {
 
   search: (q: string, mode: 'keyword' | 'semantic' | 'both' = 'both', category?: string) =>
     api.get<ForumSearchHit[]>('/forum/search', { params: { q, mode, category } }).then((r) => r.data),
+
+  // --- mentions (FORUM_PLAN.md §11) ----------------------------------------
+
+  /** Who can be addressed. Muted agents are included, flagged — you can still address them. */
+  mentionRoster: () => api.get<MentionTarget[]>('/forum/mentions/roster').then((r) => r.data),
+  mentions: (params: { status?: string; agentId?: string; threadId?: string; operator?: 1 } = {}) =>
+    api.get<ForumMention[]>('/forum/mentions', { params }).then((r) => r.data),
+  mentionCount: (agentId?: string) =>
+    api
+      .get<{ count: number; byAgent?: Record<string, number> }>('/forum/mentions/count', {
+        params: { agentId },
+      })
+      .then((r) => r.data),
+  /**
+   * Answer a mention: spawns a `forum`-origin session and runs one turn, whose answer is posted back
+   * to the thread. Returns as soon as the session exists — the turn streams into the Chat page.
+   */
+  runMention: (id: string) =>
+    api.post<{ sessionId: string; agentName: string }>(`/forum/mentions/${id}/run`).then((r) => r.data),
+  setMentionStatus: (id: string, status: 'pending' | 'dismissed') =>
+    api.post<{ ok: true; status: string }>(`/forum/mentions/${id}/status`, { status }).then((r) => r.data),
 
   // --- the file registry ---------------------------------------------------
 

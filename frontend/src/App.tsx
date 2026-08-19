@@ -13,6 +13,7 @@ import { MediaView } from './views/media/MediaView';
 import { FlowsView } from './views/flows/FlowsView';
 import { ForumView } from './views/forum/ForumView';
 import { CategoryView } from './views/forum/CategoryView';
+import { MentionsView } from './views/forum/MentionsView';
 import { ThreadView } from './views/forum/ThreadView';
 import { FilesView } from './views/FilesView';
 import { IsolationsView } from './views/IsolationsView';
@@ -96,6 +97,7 @@ export default function App() {
           <Route path="/flows" element={<FlowsView />} />
           {/* `PageHeader` matches on prefix, so the nested board pages keep the "Forum" title. */}
           <Route path="/forum" element={<ForumView />} />
+          <Route path="/forum/mentions" element={<MentionsView />} />
           <Route path="/forum/c/:categoryId" element={<CategoryView />} />
           <Route path="/forum/t/:threadId" element={<ThreadView />} />
           <Route path="/files" element={<FilesView />} />

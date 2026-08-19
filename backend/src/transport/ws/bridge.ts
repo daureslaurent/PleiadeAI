@@ -46,8 +46,8 @@ export function attachBridge(io: Server): void {
 
   // A brand-new generated session: broadcast, since no client can be in its room yet — every open
   // Workspace adds the row to the agent's session list without a reload.
-  eventBus.on('conversation:session_created', ({ sessionId, agentId, agentName, title }) => {
-    io.emit('session:created', { sessionId, agentId, agentName, title, origin: 'synthetic' });
+  eventBus.on('conversation:session_created', ({ sessionId, agentId, agentName, title, origin }) => {
+    io.emit('session:created', { sessionId, agentId, agentName, title, origin: origin ?? 'synthetic' });
   });
 
   eventBus.on('agent:stream_chunk', ({ ctx, content, isReasoning }) => {
@@ -310,6 +310,12 @@ export function attachBridge(io: Server): void {
       opening: p.opening,
       createdAt: p.createdAt,
     });
+  });
+
+  // A mention landed (FORUM_PLAN.md §11). Same room as posts, and for the same reason: it is written
+  // from a session the operator isn't watching, and the badge that counts it is on every page.
+  eventBus.on('forum:mention_created', (m) => {
+    io.to('forum').emit('forum_mention_created', { type: 'forum_mention_created', ...m });
   });
 
   // --- Flows (FLOWS_PLAN.md §5) ---------------------------------------------------------------

@@ -6,6 +6,8 @@ import { forumThreadRepository } from './forum-thread.repository';
 import { forumPostRepository } from './forum-post.repository';
 import { forumFileRepository } from './forum-file.repository';
 import { forumIndexService, snippetOf } from './forum-index.service';
+import { forumMentionService } from './forum-mention.service';
+import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumAuthor } from './forum-author';
 import type { ForumCategoryDoc } from './forum-category.model';
 import type { ForumThreadDoc } from './forum-thread.model';
@@ -195,6 +197,12 @@ export const forumService = {
       createdAt: post.created_at.toISOString(),
     });
 
+    // Mentions (spec §11.1). Fire-and-forget for the same reason indexing is: a post must never fail
+    // to save because the roster lookup or an alert leg was unavailable.
+    void forumMentionService
+      .record({ post, thread: input.thread, author: input.author })
+      .catch((err) => log.warn({ err: String(err) }, 'mention recording failed'));
+
     void forumIndexService.indexPost({
       postId: String(post._id),
       threadId: String(input.thread._id),
@@ -244,7 +252,12 @@ export const forumService = {
 
   async deletePost(postId: string): Promise<boolean> {
     const ok = await forumPostRepository.softDelete(postId);
-    if (ok) void forumIndexService.removePosts([postId]);
+    if (ok) {
+      void forumIndexService.removePosts([postId]);
+      // A queue entry pointing at a post nobody can read any more is pure noise, so mentions go with
+      // the post — unlike the post itself, which is soft-deleted because things still cite it.
+      void forumMentionRepository.removeByPost(postId);
+    }
     return ok;
   },
 
@@ -252,6 +265,7 @@ export const forumService = {
     const postIds = await forumPostRepository.removeByThread(threadId);
     const ok = await forumThreadRepository.remove(threadId);
     if (postIds.length) void forumIndexService.removePosts(postIds);
+    void forumMentionRepository.removeByThread(threadId);
     return ok;
   },
 

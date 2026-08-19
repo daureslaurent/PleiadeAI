@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Box, Cpu, FileLock2, Lock, Mail, NotebookPen, Save, Smartphone, Sparkles, Trash2, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AtSign, Box, Cpu, FileLock2, Lock, Mail, NotebookPen, Play, Save, Smartphone, Sparkles, Trash2, Loader2, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import {
   agentsApi,
+  forumApi,
   mailApi,
   settingsApi,
   skillsApi,
   toolsApi,
   type Agent,
+  type ForumMention,
   type MailAccount,
   type Skill,
   type ToolInfo,
@@ -48,6 +51,8 @@ interface Draft {
   description: string;
   subagent: boolean;
   auto_mode: boolean;
+  /** Whether an @-mention of this agent on the forum raises an alert (`FORUM_PLAN.md` §11.2). */
+  forum_mentions: boolean;
   system_prompt: string;
   tools_allowed: string[];
   qdrant_namespace: string;
@@ -79,6 +84,7 @@ const blank = (): Draft => ({
   description: '',
   subagent: true,
   auto_mode: false,
+  forum_mentions: true,
   builtin: '',
   system_prompt: '',
   tools_allowed: [],
@@ -153,6 +159,7 @@ export function AgentsView() {
       description: a.description ?? '',
       subagent: a.subagent ?? true,
       auto_mode: a.auto_mode ?? false,
+      forum_mentions: a.forum_mentions !== false,
       system_prompt: a.system_prompt,
       tools_allowed: a.tools_allowed ?? [],
       qdrant_namespace: a.qdrant_namespace,
@@ -208,6 +215,7 @@ export function AgentsView() {
         description: draft.description,
         subagent: draft.subagent,
         auto_mode: draft.auto_mode,
+        forum_mentions: draft.forum_mentions,
         system_prompt: draft.system_prompt,
         tools_allowed: draft.tools_allowed,
         qdrant_namespace: draft.qdrant_namespace || draft.name,
@@ -231,6 +239,7 @@ export function AgentsView() {
         description: draft.description,
         subagent: draft.subagent,
         auto_mode: draft.auto_mode,
+        forum_mentions: draft.forum_mentions,
         system_prompt: draft.system_prompt,
         tools_allowed: draft.tools_allowed,
         max_tool_iterations: draft.max_tool_iterations,
@@ -470,6 +479,34 @@ export function AgentsView() {
             </span>
           </label>
 
+          <label className="mt-2 flex items-start gap-3 rounded-md border border-border bg-panel px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.forum_mentions}
+              onChange={(e) => setDraft({ ...draft, forum_mentions: e.target.checked })}
+              className="mt-0.5 accent-accent"
+            />
+            <span className="leading-snug text-slate-300">
+              <span className="font-medium text-slate-200">Forum mentions</span>
+              <span className="block text-xs text-slate-500">
+                {draft.forum_mentions ? (
+                  <>
+                    An <code>@{draft.name || 'agent'}</code> on the board raises a notification (and a
+                    Telegram alert, if configured). Nothing runs on its own — you decide whether a
+                    mention is worth a turn, and Run answers it in a new conversation.
+                  </>
+                ) : (
+                  <>
+                    Muted: mentions are still recorded, still shown on the board, and still reach this
+                    agent in its next turn's forum block — they just raise no alert.
+                  </>
+                )}
+              </span>
+            </span>
+          </label>
+
+          {draft._id && <AgentMentions agentId={draft._id} name={draft.name} />}
+
           <FieldLabel>Max tool steps per turn</FieldLabel>
           <input
             type="number"
@@ -688,6 +725,81 @@ export function AgentsView() {
         </div>
       )}
     </MasterDetail>
+  );
+}
+
+/**
+ * One agent's open mentions, sitting directly under the toggle that governs them (`FORUM_PLAN.md`
+ * §11.4). This is where you notice that an agent is being paged constantly — which is a fact about
+ * the *agent*, and belongs next to its settings rather than only in the board-wide queue.
+ */
+function AgentMentions({ agentId, name }: { agentId: string; name: string }) {
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<ForumMention[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    forumApi
+      .mentions({ agentId, status: 'pending' })
+      .then(setRows)
+      .catch(() => setRows([]));
+  }, [agentId]);
+
+  useEffect(load, [load]);
+
+  if (!rows.length) return null;
+
+  async function act(m: ForumMention, run: boolean) {
+    setBusy(m.id);
+    try {
+      if (run) {
+        const { sessionId } = await forumApi.runMention(m.id);
+        navigate(`/workspace?session=${sessionId}`);
+        return;
+      }
+      await forumApi.setMentionStatus(m.id, 'dismissed');
+      load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/[0.05] p-3">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-amber-300/90">
+        <AtSign size={12} />
+        {rows.length} open mention{rows.length === 1 ? '' : 's'} for {name}
+      </p>
+      <div className="mt-2 space-y-1.5">
+        {rows.map((m) => (
+          <div key={m.id} className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => navigate(`/forum/t/${m.threadId}`)}
+              className="min-w-0 flex-1 truncate text-left text-slate-300 hover:text-accent"
+              title={m.excerpt}
+            >
+              {m.threadTitle}
+              <span className="text-slate-600"> · by {m.author.display_name}</span>
+            </button>
+            <button
+              disabled={busy === m.id}
+              onClick={() => void act(m, true)}
+              className="inline-flex items-center gap-1 rounded border border-accent/30 bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/25 disabled:opacity-50"
+            >
+              {busy === m.id ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />} Run
+            </button>
+            <button
+              disabled={busy === m.id}
+              onClick={() => void act(m, false)}
+              title="Dismiss"
+              className="rounded p-0.5 text-slate-600 hover:text-slate-300 disabled:opacity-50"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

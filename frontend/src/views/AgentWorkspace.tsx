@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { agentsApi, sessionsApi, type Agent, type Session } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { registerAgentIdentities } from '../lib/agentColor';
@@ -42,6 +43,9 @@ export function AgentWorkspace() {
   const [titlingSessionIds, setTitlingSessionIds] = useState<Set<string>>(new Set());
 
   const activeAgent = agents.find((a) => a._id === activeAgentId) ?? null;
+  // `?session=…` deep-links a conversation — how the forum's "Run this mention" and its Open
+  // conversation buttons land the operator in the turn they just started.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { wire, hydrate, clearActive, send, workingSessions, workingAgents } = useStream();
 
@@ -77,14 +81,29 @@ export function AgentWorkspace() {
   );
 
   // Boot: wire the socket, load agents, and restore the previously-open session (surviving reloads)
-  // — or auto-expand the first agent when there's nothing to restore.
+  // — or auto-expand the first agent when there's nothing to restore. A `?session=` in the URL wins
+  // over the restored one: the operator asked for that specific conversation just now.
   useEffect(() => {
     wire();
+    const wanted = searchParams.get('session');
     agentsApi.list().then(async (list) => {
       // Feed chosen colors/icons into the identity registry so name-only stream events (chat avatars,
       // ask_agent bubbles) render each agent's override rather than the default hash color.
       registerAgentIdentities(list);
       setAgents(list);
+      if (wanted) {
+        const session = await sessionsApi.get(wanted).catch(() => null);
+        const agent = session ? list.find((a) => a._id === session.agent_id) : null;
+        if (session && agent) {
+          setExpanded(new Set([agent._id]));
+          void loadSessions(agent._id);
+          await openSession(agent, session);
+          // Consume the parameter so a later reload restores normally rather than re-opening this.
+          setSearchParams({}, { replace: true });
+          return;
+        }
+        setSearchParams({}, { replace: true });
+      }
       const restoreAgent = activeAgentId ? list.find((a) => a._id === activeAgentId) : null;
       if (restoreAgent && activeSessionId) {
         setExpanded(new Set([restoreAgent._id]));
@@ -144,7 +163,7 @@ export function AgentWorkspace() {
       agentId: string;
       agentName: string;
       title: string;
-      origin: 'user' | 'synthetic';
+      origin: 'user' | 'synthetic' | 'forum';
     }) => {
       setSessionsByAgent((prev) => {
         const list = prev[s.agentId];
@@ -254,6 +273,7 @@ export function AgentWorkspace() {
         agent={activeAgent}
         hasSession={!!activeSessionId}
         generatedSession={generatedSession}
+        forumThreadId={activeSession?.origin === 'forum' ? activeSession.forum_thread_id : null}
         debuggerOpen={drawer}
         onToggleDebugger={() => {
           setDrawer((d) => !d);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText, ScrollText } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { AtSign, RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText, ScrollText } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
@@ -90,6 +91,8 @@ interface Props {
   hasSession: boolean;
   /** The open session was produced by the Conversation Generator (its "user" turns are the interviewer). */
   generatedSession?: boolean;
+  /** Forum-origin session (`FORUM_PLAN.md` §11.3): the thread whose mention started it, if any. */
+  forumThreadId?: string | null;
   debuggerOpen: boolean;
   onToggleDebugger: () => void;
   promptOpen: boolean;
@@ -251,7 +254,7 @@ function AskUserPrompt({
 }
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
-export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, promptOpen, onTogglePrompt, onOpenVisual, onOpenAndroid, onSend, onEnsureSession }: Props) {
+export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, debuggerOpen, onToggleDebugger, promptOpen, onTogglePrompt, onOpenVisual, onOpenAndroid, onSend, onEnsureSession }: Props) {
   const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, autoLoop, todos, activeSessionId, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
@@ -429,6 +432,18 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
           <Bug size={14} /> Debugger
         </button>
       </div>
+
+      {/* Where this conversation came from, when it wasn't the operator typing. A mention run read
+          out of context ("who asked this?") is exactly the trace that makes it hard to trust. */}
+      {forumThreadId && (
+        <div className="flex items-center gap-2 border-b border-amber-500/15 bg-amber-500/[0.05] px-6 py-1.5 text-[11px] text-amber-200/80">
+          <AtSign size={12} className="shrink-0 text-amber-400/80" />
+          Started by a forum mention — this agent's first answer was posted back to the thread.
+          <Link to={`/forum/t/${forumThreadId}`} className="ml-auto underline underline-offset-2 hover:text-amber-100">
+            Open thread
+          </Link>
+        </div>
+      )}
 
       {/* Isolation warning: stopped / unbuilt container for the active agent (best-effort, self-hiding) */}
       <ContainerBanner agent={agent} />

@@ -6,6 +6,7 @@ import { agentContainerManager } from '../../../isolation/AgentContainerManager'
 import { agentContainerRouter } from './agent-container.routes';
 import { suggestAgentIdentity } from '../../../domain/agents/identity-suggester';
 import { createLogger } from '../../../config/logger';
+import { invalidateRoster } from '../../../domain/forum/forum-mention.service';
 
 const log = createLogger('agents-routes');
 
@@ -74,6 +75,9 @@ agentsRouter.get('/:id', async (req, res) => {
 
 agentsRouter.post('/', async (req, res) => {
   const agent = await agentRepository.create(req.body);
+  // Forum mentions resolve against the live agent roster, so a new name has to become mentionable
+  // now rather than whenever the 30s cache happens to expire.
+  invalidateRoster();
   res.status(201).json(agent);
 });
 
@@ -114,6 +118,9 @@ agentsRouter.patch('/:id', async (req, res) => {
       .removeAgentContainer(String(agent._id))
       .catch((err) => log.warn({ id: String(agent._id), err: String(err) }, 'stale container removal failed'));
   }
+
+  // A rename changes what `@…` resolves to, and the mention toggle lives on this same body.
+  invalidateRoster();
 
   res.json(agent);
 });
@@ -179,6 +186,7 @@ agentsRouter.delete('/:id', async (req, res) => {
   }
 
   const agent = await agentRepository.delete(req.params.id);
+  invalidateRoster();
   if (!agent) {
     res.status(404).json({ error: 'not found' });
     return;

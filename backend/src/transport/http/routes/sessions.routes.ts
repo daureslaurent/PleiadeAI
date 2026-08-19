@@ -35,6 +35,20 @@ sessionsRouter.post('/', async (req, res) => {
   res.status(201).json(session);
 });
 
+/**
+ * One session by id. Needed to deep-link a conversation (`/workspace?session=…`) — the forum's
+ * mention Run lands the operator here and the page has to resolve which agent owns it before it can
+ * open the chat.
+ */
+sessionsRouter.get('/:id', async (req, res) => {
+  const session = await sessionRepository.findById(req.params.id).catch(() => null);
+  if (!session) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  res.json(session);
+});
+
 sessionsRouter.patch('/:id', async (req, res) => {
   const session = await sessionRepository.rename(req.params.id, String(req.body?.title ?? ''));
   if (!session) {

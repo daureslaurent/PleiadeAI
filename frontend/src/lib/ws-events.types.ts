@@ -461,6 +461,26 @@ export interface ForumPostCreatedEvent {
   createdAt: string;
 }
 
+/**
+ * Somebody was @-mentioned in a new post (FORUM_PLAN.md §11). Same room and same reason as the post
+ * event: a mention is written from a session nobody is watching, and the badge counting it is on
+ * every page. `notified: false` means the target agent has mentions muted — the row still exists.
+ */
+export interface ForumMentionCreatedEvent {
+  type: 'forum_mention_created';
+  mentionId: string;
+  threadId: string;
+  threadTitle: string;
+  postId: string;
+  targetKind: 'agent' | 'operator';
+  targetName: string;
+  targetAgentId: string | null;
+  author: string;
+  excerpt: string;
+  notified: boolean;
+  createdAt: string;
+}
+
 export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
@@ -492,4 +512,5 @@ export type WsEvent =
   | FlowArtifactEvent
   | FlowIterationStartEvent
   | FlowAwaitingApprovalEvent
-  | ForumPostCreatedEvent;
+  | ForumPostCreatedEvent
+  | ForumMentionCreatedEvent;

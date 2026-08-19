@@ -25,12 +25,20 @@ export const alertEngine = {
      * and the UI reads it from there.
      */
     attachments?: { bytes: Buffer; filename: string; mime: string }[];
+    /**
+     * What the alert is about, when the UI can act on it (`forum_mention` + the mention's id). Rides
+     * the Mongo leg only — Telegram gets prose, the inbox gets a button.
+     */
+    kind?: string;
+    refId?: string;
   }): Promise<void> {
     const results = await Promise.allSettled([
       notificationRepository.create({
         agent_id: input.agentId,
         title: input.title,
         content: input.content,
+        kind: input.kind,
+        ref_id: input.refId,
       }),
       telegramService.send(input.title, input.content, input.attachments),
     ]);

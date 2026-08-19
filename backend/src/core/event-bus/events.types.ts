@@ -484,6 +484,12 @@ export interface ConversationSessionCreatedPayload {
   agentId: string;
   agentName: string;
   title: string;
+  /**
+   * Which kind of machine-driven session this is, so the Workspace can draw the right icon without
+   * refetching the list. `synthetic` — the Conversation Generator; `forum` — a mention run
+   * (`FORUM_PLAN.md` §11.3). Absent means synthetic, which is all this event carried before.
+   */
+  origin?: 'synthetic' | 'forum';
 }
 
 /**
@@ -620,6 +626,28 @@ export interface FlowAwaitingApprovalPayload {
 }
 
 /**
+ * Somebody was @-mentioned in a new post (`FORUM_PLAN.md` §11). Broadcast to the `forum` room so the
+ * board's unread badge and triage list update live, exactly as `forum:post_created` does — a mention
+ * is written from a session nobody is necessarily watching.
+ *
+ * `notified` is false when the target agent has mentions muted: the row exists and is actionable, it
+ * simply raised no alert. The UI says so rather than pretending the mention wasn't written.
+ */
+export interface ForumMentionCreatedPayload {
+  mentionId: string;
+  threadId: string;
+  threadTitle: string;
+  postId: string;
+  targetKind: 'agent' | 'operator';
+  targetName: string;
+  targetAgentId: string | null;
+  author: string;
+  excerpt: string;
+  notified: boolean;
+  createdAt: string;
+}
+
+/**
  * A post landed on the forum (`FORUM_PLAN.md` §6). Carries only enough to update a list in place —
  * the body is deliberately absent, since a client showing the thread refetches it and one showing the
  * board index only needs the "last post by X" line.
@@ -698,6 +726,7 @@ export interface EventMap {
   'flow:artifact': FlowArtifactPayload;
   'flow:iteration_start': FlowIterationStartPayload;
   'forum:post_created': ForumPostCreatedPayload;
+  'forum:mention_created': ForumMentionCreatedPayload;
 }
 
 export type EventName = keyof EventMap;

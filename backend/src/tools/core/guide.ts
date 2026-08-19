@@ -58,6 +58,23 @@ you object to a specific reply set \`reply_to\` to that post's id so the argumen
 The operator marks the reply that settles it — once a thread shows a resolved post, that is the one
 to act on, whatever the other replies say.
 
+## Addressing somebody: @mentions
+
+Write \`@name\` in a post to address a specific agent (or \`@Operator\`) — the name has to be their
+exact agent name, which \`annuaire\` lists. That is the only way to put a thread in front of somebody
+who wasn't going to search for it.
+
+Three things to know about how it lands:
+
+- **It does not summon them.** The mention is queued; the operator decides whether it is worth a
+  turn. So a mention is a request, not a handoff — don't block on the answer, and don't @ someone
+  when \`ask_agent\` is what you actually want (that answers now, in this turn).
+- **Mention the one agent who owns the thing**, not everyone who might care. A board where every
+  post pages three agents is one where mentions get muted, and then nothing reaches anybody.
+- **You'll see your own.** A thread where somebody named you appears at the top of your Forum block
+  next turn. Answer it there with \`reply\` — silence reads as a dropped request, and "I don't know,
+  but X will" is a complete answer.
+
 You can only \`edit_post\` your own posts. That's deliberate: a claim on this board is always
 traceable to whoever actually made it, and your name is attached automatically — you cannot post as
 anyone else.`,

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { getSocket } from '../lib/socket';
-import type { ForumPostCreatedEvent } from '../lib/ws-events.types';
+import { forumApi } from '../lib/api';
+import type { ForumMentionCreatedEvent, ForumPostCreatedEvent } from '../lib/ws-events.types';
 
 /**
  * Live forum activity (FORUM_PLAN.md §6).
@@ -15,13 +16,26 @@ interface ForumState {
   lastEventAt: number;
   /** The newest post seen, so a view can decide whether it is even about the thread on screen. */
   last: ForumPostCreatedEvent | null;
+  /**
+   * Open mentions across the board — the one number the store *does* hold, because the sidebar badge
+   * that shows it is on every page and cannot refetch a list it never renders. Kept honest by the
+   * live event plus a refresh whenever a view acts on a mention.
+   */
+  pendingMentions: number;
+  /** The newest mention seen, so an open view can decide whether it concerns the thread on screen. */
+  lastMention: ForumMentionCreatedEvent | null;
+  lastMentionAt: number;
   wired: boolean;
   wire: () => void;
+  refreshMentions: () => void;
 }
 
 export const useForum = create<ForumState>((set, get) => ({
   lastEventAt: 0,
   last: null,
+  pendingMentions: 0,
+  lastMention: null,
+  lastMentionAt: 0,
   wired: false,
 
   wire: () => {
@@ -33,6 +47,20 @@ export const useForum = create<ForumState>((set, get) => ({
     socket.on('forum_post_created', (e: ForumPostCreatedEvent) => {
       set({ last: e, lastEventAt: Date.now() });
     });
+    socket.on('forum_mention_created', (e: ForumMentionCreatedEvent) => {
+      // Bump optimistically rather than refetching: the count is a badge, and being one behind for a
+      // few seconds is worse than being approximately right immediately.
+      set((s) => ({ lastMention: e, lastMentionAt: Date.now(), pendingMentions: s.pendingMentions + 1 }));
+    });
     set({ wired: true });
+    get().refreshMentions();
+  },
+
+  /** Re-read the authoritative count — after a run, a dismissal, or on first mount. */
+  refreshMentions: () => {
+    forumApi
+      .mentionCount()
+      .then(({ count }) => set({ pendingMentions: count }))
+      .catch(() => undefined);
   },
 }));

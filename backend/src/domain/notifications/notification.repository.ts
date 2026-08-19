@@ -7,6 +7,9 @@ export const notificationRepository = {
     agent_id?: string | Types.ObjectId | null;
     title: string;
     content: string;
+    /** Optional back-pointer to the object the alert is about — see the model's `kind`. */
+    kind?: string;
+    ref_id?: string;
   }): Promise<NotificationDoc> {
     return NotificationModel.create({ ...input, status: 'unread' });
   },

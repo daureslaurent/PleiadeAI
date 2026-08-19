@@ -329,16 +329,21 @@ export class AgentRunner {
     // the other agents posted while it was working.
     const hasForum = tools.some((t) => t.name === forum.name);
     const wantsReplies = input.forumReplies || Boolean(input.autoLoop);
-    const [forumRelated, forumReplyPointers, forumDigest] = hasForum
+    //
+    // Mentions are the exception to *both* toggles: they ride every turn. Somebody addressed this
+    // agent by name, which is a question with a sender waiting on it — unlike a related thread,
+    // which is only ever a suggestion. It costs one indexed find (§11.2).
+    const [forumRelated, forumReplyPointers, forumDigest, forumMentions] = hasForum
       ? await Promise.all([
           forumRecall.pointers(recallVector),
           wantsReplies ? forumRecall.unansweredReplies(ctx.agentId, agent.name) : Promise.resolve([]),
           input.autoLoop
             ? forumRecall.digest(input.autoLoop.forumSeenAt, agent.name)
             : Promise.resolve([]),
+          forumRecall.mentions(ctx.agentId),
         ])
-      : [[], [], []];
-    const forumBlock = buildForumBlock(forumRelated, forumReplyPointers, forumDigest);
+      : [[], [], [], []];
+    const forumBlock = buildForumBlock(forumRelated, forumReplyPointers, forumDigest, forumMentions);
 
     // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
     // recall instead of guessing. Only fires when something was injected — the badge's presence in

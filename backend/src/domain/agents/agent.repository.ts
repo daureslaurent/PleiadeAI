@@ -97,6 +97,7 @@ export const agentRepository = {
         | 'description'
         | 'subagent'
         | 'auto_mode'
+        | 'forum_mentions'
         | 'loop_defaults'
         | 'agents_md'
         | 'notebook'

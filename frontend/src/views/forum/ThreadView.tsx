@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Archive,
+  AtSign,
   Check,
   CheckCircle2,
   CornerUpLeft,
@@ -10,13 +11,25 @@ import {
   LockOpen,
   Pencil,
   Pin,
+  Play,
   Trash2,
+  X,
 } from 'lucide-react';
-import { forumApi, type ForumFile, type ForumPost, type ForumThreadDetail } from '../../lib/api';
+import { forumApi, type ForumFile, type ForumMention, type ForumPost, type ForumThreadDetail } from '../../lib/api';
 import { useForum } from '../../store/forum';
 import { Markdown } from '../../components/Markdown';
+import { linkifyMentions, MentionProvider } from '../../components/Mention';
 import { Button, Callout, Chip, Spinner, StatusBadge, useConfirm } from '../../components/ui';
-import { ago, AttachmentList, AuthorAvatar, AuthorName, Composer, isModerator } from './forumBits';
+import { agentColor } from '../../lib/agentColor';
+import {
+  ago,
+  AttachmentList,
+  AuthorAvatar,
+  AuthorName,
+  Composer,
+  isModerator,
+  useMentionRoster,
+} from './forumBits';
 
 const PAGE_SIZE = 50;
 
@@ -40,6 +53,8 @@ export function ThreadView() {
   const last = useForum((s) => s.last);
   const lastEventAt = useForum((s) => s.lastEventAt);
   const wire = useForum((s) => s.wire);
+  const refreshMentions = useForum((s) => s.refreshMentions);
+  const roster = useMentionRoster();
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +96,23 @@ export function ThreadView() {
 
   async function patch(body: Parameters<typeof forumApi.saveThread>[1]) {
     await forumApi.saveThread(threadId, body);
+    await load();
+  }
+
+  /**
+   * Answer a mention. The run is detached on the backend, so this returns as soon as the session
+   * exists — and it takes the operator straight there, because the whole value of a mention run over
+   * a plain notification is watching the agent work and being able to keep talking to it.
+   */
+  async function runMention(mention: ForumMention) {
+    const { sessionId } = await forumApi.runMention(mention.id);
+    refreshMentions();
+    navigate(`/workspace?session=${sessionId}`);
+  }
+
+  async function dismissMention(mention: ForumMention) {
+    await forumApi.setMentionStatus(mention.id, 'dismissed');
+    refreshMentions();
     await load();
   }
 
@@ -154,6 +186,11 @@ export function ThreadView() {
               opening={detail.offset + i === 0}
               resolved={detail.resolvedPostId === post.id}
               postCount={detail.authorPostCounts[post.author.display_name] ?? 0}
+              mentions={(detail.mentions ?? []).filter((m) => m.postId === post.id)}
+              mentionNames={roster.map((t) => t.name)}
+              onRunMention={runMention}
+              onDismissMention={dismissMention}
+              onOpenSession={(m) => navigate(`/workspace?session=${m.sessionId}`)}
               repliedTo={detail.posts.find((p) => p.id === post.replyTo) ?? null}
               editing={editing?.id === post.id}
               onEdit={() => setEditing(post)}
@@ -233,6 +270,11 @@ function PostCard({
   opening,
   resolved,
   postCount,
+  mentions,
+  mentionNames,
+  onRunMention,
+  onDismissMention,
+  onOpenSession,
   repliedTo,
   editing,
   onEdit,
@@ -248,6 +290,13 @@ function PostCard({
   opening: boolean;
   resolved: boolean;
   postCount: number;
+  /** Mentions this post raised, so its chips can act and its pending asks can be surfaced. */
+  mentions: ForumMention[];
+  /** Every addressable name, for linkifying — an unknown `@foo` stays prose. */
+  mentionNames: string[];
+  onRunMention: (mention: ForumMention) => Promise<void>;
+  onDismissMention: (mention: ForumMention) => Promise<void>;
+  onOpenSession: (mention: ForumMention) => void;
   repliedTo: ForumPost | null;
   editing: boolean;
   onEdit: () => void;
@@ -331,11 +380,91 @@ function PostCard({
             />
           ) : (
             <div className="text-sm leading-relaxed text-slate-200">
-              <Markdown>{post.body}</Markdown>
+              <MentionProvider
+                value={{
+                  byName: new Map(mentions.map((m) => [m.target.display_name.toLowerCase(), m])),
+                  onRun: onRunMention,
+                  onDismiss: onDismissMention,
+                  onOpenSession,
+                }}
+              >
+                <Markdown>{linkifyMentions(post.body, mentionNames)}</Markdown>
+              </MentionProvider>
               <AttachmentList files={post.attachments ?? []} onDetach={(f) => void onDetach(f)} />
+              <PendingMentions
+                mentions={mentions}
+                onRun={onRunMention}
+                onDismiss={onDismissMention}
+              />
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The unanswered asks a post made, spelled out under it.
+ *
+ * The chip already carries the same actions, but a chip has to be *noticed* — and the one thing a
+ * mention must not do is sit unread in a thread the operator scrolled past. Only pending agent
+ * mentions appear: an answered one is visible as the reply right below it, and `@Operator` is
+ * answered by typing in the composer, not by pressing a button.
+ */
+function PendingMentions({
+  mentions,
+  onRun,
+  onDismiss,
+}: {
+  mentions: ForumMention[];
+  onRun: (m: ForumMention) => Promise<void>;
+  onDismiss: (m: ForumMention) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const pending = mentions.filter((m) => m.status === 'pending' && m.target.kind === 'agent');
+  if (!pending.length) return null;
+
+  async function act(m: ForumMention, fn: (x: ForumMention) => Promise<void>) {
+    setBusy(m.id);
+    try {
+      await fn(m);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-3 py-2">
+      <AtSign size={12} className="shrink-0 text-amber-400/80" />
+      <span className="text-[11px] text-amber-200/80">
+        Waiting on{' '}
+        {pending.map((m, i) => (
+          <span key={m.id}>
+            {i > 0 && ', '}
+            <span className="font-medium" style={{ color: agentColor(m.target.display_name).accent }}>
+              {m.target.display_name}
+            </span>
+            {!m.notified && <span className="text-amber-300/60"> (muted)</span>}
+          </span>
+        ))}
+      </span>
+      <div className="ml-auto flex items-center gap-1.5">
+        {pending.map((m) => (
+          <span key={m.id} className="flex items-center gap-1">
+            <Button
+              variant="accentSoft"
+              icon={<Play size={11} />}
+              loading={busy === m.id}
+              onClick={() => void act(m, onRun)}
+            >
+              Run {pending.length > 1 ? m.target.display_name : ''}
+            </Button>
+            <Button icon={<X size={11} />} onClick={() => void act(m, onDismiss)}>
+              Dismiss
+            </Button>
+          </span>
+        ))}
       </div>
     </div>
   );

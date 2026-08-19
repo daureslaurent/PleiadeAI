@@ -20,10 +20,12 @@ export const sessionRepository = {
    */
   listByAgent(
     agentId: string | Types.ObjectId,
-    origin: 'user' | 'synthetic' | 'all' = 'user',
+    origin: 'user' | 'synthetic' | 'forum' | 'all' = 'user',
   ): Promise<SessionDoc[]> {
     const filter: Record<string, unknown> = { agent_id: agentId };
-    // Sessions predating the `origin` field are the operator's own — match them as `user`.
+    // Sessions predating the `origin` field are the operator's own — match them as `user`. Mention
+    // runs ride along with `user`: the operator started them deliberately and will want to continue
+    // them, which is not true of a generated interview.
     if (origin === 'user') filter.origin = { $ne: 'synthetic' };
     else if (origin !== 'all') filter.origin = origin;
     return SessionModel.find(filter).sort({ updated_at: -1 }).exec();
@@ -53,8 +55,10 @@ export const sessionRepository = {
     agentId: string | Types.ObjectId;
     agentName: string;
     title?: string;
-    origin?: 'user' | 'synthetic';
+    origin?: 'user' | 'synthetic' | 'forum';
     generatorId?: string | Types.ObjectId;
+    forumThreadId?: string | Types.ObjectId;
+    forumMentionId?: string | Types.ObjectId;
   }): Promise<SessionDoc> {
     return SessionModel.create({
       agent_id: input.agentId,
@@ -62,6 +66,8 @@ export const sessionRepository = {
       title: input.title ?? 'New session',
       origin: input.origin ?? 'user',
       generator_id: input.generatorId ?? null,
+      forum_thread_id: input.forumThreadId ?? null,
+      forum_mention_id: input.forumMentionId ?? null,
     });
   },
 

@@ -5,6 +5,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Check, Copy } from 'lucide-react';
 import { MermaidBlock } from './Mermaid';
+import { MentionChip, mentionName } from './Mention';
 
 /** Extract the raw text out of a code block's children for copying. */
 function childrenToText(children: ReactNode): string {
@@ -82,16 +83,23 @@ const components: Components = {
     }
     return <CodeBlock language={language} code={code} />;
   },
-  a: ({ children, ...props }) => (
-    <a
-      {...props}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-accent underline underline-offset-2 hover:text-accent/80"
-    >
-      {children}
-    </a>
-  ),
+  a: ({ children, ...props }) => {
+    // Forum @-mentions are linkified into `pleiades-mention:` hrefs before rendering, so they get the
+    // chip and its hovercard through the one markdown pipeline instead of a second renderer for post
+    // bodies (see `components/Mention.tsx`).
+    const mention = mentionName(props.href);
+    if (mention) return <MentionChip name={mention} />;
+    return (
+      <a
+        {...props}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-accent underline underline-offset-2 hover:text-accent/80"
+      >
+        {children}
+      </a>
+    );
+  },
   ul: ({ children }) => <ul className="my-1.5 list-disc space-y-0.5 pl-5">{children}</ul>,
   ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-0.5 pl-5">{children}</ol>,
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,

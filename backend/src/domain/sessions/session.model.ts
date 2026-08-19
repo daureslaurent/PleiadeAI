@@ -22,10 +22,22 @@ const SessionSchema = new Schema(
      * see `docs/conversation-generator.md`). The Workspace shows both, marking the generated ones so
      * the interviewer's turns are never mistaken for the operator's; everything else (scoring, the
      * fine-tune dataset builder) treats them alike.
+     *
+     * `forum` marks a session spawned by the operator running an @-mention (`FORUM_PLAN.md` §11.3).
+     * It is a real conversation in every other respect — same tools, same streaming, same scoring —
+     * which is the whole point of reusing sessions for it: the operator can keep talking after the
+     * agent's answer has gone back to the thread.
      */
-    origin: { type: String, enum: ['user', 'synthetic'], default: 'user', index: true },
+    origin: { type: String, enum: ['user', 'synthetic', 'forum'], default: 'user', index: true },
     /** Synthetic only: the `conversation_generators` row that produced this session. */
     generator_id: { type: Schema.Types.ObjectId, ref: 'ConversationGenerator', default: null, index: true },
+    /**
+     * Forum-origin only: the thread the mention came from, and the mention itself. Kept so the
+     * Workspace can offer a link back to the board — a mention run read out of context ("who asked
+     * this?") is exactly the trace that makes it hard to trust.
+     */
+    forum_thread_id: { type: Schema.Types.ObjectId, ref: 'ForumThread', default: null },
+    forum_mention_id: { type: Schema.Types.ObjectId, ref: 'ForumMention', default: null },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
