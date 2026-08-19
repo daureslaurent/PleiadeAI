@@ -2,7 +2,7 @@ import { createLogger } from '../../config/logger';
 import { eventBus } from '../../core/event-bus/EventBus';
 import type { EventContext } from '../../core/event-bus/events.types';
 import { sessionLock } from '../../core/session/SessionLock';
-import { agentRunner } from '../../orchestrator/AgentRunner';
+import { agentRunner, RunAbortedError } from '../../orchestrator/AgentRunner';
 import { liveRuns } from '../../transport/ws/live-runs';
 import { TurnRecorder } from '../../transport/ws/TurnRecorder';
 import { agentRepository } from '../agents/agent.repository';
@@ -154,15 +154,26 @@ export const forumMentionRunner = {
     // the run is live rather than showing an idle conversation that suddenly sprouts an answer.
     const recorder = new TurnRecorder(sessionId, agentName);
     recorder.start();
-    liveRuns.start(sessionId, recorder);
+    // The controller is what makes the Workspace's stop button work on a mention run: `chat:stop`
+    // looks the session up in `liveRuns` and fires it. Registered without one, the turn ran to
+    // completion no matter how hard the operator pressed stop.
+    const controller = new AbortController();
+    liveRuns.start(sessionId, recorder, controller);
 
     // A live operator chat on this agent wins; the mention has already waited, it can wait a minute.
     await sessionLock.waitUntilFree(agentId, YIELD_TIMEOUT_MS);
 
     let answer = '';
     let failure = '';
+    let stopped = false;
     try {
-      const result = await agentRunner.run({ agentName, sessionId, depth: 0, userText: text });
+      const result = await agentRunner.run({
+        agentName,
+        sessionId,
+        depth: 0,
+        userText: text,
+        signal: controller.signal,
+      });
       answer = result.text;
       const turn = recorder.build(answer);
       await sessionRepository.addMessage(sessionId, {
@@ -186,17 +197,21 @@ export const forumMentionRunner = {
         runId: result.runId,
       });
     } catch (err) {
+      // Operator hit stop: keep whatever streamed so far, but no error banner — this is a clean end,
+      // and the mention stays pending so it can simply be run again.
+      stopped = err instanceof RunAbortedError || controller.signal.aborted;
       failure = err instanceof Error ? err.message : String(err);
       const turn = recorder.build('');
-      const blocks = [
-        ...turn.blocks,
-        { kind: 'text' as const, text: `\n\n⚠️ The run failed: ${failure}` },
-      ];
+      const blocks = stopped
+        ? turn.blocks
+        : [...turn.blocks, { kind: 'text' as const, text: `\n\n⚠️ The run failed: ${failure}` }];
       await sessionRepository
         .addMessage(sessionId, { role: 'assistant', text: '', blocks, trace: turn.trace })
         .catch((e) => log.error({ err: String(e) }, 'failed to persist interrupted mention turn'));
       eventBus.emit('conversation:turn_complete', { ctx, answer: '', blocks, turnId: '', runId: '' });
+      if (stopped) log.info({ mentionId: String(mention._id), sessionId }, 'mention run stopped by user');
     } finally {
+      recorder.stop();
       liveRuns.end(sessionId);
     }
 

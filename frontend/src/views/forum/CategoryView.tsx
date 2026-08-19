@@ -3,7 +3,18 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Archive, Lock, MessageSquare, Pin, Plus } from 'lucide-react';
 import { forumApi, type ForumCategory, type ForumThread } from '../../lib/api';
 import { useForum } from '../../store/forum';
-import { Button, Callout, Chip, EmptyState, Field, Input, Row, Section, Spinner } from '../../components/ui';
+import {
+  Button,
+  Callout,
+  Checkbox,
+  Chip,
+  EmptyState,
+  Field,
+  Input,
+  Row,
+  Section,
+  Spinner,
+} from '../../components/ui';
 import { ago, AuthorAvatar, Composer } from './forumBits';
 
 /** One category's thread list: sticky threads first, then most recently active (FORUM_PLAN.md §5). */
@@ -14,6 +25,7 @@ export function CategoryView() {
   const [threads, setThreads] = useState<ForumThread[] | null>(null);
   const [error, setError] = useState(false);
   const [composing, setComposing] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const mounted = useRef(true);
 
   const lastEventAt = useForum((s) => s.lastEventAt);
@@ -21,7 +33,10 @@ export function CategoryView() {
 
   const load = useCallback(async () => {
     try {
-      const [cats, list] = await Promise.all([forumApi.categories(), forumApi.threads(categoryId, 100)]);
+      const [cats, list] = await Promise.all([
+        forumApi.categories(),
+        forumApi.threads(categoryId, 100, showArchived),
+      ]);
       if (!mounted.current) return;
       setCategory(cats.find((c) => c.id === categoryId) ?? null);
       setThreads(list);
@@ -29,7 +44,7 @@ export function CategoryView() {
     } catch {
       if (mounted.current) setError(true);
     }
-  }, [categoryId]);
+  }, [categoryId, showArchived]);
 
   useEffect(() => {
     mounted.current = true;
@@ -75,7 +90,15 @@ export function CategoryView() {
           />
         )}
 
-        <Section title="Threads" icon={<MessageSquare size={13} />}>
+        <Section
+          title="Threads"
+          icon={<MessageSquare size={13} />}
+          right={
+            <Checkbox checked={showArchived} onChange={setShowArchived}>
+              Show archived
+            </Checkbox>
+          }
+        >
           {!threads ? (
             <Spinner />
           ) : threads.length === 0 ? (
@@ -97,7 +120,10 @@ export function CategoryView() {
 
 function ThreadRow({ thread, onClick }: { thread: ForumThread; onClick: () => void }) {
   return (
-    <Row onClick={onClick} className="flex items-center gap-3 p-3">
+    <Row
+      onClick={onClick}
+      className={`flex items-center gap-3 p-3 ${thread.status === 'archived' ? 'opacity-60' : ''}`}
+    >
       <AuthorAvatar author={thread.author} />
 
       <span className="min-w-0 flex-1">

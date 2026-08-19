@@ -2676,8 +2676,12 @@ export const forumApi = {
   removeCategory: (id: string, force = false) =>
     api.delete(`/forum/categories/${id}`, { params: force ? { force: 1 } : {} }).then((r) => r.data),
 
-  threads: (categoryId?: string, limit = 50) =>
-    api.get<ForumThread[]>('/forum/threads', { params: { category: categoryId, limit } }).then((r) => r.data),
+  threads: (categoryId?: string, limit = 50, includeArchived = false) =>
+    api
+      .get<ForumThread[]>('/forum/threads', {
+        params: { category: categoryId, limit, includeArchived: includeArchived ? '1' : undefined },
+      })
+      .then((r) => r.data),
   createThread: (body: { category: string; title: string; body: string; tags?: string[]; attachments?: string[] }) =>
     api.post<ForumThread & { posts: ForumPost[] }>('/forum/threads', body).then((r) => r.data),
   thread: (id: string, limit = 50, offset = 0) =>
