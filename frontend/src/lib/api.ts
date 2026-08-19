@@ -313,6 +313,11 @@ export interface Agent {
    */
   auto_mode: boolean;
   /**
+   * Starting values for this agent's Loop panel — not a running loop, just what the form opens with,
+   * so an agent built for a standing job arms in one click.
+   */
+  loop_defaults?: { goal: string; continue_text: string; interval_sec: number };
+  /**
    * Role slug when the app owns this agent (`''` for operator-made ones). A built-in cannot be
    * deleted or renamed — privileged tools authorise against the slug — but is otherwise editable.
    */

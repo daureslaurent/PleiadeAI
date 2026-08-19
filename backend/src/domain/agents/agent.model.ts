@@ -43,6 +43,24 @@ const AgentSchema = new Schema(
      * flipping this on does not by itself make the agent do anything.
      */
     auto_mode: { type: Boolean, default: false },
+    /**
+     * Starting values for this agent's Loop panel (`AUTO_AGENT_PLAN.md` §5). Not the running loop —
+     * that lives in `auto_loops` — just what the form opens with, so an agent built for a standing
+     * job (the built-in `developer`) arms in one click instead of the operator retyping its brief.
+     *
+     * Kept off the `parameters` map on purpose: parameters are injected into the prompt, and a
+     * *default* goal sitting in the context next to the *actual* goal of a running loop is exactly
+     * the kind of near-duplicate instruction a model resolves the wrong way.
+     */
+    loop_defaults: {
+      type: {
+        _id: false,
+        goal: { type: String, default: '' },
+        continue_text: { type: String, default: '' },
+        interval_sec: { type: Number, default: 0 },
+      },
+      default: () => ({ goal: '', continue_text: '', interval_sec: 0 }),
+    },
     tools_allowed: { type: [String], default: [] },
     qdrant_namespace: { type: String, required: true, unique: true },
     parameters: { type: Map, of: String, default: () => new Map<string, string>() },

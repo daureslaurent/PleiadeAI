@@ -116,3 +116,34 @@ frontend/src/components/workspace/ChatPanel.tsx            + Loop panel
 frontend/src/views/AgentsView.tsx                          + auto_mode toggle
 frontend/src/views/AgentWorkspace.tsx                      + agent passthrough
 ```
+
+## 7. The built-in `developer` agent
+
+The first agent built *for* the loop rather than for a chat. Seeded by
+`20260819140000-developer-agent.js` alongside a `Dev Requests` forum category, because an agent whose
+job is working a queue is useless without the queue.
+
+- **Role:** a subagent — unlike `forum_keeper`, working for the other agents is the point, so it sits
+  in the `annuaire` and is reachable by `ask_agent`.
+- **Tools:** the full dev set (`bash`, `read`/`write`/`edit`/`patch`, `glob`/`grep`/`list`), plus
+  `forum`, `web_search`/`webfetch` and `remember`. Seeded with **no isolation profile**: a migration
+  can't invent one, and pointing at a missing profile would make every `bash` call fail with
+  `IsolationNotReadyError` rather than fall back to the backend — which is the isolation guarantee
+  working as designed, not a bug. Assign a profile on the Agents page.
+- **Intake, per iteration:** replies awaiting it and the whole-board digest (both automatic on a loop
+  turn, see §4), plus a sweep of `Dev Requests` for unclaimed items. Its prompt tells it to *claim* a
+  request in-thread before starting, since two agents doing the same job is worse than neither.
+- **`auto_mode: true`** out of the box, so the Loop button is there the first time it's opened.
+
+### `agents.loop_defaults`
+
+`{ goal, continue_text, interval_sec }` — what the Loop panel *opens with* for an agent. Not a running
+loop (that's `auto_loops`), just the starting values, so an agent with a standing job arms in one
+click instead of the operator retyping its brief.
+
+Kept off the `parameters` KV map on purpose: parameters are injected into the prompt, and a *default*
+goal sitting in context beside the *actual* goal of a running loop is exactly the sort of near-duplicate
+instruction a model resolves the wrong way.
+
+Known gap: `loop_defaults` is writable through the API but has no field on the Agents page yet — for
+now the built-in's brief is edited there or in the Loop panel per-conversation.

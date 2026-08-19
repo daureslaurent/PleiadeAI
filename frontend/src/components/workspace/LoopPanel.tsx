@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Repeat, Square, Play, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { autoLoopsApi, type Agent } from '../../lib/api';
 import { useStream } from '../../store/stream';
-import { usePersistentState } from '../../hooks/usePersistentState';
 
 /**
  * The auto-agent Loop panel (`AUTO_AGENT_PLAN.md` §5): where the operator hands an `auto_mode` agent
@@ -35,15 +34,35 @@ function isLive(status: string | undefined): boolean {
 export function LoopPanel({ agent, sessionId, onEnsureSession, onClose }: Props) {
   const { autoLoop, setAutoLoop } = useStream();
 
-  // The form is remembered per browser, not per session: an operator running the same kind of loop
-  // over and over shouldn't retype the interval and the continue phrasing every time.
-  const [goal, setGoal] = usePersistentState('loop:goal', '');
-  const [seed, setSeed] = usePersistentState('loop:seed', '');
-  const [continueText, setContinueText] = usePersistentState('loop:continue', DEFAULT_CONTINUE);
-  const [intervalSec, setIntervalSec] = usePersistentState('loop:interval', 300);
+  // The form opens on the agent's own `loop_defaults` — an agent built for a standing job (the
+  // built-in `developer`) ships with its brief already written, so arming it is one click. Not
+  // remembered per browser: a goal is a property of the agent and the conversation, and a single
+  // localStorage slot would leak one agent's brief into the next agent you opened.
+  const defaultGoal = agent.loop_defaults?.goal ?? '';
+  const defaultContinue = agent.loop_defaults?.continue_text || DEFAULT_CONTINUE;
+  const defaultInterval = agent.loop_defaults?.interval_sec || 300;
+  const [goal, setGoal] = useState(defaultGoal);
+  const [seed, setSeed] = useState('');
+  const [continueText, setContinueText] = useState(defaultContinue);
+  const [intervalSec, setIntervalSec] = useState(defaultInterval);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+
+  // Switching agents re-seeds the form from the new agent's defaults. The loop fetch below runs after
+  // and overrides this whenever the conversation already has a loop — a real loop's own values always
+  // beat a default.
+  //
+  // Keyed on the id alone, deliberately: `loop_defaults` is a fresh object on every agents refetch,
+  // so depending on it would re-run this and wipe whatever the operator had typed into the form.
+  const initialRef = useRef({ defaultGoal, defaultContinue, defaultInterval });
+  initialRef.current = { defaultGoal, defaultContinue, defaultInterval };
+  useEffect(() => {
+    setGoal(initialRef.current.defaultGoal);
+    setSeed('');
+    setContinueText(initialRef.current.defaultContinue);
+    setIntervalSec(initialRef.current.defaultInterval);
+  }, [agent._id]);
 
   // Load whatever loop this conversation already has, so re-opening the panel on a running loop shows
   // its real state rather than an empty form.
@@ -78,7 +97,7 @@ export function LoopPanel({ agent, sessionId, onEnsureSession, onClose }: Props)
     return () => {
       cancelled = true;
     };
-  }, [sessionId, setAutoLoop, setGoal, setContinueText, setIntervalSec]);
+  }, [sessionId, setAutoLoop]);
 
   // Local ticker for the countdown only. It never decides anything — if it drifts, the next
   // `auto_loop` event corrects it; the backend's timer is what actually fires.
