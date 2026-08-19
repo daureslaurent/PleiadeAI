@@ -91,6 +91,19 @@ export const llamaLogRepository = {
     return LlamaCallArchiveModel.findOne({ call_id: callId }).exec();
   },
 
+  /**
+   * The last `limit` **chat-turn** calls of one session, oldest first — the session's prompt history
+   * as actually sent. Backs the chat page's Prompt view: every inference pass of every turn (the tool
+   * loop's growing message array included), which is where context growth becomes visible.
+   */
+  async listBySession(sessionId: string, limit: number): Promise<LlamaLogDoc[]> {
+    const docs = await LlamaCallArchiveModel.find({ session_id: sessionId, source: 'chat-turn' })
+      .sort({ created_at: -1 })
+      .limit(limit)
+      .exec();
+    return docs.reverse();
+  },
+
   /** All archive records of one turn (parent + sub-agent runs), oldest first. */
   listByTurn(turnId: string): Promise<LlamaLogDoc[]> {
     return LlamaCallArchiveModel.find({ turn_id: turnId }).sort({ created_at: 1 }).exec();

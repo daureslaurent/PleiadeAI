@@ -391,6 +391,48 @@ export class LlamaClient {
   }
 
   /**
+   * Token counts for a list of raw strings via llama.cpp's `/tokenize`, WITHOUT the chat template.
+   * Backs the chat page's Prompt view, which sizes each message of a captured request individually.
+   *
+   * Because the per-message scaffolding the template adds (role headers, turn delimiters) isn't
+   * counted, these figures sum to slightly *less* than `tokenizeMessages`' exact prompt total — the
+   * caller reports both, the breakdown for "what is eating my window" and the total for accuracy.
+   * Best-effort per entry: `null` where the server has no `/tokenize` or the request failed.
+   */
+  async tokenizeTexts(target: ResolvedInference, texts: string[]): Promise<(number | null)[]> {
+    const base = target.url.replace(/\/$/, '');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(target.apiKey ? { Authorization: `Bearer ${target.apiKey}` } : {}),
+    };
+    const count = async (content: string): Promise<number | null> => {
+      if (!content) return 0;
+      try {
+        const res = await fetch(`${base}/tokenize`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ content, add_special: false }),
+        });
+        if (!res.ok) return null;
+        const { tokens } = (await res.json()) as { tokens?: unknown[] };
+        return Array.isArray(tokens) ? tokens.length : null;
+      } catch {
+        return null;
+      }
+    };
+
+    // Bounded concurrency: a long session's request can carry dozens of messages and the inference
+    // host is remote — firing them all at once would hammer it for a debug view.
+    const out: (number | null)[] = new Array(texts.length).fill(null);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(6, texts.length) }, async () => {
+      for (let i = next++; i < texts.length; i = next++) out[i] = await count(texts[i] ?? "");
+    });
+    await Promise.all(workers);
+    return out;
+  }
+
+  /**
    * Stream one assistant turn. Text deltas are handed to `onToken` as they arrive; tool-call
    * fragments are accumulated and returned assembled once the stream ends.
    *

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText } from 'lucide-react';
+import { RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText, ScrollText } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
@@ -92,6 +92,8 @@ interface Props {
   generatedSession?: boolean;
   debuggerOpen: boolean;
   onToggleDebugger: () => void;
+  promptOpen: boolean;
+  onTogglePrompt: () => void;
   onOpenVisual: () => void;
   onOpenAndroid: () => void;
   onSend: (text: string, images?: string[], forumReplies?: boolean) => void;
@@ -249,7 +251,7 @@ function AskUserPrompt({
 }
 
 /** Center column: the conversation plus the composer. Modern bubble layout with auto-scroll. */
-export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, onOpenVisual, onOpenAndroid, onSend, onEnsureSession }: Props) {
+export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, onToggleDebugger, promptOpen, onTogglePrompt, onOpenVisual, onOpenAndroid, onSend, onEnsureSession }: Props) {
   const { turns, liveItems, liveFrames, frameStack, liveReasoning, streaming, contextUsage, liveContext, pendingAsk, lastTurnTruncated, autoLoop, todos, activeSessionId, answerAsk, stop } =
     useStream();
   const [input, setInput] = useState('');
@@ -401,12 +403,24 @@ export function ChatPanel({ agent, hasSession, generatedSession, debuggerOpen, o
           </button>
         )}
         <button
-          onClick={onToggleDebugger}
+          onClick={onTogglePrompt}
+          title="See the conversation exactly as it is sent to the model"
           className={[
             'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs transition-colors',
             !(hasSession && (contextUsage || liveContext)) && !agent?.visual && !agent?.android
               ? 'ml-auto'
               : '',
+            promptOpen
+              ? 'bg-accent/15 text-accent shadow-[0_0_12px_rgba(56,189,248,0.2)]'
+              : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
+          ].join(' ')}
+        >
+          <ScrollText size={14} /> Prompt
+        </button>
+        <button
+          onClick={onToggleDebugger}
+          className={[
+            'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs transition-colors',
             debuggerOpen
               ? 'bg-reasoning/15 text-reasoning shadow-[0_0_12px_rgba(168,85,247,0.2)]'
               : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',

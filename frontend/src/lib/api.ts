@@ -1917,9 +1917,27 @@ export interface LlamaLogStats {
   dbBytes: number;
 }
 
+/** Token breakdown for one captured request (chat page Prompt view). */
+export interface PromptTokenBreakdown {
+  /** Per-message content tokens, index-aligned with the request's messages. `null` = unavailable. */
+  perMessage: (number | null)[];
+  /** Exact templated prompt total — larger than the sum, which excludes template scaffolding. */
+  total: number | null;
+  contextWindow?: number;
+}
+
 export const llmDebugApi = {
   list: (limit: number) =>
     api.get<LlamaCallRecord[]>('/llama-logs', { params: { limit } }).then((r) => r.data),
+  /** Every chat-turn call of one session, oldest first — the Prompt view's backing data. */
+  bySession: (sessionId: string, limit = 60) =>
+    api
+      .get<LlamaCallRecord[]>(`/llama-logs/session/${sessionId}`, { params: { limit } })
+      .then((r) => r.data),
+  tokenize: (messages: unknown[], agentId?: string | null) =>
+    api
+      .post<PromptTokenBreakdown>('/llama-logs/tokenize', { messages, agentId: agentId ?? null })
+      .then((r) => r.data),
   get: (id: string) => api.get<LlamaCallRecord>(`/llama-logs/${id}`).then((r) => r.data),
   stats: () => api.get<LlamaLogStats>('/llama-logs/stats').then((r) => r.data),
   purgeArchive: () =>

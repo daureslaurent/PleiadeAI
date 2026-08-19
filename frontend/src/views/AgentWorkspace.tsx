@@ -7,6 +7,7 @@ import { usePersistentState } from '../hooks/usePersistentState';
 import { WorkspaceNav } from '../components/workspace/WorkspaceNav';
 import { ChatPanel } from '../components/workspace/ChatPanel';
 import { DebuggerDrawer } from '../components/workspace/DebuggerDrawer';
+import { PromptDrawer } from '../components/workspace/PromptDrawer';
 
 // Lazy: the noVNC client is only pulled in when an operator actually opens a desktop.
 const VisualPanel = lazy(() =>
@@ -33,6 +34,8 @@ export function AgentWorkspace() {
   const [activeAgentId, setActiveAgentId] = usePersistentState<string | null>('workspace:activeAgentId', null);
   const [activeSessionId, setActiveSessionId] = usePersistentState<string | null>('workspace:activeSessionId', null);
   const [drawer, setDrawer] = usePersistentState('workspace:debuggerOpen', true);
+  // The two right drawers are mutually exclusive — the chat column is too narrow for both.
+  const [promptOpen, setPromptOpen] = usePersistentState('workspace:promptOpen', false);
   const [visualOpen, setVisualOpen] = useState(false);
   const [androidOpen, setAndroidOpen] = useState(false);
   // Sessions whose auto-title is currently being generated → render a spinner beside the name.
@@ -252,13 +255,28 @@ export function AgentWorkspace() {
         hasSession={!!activeSessionId}
         generatedSession={generatedSession}
         debuggerOpen={drawer}
-        onToggleDebugger={() => setDrawer((d) => !d)}
+        onToggleDebugger={() => {
+          setDrawer((d) => !d);
+          setPromptOpen(false);
+        }}
+        promptOpen={promptOpen}
+        onTogglePrompt={() => {
+          setPromptOpen((p) => !p);
+          setDrawer(false);
+        }}
         onOpenVisual={() => setVisualOpen(true)}
         onOpenAndroid={() => setAndroidOpen(true)}
         onSend={handleSend}
         onEnsureSession={ensureSession}
       />
       {drawer && <DebuggerDrawer onClose={() => setDrawer(false)} agent={activeAgent} />}
+      {promptOpen && (
+        <PromptDrawer
+          onClose={() => setPromptOpen(false)}
+          sessionId={activeSessionId}
+          agent={activeAgent}
+        />
+      )}
       {visualOpen && activeAgent && (
         <Suspense fallback={null}>
           <VisualPanel
