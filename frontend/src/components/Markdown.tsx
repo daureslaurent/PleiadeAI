@@ -6,6 +6,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Check, Copy } from 'lucide-react';
 import { MermaidBlock } from './Mermaid';
 import { MentionChip, mentionName } from './Mention';
+import { linkifyThreadIds, ThreadRefChip, threadRefId } from './ThreadRef';
 
 /** Extract the raw text out of a code block's children for copying. */
 function childrenToText(children: ReactNode): string {
@@ -89,6 +90,10 @@ const components: Components = {
     // bodies (see `components/Mention.tsx`).
     const mention = mentionName(props.href);
     if (mention) return <MentionChip name={mention} />;
+    // Same trick for raw thread ids (`components/ThreadRef.tsx`): linkified on the way in, drawn as
+    // the thread's title with a card. Ids that resolve to no thread put themselves back as code.
+    const thread = threadRefId(props.href);
+    if (thread) return <ThreadRefChip id={thread} />;
     return (
       <a
         {...props}
@@ -129,10 +134,14 @@ const components: Components = {
 
 /** Renders GitHub-flavored markdown with syntax-highlighted, copyable code blocks. */
 export const Markdown = memo(function Markdown({ children }: { children: string }) {
+  // Thread ids are linkified here rather than at each call site, so a thread referenced in a post,
+  // in a chat turn or in a cron run's output all read the same. `@mentions` stay opt-in at the call
+  // site: they need the roster of known names, which only the board has.
+  const source = linkifyThreadIds(children);
   return (
     <div className="min-w-0 max-w-full break-words text-sm [overflow-wrap:anywhere]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {children}
+        {source}
       </ReactMarkdown>
     </div>
   );

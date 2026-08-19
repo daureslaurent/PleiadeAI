@@ -42,6 +42,21 @@ export const forumPostRepository = {
     return Object.fromEntries(rows.map((r) => [r._id, r.n]));
   },
 
+  /**
+   * The opening post of each of several threads, in one aggregation — the excerpt a thread-reference
+   * hovercard shows. Per-thread queries would mean one round trip per `#thread` chip on a page.
+   */
+  async openingBodies(threadIds: string[]): Promise<Record<string, string>> {
+    const valid = threadIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
+    if (!valid.length) return {};
+    const rows = await ForumPostModel.aggregate<{ _id: Types.ObjectId; body: string }>([
+      { $match: { thread_id: { $in: valid }, deleted: false } },
+      { $sort: { created_at: 1 } },
+      { $group: { _id: '$thread_id', body: { $first: '$body' } } },
+    ]).exec();
+    return Object.fromEntries(rows.map((r) => [String(r._id), r.body]));
+  },
+
   findById(id: string): Promise<ForumPostDoc | null> {
     if (!Types.ObjectId.isValid(id)) return Promise.resolve(null);
     return ForumPostModel.findById(id).exec();

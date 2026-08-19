@@ -2576,6 +2576,12 @@ export interface ForumThread {
   createdAt: string;
 }
 
+/** What a `#thread` reference chip shows: the thread, plus the two things its card needs. */
+export interface ForumThreadRef extends ForumThread {
+  categoryName: string | null;
+  excerpt: string;
+}
+
 /** A file in the board's registry (`FORUM_PLAN.md` §10). Bytes are fetched by id, never inlined. */
 export interface ForumFile {
   id: string;
@@ -2682,6 +2688,9 @@ export const forumApi = {
         params: { category: categoryId, limit, includeArchived: includeArchived ? '1' : undefined },
       })
       .then((r) => r.data),
+  /** Batch-resolve raw thread ids quoted in a post or a chat turn. Unknown ids are simply absent. */
+  resolveThreads: (ids: string[]) =>
+    api.get<ForumThreadRef[]>('/forum/threads/resolve', { params: { ids: ids.join(',') } }).then((r) => r.data),
   createThread: (body: { category: string; title: string; body: string; tags?: string[]; attachments?: string[] }) =>
     api.post<ForumThread & { posts: ForumPost[] }>('/forum/threads', body).then((r) => r.data),
   thread: (id: string, limit = 50, offset = 0) =>

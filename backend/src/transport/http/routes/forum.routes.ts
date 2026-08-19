@@ -87,6 +87,18 @@ function shapeThread(doc: ForumThreadDoc) {
   };
 }
 
+/** First lines of a post, stripped of the markdown that reads as noise in a one-line preview. */
+function excerpt(body: string, max = 220): string {
+  const flat = body
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^[>#\-*\s]+/gm, '')
+    .replace(/[`*_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max).trimEnd()}…`;
+}
+
 function shapePost(doc: ForumPostDoc, files: ForumFileDoc[] = []) {
   return {
     id: String(doc._id),
@@ -235,6 +247,37 @@ forumRouter.post('/threads', async (req, res) => {
     if (status === null) throw err;
     res.status(status).json({ error: (err as Error).message });
   }
+});
+
+/**
+ * Batch-resolve thread ids into the little that a `#thread` reference chip needs (FORUM_PLAN.md
+ * §11.5). Agents quote raw thread ids at each other constantly — in posts, and at the operator in
+ * chat — and an ObjectId says nothing about what it points at. The renderer turns every known id
+ * into a chip; unknown ids come back absent and stay plain text, so this is also the *is it a
+ * thread* test. One call per rendered page, not one per chip.
+ *
+ * Registered ahead of `/threads/:id` — Express matches in order, and `resolve` is a valid ObjectId
+ * shape to nobody, but the param route would still swallow it.
+ */
+forumRouter.get('/threads/resolve', async (req, res) => {
+  const ids = String(req.query.ids ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 50);
+  const threads = await forumThreadRepository.findByIds(ids);
+  const [categories, bodies] = await Promise.all([
+    forumCategoryRepository.list(),
+    forumPostRepository.openingBodies(threads.map((t) => String(t._id))),
+  ]);
+  const categoryName = new Map(categories.map((c) => [String(c._id), c.name]));
+  res.json(
+    threads.map((t) => ({
+      ...shapeThread(t),
+      categoryName: categoryName.get(String(t.category_id)) ?? null,
+      excerpt: excerpt(bodies[String(t._id)] ?? ''),
+    })),
+  );
 });
 
 forumRouter.get('/threads/:id', async (req, res) => {
