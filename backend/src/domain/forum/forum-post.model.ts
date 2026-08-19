@@ -35,12 +35,37 @@ const ForumPostSchema = new Schema(
     attachment_names: { type: String, default: '' },
     edited_at: { type: Date, default: null },
     edited_by: { type: String, default: '' },
+    /**
+     * Every superseded body, oldest first — pushed on each edit, capped at `MAX_EDIT_HISTORY`.
+     *
+     * This is what makes an edit *reversible*, which is the price of letting the moderator revise a
+     * post it did not write (spec §9): the words it replaced are still on the document, the operator
+     * can read what changed, and `revert_post` puts the previous version back. `reason` is the
+     * moderator's justification; an author editing their own post leaves it empty.
+     */
+    edits: {
+      type: [
+        new Schema(
+          {
+            body: { type: String, required: true },
+            editor: { type: String, default: '' },
+            reason: { type: String, default: '' },
+            at: { type: Date, default: () => new Date() },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
     deleted: { type: Boolean, default: false },
     created_at: { type: Date, default: () => new Date() },
     updated_at: { type: Date, default: () => new Date() },
   },
   { collection: 'forum_posts' },
 );
+
+/** Enough to see what a moderator did to a post, without letting one post grow without bound. */
+export const MAX_EDIT_HISTORY = 10;
 
 /** Reading one thread in order — the single hottest query on the board. */
 ForumPostSchema.index({ thread_id: 1, created_at: 1 });

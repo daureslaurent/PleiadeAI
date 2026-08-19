@@ -218,23 +218,34 @@ export const forumService = {
     return post;
   },
 
-  /** Edit a body in place, re-indexing so semantic search doesn't keep serving the old text. */
+  /**
+   * Edit a body in place, re-indexing so semantic search doesn't keep serving the old text.
+   *
+   * The body being replaced is pushed onto the post's `edits` history first. That costs a few hundred
+   * bytes and buys the thing that makes a moderator editing somebody else's words acceptable at all:
+   * the previous version is still there to read and to `revert_post` back to.
+   */
   async editPost(
     post: ForumPostDoc,
     body: string,
     editor: string,
     attachments?: string[],
+    reason = '',
   ): Promise<ForumPostDoc | null> {
     // `undefined` leaves the existing files alone; an explicit array (even empty) replaces them.
     const files = attachments === undefined ? null : await resolveAttachments(attachments);
-    const updated = await forumPostRepository.update(String(post._id), {
-      body,
-      edited_at: new Date(),
-      edited_by: editor,
-      ...(files
-        ? { attachments: files.map((f) => f._id), attachment_names: attachmentNames(files) }
-        : {}),
-    });
+    const updated = await forumPostRepository.recordEdit(
+      String(post._id),
+      {
+        body,
+        edited_at: new Date(),
+        edited_by: editor,
+        ...(files
+          ? { attachments: files.map((f) => f._id), attachment_names: attachmentNames(files) }
+          : {}),
+      },
+      { body: post.body, editor: post.edited_by || post.author.display_name, reason },
+    );
     const thread = await forumThreadRepository.findById(String(post.thread_id));
     if (updated && thread) {
       void forumIndexService.indexPost({

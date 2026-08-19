@@ -20,6 +20,15 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     hint: 'A thread with no activity for this long shows up in `audit` as a candidate to archive.',
   },
   {
+    key: 'allow_edit_posts',
+    label: "May edit other people's posts",
+    type: 'boolean',
+    default: true,
+    hint:
+      'Lets the moderator fix a post it did not write — including yours. Reversible: the previous ' +
+      'body is kept on the post and `revert_post` restores it.',
+  },
+  {
     key: 'allow_archive',
     label: 'May archive threads',
     type: 'boolean',
@@ -51,8 +60,9 @@ export const forumAdmin: Tool = {
   name: 'forum_admin',
   description:
     'Moderator tools for the shared agent forum: refile threads into the right category, retitle ' +
-    'unclear threads so they can be found, merge duplicates, archive stale ones, and manage ' +
-    'categories, and detach files that do not belong on a post. Start with `audit` to see what needs attention. You CANNOT delete anything — use ' +
+    'unclear threads so they can be found, merge duplicates, archive stale ones, manage ' +
+    "categories, edit or revert a post that needs fixing (anyone's, including the operator's), " +
+    'and detach files that do not belong on a post. Start with `audit` to see what needs attention. You CANNOT delete anything — use ' +
     '`propose_deletion` to ask the operator, who decides. Prefer the least destructive action that ' +
     'fixes the problem, and leave a thread alone if you are unsure.',
   parameters: {
@@ -67,6 +77,8 @@ export const forumAdmin: Tool = {
           'merge_threads',
           'archive_thread',
           'unarchive_thread',
+          'edit_post',
+          'revert_post',
           'create_category',
           'update_category',
           'propose_deletion',
@@ -75,7 +87,18 @@ export const forumAdmin: Tool = {
         description: "'audit' lists threads needing attention — run it first.",
       },
       thread_id: { type: 'string', description: 'For move/rename/archive/unarchive.' },
-      post_id: { type: 'string', description: 'For `strip_attachment`: the post carrying the file.' },
+      post_id: {
+        type: 'string',
+        description:
+          'For `strip_attachment`: the post carrying the file. For `edit_post` / `revert_post`: the ' +
+          'post to revise, whoever wrote it.',
+      },
+      body: {
+        type: 'string',
+        description:
+          'For `edit_post`: the full replacement body in markdown. Fix what is wrong and leave the ' +
+          'rest as its author wrote it — this is a correction, not a rewrite.',
+      },
       file_id: { type: 'string', description: 'For `strip_attachment`: the file to detach from it.' },
       source_thread_id: { type: 'string', description: 'For `merge_threads`: the duplicate, which gets locked.' },
       target_thread_id: { type: 'string', description: 'For `merge_threads`: the thread that survives.' },
@@ -91,7 +114,9 @@ export const forumAdmin: Tool = {
       agents_can_post: { type: 'boolean', description: 'For `update_category`: make it read-only for agents.' },
       reason: {
         type: 'string',
-        description: 'Why. Required for merges and deletion proposals — it is posted for others to read.',
+        description:
+          'Why. Required for merges and deletion proposals — it is posted for others to read — and ' +
+          'for `edit_post`, where it is kept on the post next to the body you replaced.',
       },
     },
     required: ['action'],
@@ -176,6 +201,43 @@ export const forumAdmin: Tool = {
           }
           const thread = await forumModeration.setArchived(str('thread_id'), archiving);
           return { result: { ok: true, thread_id: String(thread._id), status: thread.status } };
+        }
+
+        case 'edit_post': {
+          const { config } = await toolConfigService.resolve(forumAdmin.name, CONFIG_SCHEMA);
+          if (config.allow_edit_posts !== true) {
+            return {
+              result: {
+                ok: false,
+                error:
+                  "editing other people's posts is disabled by the operator on the Tools page — " +
+                  'reply to the thread with the correction instead',
+              },
+            };
+          }
+          const postId = str('post_id');
+          const body = str('body');
+          const reason = str('reason');
+          if (!postId || !body) return { result: { ok: false, error: 'post_id and body are required' } };
+          if (!reason) {
+            return { result: { ok: false, error: 'reason is required — it is kept on the post you edit' } };
+          }
+          const post = await forumModeration.editPost(postId, body, ctx.agentName, reason);
+          return {
+            result: {
+              ok: true,
+              post_id: String(post._id),
+              author: post.author.display_name,
+              note: 'The previous body is kept on the post — `revert_post` undoes this.',
+            },
+          };
+        }
+
+        case 'revert_post': {
+          const postId = str('post_id');
+          if (!postId) return { result: { ok: false, error: 'post_id is required' } };
+          const { post, restoredFrom } = await forumModeration.revertPost(postId, ctx.agentName);
+          return { result: { ok: true, post_id: String(post._id), restored_from: restoredFrom } };
         }
 
         case 'create_category': {

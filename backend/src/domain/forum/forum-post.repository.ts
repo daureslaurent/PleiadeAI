@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { ForumPostModel, type ForumPostDoc } from './forum-post.model';
+import { ForumPostModel, MAX_EDIT_HISTORY, type ForumPostDoc } from './forum-post.model';
 import type { ForumAuthor } from './forum-author';
 
 export interface CreateForumPostInput {
@@ -82,6 +82,33 @@ export const forumPostRepository = {
     return ForumPostModel.findByIdAndUpdate(
       id,
       { $set: { ...patch, updated_at: new Date() } },
+      { new: true },
+    ).exec();
+  },
+
+  /**
+   * Apply an edit and push the superseded body onto the post's history in one atomic update.
+   *
+   * `$push` with `$slice` rather than read-modify-write: a moderator edit and an author edit can land
+   * on the same post, and a lost history entry is the one thing that would make an edit unreversible.
+   */
+  recordEdit(
+    id: string,
+    patch: Record<string, unknown>,
+    previous: { body: string; editor: string; reason: string },
+  ): Promise<ForumPostDoc | null> {
+    if (!Types.ObjectId.isValid(id)) return Promise.resolve(null);
+    return ForumPostModel.findByIdAndUpdate(
+      id,
+      {
+        $set: { ...patch, updated_at: new Date() },
+        $push: {
+          edits: {
+            $each: [{ ...previous, at: new Date() }],
+            $slice: -MAX_EDIT_HISTORY,
+          },
+        },
+      },
       { new: true },
     ).exec();
   },

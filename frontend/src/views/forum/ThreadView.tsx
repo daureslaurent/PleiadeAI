@@ -340,11 +340,11 @@ function PostCard({
         </div>
 
         <div className="min-w-0 flex-1 p-4">
-          <div className="mb-2 flex items-center gap-2 text-[11px] text-slate-600">
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
             <span>#{index}</span>
             <span>·</span>
             <span title={new Date(post.createdAt).toLocaleString()}>{ago(post.createdAt)}</span>
-            {post.editedAt && <span title={new Date(post.editedAt).toLocaleString()}>· edited by {post.editedBy}</span>}
+            {post.editedAt && <EditedNote post={post} />}
             <div className="ml-auto flex items-center gap-0.5">
               <IconAction title={resolved ? 'Unmark as the answer' : 'Mark as the answer'} onClick={onResolve}>
                 <Check size={12} className={resolved ? 'text-emerald-400' : ''} />
@@ -412,6 +412,48 @@ function PostCard({
  * mentions appear: an answered one is visible as the reply right below it, and `@Operator` is
  * answered by typing in the composer, not by pressing a button.
  */
+/**
+ * The "edited by X" byline. The moderator may revise a post it did not write — including the
+ * operator's — so an edit has to be inspectable in place: clicking reveals the reason it gave and the
+ * body it replaced, which is also how the original text is recovered if you disagree with it.
+ */
+function EditedNote({ post }: { post: ForumPost }) {
+  const [open, setOpen] = useState(false);
+  const when = new Date(post.editedAt!).toLocaleString();
+
+  if (!post.editReason && !post.previousBody) {
+    return <span title={when}>· edited by {post.editedBy}</span>;
+  }
+  return (
+    <>
+      <button
+        className="text-slate-500 underline decoration-dotted underline-offset-2 hover:text-slate-300"
+        title={when}
+        onClick={() => setOpen((v) => !v)}
+      >
+        · edited by {post.editedBy}
+      </button>
+      {open && (
+        <div className="basis-full rounded-lg border border-white/[0.08] bg-black/25 p-2">
+          {post.editReason && (
+            <p className="text-[11px] text-slate-400">
+              Reason: <span className="text-slate-300">{post.editReason}</span>
+            </p>
+          )}
+          {post.previousBody && (
+            <>
+              <p className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-600">Previous version</p>
+              <p className="mt-1 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-400">
+                {post.previousBody}
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 function PendingMentions({
   mentions,
   onRun,

@@ -109,6 +109,10 @@ function shapePost(doc: ForumPostDoc, files: ForumFileDoc[] = []) {
     replyTo: doc.reply_to ? String(doc.reply_to) : null,
     editedAt: doc.edited_at,
     editedBy: doc.edited_by,
+    // The moderator can revise a post it did not write, so an edit has to be able to explain itself:
+    // the reason it gave, and the body it replaced, ride along for the byline's tooltip.
+    editReason: doc.edits?.[doc.edits.length - 1]?.reason ?? '',
+    previousBody: doc.edits?.[doc.edits.length - 1]?.body ?? '',
     createdAt: doc.created_at,
   };
 }

@@ -2616,6 +2616,9 @@ export interface ForumPost {
   replyTo: string | null;
   editedAt: string | null;
   editedBy: string;
+  /** Why the last edit happened (the moderator always gives one) and the body it replaced. */
+  editReason: string;
+  previousBody: string;
   createdAt: string;
 }
 

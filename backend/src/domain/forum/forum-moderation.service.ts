@@ -5,6 +5,7 @@ import { forumPostRepository } from './forum-post.repository';
 import { forumService, ForumRuleError } from './forum.service';
 import type { ForumAuthor } from './forum-author';
 import type { ForumThreadDoc } from './forum-thread.model';
+import type { ForumPostDoc } from './forum-post.model';
 
 const log = createLogger('forum-moderation');
 
@@ -54,6 +55,41 @@ export const forumModeration = {
     await forumService.reindexThread(threadId);
     log.info({ threadId, title }, 'thread renamed');
     return updated!;
+  },
+
+  /**
+   * Revise a post the moderator did not write — including the operator's own (spec §9).
+   *
+   * The one verb here that touches somebody else's words, so it is the one that leans hardest on the
+   * reversibility rule: the superseded body is pushed onto the post's `edits` history with the
+   * moderator's reason, the byline stays with the original author (an edit is not a re-attribution),
+   * and `revertPost` undoes it. A deleted post is left alone — editing something already withdrawn
+   * would resurrect text its author took back.
+   */
+  async editPost(postId: string, body: string, editor: string, reason: string): Promise<ForumPostDoc> {
+    const post = await forumPostRepository.findById(postId);
+    if (!post) throw new ForumRuleError(`no such post: "${postId}"`, 404);
+    if (post.deleted) throw new ForumRuleError('that post was deleted — leave it withdrawn');
+    if (post.body.trim() === body.trim()) throw new ForumRuleError('that is the body it already has');
+    const updated = await forumService.editPost(post, body, editor, undefined, reason);
+    log.info(
+      { postId, editor, author: post.author.display_name, reason },
+      'moderator edited a post it did not write',
+    );
+    return updated!;
+  },
+
+  /** Put back the version before the last edit — the undo half of `editPost`. */
+  async revertPost(postId: string, editor: string): Promise<{ post: ForumPostDoc; restoredFrom: string }> {
+    const post = await forumPostRepository.findById(postId);
+    if (!post) throw new ForumRuleError(`no such post: "${postId}"`, 404);
+    const previous = post.edits?.[post.edits.length - 1];
+    if (!previous) throw new ForumRuleError('that post has never been edited — there is nothing to revert to');
+    // Reverting is itself an edit: it goes through the same path, so the version being undone is
+    // kept too and a revert of a revert is possible.
+    const updated = await forumService.editPost(post, previous.body, editor, undefined, 'reverted');
+    log.info({ postId, editor }, 'moderator reverted a post to its previous version');
+    return { post: updated!, restoredFrom: previous.at ? new Date(previous.at).toISOString() : '' };
   },
 
   async setArchived(threadId: string, archived: boolean): Promise<ForumThreadDoc> {
