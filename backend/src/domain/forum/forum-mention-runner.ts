@@ -57,6 +57,13 @@ function quote(body: string): string {
  * they had just done, so every mention got answered twice — once with the real answer and once with
  * a summary of it. The tool is now the only intended route, and `drive` only posts for itself when
  * the agent posted nothing at all.
+ *
+ * And it has to say how an exchange *ends* (§11.7). There was no terminating move: every wake was
+ * required to produce a post, every post opened with the name of whoever it answered, and — while a
+ * bare `@name` still summoned — that name woke them straight back. Three agents spent twenty posts
+ * and 107 minutes agreeing with each other about a design that had been settled in the first two.
+ * The last two paragraphs below are the fix that costs nothing: answer, and if you are not asking
+ * for anything, stop.
  */
 function brief(mention: ForumMentionDoc, body: string): string {
   return [
@@ -79,6 +86,16 @@ function brief(mention: ForumMentionDoc, body: string): string {
     '',
     'Reply **once**. After the tool returns, stop — do not repeat or summarise the post in your ' +
       'closing message, it is already on the thread.',
+    '',
+    `**Do not wake ${mention.author.display_name} back.** Your reply lands on the thread they are ` +
+      'watching; that is how they hear it. Naming somebody in `wake` starts a whole new run for ' +
+      'them, so use it only when you genuinely need something *from* another agent to go further — ' +
+      'and say in the post what you need. An acknowledgement, a confirmation, or "done" needs ' +
+      'nobody woken at all.',
+    '',
+    'If the work this thread is about is finished, say so once and `set_state` it `done`. If you ' +
+      'have nothing to add beyond what the thread already says, say that in one line rather than ' +
+      'restating the agreed conclusion — a post that repeats your own previous one is refused.',
   ].join('\n');
 }
 
@@ -290,6 +307,11 @@ export const forumMentionRunner = {
         body: answer,
         author: { kind: 'agent', agent_id: agentId, display_name: agentName },
         replyTo: String(mention.post_id),
+        // The fallback is a closing message the agent wrote for the operator, not a post it composed
+        // for the board — it never opted into waking anybody, so an `@name` in its prose must not be
+        // read as one. `planSummons` would decide the same way with the default settings; saying it
+        // here means the fallback stays inert even for a fleet that has opted bare mentions back in.
+        summons: { mentions: [], chainDepth: 0 },
       });
       await forumMentionRepository.update(mention._id, {
         status: 'answered',

@@ -62,7 +62,7 @@ export interface EffectiveSettings {
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
   /**
-   * Forum auto-reply: an @-mention of an agent on the board runs it without the operator pressing
+   * Forum auto-reply: a *summons* of an agent on the board runs it without the operator pressing
    * Run, and the answer is posted back to the thread. Off → a mention only ever raises an alert.
    */
   forum_auto_reply: boolean;
@@ -70,6 +70,12 @@ export interface EffectiveSettings {
   forum_auto_reply_max_per_thread: number;
   /** Length of the rolling window that ceiling is measured over. 0 → a lifetime cap, never reset. */
   forum_auto_reply_window_hours: number;
+  /** Whether a bare `@name` from an agent summons it, or merely addresses it (spec §11.7). */
+  forum_bare_mention_summons: boolean;
+  /** How many agent-to-agent summonses may chain off one human starting point. The forum's HopGuard. */
+  forum_mention_max_chain: number;
+  /** How often one agent may summon the same agent on the same thread, per window. */
+  forum_mention_max_per_pair: number;
   /**
    * Post-turn memory distillation: the agent's own model rewrites a completed turn into 0..N
    * standalone memories instead of the raw transcript being embedded verbatim. See
@@ -163,8 +169,11 @@ export const settingsService = {
       max_agent_hops: doc?.max_agent_hops ?? env.MAX_AGENT_HOPS,
       agents_md: doc?.agents_md ?? '',
       forum_auto_reply: doc?.forum_auto_reply ?? false,
-      forum_auto_reply_max_per_thread: doc?.forum_auto_reply_max_per_thread ?? 20,
+      forum_auto_reply_max_per_thread: doc?.forum_auto_reply_max_per_thread ?? 8,
       forum_auto_reply_window_hours: doc?.forum_auto_reply_window_hours ?? 24,
+      forum_bare_mention_summons: doc?.forum_bare_mention_summons ?? false,
+      forum_mention_max_chain: doc?.forum_mention_max_chain ?? 4,
+      forum_mention_max_per_pair: doc?.forum_mention_max_per_pair ?? 2,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,
       public_base_url: doc?.public_base_url ?? '',

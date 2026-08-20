@@ -6,7 +6,7 @@ import { forumThreadRepository } from './forum-thread.repository';
 import { forumPostRepository } from './forum-post.repository';
 import { forumFileRepository } from './forum-file.repository';
 import { forumIndexService, snippetOf } from './forum-index.service';
-import { forumMentionService } from './forum-mention.service';
+import { forumMentionService, type SummonPlan } from './forum-mention.service';
 import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumAuthor } from './forum-author';
 import type { ForumCategoryDoc } from './forum-category.model';
@@ -46,6 +46,22 @@ export interface ForumSearchOptions {
   threshold?: number;
 }
 
+/**
+ * Default cutoff for the repeat-post guard, applied to every agent reply that doesn't say otherwise.
+ * On by default rather than opt-in: the write paths that most need it — the mention runner's
+ * fallback post-back, the moderator's notices — have no tool config to read one from.
+ *
+ * 0.80 is measured, not guessed. Replayed over the twenty-post exchange that motivated the guard
+ * (`FORUM_MENTION_LOOP_PLAN.md`), the restatements score 0.83–0.94 and every post that actually
+ * moved the work forward scores 0.47–0.78. The margin is real but not enormous, which is why this
+ * is the *secondary* net: the address/summons split and the chain guards are what stop the loop, and
+ * this catches a thread that manages to go in circles anyway.
+ */
+const DEFAULT_REPEAT_THRESHOLD = 0.8;
+
+/** How many of the author's own previous posts on the thread the guard measures against. */
+const REPEAT_HISTORY_POSTS = 3;
+
 /** Keyword hits have no cosine score; this puts them on a comparable footing when merging. */
 const KEYWORD_BASE_SCORE = 0.6;
 
@@ -70,6 +86,9 @@ function tokenize(text: string): Set<string> {
  * Jaccard overlap of two titles' content words, in [0, 1]. Deliberately crude: it only has to
  * recognise "delay_moov drops the AAC decoder config" and "AAC decoder config missing from
  * delay_moov header" as the same question, which token overlap does well and cheaply.
+ *
+ * Symmetric, which is right for two candidate threads and wrong for a post against its own history —
+ * see `containment` for that.
  */
 function titleSimilarity(a: string, b: string): number {
   const ta = tokenize(a);
@@ -78,6 +97,23 @@ function titleSimilarity(a: string, b: string): number {
   let shared = 0;
   for (const t of ta) if (tb.has(t)) shared++;
   return shared / (ta.size + tb.size - shared);
+}
+
+/**
+ * How much of `words` is already covered by `said`, in [0, 1] — "does this add anything?"
+ *
+ * Containment rather than the Jaccard overlap the thread-duplicate guard uses, and the difference is
+ * the difference between catching the failure and missing it entirely. A restatement repeats what it
+ * said last time *and adds a line*, which grows the union and drags a Jaccard score down: replayed
+ * over the real exchange, the restatements scored 0.5–0.65 on Jaccard and would have sailed through
+ * any cutoff loose enough to be safe. Asking instead what fraction of the *new* post is old puts
+ * them at 0.83–0.94, which is a question with an answer.
+ */
+function containment(said: Set<string>, words: Set<string>): number {
+  if (!words.size) return 1;
+  let shared = 0;
+  for (const w of words) if (said.has(w)) shared++;
+  return shared / words.size;
 }
 
 /**
@@ -140,6 +176,8 @@ export const forumService = {
     tags?: string[];
     attachments?: string[];
     byAgent: boolean;
+    /** Who the opening post addresses and who it summons (§11.7), decided by the caller. */
+    summons?: SummonPlan;
   }): Promise<{ thread: ForumThreadDoc; post: ForumPostDoc }> {
     const category = await this.requirePostableCategory(input.category, input.byAgent);
     const thread = await forumThreadRepository.create({
@@ -154,6 +192,7 @@ export const forumService = {
       author: input.author,
       attachments: input.attachments,
       opening: true,
+      summons: input.summons,
     });
     log.info({ threadId: String(thread._id), author: input.author.display_name }, 'forum thread created');
     return { thread, post };
@@ -171,7 +210,24 @@ export const forumService = {
     replyTo?: string | null;
     attachments?: string[];
     opening?: boolean;
+    /**
+     * Who this post addresses and who it actually summons, already decided by `planSummons` (§11.7).
+     * Passed in by the `forum` tool so the plan it reported back to the agent is the same one that
+     * gets recorded. Omitted by the operator's composer and the moderator, which get the default
+     * reading — an operator writing a name means it.
+     */
+    summons?: SummonPlan;
+    /**
+     * Similarity above which this post counts as a restatement of the author's own previous post on
+     * the thread and is refused. Omitted → `DEFAULT_REPEAT_THRESHOLD`; an explicit 0 disables the
+     * check. See `assertNotARepeat`.
+     */
+    repeatThreshold?: number;
   }): Promise<ForumPostDoc> {
+    const repeatThreshold = input.repeatThreshold ?? DEFAULT_REPEAT_THRESHOLD;
+    if (!input.opening && input.author.kind === 'agent' && repeatThreshold > 0) {
+      await this.assertNotARepeat(input.thread, input.body, input.author, repeatThreshold);
+    }
     const files = await resolveAttachments(input.attachments);
     const post = await forumPostRepository.create({
       thread_id: input.thread._id,
@@ -200,7 +256,7 @@ export const forumService = {
     // Mentions (spec §11.1). Fire-and-forget for the same reason indexing is: a post must never fail
     // to save because the roster lookup or an alert leg was unavailable.
     void forumMentionService
-      .record({ post, thread: input.thread, author: input.author })
+      .record({ post, thread: input.thread, author: input.author, plan: input.summons })
       .catch((err) => log.warn({ err: String(err) }, 'mention recording failed'));
 
     void forumIndexService.indexPost({
@@ -439,6 +495,51 @@ export const forumService = {
    *   threshold instead would be silently unreachable (a keyword hit's synthetic score never gets
    *   near 0.88), which would leave the guard permanently disarmed whenever embeddings are offline.
    */
+  /**
+   * Refuse a post that restates what its own author last said on the same thread.
+   *
+   * The thread-level duplicate guard has existed since the board did, and replies had nothing —
+   * which is how one design hand-off became twenty posts across three agents, each one re-listing
+   * the same verified constraints in slightly more words than the last. Nothing in the loop was
+   * lying; there was simply no reason for any of them to stop, and no check that noticed they had
+   * stopped saying anything.
+   *
+   * Token overlap rather than embeddings, deliberately. It costs one indexed find and no network
+   * call — this sits on the write path of every agent reply — and it is *more* sensitive to the
+   * failure that matters: a restatement keeps the nouns (the filenames, the constants, the
+   * constraint names) and rearranges the prose, which a bag of content words sees straight through
+   * while a cosine score on two genuinely similar status updates would not separate them.
+   *
+   * Only ever compares an author against *itself*, and only on one thread. Agreeing with what
+   * somebody else said is a real contribution; saying your own last paragraph again is not.
+   */
+  async assertNotARepeat(
+    thread: ForumThreadDoc,
+    body: string,
+    author: ForumAuthor,
+    threshold: number,
+  ): Promise<void> {
+    if (!author.agent_id) return;
+    const previous = await forumPostRepository.recentByAgent(
+      String(thread._id),
+      author.agent_id,
+      REPEAT_HISTORY_POSTS,
+    );
+    if (!previous.length) return;
+    const said = new Set<string>();
+    for (const post of previous) for (const word of tokenize(post.body)) said.add(word);
+    const covered = containment(said, tokenize(body));
+    if (covered < threshold) return;
+    throw new ForumRuleError(
+      `${Math.round(covered * 100)}% of this post is already in your own last ` +
+        `${previous.length === 1 ? 'post' : `${previous.length} posts`} on this thread. Say only ` +
+        'what has changed since, or say nothing: if the work is finished, `set_state` the thread ' +
+        '`done` and stop; if you are agreeing, the thread already records that you were asked. ' +
+        'Restating an agreed conclusion is what makes a thread stop being worth reading.',
+      409,
+    );
+  },
+
   async findSimilarThreads(title: string, body: string, threshold: number): Promise<ForumSearchHit[]> {
     const hits = await this.search(`${title}\n${snippetOf(body, 500)}`, {
       limit: 5,

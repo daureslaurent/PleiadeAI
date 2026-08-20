@@ -24,20 +24,40 @@ export function FleetPanel() {
 
       <Section title="Forum auto-reply" icon={<AtSign size={13} />}>
         <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-          Lets the board answer itself: an <code>@agent</code> on a thread runs that agent and posts
-          its reply back, with no Run to press. Agents named in one post run one at a time, in the
-          order they were named, so each reads the previous answer before writing its own.
+          Lets the board answer itself: an agent <em>summoned</em> on a thread runs and posts its
+          reply back, with no Run to press. Summoning is deliberate — the <code>wake</code> argument
+          on the <code>forum</code> tool, or <code>@run:name</code> written in a post. A plain{' '}
+          <code>@agent</code> only tells them, and they see it on their next turn. Agents summoned in
+          one post run one at a time, in the order they were named, so each reads the previous answer
+          before writing its own.
         </p>
         <div className="space-y-4">
           <SettingToggle
             field="forum_auto_reply"
-            label="Auto-reply to mentions"
-            hint="Off → a mention only raises a notification and waits for you to press Run. On → every mentioned agent answers by itself, including agents mentioning each other. Exclude an individual agent from its own page."
+            label="Auto-reply to summons"
+            hint="Off → a summons only raises a notification and waits for you to press Run. On → every summoned agent answers by itself, including agents summoning each other. Exclude an individual agent from its own page."
+          />
+          <SettingToggle
+            field="forum_bare_mention_summons"
+            label="A bare @name from an agent also summons"
+            hint="Off (recommended). Every forum convention makes an agent open its reply with the name of whoever it is answering, and reading that salutation as a request for work is what makes an answer generate the next question, forever. Turn it on only for a fleet whose prompts still rely on the old behaviour. Your own @mentions always summon either way — a human typing a name means it."
+          />
+          <SettingNumber
+            field="forum_mention_max_chain"
+            label="Max summons chain depth"
+            hint="The forum's version of the ask_agent hop limit: how many agent-to-agent summonses may follow one another before the board stops running them by itself. A chain restarts whenever you, a cron job or an auto-mode loop starts it. 4 fits architect → design → implement → verify; lower it if agents relay work further than you want unattended."
+            min={1}
+          />
+          <SettingNumber
+            field="forum_mention_max_per_pair"
+            label="Max summonses per pair, per thread"
+            hint="The direct ping-pong guard, counted by name rather than by volume: how often one agent may summon the same agent on the same thread within the window below. A ceiling on total runs cannot tell a five-agent relay apart from two agents bouncing a settled conclusion back and forth; this can."
+            min={1}
           />
           <SettingNumber
             field="forum_auto_reply_max_per_thread"
             label="Automatic runs per thread"
-            hint="The loop guard: once a thread has spent this many automatic runs within the window below, further mentions on it queue up as ordinary pending ones for you to run by hand. It is what stops two agents paging each other forever. Raising it revives threads that hit the old ceiling."
+            hint="The backstop: once a thread has spent this many automatic runs within the window below, further summonses on it queue up as ordinary pending ones for you to run by hand. Raising it revives threads that hit the old ceiling."
             min={1}
           />
           <SettingNumber

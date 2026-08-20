@@ -13,6 +13,8 @@ interface Queued {
   threadId: string;
   threadTitle: string;
   agentName: string;
+  /** Who summoned it — half of the pair the rate guard counts. */
+  authorName: string;
 }
 
 /**
@@ -42,12 +44,21 @@ export const forumAutoReply = {
    * the moment it runs, because a queue drains slowly by design.
    */
   async enqueue(
-    rows: Array<{ mentionId: string; threadId: string; threadTitle: string; agentId: string | null; agentName: string; isAgent: boolean }>,
+    rows: Array<{
+      mentionId: string;
+      threadId: string;
+      threadTitle: string;
+      agentId: string | null;
+      agentName: string;
+      authorName: string;
+      /** Already decided by `planSummons`: this is a summons, and no guard withheld it. */
+      eligible: boolean;
+    }>,
   ): Promise<void> {
     const settings = await settingsService.get();
     if (!settings.forum_auto_reply) return;
 
-    const eligible = rows.filter((r) => r.isAgent && r.agentId);
+    const eligible = rows.filter((r) => r.eligible && r.agentId);
     if (!eligible.length) return;
 
     for (const row of eligible) {
@@ -56,6 +67,7 @@ export const forumAutoReply = {
         threadId: row.threadId,
         threadTitle: row.threadTitle,
         agentName: row.agentName,
+        authorName: row.authorName,
       });
     }
     log.info(
@@ -99,11 +111,41 @@ async function runOne(item: Queued): Promise<void> {
   const mention = await forumMentionRepository.findById(item.mentionId);
   // Already answered (the operator got there first), dismissed, or the post was deleted under it.
   if (!mention || mention.status !== 'pending') return;
+  // A summons the plan already withheld never reaches the queue; this covers the row being
+  // re-examined after the fact, and costs one field read.
+  if (!mention.summon || mention.run_blocked) return;
 
   const thread = await forumThreadRepository.findById(item.threadId);
   if (!thread || thread.status !== 'open') {
     log.info({ mentionId: item.mentionId }, 'thread not open — auto-reply skipped');
     return;
+  }
+
+  const windowStart = (ms: number): Date | null => (ms > 0 ? new Date(Date.now() - ms) : null);
+
+  // The pair guard (§11.7). A ceiling on total runs per thread cannot tell a five-agent relay from
+  // two agents bouncing a conclusion back and forth — the second is what actually happened on the
+  // live board, and it is recognisable by name: A summoning B on the same thread, over and over.
+  // Checked here rather than at post time because it is time-windowed, and a mention can wait.
+  const pairCap = Math.max(1, settings.forum_mention_max_per_pair ?? 2);
+  const authorAgentId = mention.author.kind === 'agent' ? mention.author.agent_id : null;
+  const targetAgentId = mention.target.agent_id;
+  if (authorAgentId && targetAgentId) {
+    const seen = await forumMentionRepository.countPair(
+      item.threadId,
+      authorAgentId,
+      targetAgentId,
+      windowStart(autoRunWindowMs(settings.forum_auto_reply_window_hours)),
+    );
+    // `>` not `>=`: this mention is itself already counted, so the cap is "this many, then stop".
+    if (seen > pairCap) {
+      log.warn(
+        { thread: item.threadTitle, from: item.authorName, to: item.agentName, seen, pairCap },
+        'pair has summoned each other too often on this thread — mention left pending for a manual run',
+      );
+      await forumMentionRepository.update(mention._id, { run_blocked: 'pair_rate' });
+      return;
+    }
   }
 
   // The loop guard. Claimed *before* the run, not after, so a run that dies on an unreachable
@@ -117,6 +159,7 @@ async function runOne(item: Queued): Promise<void> {
       { threadId: item.threadId, title: item.threadTitle, budget, windowMs },
       'thread has spent its auto-reply budget — mention left pending for a manual run',
     );
+    await forumMentionRepository.update(mention._id, { run_blocked: 'budget' });
     await notifyExhausted(item, budget, windowMs);
     return;
   }
@@ -149,10 +192,10 @@ async function notifyExhausted(item: Queued, budget: number, windowMs: number): 
     .create({
       title: `Forum thread out of auto-reply budget: ${item.threadTitle}`,
       content:
-        `"${item.threadTitle}" has spent its ${budget} automatic replies ${window}, so \`@${item.agentName}\` ` +
-        'was not woken and its mention is waiting. Nothing is lost — run the mention by hand from ' +
-        'the thread, or raise the budget in Settings. If agents are paging each other in circles ' +
-        'here, that is what this limit caught.',
+        `"${item.threadTitle}" has spent its ${budget} automatic replies ${window}, so ` +
+        `\`${item.authorName}\` → \`@${item.agentName}\` was not woken and its mention is waiting. ` +
+        'Nothing is lost — run the mention by hand from the thread, or raise the budget in Settings. ' +
+        'If those two are paging each other in circles here, that is what this limit caught.',
       kind: 'forum_thread',
       ref_id: item.threadId,
     })

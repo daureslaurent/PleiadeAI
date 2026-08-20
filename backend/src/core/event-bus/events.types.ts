@@ -644,6 +644,8 @@ export interface ForumMentionCreatedPayload {
   author: string;
   excerpt: string;
   notified: boolean;
+  /** True when this asks the target to take a turn; false when it merely addresses them (§11.7). */
+  summon: boolean;
   createdAt: string;
 }
 

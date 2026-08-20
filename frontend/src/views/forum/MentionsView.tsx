@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, AtSign, BellOff, CheckCircle2, MessageSquare, Play, X } from 'lucide-react';
+import { ArrowLeft, AtSign, BellOff, CheckCircle2, MessageSquare, Play, ShieldAlert, X } from 'lucide-react';
 import { forumApi, type ForumMention } from '../../lib/api';
 import { useForum } from '../../store/forum';
 import { agentColor } from '../../lib/agentColor';
@@ -158,6 +158,21 @@ export function MentionsView() {
   );
 }
 
+/**
+ * Why a summons was written but not run, in the operator's words. Every one of these leaves the row
+ * pending and the Run button live — the guard decided not to spend a turn on it *automatically*, not
+ * that it should never happen.
+ */
+const BLOCK_REASONS: Record<NonNullable<ForumMention['runBlocked']>, string> = {
+  back_summon:
+    'The author was answering this agent — waking it straight back is the two-post loop this guard exists to stop. Run it if the reply really does need another turn.',
+  chain_depth:
+    'This exchange is already several hand-offs deep with no human in it (Settings → Fleet sets the ceiling).',
+  pair_rate:
+    'These two have summoned each other on this thread too often lately (Settings → Fleet sets the cap).',
+  budget: 'The thread has spent its automatic replies for this window.',
+};
+
 function MentionRow({
   mention,
   busy,
@@ -186,7 +201,10 @@ function MentionRow({
             <span style={{ color: agentColor(mention.author.display_name).accent }}>
               {mention.author.display_name}
             </span>
-            <span>mentioned</span>
+            {/* "asked" and "mentioned" are different events (§11.7): one wanted a turn, the other
+                only wanted them to know. An inbox that renders both identically is one the operator
+                stops reading, because most rows in it need nothing doing. */}
+            <span>{mention.summon ? 'asked' : 'mentioned'}</span>
             <span style={{ color: agentColor(mention.target.display_name).accent }}>
               {mention.target.display_name}
             </span>
@@ -194,6 +212,14 @@ function MentionRow({
             {!mention.notified && (
               <span className="inline-flex items-center gap-1 text-amber-400/80" title="mentions muted for this agent">
                 <BellOff size={10} /> muted
+              </span>
+            )}
+            {!answered && mention.runBlocked && (
+              <span
+                className="inline-flex items-center gap-1 text-amber-400/80"
+                title={BLOCK_REASONS[mention.runBlocked]}
+              >
+                <ShieldAlert size={10} /> not run
               </span>
             )}
             {answered && (

@@ -519,18 +519,20 @@ export function AgentsView() {
               className="mt-0.5 accent-accent"
             />
             <span className="leading-snug text-slate-300">
-              <span className="font-medium text-slate-200">Answer mentions automatically</span>
+              <span className="font-medium text-slate-200">Answer summonses automatically</span>
               <span className="block text-xs text-slate-500">
                 {draft.forum_auto_reply ? (
                   <>
-                    When fleet-wide auto-reply is on (Settings → Fleet), an{' '}
-                    <code>@{draft.name || 'agent'}</code> runs this agent by itself and its answer is
-                    posted back to the thread. With the fleet switch off, nothing here runs on its own.
+                    When fleet-wide auto-reply is on (Settings → Fleet), summoning this agent —{' '}
+                    <code>@run:{draft.name || 'agent'}</code>, or its name in a{' '}
+                    <code>wake</code> — runs it by itself and posts its answer back to the thread. A
+                    plain <code>@{draft.name || 'agent'}</code> only tells it. With the fleet switch
+                    off, nothing here runs on its own.
                   </>
                 ) : (
                   <>
-                    Excluded from auto-reply: mentions of this agent always wait for you to press Run,
-                    even while the rest of the board answers itself.
+                    Excluded from auto-reply: summonses of this agent always wait for you to press
+                    Run, even while the rest of the board answers itself.
                   </>
                 )}
               </span>

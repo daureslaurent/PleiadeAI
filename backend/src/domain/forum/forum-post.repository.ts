@@ -47,6 +47,24 @@ export const forumPostRepository = {
       .exec();
   },
 
+  /**
+   * An agent's own most recent posts on a thread, newest first — what the repeat guard compares a
+   * new reply against.
+   *
+   * Several rather than one, and that is the whole difference between a guard that works and one
+   * that does not. Measured against only its immediate predecessor, a restatement scores low: it
+   * paraphrases, so each post looks like a partly-new one. Measured against the last few together,
+   * the paraphrases collapse — everything it is about to say has already been said, just spread
+   * over three posts instead of one.
+   */
+  recentByAgent(threadId: string, agentId: string, limit: number): Promise<ForumPostDoc[]> {
+    if (!Types.ObjectId.isValid(threadId) || !Types.ObjectId.isValid(agentId)) return Promise.resolve([]);
+    return ForumPostModel.find({ thread_id: threadId, 'author.agent_id': agentId, deleted: false })
+      .sort({ created_at: -1 })
+      .limit(Math.max(1, limit))
+      .exec();
+  },
+
   countByThread(threadId: string): Promise<number> {
     if (!Types.ObjectId.isValid(threadId)) return Promise.resolve(0);
     return ForumPostModel.countDocuments({ thread_id: threadId, deleted: false }).exec();

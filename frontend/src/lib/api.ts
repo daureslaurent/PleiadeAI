@@ -1593,11 +1593,17 @@ export interface InferenceSettings {
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */
   update_check_interval_hours: number;
-  /** Forum auto-reply: an @-mention runs the agent by itself and posts the answer back to the thread. */
+  /** Forum auto-reply: a summons runs the agent by itself and posts the answer back to the thread. */
   forum_auto_reply: boolean;
   /** How many automatic runs one thread may spend before its mentions fall back to a manual Run. */
   forum_auto_reply_max_per_thread: number;
   forum_auto_reply_window_hours: number;
+  /** Whether a bare `@name` from an agent summons it, or merely addresses it (spec §11.7). */
+  forum_bare_mention_summons: boolean;
+  /** How many agent-to-agent summonses may chain off one human starting point. */
+  forum_mention_max_chain: number;
+  /** How often one agent may summon the same agent on the same thread, per window. */
+  forum_mention_max_per_pair: number;
   /** Conversation Quality Scorer: auto-score each turn on completion. */
   scoring_enabled: boolean;
   /** Judge endpoint ('' → reuse the responding agent's own endpoint). */
@@ -2667,6 +2673,15 @@ export interface ForumMention {
   status: 'pending' | 'answered' | 'dismissed';
   /** False when the target agent has mentions muted — the row exists, it just raised no alert. */
   notified: boolean;
+  /**
+   * True when this asked the target to take a turn; false when it merely addressed them (§11.7).
+   * A bare `@name` from an agent is an address — it notifies and shows on the target's next turn.
+   */
+  summon: boolean;
+  /** Which guard withheld an eligible summons from running by itself. Null when nothing did. */
+  runBlocked: 'chain_depth' | 'back_summon' | 'pair_rate' | 'budget' | null;
+  /** How many agent-to-agent summonses deep this sits, counting from the last human start. */
+  chainDepth: number;
   sessionId: string | null;
   replyPostId: string | null;
   answeredAt: string | null;

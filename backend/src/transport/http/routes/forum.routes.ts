@@ -148,6 +148,11 @@ function shapeMention(doc: ForumMentionDoc) {
     author: doc.author,
     status: doc.status,
     notified: doc.notified,
+    /** Asks for a turn, versus merely addresses (spec §11.7). */
+    summon: doc.summon,
+    /** Which guard withheld an otherwise-eligible summons from running by itself. */
+    runBlocked: doc.run_blocked ?? null,
+    chainDepth: doc.chain_depth ?? 0,
     sessionId: doc.session_id ? String(doc.session_id) : null,
     replyPostId: doc.reply_post_id ? String(doc.reply_post_id) : null,
     answeredAt: doc.answered_at,

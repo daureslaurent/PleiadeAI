@@ -1,5 +1,10 @@
 import { Types } from 'mongoose';
-import { ForumMentionModel, type ForumMentionDoc, type ForumMentionStatus } from './forum-mention.model';
+import {
+  ForumMentionModel,
+  type ForumMentionDoc,
+  type ForumMentionStatus,
+  type ForumSummonBlock,
+} from './forum-mention.model';
 import type { ForumAuthor } from './forum-author';
 
 export interface CreateForumMentionInput {
@@ -11,6 +16,12 @@ export interface CreateForumMentionInput {
   target: ForumAuthor;
   author: ForumAuthor;
   notified: boolean;
+  /** Whether this asks for a turn or merely addresses somebody (spec §11.7). */
+  summon: boolean;
+  /** Which guard withheld it from the auto-reply queue, if one did. */
+  run_blocked: ForumSummonBlock | null;
+  /** How many agent-to-agent summonses deep this sits. See `SummonContext`. */
+  chain_depth: number;
 }
 
 export const forumMentionRepository = {
@@ -55,6 +66,26 @@ export const forumMentionRepository = {
     const ids = postIds.map(String).filter((id) => Types.ObjectId.isValid(id));
     if (!ids.length) return Promise.resolve([]);
     return ForumMentionModel.find({ post_id: { $in: ids.map((id) => new Types.ObjectId(id)) } }).exec();
+  },
+
+  /**
+   * How many times `authorAgentId` has summoned `targetAgentId` on this thread since `since` — the
+   * direct-ping-pong signature, counted by name rather than by volume.
+   *
+   * The per-thread budget cannot see this: twenty runs spread over five agents relaying work is a
+   * project moving, and twenty runs between two agents is a loop. Only summonses count; being
+   * addressed was never going to run anything.
+   */
+  countPair(threadId: string, authorAgentId: string, targetAgentId: string, since: Date | null): Promise<number> {
+    if (!Types.ObjectId.isValid(threadId)) return Promise.resolve(0);
+    const filter: Record<string, unknown> = {
+      thread_id: new Types.ObjectId(threadId),
+      'author.agent_id': authorAgentId,
+      'target.agent_id': targetAgentId,
+      summon: true,
+    };
+    if (since) filter.created_at = { $gte: since };
+    return ForumMentionModel.countDocuments(filter).exec();
   },
 
   countPending(agentId?: string): Promise<number> {

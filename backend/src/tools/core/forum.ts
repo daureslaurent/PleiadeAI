@@ -9,6 +9,12 @@ import {
 } from '../../domain/forum/forum-thread.repository';
 import { FORUM_WORK_STATES, type ForumWorkState } from '../../domain/forum/forum-thread.model';
 import { loadRoster } from '../../domain/forum/forum-roster';
+import {
+  blockReason,
+  planSummons,
+  summonContextFor,
+  type SummonPlan,
+} from '../../domain/forum/forum-mention.service';
 import { settingsService } from '../../domain/settings/settings.service';
 import { forumPostRepository } from '../../domain/forum/forum-post.repository';
 import { forumFileRepository } from '../../domain/forum/forum-file.repository';
@@ -44,9 +50,9 @@ async function budgetWarning(
       remaining: budget.remaining,
       resets_at: budget.resetsAt?.toISOString(),
       note: budget.exhausted
-        ? 'This thread has spent its automatic replies — an @mention here will not wake anyone ' +
-          'until the operator runs it by hand. Open a fresh thread for anything that still needs doing.'
-        : 'This thread is nearly out of automatic replies. Once they run out an @mention here wakes ' +
+        ? 'This thread has spent its automatic replies — `wake` here will not run anyone until the ' +
+          'operator does it by hand. Open a fresh thread for anything that still needs doing.'
+        : 'This thread is nearly out of automatic replies. Once they run out, `wake` here runs ' +
           'nobody, so start a new thread for the next piece of work rather than continuing here.',
     },
   };
@@ -100,6 +106,13 @@ const CONFIG_SCHEMA: ToolConfigField[] = [
     type: 'number',
     default: 10,
     hint: 'Ceiling on how many files one post may carry.',
+  },
+  {
+    key: 'repeat_threshold',
+    label: 'Repeat-post cutoff',
+    type: 'number',
+    default: 0.8,
+    hint: 'Refuse a reply when this fraction of it is already covered by the author\'s own last few posts on the same thread. 0 disables it. Measured against the real runaway exchange: restatements score 0.83–0.94, posts that actually moved the work forward 0.47–0.78.',
   },
   {
     key: 'duplicate_threshold',
@@ -334,7 +347,19 @@ export const forum: Tool = {
         type: 'string',
         description:
           'For `post_thread`/`reply`/`edit_post`: markdown. State what you verified versus what you ' +
-          'are guessing — other agents will act on this.',
+          'are guessing — other agents will act on this. Writing `@name` here *addresses* somebody: ' +
+          'it tells them, and they see it on their next turn. It does not make them run — use `wake` ' +
+          'for that. Do not repeat what the thread already says; add only what is new.',
+      },
+      wake: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'For `post_thread`/`reply`: agents to *run now* over this post, by exact name. Each one ' +
+          'is a full turn on the GPU, so name only those you actually need something from, and say ' +
+          'in the body what you need from each. Leave it out when you are answering someone, ' +
+          'acknowledging, or reporting done — your post already reaches everyone on the thread, and ' +
+          'waking them back is how two agents end up talking past each other forever.',
       },
       reply_to: { type: 'string', description: 'For `reply`: the post id you are answering.' },
       state: {
@@ -400,6 +425,48 @@ export const forum: Tool = {
 
     const action = String(args.action ?? '').trim();
     const str = (key: string): string => String(args[key] ?? '').trim();
+    const repeatThreshold = Math.max(0, Number(config.repeat_threshold ?? 0.8) || 0);
+
+    /**
+     * Decide who this post addresses and who it actually wakes, *before* writing it (spec §11.7).
+     *
+     * Done here rather than left to the write path so the tool result can name both groups. One
+     * `wake` is one inference run, and until now that cost was invisible to the agent spending it:
+     * a post naming three agents spawned three sessions and said nothing about having done so. The
+     * same plan is handed to `addPost`, so what the agent is told and what the board records are
+     * the same decision rather than two that happen to agree.
+     */
+    const summonsFor = async (body: string, threadId: string | null): Promise<SummonPlan> => {
+      const context = await summonContextFor(ctx.sessionId);
+      return planSummons({
+        body,
+        author,
+        wake: Array.isArray(args.wake) ? args.wake.map(String) : [],
+        context,
+        threadId,
+      });
+    };
+
+    /** `woke` / `addressed` / `not_woken`, for the tool result. Omitted when there is nothing to say. */
+    const summonsReport = (plan: SummonPlan) => {
+      const woke = plan.mentions.filter((m) => m.summon && !m.blocked).map((m) => m.target.name);
+      const addressed = plan.mentions.filter((m) => !m.summon).map((m) => m.target.name);
+      const withheld = plan.mentions
+        .filter((m) => m.blocked)
+        .map((m) => ({ agent: m.target.name, reason: blockReason(m.blocked!, m.target.name) }));
+      return {
+        ...(woke.length ? { woke } : {}),
+        ...(addressed.length
+          ? {
+              addressed,
+              addressed_note:
+                'Told, not run — they will see this on their next turn. Add them to `wake` if you ' +
+                'need an answer before then.',
+            }
+          : {}),
+        ...(withheld.length ? { not_woken: withheld } : {}),
+      };
+    };
 
     try {
       switch (action) {
@@ -571,6 +638,9 @@ export const forum: Tool = {
           }
 
           const files = await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
+          // A new thread is a new place, so a summons here is never a back-summon — but it still
+          // counts against the chain depth, which is what keeps a relay of fresh threads bounded.
+          const summons = await summonsFor(body, null);
           const { thread, post } = await forumService.createThread({
             category,
             title,
@@ -579,6 +649,7 @@ export const forum: Tool = {
             tags: Array.isArray(args.tags) ? args.tags.map(String) : [],
             attachments: files.map((f) => String(f._id)),
             byAgent: true,
+            summons,
           });
           log.info({ agent: ctx.agentName, threadId: String(thread._id) }, 'agent opened a forum thread');
           return {
@@ -588,6 +659,7 @@ export const forum: Tool = {
               post_id: String(post._id),
               title: thread.title,
               ...(files.length ? { attachments: files.map(shapeFile) } : {}),
+              ...summonsReport(summons),
             },
           };
         }
@@ -598,12 +670,15 @@ export const forum: Tool = {
           if (!threadId || !body) return { result: { ok: false, error: 'thread_id and body are required' } };
           const thread = await forumService.requireOpenThread(threadId);
           const files = await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
+          const summons = await summonsFor(body, threadId);
           const post = await forumService.addPost({
             thread,
             body,
             author,
             replyTo: str('reply_to') || null,
             attachments: files.map((f) => String(f._id)),
+            summons,
+            repeatThreshold,
           });
           return {
             result: {
@@ -612,6 +687,7 @@ export const forum: Tool = {
               thread_id: threadId,
               title: thread.title,
               ...(files.length ? { attachments: files.map(shapeFile) } : {}),
+              ...summonsReport(summons),
             },
           };
         }

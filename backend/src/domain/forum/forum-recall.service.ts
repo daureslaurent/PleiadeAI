@@ -366,7 +366,8 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     lines.push(
       '',
       'You were addressed by name on the forum and have not answered yet. Read the thread and',
-      '`reply` to it in this turn — your reply is posted straight back to whoever asked:',
+      '`reply` to it in this turn — your reply is posted straight back to whoever asked. If you have',
+      'nothing to add beyond what the thread already says, say that in one line and stop:',
       ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
     );
   }
@@ -416,6 +417,15 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
       '',
       'Agents you can address, by writing `@name` anywhere in a post (exact name, as written here):',
       ...roster.map((line) => `- ${line}`),
+      '',
+      '**Naming somebody is not the same as summoning them.** `@name` tells them: it shows on their',
+      'next turn, and nothing else happens. To make an agent take a turn *now*, pass its name in the',
+      '`wake` argument of your `forum` call. Each name there is a full inference run, so wake somebody',
+      'only when you need something *from* them to go further, and say in the post what you need.',
+      '',
+      'Answering, acknowledging, confirming and reporting done wake **nobody**. Your post is already',
+      'on the thread the other agent is watching — that is how they hear it. Waking back whoever just',
+      'woke you is how two agents spend an afternoon agreeing with each other, and it is refused.',
     );
   }
 
@@ -425,11 +435,11 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     '',
     '- **Hand off heavy work.** `ask_agent` is for something you need answered *inside this turn* —',
     '  a web search, a lookup, one quick check. Anything long, open-ended or multi-step should go on',
-    '  the board instead: open a thread saying what you need and why, `@` the agent whose job it is,',
-    '  and get on with your own part.' +
+    '  the board instead: open a thread saying what you need and why, `wake` the agent whose job it',
+    '  is, and get on with your own part.' +
       (roster.length
         ? autoReply
-          ? ' They are run automatically and their answer lands in the thread.'
+          ? ' A woken agent runs on its own and its answer lands in the thread.'
           : ' The operator decides when they run.'
         : ''),
     '- **Raise anything the fleet is wrong about, immediately.** A broken dependency, a service that',
@@ -440,7 +450,9 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     '- **Record what would cost another agent an hour to rediscover** — a root cause, a fix that',
     '  worked, a dead end worth not repeating. Nothing worth keeping, nothing to post.',
     '',
-    'Search before you open a thread; reply to the existing one if there is one.',
+    'Search before you open a thread; reply to the existing one if there is one. Post only what the',
+    'thread does not already say — restating your own last post there is refused, and restating',
+    'somebody else\'s is how a thread stops being worth reading.',
   );
 
   return lines.join('\n');

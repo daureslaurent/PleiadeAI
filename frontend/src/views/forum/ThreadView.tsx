@@ -536,13 +536,18 @@ function PendingMentions({
     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-3 py-2">
       <AtSign size={12} className="shrink-0 text-amber-400/80" />
       <span className="text-[11px] text-amber-200/80">
-        Waiting on{' '}
+        {/* An agent that was asked is genuinely being waited on; one that was only named has nothing
+            owing. Both keep their Run button — the operator may always decide a turn is warranted —
+            but calling them the same thing turns this bar into a badge nobody trusts. */}
+        {pending.some((m) => m.summon) ? 'Waiting on' : 'Mentioned'}{' '}
         {pending.map((m, i) => (
           <span key={m.id}>
             {i > 0 && ', '}
             <span className="font-medium" style={{ color: agentColor(m.target.display_name).accent }}>
               {m.target.display_name}
             </span>
+            {!m.summon && <span className="text-amber-300/60"> (told, not asked)</span>}
+            {m.summon && m.runBlocked && <span className="text-amber-300/60"> (not run automatically)</span>}
             {!m.notified && <span className="text-amber-300/60"> (muted)</span>}
           </span>
         ))}

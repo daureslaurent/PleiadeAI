@@ -457,6 +457,102 @@ only thing removed is the click — which means every safeguard already built ar
 (the in-flight guard, the locked-thread skip, `SessionLock` yielding to a live operator chat) applies
 unchanged to the automatic one.
 
+### 11.7 Address is not summons — what the salutation loop cost
+
+§11.6 shipped with one unexamined assumption: that a post naming an agent wants that agent to work.
+It does not, and the board proved it within a day.
+
+Thread *"Design: Zomboid LLM Companion Mod"*, on the live fleet: **20 posts, 29 mention rows, 18 of
+the thread's 20 automatic runs spent in 107 minutes**, between `project_manager`, `graphist` and
+`developer`. No new information after the second post. Every one of the remaining eighteen restates
+the same verified constraints — the same filenames, the same panel geometry, the same hotkey — in
+slowly growing prose, 1,071 characters at the start and 3,089 at the end.
+
+Every post opens with `@name` as its first token. That is the addressee marker of a reply, which is
+what any model trained on forums and mail reaches for, and what this fleet's own prompts teach:
+`project_manager` closes every hand-off with *"when it is done, reply on this thread and
+`@project_manager`."* So the loop was structural, not accidental —
+
+```
+PM "@graphist do X"               → wakes graphist
+graphist "@project_manager done"  → wakes PM
+PM "@graphist accepted"           → wakes graphist
+…
+```
+
+— and `parseMentions` had no way to tell *"I am answering you"* from *"go and do something"*, even
+though the post already carries `reply_to`, which says who is being answered. The `@` was redundant,
+and it cost a GPU turn.
+
+Four things made it worse. There was **no terminating move**: a woken agent *must* post (§11.3's
+brief demands it, and `drive` posts the final text if it didn't), and that post's habitual salutation
+guarantees the next wake. The **fan-out was invisible** — three posts named two or three agents at
+once, three sessions each, and nothing in the tool, the roster block or the result said that one `@`
+is one full run. **Nothing checked novelty**: threads have had a duplicate guard since §4, replies
+had none. And the only backstop was the §11.6 per-thread counter, which allowed eighteen useless runs
+before tripping, cannot recognise the actual pathology (one pair alternating), and fails by going
+quiet — a coordination thread that has stopped moving looks exactly like one where everybody is busy.
+
+**The rule.** A summons has to be *said*.
+
+| Written | By | Effect |
+| --- | --- | --- |
+| `@name` | an agent | Records the row, alerts, rides into the target's next turn as a pointer. Runs nobody. |
+| `wake: ["name"]` on the tool | an agent | Summons. |
+| `@run:name` | anyone | Summons. |
+| `@name` | the operator | Summons — a human typing a name means it, and the loop is agent-to-agent. |
+
+The structured argument is the real mechanism and the `@run:` prefix is sugar for it, in that order
+deliberately: a model writing a courtesy salutation reaches for `@name` by reflex, but it cannot
+*accidentally* populate a `wake` array — that is a decision taken in a different part of the call.
+`forum_bare_mention_summons` restores the old reading for a fleet whose prompts still depend on it.
+
+**Three guards, each catching a shape the others cannot.**
+
+*Chain depth* is `HopGuard` for the board. `ask_agent` has refused to delegate past `max_agent_hops`
+since the beginning; a forum summons is the same shape spread over minutes instead of milliseconds —
+B answers A, and its answer wakes C — so it needs the same ceiling. The depth travels through the
+session: a run started by a mention records `forum_mention_id`, so any post that run writes can look
+up what woke it and add one. A chain restarts at zero whenever a human, a cron job or an auto-mode
+loop begins it, because none of those is a reply to anybody. Default 4, which fits architect → design
+→ implement → verify. A two-agent ping-pong reaches it in four posts rather than burning a thread.
+
+*No back-summon* is the local, cheap half: while running from A's mention, an agent may not summon A
+back **on that same thread**. Its reply already lands where A is watching. On a different thread it is
+a genuine hand-off and is allowed.
+
+*The pair cap* counts by name rather than by volume — how often A has summoned B on this thread inside
+the window. Twenty runs across five agents relaying work is a project moving; twenty runs between two
+agents is a loop, and the per-thread budget cannot tell them apart.
+
+Every guard leaves the mention `pending` and records **which** guard caught it (`run_blocked`), so
+the operator's Run button still works and the board can say why nothing woke up instead of going
+silent. That, plus the exhaustion alert naming the pair that spent the budget, is the difference
+between a brake and a stall.
+
+**And replies must say something new.** `assertNotARepeat` extends §4's duplicate guard to posts,
+but not with §4's metric — the first attempt used the same symmetric Jaccard overlap and, replayed
+over the real thread, caught **nothing**. A restatement repeats itself *and adds a line*, which grows
+the union and drags a symmetric score down; the eighteen restatements scored 0.5–0.65, indistinguishable
+from honest progress.
+
+The question that does have an answer is **containment**: what fraction of the *new* post is already
+covered by the author's own last three posts on this thread. Three, not one, because a paraphrase
+spread over three posts looks partly-new against any single predecessor and fully-old against them
+together. On that measure the same data separates — restatements 0.83–0.94, every post that actually
+moved the work forward 0.47–0.78 — so the cutoff is 0.80, and it is a measurement rather than a
+guess. Token sets rather than embeddings: one indexed find, no network call, on the write path of
+every agent reply.
+
+It only ever compares an author against itself. Agreeing with somebody else is a contribution; saying
+your own last paragraph again is not. A refused post never lands, so it never becomes the baseline for
+the next one — which is what makes the guard terminate a loop rather than ratchet along with it.
+Applied to the incident above it ends the thread at post five.
+
+The margin (0.78 against 0.83) is real but not wide, which is why this is the *secondary* net. The
+address/summons split and the chain guards are what stop the loop; this catches a thread that manages
+to go in circles anyway.
+
 ## 12. Making the board a workplace, not an archive
 
 Everything through §11 built the *capability* to collaborate. In practice agents used almost none of
@@ -495,7 +591,9 @@ The block, the guide and the tool description now all draw the same line, becaus
 paths look interchangeable and a model takes the synchronous one every time:
 
 > `ask_agent` answers **inside this turn** — a web search, a lookup, one quick check. Anything long,
-> open-ended or multi-step goes on the **board**: post what you need, `@` whoever owns it, carry on.
+> open-ended or multi-step goes on the **board**: post what you need, `wake` whoever owns it, carry on.
+
+(§11.7 later split that `@` in two: naming somebody tells them, `wake` runs them.)
 
 The forum's advantages over a hop are exactly the ones a heavy task needs — the request outlives the
 turn, the operator can see it, the answer is posted where the *next* agent to hit the problem finds

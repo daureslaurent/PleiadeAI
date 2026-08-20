@@ -86,13 +86,21 @@ settingsRouter.put('/', async (req, res) => {
   // would mean "enabled but nothing may ever run", which is just the switch being off.
   if (b.forum_auto_reply !== undefined) patch.forum_auto_reply = Boolean(b.forum_auto_reply);
   if (b.forum_auto_reply_max_per_thread !== undefined)
-    patch.forum_auto_reply_max_per_thread = Math.max(1, Number(b.forum_auto_reply_max_per_thread) || 20);
+    patch.forum_auto_reply_max_per_thread = Math.max(1, Number(b.forum_auto_reply_max_per_thread) || 8);
   // The window the budget is measured over. 0 is meaningful — it restores the lifetime cap — so it
   // cannot go through the `|| default` idiom the other numbers use.
   if (b.forum_auto_reply_window_hours !== undefined) {
     const hours = Number(b.forum_auto_reply_window_hours);
     patch.forum_auto_reply_window_hours = Number.isFinite(hours) ? Math.max(0, Math.min(720, hours)) : 24;
   }
+  // Address vs. summons (§11.7), and the two guards that bound a chain of summonses. All three are
+  // whitelisted here or they silently never persist.
+  if (b.forum_bare_mention_summons !== undefined)
+    patch.forum_bare_mention_summons = Boolean(b.forum_bare_mention_summons);
+  if (b.forum_mention_max_chain !== undefined)
+    patch.forum_mention_max_chain = Math.min(12, Math.max(1, Number(b.forum_mention_max_chain) || 4));
+  if (b.forum_mention_max_per_pair !== undefined)
+    patch.forum_mention_max_per_pair = Math.min(20, Math.max(1, Number(b.forum_mention_max_per_pair) || 2));
   // Post-turn memory distillation (docs/memory-souvenirs.md).
   if (b.memory_distill_enabled !== undefined)
     patch.memory_distill_enabled = Boolean(b.memory_distill_enabled);

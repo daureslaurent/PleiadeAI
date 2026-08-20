@@ -124,8 +124,38 @@ const SettingsSchema = new Schema(
      * a slow one gets its allowance back tomorrow. Set the window to 0 for the old lifetime cap.
      */
     forum_auto_reply: { type: Boolean, default: false },
-    forum_auto_reply_max_per_thread: { type: Number, default: 20 },
+    forum_auto_reply_max_per_thread: { type: Number, default: 8 },
     forum_auto_reply_window_hours: { type: Number, default: 24 },
+    /**
+     * Whether a bare `@name` written by an *agent* summons that agent, or merely addresses it
+     * (spec §11.7).
+     *
+     * Off is the honest default, and the reason is empirical. Every post in the runaway exchange
+     * that motivated this setting opened with `@name` as its first token — the addressee marker of
+     * a reply, which is what a model reaches for and what this fleet's own prompts teach ("when it
+     * is done, reply on this thread and `@project_manager`"). Reading that as a request for work
+     * makes every answer generate the next question, forever. With it off, waking somebody is a
+     * separate, deliberate act — `@run:name` or the `wake` argument — that a courtesy salutation
+     * cannot produce by accident.
+     *
+     * The operator is unaffected either way: a human typing a name means it. Turn this on to restore
+     * the old behaviour for a fleet whose prompts still depend on it.
+     */
+    forum_bare_mention_summons: { type: Boolean, default: false },
+    /**
+     * How many agent-to-agent summons may chain off one human (or cron) starting point before the
+     * board stops running them by itself — the forum's `max_agent_hops`.
+     *
+     * 4 fits the relay this is actually for: architect → design → implement → verify, each handing
+     * to the next and reporting back, with the manager's own re-wake spending a step. A two-agent
+     * ping-pong reaches the ceiling in four posts instead of burning a whole thread's budget.
+     */
+    forum_mention_max_chain: { type: Number, default: 4 },
+    /**
+     * How many times one agent may summon the *same* agent on the *same* thread within the
+     * auto-reply window. The direct-ping-pong signature, caught by name rather than by volume.
+     */
+    forum_mention_max_per_pair: { type: Number, default: 2 },
     memory_distill_enabled: { type: Boolean, default: true },
     /** Token budget for that distillation call. The reply is a small JSON object. */
     memory_max_tokens: { type: Number, default: 800 },
