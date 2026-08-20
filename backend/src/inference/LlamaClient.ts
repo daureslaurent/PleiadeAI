@@ -20,6 +20,32 @@ import type {
 const log = createLogger('llama-client');
 
 /**
+ * The same conversation with every image part replaced by a text placeholder, or the array itself
+ * when it carries no images (so the caller can tell "nothing to do" from "stripped" by identity).
+ *
+ * A model that cannot see is better told an image was here than handed a payload it rejects: a
+ * llama.cpp server launched without `--mmproj` fails the *whole request* with
+ * `500 image input is not supported`, which surfaces to the operator as a crashed turn rather than
+ * as a capability gap.
+ */
+function withoutImages(messages: ChatMessage[]): ChatMessage[] {
+  let stripped = false;
+  const out = messages.map((m) => {
+    if (!Array.isArray(m.content) || !m.content.some((p) => p.type === 'image_url')) return m;
+    stripped = true;
+    return {
+      ...m,
+      content: m.content.map((part) =>
+        part.type === 'image_url'
+          ? { type: 'text' as const, text: '[image omitted — this model cannot see images]' }
+          : part,
+      ),
+    };
+  });
+  return stripped ? out : messages;
+}
+
+/**
  * Thin wrapper over the official OpenAI SDK pointed at the remote llama.cpp server's
  * OpenAI-compatible `/v1/chat/completions` endpoint. Handles streaming token deltas and
  * incremental assembly of tool calls (which arrive fragmented across chunks).
@@ -490,6 +516,18 @@ export class LlamaClient {
     for (let i = 0; i < candidates.length; i++) {
       const cand = candidates[i];
       if (!cand) continue;
+      // Images ride on the prompt because the *primary* target was multimodal (`AgentRunner` only
+      // attaches them when `supportsVision`). A failover candidate without `--mmproj` answers the
+      // very same body with `500 image input is not supported` and the turn dies — so drop the pixels
+      // for that attempt and tell the model, in words, what it is no longer being shown. Degraded is
+      // the point: the second-choice box answers the question blind rather than not at all.
+      const payload = cand.supportsVision ? messages : withoutImages(messages);
+      if (payload !== messages) {
+        log.warn(
+          { url: cand.url, model: cand.model },
+          'candidate endpoint is not vision-capable — images replaced with placeholders for this attempt',
+        );
+      }
       // Once a token reaches the caller we've committed to this endpoint — the UI has already
       // streamed partial text, so we can't silently restart elsewhere. Track that to gate failover.
       let emitted = false;
@@ -506,7 +544,7 @@ export class LlamaClient {
         },
       };
       try {
-        const result = await this.attemptStream(cand, messages, tools, guarded, overrides, signal);
+        const result = await this.attemptStream(cand, payload, tools, guarded, overrides, signal);
         // Reachable and streamed cleanly — clear any failure state so a recovered endpoint returns to
         // rotation immediately (also the reactive complement to the background poller).
         endpointHealth.reportSuccess(cand.url);
