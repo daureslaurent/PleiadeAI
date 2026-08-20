@@ -191,15 +191,27 @@ export function useFlowRun(runId: string | null): LiveRun & { refresh: () => voi
 
     // A flow run's socket room already carries everything the nodes emit internally (spec §1.1), so
     // the agent's reasoning and each tool call land in the same ordered stream as the node output.
-    const onStreamChunk = (e: { content: string; is_reasoning: boolean }) =>
-      line(currentNode, 'agent', e.content, true);
-    const onToolStart = (e: { tool: string; args: Record<string, unknown> }) =>
-      line(currentNode, 'tool', `→ ${e.tool}`);
-    const onToolEnd = (e: { tool: string; status: string }) =>
-      line(currentNode, 'tool', `← ${e.tool} ${e.status}`);
-    const onToolOutput = (e: { chunk: string }) => line(currentNode, 'tool', e.chunk, true);
-    const onMediaGen = (e: { phase: string; kind: string; workflow: string; prompt: string }) => {
-      if (e.phase !== 'start') return;
+    //
+    // These four events are *not* flow-specific: the same connection also carries them for every
+    // chat session the operator has running. They are only this run's when their `sessionId` is the
+    // run id (which is what the run's room is named after) — without that check a chat happening in
+    // another tab writes its tokens into this run's debug log.
+    const ours = (e: { sessionId?: string }) => e.sessionId === runId;
+
+    const onStreamChunk = (e: { sessionId?: string; content: string; is_reasoning: boolean }) => {
+      if (ours(e)) line(currentNode, 'agent', e.content, true);
+    };
+    const onToolStart = (e: { sessionId?: string; tool: string; args: Record<string, unknown> }) => {
+      if (ours(e)) line(currentNode, 'tool', `→ ${e.tool}`);
+    };
+    const onToolEnd = (e: { sessionId?: string; tool: string; status: string }) => {
+      if (ours(e)) line(currentNode, 'tool', `← ${e.tool} ${e.status}`);
+    };
+    const onToolOutput = (e: { sessionId?: string; chunk: string }) => {
+      if (ours(e)) line(currentNode, 'tool', e.chunk, true);
+    };
+    const onMediaGen = (e: { sessionId?: string; phase: string; kind: string; workflow: string; prompt: string }) => {
+      if (!ours(e) || e.phase !== 'start') return;
       line(currentNode, 'media', `${e.kind} · ${e.workflow} · "${(e.prompt ?? '').slice(0, 120)}"`);
     };
 

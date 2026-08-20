@@ -473,6 +473,20 @@ export const useStream = create<StreamState>((set, get) => ({
     if (get().wired) return;
     const socket = getSocket();
 
+    /**
+     * Does this event belong to the conversation currently on screen?
+     *
+     * One socket carries every session the operator has running — a second agent chatted to while a
+     * first is still working, a cron turn, a flow run being watched — because a client stays joined
+     * to each session's room so its terminal events arrive. The live buffer below (`liveItems`,
+     * `liveFrames`, `trace`) is *singular*: it holds the open turn of the active session only. So
+     * every session-scoped event is gated here first; an unrouted one folds a background agent's
+     * tokens and tool calls into the turn you are reading. Background turns lose nothing — the
+     * backend's `TurnRecorder` mirrors them and persists the rich turn, and reopening the session
+     * replays it (`chat:snapshot` while it is still in flight).
+     */
+    const onScreen = (sessionId: string | null | undefined) => sessionId === get().activeSessionId;
+
     // The backend rejects the handshake for a missing/expired/invalid JWT. Treat that as a session
     // expiry: log out so the AuthGuard login window replaces the workspace instead of a dead socket.
     socket.on('connect_error', (err: Error) => {
@@ -483,6 +497,7 @@ export const useStream = create<StreamState>((set, get) => ({
     });
 
     socket.on('stream_chunk', (e: StreamChunkEvent) => {
+      if (!onScreen(e.sessionId)) return;
       set((s) => {
         const top = s.frameStack[s.frameStack.length - 1] ?? 'root';
         const items = [...s.liveItems];
@@ -518,6 +533,7 @@ export const useStream = create<StreamState>((set, get) => ({
     });
 
     socket.on('tool_start', (e: ToolStartEvent) => {
+      if (!onScreen(e.sessionId)) return;
       set((s) => {
         const top = s.frameStack[s.frameStack.length - 1] ?? 'root';
         return {
@@ -543,6 +559,7 @@ export const useStream = create<StreamState>((set, get) => ({
     });
 
     socket.on('tool_output', (e: ToolOutputEvent) => {
+      if (!onScreen(e.sessionId)) return;
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId ? { ...it, output: it.output + e.chunk } : it,
@@ -552,6 +569,7 @@ export const useStream = create<StreamState>((set, get) => ({
 
     // Vision analysis of a visual_screenshot: attach the thumbnail + Q&A to its tool block.
     socket.on('vision', (e: VisionEvent) => {
+      if (!onScreen(e.sessionId)) return;
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
@@ -578,7 +596,8 @@ export const useStream = create<StreamState>((set, get) => ({
     // Images land via `tool_end` (as the block's `images`) and video/audio are fetched by resource
     // handle, so this only adds framing.
     socket.on('media_gen', (e: MediaGenEvent) => {
-      const { type: _type, callId: _callId, phase: _phase, ...fields } = e;
+      if (!onScreen(e.sessionId)) return;
+      const { type: _type, callId: _callId, phase: _phase, sessionId: _sid, ...fields } = e;
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
@@ -592,6 +611,7 @@ export const useStream = create<StreamState>((set, get) => ({
 
     // Live progress of a long render. Replaces rather than accumulates — only the latest matters.
     socket.on('tool_progress', (e: ToolProgressEvent) => {
+      if (!onScreen(e.sessionId)) return;
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
@@ -635,15 +655,22 @@ export const useStream = create<StreamState>((set, get) => ({
         y2: e.y2,
         snap: e.snap,
       };
+      // The desktop pulse is *not* session-scoped: the live-desktop panel is per agent (it filters
+      // on `agentId`), and an agent clicking around in a background session should still mark its
+      // own screen. Only the attachment to a tool block belongs to the on-screen turn.
+      const mine = onScreen(e.sessionId);
       set((s) => ({
-        liveItems: s.liveItems.map((it) =>
-          it.kind === 'tool' && it.callId === e.callId ? { ...it, visualAct: info } : it,
-        ),
+        liveItems: mine
+          ? s.liveItems.map((it) =>
+              it.kind === 'tool' && it.callId === e.callId ? { ...it, visualAct: info } : it,
+            )
+          : s.liveItems,
         lastVisualAct: { ...info, agentId: e.agentId, ts: Date.now() },
       }));
     });
 
     socket.on('tool_end', (e: ToolEndEvent) => {
+      if (!onScreen(e.sessionId)) return;
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
           it.kind === 'tool' && it.callId === e.callId
@@ -669,6 +696,11 @@ export const useStream = create<StreamState>((set, get) => ({
     });
 
     socket.on('agent_hop', (e: AgentHopEvent) => {
+      // The delegated agent is now working. That badge is global (it marks the agent, not the
+      // conversation), so it is bumped for every session — only the frame stack below, which
+      // describes the open turn, is gated on the session being on screen.
+      set((s) => ({ workingAgents: bumpAgent(s.workingAgents, e.to, +1) }));
+      if (!onScreen(e.sessionId)) return;
       set((s) => {
         // Runs are a strict stack (a parent `ask_agent` awaits its child), so the new frame nests
         // under whichever frame is currently streaming. Drop a placeholder in the parent's log to
@@ -698,13 +730,13 @@ export const useStream = create<StreamState>((set, get) => ({
             ...s.trace,
             { kind: 'hop', label: `${e.from} → ${e.to}`, detail: e.query, depth: e.depth },
           ],
-          // The delegated agent is now working (fired for a sub-agent `ask_agent` call).
-          workingAgents: bumpAgent(s.workingAgents, e.to, +1),
         };
       });
     });
 
     socket.on('agent_hop_done', (e: AgentHopDoneEvent) => {
+      set((s) => ({ workingAgents: bumpAgent(s.workingAgents, e.to, -1) }));
+      if (!onScreen(e.sessionId)) return;
       set((s) => {
         const top = s.frameStack[s.frameStack.length - 1];
         const frame = top ? s.liveFrames[top] : undefined;
@@ -719,12 +751,14 @@ export const useStream = create<StreamState>((set, get) => ({
         return {
           liveFrames,
           frameStack: top && top !== 'root' ? s.frameStack.slice(0, -1) : s.frameStack,
-          workingAgents: bumpAgent(s.workingAgents, e.to, -1),
         };
       });
     });
 
     socket.on('system_alert', (e: SystemAlertEvent) => {
+      // A global alert (no session) is shown wherever the operator is; a session's own alert belongs
+      // to its debugger trace and must not land in another conversation's.
+      if (e.sessionId && !onScreen(e.sessionId)) return;
       set((s) => ({ trace: [...s.trace, { kind: 'alert', label: e.message, status: e.level }] }));
     });
 

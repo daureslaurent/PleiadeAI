@@ -6,6 +6,13 @@ import { eventBus } from '../../core/event-bus/EventBus';
  * them to the socket.io room named by `sessionId`. Because every internal payload carries
  * `ctx.sessionId`, streams stay isolated to the originating client without per-listener wiring.
  *
+ * Rooms are necessary but not sufficient: one connection is joined to *every* session it has
+ * touched (so a background turn still delivers its terminal events) and to any flow run it is
+ * watching. A client therefore receives events for several concurrently-running agents at once and
+ * has to route them. So **every session-scoped wire event carries `sessionId`** — without it the
+ * client cannot tell one agent's tokens from another's and folds them all into whatever
+ * conversation is on screen. Add the field to any new session-scoped event here.
+ *
  * The wire payloads are intentionally the narrow shapes the UI consumes — richer internal
  * fields (ids, args, timings) are dropped here.
  */
@@ -53,6 +60,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('agent:stream_chunk', ({ ctx, content, isReasoning }) => {
     io.to(ctx.sessionId).emit('stream_chunk', {
       type: 'stream_chunk',
+      sessionId: ctx.sessionId,
       agent: ctx.agentName,
       content,
       is_reasoning: isReasoning,
@@ -62,6 +70,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('agent:ask_agent', (payload) => {
     io.to(payload.ctx.sessionId).emit('agent_hop', {
       type: 'agent_hop',
+      sessionId: payload.ctx.sessionId,
       from: payload.from,
       to: payload.to,
       depth: payload.depth,
@@ -73,6 +82,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('agent:ask_agent_done', (payload) => {
     io.to(payload.ctx.sessionId).emit('agent_hop_done', {
       type: 'agent_hop_done',
+      sessionId: payload.ctx.sessionId,
       from: payload.from,
       to: payload.to,
       depth: payload.depth,
@@ -83,6 +93,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('agent:tool_invoke', ({ ctx, callId, tool, args }) => {
     io.to(ctx.sessionId).emit('tool_start', {
       type: 'tool_start',
+      sessionId: ctx.sessionId,
       agent: ctx.agentName,
       callId,
       tool,
@@ -93,6 +104,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('tool:output_chunk', ({ ctx, callId, chunk }) => {
     io.to(ctx.sessionId).emit('tool_output', {
       type: 'tool_output',
+      sessionId: ctx.sessionId,
       callId,
       chunk,
     });
@@ -101,6 +113,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('tool:vision', ({ ctx, callId, image, question, answer, model, x, y, width, height, snap }) => {
     io.to(ctx.sessionId).emit('vision', {
       type: 'vision',
+      sessionId: ctx.sessionId,
       callId,
       image,
       question,
@@ -117,6 +130,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('tool:visual_act', ({ ctx, callId, image, width, height, action, x, y, x2, y2, snap }) => {
     io.to(ctx.sessionId).emit('visual_act', {
       type: 'visual_act',
+      sessionId: ctx.sessionId,
       callId,
       agentId: ctx.agentId,
       image,
@@ -134,6 +148,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('agent:media_generated', ({ ctx, ...payload }) => {
     io.to(ctx.sessionId).emit('media_gen', {
       type: 'media_gen',
+      sessionId: ctx.sessionId,
       ...payload,
       sourceId: payload.sourceId ?? null,
     });
@@ -142,6 +157,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('tool:progress', ({ ctx, ...payload }) => {
     io.to(ctx.sessionId).emit('tool_progress', {
       type: 'tool_progress',
+      sessionId: ctx.sessionId,
       ...payload,
       etaMs: payload.etaMs ?? null,
     });
@@ -150,6 +166,7 @@ export function attachBridge(io: Server): void {
   eventBus.on('tool:execution_complete', ({ ctx, callId, tool, status, result, images }) => {
     io.to(ctx.sessionId).emit('tool_end', {
       type: 'tool_end',
+      sessionId: ctx.sessionId,
       agent: ctx.agentName,
       callId,
       tool,
@@ -228,7 +245,14 @@ export function attachBridge(io: Server): void {
 
   eventBus.on('system:alert', ({ ctx, level, message }) => {
     const emitter = ctx?.sessionId ? io.to(ctx.sessionId) : io;
-    emitter.emit('system_alert', { type: 'system_alert', level, message });
+    // A session-scoped alert names its session so a client watching another conversation ignores it;
+    // a global one (no ctx) carries `null` and is shown wherever the operator happens to be.
+    emitter.emit('system_alert', {
+      type: 'system_alert',
+      sessionId: ctx?.sessionId ?? null,
+      level,
+      message,
+    });
   });
 
   // LLM Debug feed — a *global* stream (not session-scoped), so it goes to a dedicated `llama-log`

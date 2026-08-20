@@ -1,9 +1,16 @@
 /**
  * Mirror of the backend WebSocket payload schema (§6 of IMPLEMENTATION_PLAN.md).
  * Keep in lockstep with `backend/src/transport/ws/bridge.ts`.
+ *
+ * One socket carries every session the operator has open or left running — several agents can be
+ * streaming at once — so every session-scoped event declares `sessionId`, and its handler must
+ * ignore anything that isn't the conversation on screen. A new session-scoped event without the
+ * field would silently fold one agent's turn into another's.
  */
 export interface StreamChunkEvent {
   type: 'stream_chunk';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   agent: string;
   content: string;
   is_reasoning: boolean;
@@ -11,6 +18,8 @@ export interface StreamChunkEvent {
 
 export interface AgentHopEvent {
   type: 'agent_hop';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   from: string;
   to: string;
   depth: number;
@@ -21,6 +30,8 @@ export interface AgentHopEvent {
 
 export interface AgentHopDoneEvent {
   type: 'agent_hop_done';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   from: string;
   to: string;
   depth: number;
@@ -29,6 +40,8 @@ export interface AgentHopDoneEvent {
 
 export interface ToolStartEvent {
   type: 'tool_start';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   agent: string;
   callId: string;
   tool: string;
@@ -37,12 +50,16 @@ export interface ToolStartEvent {
 
 export interface ToolOutputEvent {
   type: 'tool_output';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   callId: string;
   chunk: string;
 }
 
 export interface ToolEndEvent {
   type: 'tool_end';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   agent: string;
   callId: string;
   tool: string;
@@ -54,6 +71,8 @@ export interface ToolEndEvent {
 
 export interface SystemAlertEvent {
   type: 'system_alert';
+  /** Session the alert came from; `null` for a global one, which is shown anywhere. */
+  sessionId: string | null;
   level: 'info' | 'warn' | 'error';
   message: string;
 }
@@ -61,6 +80,8 @@ export interface SystemAlertEvent {
 /** Vision analysis of a `visual_screenshot` call: the screenshot thumbnail + the model's answer. */
 export interface VisionEvent {
   type: 'vision';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   callId: string;
   /** Small JPEG thumbnail (data URL) of the analysed screenshot. */
   image: string;
@@ -86,6 +107,8 @@ export interface VisionEvent {
  */
 export interface MediaGenEvent {
   type: 'media_gen';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   callId: string;
   /**
    * `start` lands seconds after the remote accepts the job and names the run; `done` adds the
@@ -124,6 +147,8 @@ export interface MediaGenEvent {
  */
 export interface ToolProgressEvent {
   type: 'tool_progress';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   callId: string;
   phase: 'queued' | 'running' | 'downloading';
   percent: number | null;
@@ -147,6 +172,8 @@ export interface ToolProgressEvent {
 /** Action marker for a `visual_act` call: a screenshot + where the action landed (drive-the-desktop). */
 export interface VisualActEvent {
   type: 'visual_act';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
   callId: string;
   /** The agent whose desktop was acted on — lets the live desktop panel filter to its own agent. */
   agentId: string;

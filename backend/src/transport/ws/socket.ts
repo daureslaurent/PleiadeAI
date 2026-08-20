@@ -71,9 +71,18 @@ export function attachSocket(httpServer: HttpServer): Server {
     // Sessions this connection has run, so pending `ask_user` prompts can be cancelled on disconnect.
     const sessions = new Set<string>();
 
+    // The session this connection is currently *displaying*. Room membership can't answer that: a
+    // client stays joined to every session it has run (so a background turn still delivers its
+    // terminal `chat:done`) and to any flow run it watches. Only the displayed session's client
+    // holds the live buffer the rich turn is folded out of — for every other session the backend
+    // has to persist the turn from its own recorder. `session:subscribe` and sending a message are
+    // both statements of "this is what I'm looking at now".
+    let viewing: string | null = null;
+
     socket.on('chat:message', async (input: ChatMessageInput) => {
       const sessionId = input.sessionId ?? randomUUID();
       sessions.add(sessionId);
+      viewing = sessionId; // composing a message means this conversation is the one on screen
       socket.join(sessionId); // receive this turn's streamed events
       socket.emit('session', { sessionId });
 
@@ -100,14 +109,18 @@ export function attachSocket(httpServer: HttpServer): Server {
           history: input.history,
           signal: controller.signal,
         });
-        if (socket.connected) {
+        // Only the client that is still here *and* still showing this conversation owns the live
+        // buffer. One that navigated to another agent's session has thrown its buffer away, so
+        // letting it persist would save a plain-text stub in place of the tools and sub-agent hops.
+        if (socket.connected && viewing === sessionId) {
           // Normal case: the originating client is still here — it renders the streamed turn and
           // persists it (with the rich inline blocks) via the REST API, as before. `runId` (the
           // depth-0 agent-run) lets the client tag the saved message so the top-level turn's quality
           // score attaches on refresh; `turnId` groups it with any sub-agent runs.
           socket.emit('chat:done', { sessionId, answer, turnId, runId });
         } else {
-          // The client left mid-run (e.g. a browser refresh). Persist the *rich* turn ourselves —
+          // The client left mid-run (a refresh) or moved on to another conversation while this one
+          // kept running. Persist the *rich* turn ourselves —
           // reconstructed from the same event stream — so tool calls and sub-agent hops survive, not
           // just the plain answer. Broadcast to anyone who re-subscribed; `persisted` tells them to
           // render (from the included blocks) but NOT save again.
@@ -206,8 +219,10 @@ export function attachSocket(httpServer: HttpServer): Server {
               .catch((e) => log.error({ err: String(e) }, 'partial persist failed'));
           }
 
-          const target = socket.connected ? socket : io.to(sessionId);
-          target.emit('system_alert', { type: 'system_alert', level: 'error', message });
+          const target = socket.connected && viewing === sessionId ? socket : io.to(sessionId);
+          // Named, so a client watching a different conversation reports the failure against the
+          // session it actually happened in rather than the one on screen.
+          target.emit('system_alert', { type: 'system_alert', sessionId, level: 'error', message });
           // Terminal signal stops the "working" state; carry the saved partial so the live UI keeps
           // it (and doesn't double-persist when we already did).
           target.emit('chat:done', {
@@ -247,6 +262,7 @@ export function attachSocket(httpServer: HttpServer): Server {
       if (!sessionId) return;
       socket.join(sessionId);
       sessions.add(sessionId);
+      viewing = sessionId;
       const run = liveRuns.get(sessionId);
       if (run) {
         socket.emit('chat:running', { sessionId });
