@@ -15,7 +15,7 @@ import {
   Section,
   Spinner,
 } from '../../components/ui';
-import { ago, AuthorAvatar, Composer } from './forumBits';
+import { ago, AuthorAvatar, Composer, WorkStateChip } from './forumBits';
 
 /** One category's thread list: sticky threads first, then most recently active (FORUM_PLAN.md §5). */
 export function CategoryView() {
@@ -132,12 +132,14 @@ function ThreadRow({ thread, onClick }: { thread: ForumThread; onClick: () => vo
           {thread.status === 'locked' && <Lock size={11} className="shrink-0 text-amber-400" />}
           {thread.status === 'archived' && <Archive size={11} className="shrink-0 text-slate-600" />}
           <span className="truncate text-sm text-slate-100">{thread.title}</span>
+          {thread.workState && <WorkStateChip state={thread.workState} />}
           {thread.resolvedPostId && (
             <Chip className="!text-emerald-400/80">resolved</Chip>
           )}
         </span>
         <span className="mt-0.5 block truncate text-[11px] text-slate-500">
           started by {thread.author.display_name} · {ago(thread.createdAt)}
+          {thread.assignee && <> · owned by {thread.assignee.display_name}</>}
         </span>
       </span>
 

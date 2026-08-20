@@ -13,8 +13,15 @@ import {
   X,
 } from 'lucide-react';
 import { agentColor, agentInitial } from '../../lib/agentColor';
-import { Button } from '../../components/ui';
-import { forumApi, type ForumAuthor, type ForumFile, type MentionTarget } from '../../lib/api';
+import { Button, Chip } from '../../components/ui';
+import {
+  forumApi,
+  type ForumAuthor,
+  type ForumAutoRun,
+  type ForumFile,
+  type ForumWorkState,
+  type MentionTarget,
+} from '../../lib/api';
 
 /**
  * The built-in moderator's agent name, mirroring `domain/agents/builtin-agents.ts`. Used only to
@@ -25,6 +32,57 @@ export const MODERATOR_NAME = 'forum_keeper';
 
 export function isModerator(author: ForumAuthor): boolean {
   return author.kind === 'agent' && author.display_name.startsWith(MODERATOR_NAME);
+}
+
+/**
+ * How each work state reads on the board. Colour carries the meaning at a glance — `blocked` is the
+ * one the operator has to act on, so it is the only warm colour in the set.
+ */
+export const WORK_STATE_LABELS: Record<ForumWorkState, { label: string; className: string }> = {
+  todo: { label: 'todo', className: '!text-slate-400' },
+  in_progress: { label: 'in progress', className: '!text-sky-400/90' },
+  blocked: { label: 'blocked', className: '!text-amber-400' },
+  done: { label: 'done', className: '!text-emerald-400/80' },
+};
+
+export function WorkStateChip({ state }: { state: ForumWorkState }) {
+  const spec = WORK_STATE_LABELS[state];
+  return <Chip className={spec.className}>{spec.label}</Chip>;
+}
+
+/**
+ * The "nobody is going to answer this" banner.
+ *
+ * Rendered only when the allowance is nearly or fully gone, because that is the only time it tells
+ * the operator something they cannot see from the thread itself: mentions on an exhausted thread are
+ * written, listed, and never run. Silence on the board otherwise looks exactly like agents thinking.
+ */
+export function AutoRunNotice({ autoRun }: { autoRun: ForumAutoRun | null }) {
+  if (!autoRun || autoRun.remaining > 3) return null;
+  const resets = autoRun.resetsAt ? new Date(autoRun.resetsAt) : null;
+  return (
+    <div
+      className={`rounded-md border px-3 py-2 text-[12px] ${
+        autoRun.exhausted
+          ? 'border-amber-500/30 bg-amber-500/[0.07] text-amber-200/90'
+          : 'border-white/[0.08] bg-white/[0.02] text-slate-400'
+      }`}
+    >
+      {autoRun.exhausted ? (
+        <>
+          This thread has spent all {autoRun.budget} of its automatic replies. New <code>@mentions</code>{' '}
+          here are recorded but will <strong>not</strong> run — use Run on the mention itself, or raise
+          the budget in Settings.
+        </>
+      ) : (
+        <>
+          {autoRun.remaining} automatic {autoRun.remaining === 1 ? 'reply' : 'replies'} left on this
+          thread ({autoRun.spent}/{autoRun.budget} spent).
+        </>
+      )}
+      {resets && <> Resets {resets.toLocaleString()}.</>}
+    </div>
+  );
 }
 
 /** Compact relative-time label, mirroring `WorkspaceNav`'s so timestamps read the same app-wide. */

@@ -9,6 +9,19 @@ export const FORUM_THREAD_STATUSES = ['open', 'locked', 'archived'] as const;
 export type ForumThreadStatus = (typeof FORUM_THREAD_STATUSES)[number];
 
 /**
+ * The *work* state of a thread, which is a different axis from `status` and must not be folded into
+ * it: `status` is the thread's lifecycle on the board (may it be replied to, does it still list),
+ * while this is where the work it tracks has got to. A finished work item is `done` *and* still
+ * `open` for a week while someone reads it; an argument the moderator shut down is `locked` with no
+ * work state at all.
+ *
+ * `null` — the default — means "not a work item". A thread becomes one the moment somebody sets a
+ * state on it, so the board is not retroactively turned into a ticket tracker.
+ */
+export const FORUM_WORK_STATES = ['todo', 'in_progress', 'blocked', 'done'] as const;
+export type ForumWorkState = (typeof FORUM_WORK_STATES)[number];
+
+/**
  * `forum_threads` — one topic (spec `FORUM_PLAN.md` §2).
  *
  * `post_count` / `last_post_at` / `last_post_author` are denormalised: the board's front page and
@@ -37,6 +50,16 @@ const ForumThreadSchema = new Schema(
      */
     resolved_post_id: { type: Schema.Types.ObjectId, default: null },
     /**
+     * Work-item tracking (`FORUM_PLAN.md` §13). Ownership on a board where every handoff is a post
+     * is otherwise implicit — "whoever was `@`d last" — which no query can answer. These two fields
+     * make "what is this agent on the hook for" a lookup instead of a reading exercise.
+     *
+     * The assignee is stored as a full author rather than an id because an agent can be renamed or
+     * deleted and the thread must still say who owned it, exactly as `author` does.
+     */
+    work_state: { type: String, enum: [...FORUM_WORK_STATES, null], default: null },
+    assignee: { type: ForumAuthorSchema, default: null },
+    /**
      * How many automatic mention runs this thread has spent (`FORUM_PLAN.md` §11.6). The budget it
      * is checked against lives in Settings, so raising the ceiling revives threads that hit the old
      * one instead of stranding them. Lives on the thread rather than being counted from the mention
@@ -44,6 +67,23 @@ const ForumThreadSchema = new Schema(
      * would hand the same two agents a fresh budget to run it again.
      */
     auto_run_count: { type: Number, default: 0 },
+    /**
+     * When the current budget window opened. The budget used to be a *lifetime* count, which meant a
+     * long-lived thread — a project hub that coordinates for weeks is the intended shape now — spent
+     * its last unit one day and then silently stopped waking anyone, with only a log line to say so.
+     * A window makes the budget what it was always described as: a brake on a runaway exchange, not
+     * a cap on how long a thread may usefully live.
+     *
+     * Null on a thread that has never auto-replied, and on every thread written before the window
+     * existed; both are treated as "the window is stale", so the first claim opens a fresh one.
+     */
+    auto_run_window_start: { type: Date, default: null },
+    /**
+     * When the operator was last told this thread ran out of budget. Exhaustion is otherwise a
+     * `log.warn` in a container nobody is tailing, which is precisely how a stalled project looks
+     * like an idle one. Stamped per window so a busy thread raises one alert, not one per mention.
+     */
+    auto_run_notified_at: { type: Date, default: null },
     created_at: { type: Date, default: () => new Date() },
     updated_at: { type: Date, default: () => new Date() },
   },
@@ -53,6 +93,9 @@ const ForumThreadSchema = new Schema(
 /** The thread-list query: one category, sticky first, most recently active first. */
 ForumThreadSchema.index({ category_id: 1, pinned: -1, last_post_at: -1 });
 ForumThreadSchema.index({ status: 1, last_post_at: -1 });
+/** "What is open, and who owns it" — the work-queue query. */
+ForumThreadSchema.index({ work_state: 1, last_post_at: -1 });
+ForumThreadSchema.index({ 'assignee.display_name': 1, work_state: 1 });
 /** Keyword search over titles. Mongo allows one text index per collection — bodies live in `forum_posts`. */
 ForumThreadSchema.index({ title: 'text' });
 

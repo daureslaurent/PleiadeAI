@@ -10,7 +10,7 @@ import { forumMentionService } from './forum-mention.service';
 import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumAuthor } from './forum-author';
 import type { ForumCategoryDoc } from './forum-category.model';
-import type { ForumThreadDoc } from './forum-thread.model';
+import type { ForumThreadDoc, ForumWorkState } from './forum-thread.model';
 import type { ForumPostDoc } from './forum-post.model';
 import type { ForumFileDoc } from './forum-file.model';
 
@@ -258,6 +258,66 @@ export const forumService = {
         createdAt: updated.created_at,
       });
     }
+    return updated;
+  },
+
+  /**
+   * Set a thread's work state and/or its owner, refusing anyone with no claim on it.
+   *
+   * Ownership rather than moderation. `forum_admin` is reserved for the built-in moderator and
+   * checks that on every call, so routing a project manager's "this is now in progress" through it
+   * would mean granting board-wide moderation to run a project — the wrong trade entirely. The
+   * thread's **author** opened the work item and the **assignee** is doing it; those two are exactly
+   * the people who know its state, and neither needs any power over anybody else's threads.
+   *
+   * The operator is not checked here: the HTTP route is already behind `requireAuth`, and an
+   * operator who can delete the thread outright is not meaningfully restrained from re-labelling it.
+   */
+  async setWorkState(
+    threadId: string,
+    actor: ForumAuthor,
+    patch: { state?: ForumWorkState | null; assignee?: ForumAuthor | null },
+  ): Promise<ForumThreadDoc> {
+    const thread = await forumThreadRepository.findById(threadId);
+    if (!thread) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);
+    if (thread.status === 'archived') throw new ForumRuleError('thread is archived', 409);
+
+    if (actor.kind === 'agent') {
+      const isAuthor = thread.author.agent_id === actor.agent_id;
+      const isAssignee = thread.assignee?.agent_id === actor.agent_id;
+      if (!isAuthor && !isAssignee) {
+        throw new ForumRuleError(
+          'only the agent that opened this thread, or the agent it is assigned to, may change its ' +
+            'work state — reply on the thread and ask its owner instead',
+          403,
+        );
+      }
+    }
+
+    const update: Record<string, unknown> = {};
+    if (patch.state !== undefined) update.work_state = patch.state;
+    // `null` clears the owner, which is a real intention ("nobody is on this any more"), so the key
+    // being present matters more than its value being truthy.
+    if (patch.assignee !== undefined) update.assignee = patch.assignee;
+
+    const updated = await forumThreadRepository.update(threadId, update);
+    if (!updated) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);
+    return updated;
+  },
+
+  /** Sticky a thread to the top of its category. Author-only, by the same argument as `setWorkState`. */
+  async setPinned(threadId: string, actor: ForumAuthor, pinned: boolean): Promise<ForumThreadDoc> {
+    const thread = await forumThreadRepository.findById(threadId);
+    if (!thread) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);
+    if (actor.kind === 'agent' && thread.author.agent_id !== actor.agent_id) {
+      throw new ForumRuleError(
+        'only the agent that opened this thread may pin it — pinning is how a category says what ' +
+          'to read first, so it is not something one agent does to another\'s thread',
+        403,
+      );
+    }
+    const updated = await forumThreadRepository.update(threadId, { pinned });
+    if (!updated) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);
     return updated;
   },
 

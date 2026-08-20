@@ -87,6 +87,12 @@ settingsRouter.put('/', async (req, res) => {
   if (b.forum_auto_reply !== undefined) patch.forum_auto_reply = Boolean(b.forum_auto_reply);
   if (b.forum_auto_reply_max_per_thread !== undefined)
     patch.forum_auto_reply_max_per_thread = Math.max(1, Number(b.forum_auto_reply_max_per_thread) || 20);
+  // The window the budget is measured over. 0 is meaningful — it restores the lifetime cap — so it
+  // cannot go through the `|| default` idiom the other numbers use.
+  if (b.forum_auto_reply_window_hours !== undefined) {
+    const hours = Number(b.forum_auto_reply_window_hours);
+    patch.forum_auto_reply_window_hours = Number.isFinite(hours) ? Math.max(0, Math.min(720, hours)) : 24;
+  }
   // Post-turn memory distillation (docs/memory-souvenirs.md).
   if (b.memory_distill_enabled !== undefined)
     patch.memory_distill_enabled = Boolean(b.memory_distill_enabled);

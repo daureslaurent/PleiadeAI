@@ -2,7 +2,12 @@ import { Router } from 'express';
 import multer from 'multer';
 import { createLogger } from '../../../config/logger';
 import { forumCategoryRepository } from '../../../domain/forum/forum-category.repository';
-import { forumThreadRepository } from '../../../domain/forum/forum-thread.repository';
+import {
+  autoRunBudget,
+  autoRunWindowMs,
+  forumThreadRepository,
+} from '../../../domain/forum/forum-thread.repository';
+import { settingsService } from '../../../domain/settings/settings.service';
 import { forumPostRepository } from '../../../domain/forum/forum-post.repository';
 import { forumFileRepository } from '../../../domain/forum/forum-file.repository';
 import { forumService, ForumRuleError, type ForumSearchMode } from '../../../domain/forum/forum.service';
@@ -11,9 +16,9 @@ import { forumMentionRepository } from '../../../domain/forum/forum-mention.repo
 import { forumMentionService } from '../../../domain/forum/forum-mention.service';
 import { forumMentionRunner, MentionRunError } from '../../../domain/forum/forum-mention-runner';
 import type { ForumMentionDoc, ForumMentionStatus } from '../../../domain/forum/forum-mention.model';
-import { FORUM_THREAD_STATUSES } from '../../../domain/forum/forum-thread.model';
+import { FORUM_THREAD_STATUSES, FORUM_WORK_STATES } from '../../../domain/forum/forum-thread.model';
 import type { ForumCategoryDoc } from '../../../domain/forum/forum-category.model';
-import type { ForumThreadDoc } from '../../../domain/forum/forum-thread.model';
+import type { ForumThreadDoc, ForumWorkState } from '../../../domain/forum/forum-thread.model';
 import type { ForumPostDoc } from '../../../domain/forum/forum-post.model';
 import type { ForumFileDoc } from '../../../domain/forum/forum-file.model';
 
@@ -69,6 +74,18 @@ function shapeCategory(doc: ForumCategoryDoc) {
   };
 }
 
+/** The thread's live auto-reply allowance, or null when the fleet switch is off and it is moot. */
+async function threadAutoRun(doc: ForumThreadDoc) {
+  const settings = await settingsService.get();
+  if (!settings.forum_auto_reply) return null;
+  const budget = autoRunBudget(
+    doc,
+    settings.forum_auto_reply_max_per_thread,
+    autoRunWindowMs(settings.forum_auto_reply_window_hours),
+  );
+  return { ...budget, resetsAt: budget.resetsAt ? budget.resetsAt.toISOString() : null };
+}
+
 function shapeThread(doc: ForumThreadDoc) {
   return {
     id: String(doc._id),
@@ -76,6 +93,8 @@ function shapeThread(doc: ForumThreadDoc) {
     title: doc.title,
     author: doc.author,
     status: doc.status,
+    workState: doc.work_state ?? null,
+    assignee: doc.assignee ?? null,
     pinned: doc.pinned,
     tags: doc.tags,
     postCount: doc.post_count,
@@ -216,9 +235,16 @@ forumRouter.delete('/categories/:id', async (req, res) => {
 
 forumRouter.get('/threads', async (req, res) => {
   const categoryId = typeof req.query.category === 'string' && req.query.category ? req.query.category : undefined;
+  // Comma-separated so the board's "open work" filter is one request rather than one per state.
+  const workState =
+    typeof req.query.workState === 'string' && req.query.workState
+      ? (req.query.workState.split(',').map((s) => s.trim()).filter(Boolean) as Array<ForumWorkState | 'none'>)
+      : undefined;
   const threads = await forumThreadRepository.list({
     categoryId,
     includeArchived: req.query.includeArchived === '1',
+    workState,
+    assignee: typeof req.query.assignee === 'string' && req.query.assignee ? req.query.assignee : undefined,
     limit: Number(req.query.limit) || 50,
   });
   res.json(threads.map(shapeThread));
@@ -319,6 +345,9 @@ forumRouter.get('/threads/:id', async (req, res) => {
     total,
     offset,
     authorPostCounts: postCounts,
+    // What is left of the thread's automatic-reply allowance, so the thread page can say why nobody
+    // is answering instead of leaving it to be inferred from a container log.
+    autoRun: await threadAutoRun(thread),
     // The mentions raised by the posts on this page, so every `@name` chip knows its own state and
     // can offer Run without the thread firing one request per chip.
     mentions: (await forumMentionRepository.listByPosts(posts.map((p) => p._id))).map(shapeMention),
@@ -339,6 +368,17 @@ forumRouter.patch('/threads/:id', async (req, res) => {
   }
   // `null` clears the verdict, a string sets it — so the key has to be present-but-undefined-safe.
   if ('resolvedPostId' in (req.body ?? {})) patch.resolved_post_id = req.body.resolvedPostId || null;
+  if ('workState' in (req.body ?? {})) {
+    const state = req.body.workState;
+    if (state !== null && !(FORUM_WORK_STATES as readonly string[]).includes(String(state))) {
+      res.status(400).json({ error: `workState must be null or one of: ${FORUM_WORK_STATES.join(', ')}` });
+      return;
+    }
+    patch.work_state = state ?? null;
+  }
+  // The operator assigns by picking from the roster in the UI, so the author object arrives whole;
+  // `null` un-assigns.
+  if ('assignee' in (req.body ?? {})) patch.assignee = req.body.assignee || null;
 
   const updated = await forumThreadRepository.update(req.params.id, patch);
   if (!updated) {

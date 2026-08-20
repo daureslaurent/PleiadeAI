@@ -1597,6 +1597,7 @@ export interface InferenceSettings {
   forum_auto_reply: boolean;
   /** How many automatic runs one thread may spend before its mentions fall back to a manual Run. */
   forum_auto_reply_max_per_thread: number;
+  forum_auto_reply_window_hours: number;
   /** Conversation Quality Scorer: auto-score each turn on completion. */
   scoring_enabled: boolean;
   /** Judge endpoint ('' → reuse the responding agent's own endpoint). */
@@ -2570,12 +2571,30 @@ export interface ForumCategory {
   lastThread: { id: string; title: string; lastPostAt: string; lastPostAuthor: string } | null;
 }
 
+/**
+ * Where the work a thread tracks has got to — a different axis from `status`, which is the thread's
+ * own lifecycle on the board. `null` means the thread is not a work item at all.
+ */
+export type ForumWorkState = 'todo' | 'in_progress' | 'blocked' | 'done';
+
+/** What is left of a thread's automatic-reply allowance. Null when fleet auto-reply is off. */
+export interface ForumAutoRun {
+  spent: number;
+  budget: number;
+  remaining: number;
+  /** When the rolling window resets. Null when windowing is disabled and the budget is a hard cap. */
+  resetsAt: string | null;
+  exhausted: boolean;
+}
+
 export interface ForumThread {
   id: string;
   categoryId: string;
   title: string;
   author: ForumAuthor;
   status: 'open' | 'locked' | 'archived';
+  workState: ForumWorkState | null;
+  assignee: ForumAuthor | null;
   pinned: boolean;
   tags: string[];
   postCount: number;
@@ -2671,6 +2690,8 @@ export interface ForumThreadDetail extends ForumThread {
   authorPostCounts: Record<string, number>;
   /** Mentions raised by the posts on this page, so each `@name` chip knows its own state. */
   mentions: ForumMention[];
+  /** The thread's automatic-reply allowance, so the page can explain a thread nobody answers. */
+  autoRun: ForumAutoRun | null;
 }
 
 export interface ForumSearchHit {
@@ -2695,10 +2716,21 @@ export const forumApi = {
   removeCategory: (id: string, force = false) =>
     api.delete(`/forum/categories/${id}`, { params: force ? { force: 1 } : {} }).then((r) => r.data),
 
-  threads: (categoryId?: string, limit = 50, includeArchived = false) =>
+  threads: (
+    categoryId?: string,
+    limit = 50,
+    includeArchived = false,
+    filter: { workState?: Array<ForumWorkState | 'none'>; assignee?: string } = {},
+  ) =>
     api
       .get<ForumThread[]>('/forum/threads', {
-        params: { category: categoryId, limit, includeArchived: includeArchived ? '1' : undefined },
+        params: {
+          category: categoryId,
+          limit,
+          includeArchived: includeArchived ? '1' : undefined,
+          workState: filter.workState?.length ? filter.workState.join(',') : undefined,
+          assignee: filter.assignee || undefined,
+        },
       })
       .then((r) => r.data),
   /** Batch-resolve raw thread ids quoted in a post or a chat turn. Unknown ids are simply absent. */
@@ -2710,7 +2742,15 @@ export const forumApi = {
     api.get<ForumThreadDetail>(`/forum/threads/${id}`, { params: { limit, offset } }).then((r) => r.data),
   saveThread: (
     id: string,
-    patch: Partial<{ title: string; pinned: boolean; status: string; categoryId: string; resolvedPostId: string | null }>,
+    patch: Partial<{
+      title: string;
+      pinned: boolean;
+      status: string;
+      categoryId: string;
+      resolvedPostId: string | null;
+      workState: ForumWorkState | null;
+      assignee: ForumAuthor | null;
+    }>,
   ) => api.patch<ForumThread>(`/forum/threads/${id}`, patch).then((r) => r.data),
   removeThread: (id: string) => api.delete(`/forum/threads/${id}`).then((r) => r.data),
 

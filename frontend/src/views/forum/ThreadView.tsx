@@ -15,7 +15,14 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { forumApi, type ForumFile, type ForumMention, type ForumPost, type ForumThreadDetail } from '../../lib/api';
+import {
+  forumApi,
+  type ForumFile,
+  type ForumMention,
+  type ForumPost,
+  type ForumThreadDetail,
+  type ForumWorkState,
+} from '../../lib/api';
 import { useForum } from '../../store/forum';
 import { Markdown } from '../../components/Markdown';
 import { linkifyMentions, MentionProvider } from '../../components/Mention';
@@ -26,12 +33,53 @@ import {
   AttachmentList,
   AuthorAvatar,
   AuthorName,
+  AutoRunNotice,
   Composer,
   isModerator,
   useMentionRoster,
+  WORK_STATE_LABELS,
+  WorkStateChip,
 } from './forumBits';
 
 const PAGE_SIZE = 50;
+
+/**
+ * The operator's half of work tracking: agents set their own threads' state through the `forum`
+ * tool, and this is the same field from the other side — for a thread whose owning agent got it
+ * wrong, or one the operator opened by hand.
+ *
+ * Deliberately a row of toggles rather than a dropdown: with four states the whole vocabulary fits
+ * on one line, and the board's value comes from these being cheap enough to keep honest.
+ */
+function WorkStatePicker({
+  state,
+  onPick,
+}: {
+  state: ForumWorkState | null;
+  onPick: (next: ForumWorkState | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 pt-1">
+      <span className="mr-1 text-[11px] text-slate-600">work state</span>
+      {(Object.keys(WORK_STATE_LABELS) as ForumWorkState[]).map((key) => (
+        <button
+          key={key}
+          type="button"
+          // Clicking the active state clears it — a thread that turned out not to be a work item
+          // should be able to stop being one without a separate "none" button.
+          onClick={() => onPick(state === key ? null : key)}
+          className={`rounded px-1.5 py-0.5 text-[11px] transition-colors ${
+            state === key
+              ? 'bg-white/[0.08] text-slate-100'
+              : 'text-slate-600 hover:bg-white/[0.04] hover:text-slate-400'
+          }`}
+        >
+          {WORK_STATE_LABELS[key].label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /**
  * A thread (FORUM_PLAN.md §5): the classic forum post layout — a narrow author column beside the
@@ -166,6 +214,7 @@ export function ThreadView() {
           <div className="flex flex-wrap items-center gap-2">
             {detail.pinned && <Pin size={13} className="text-accent" />}
             <h1 className="text-lg font-medium text-slate-100">{detail.title}</h1>
+            {detail.workState && <WorkStateChip state={detail.workState} />}
             {detail.status !== 'open' && (
               <StatusBadge tone={detail.status === 'locked' ? 'busy' : 'idle'}>{detail.status}</StatusBadge>
             )}
@@ -173,9 +222,16 @@ export function ThreadView() {
           <p className="text-[11px] text-slate-500">
             {detail.total} post{detail.total === 1 ? '' : 's'} · started by {detail.author.display_name} ·{' '}
             {ago(detail.createdAt)}
+            {detail.assignee && <> · owned by {detail.assignee.display_name}</>}
             {detail.tags.length > 0 && <> · {detail.tags.join(', ')}</>}
           </p>
+          <WorkStatePicker
+            state={detail.workState}
+            onPick={(next) => void patch({ workState: next })}
+          />
         </div>
+
+        <AutoRunNotice autoRun={detail.autoRun} />
 
         <div className="space-y-3">
           {detail.posts.map((post, i) => (

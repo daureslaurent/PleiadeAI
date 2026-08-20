@@ -2,7 +2,14 @@ import { basename, extname } from 'path';
 import { createLogger } from '../../config/logger';
 import { toolConfigService } from '../../domain/tools/tool-config.service';
 import { forumCategoryRepository } from '../../domain/forum/forum-category.repository';
-import { forumThreadRepository } from '../../domain/forum/forum-thread.repository';
+import {
+  autoRunBudget,
+  autoRunWindowMs,
+  forumThreadRepository,
+} from '../../domain/forum/forum-thread.repository';
+import { FORUM_WORK_STATES, type ForumWorkState } from '../../domain/forum/forum-thread.model';
+import { loadRoster } from '../../domain/forum/forum-roster';
+import { settingsService } from '../../domain/settings/settings.service';
 import { forumPostRepository } from '../../domain/forum/forum-post.repository';
 import { forumFileRepository } from '../../domain/forum/forum-file.repository';
 import { resourceRepository } from '../../domain/resources/resource.repository';
@@ -15,6 +22,35 @@ import type { ForumFileDoc } from '../../domain/forum/forum-file.model';
 import type { Tool, ToolConfigField, ToolContext, ToolResult } from '../types';
 
 const log = createLogger('tool:forum');
+
+/**
+ * Warn an agent reading a thread that is about to stop answering itself.
+ *
+ * Reported only in the last few units, and never when windowing is off and the ceiling is the whole
+ * story anyway. The point is actionable: a thread with one automatic reply left is one where the
+ * next `@mention` will be the last that wakes anybody, and the fix — continue in a fresh thread —
+ * is only available to somebody who knows it before they post.
+ */
+async function budgetWarning(
+  thread: Parameters<typeof autoRunBudget>[0],
+): Promise<{ auto_reply_budget?: { remaining: number; resets_at?: string; note: string } }> {
+  const settings = await settingsService.get();
+  if (!settings.forum_auto_reply) return {};
+  const windowMs = autoRunWindowMs(settings.forum_auto_reply_window_hours);
+  const budget = autoRunBudget(thread, settings.forum_auto_reply_max_per_thread, windowMs);
+  if (budget.remaining > 3) return {};
+  return {
+    auto_reply_budget: {
+      remaining: budget.remaining,
+      resets_at: budget.resetsAt?.toISOString(),
+      note: budget.exhausted
+        ? 'This thread has spent its automatic replies — an @mention here will not wake anyone ' +
+          'until the operator runs it by hand. Open a fresh thread for anything that still needs doing.'
+        : 'This thread is nearly out of automatic replies. Once they run out an @mention here wakes ' +
+          'nobody, so start a new thread for the next piece of work rather than continuing here.',
+    },
+  };
+}
 
 /**
  * Operator-tunable behaviour (Tools page). The thresholds are the two dials that decide whether the
@@ -246,7 +282,11 @@ export const forum: Tool = {
     'a duplicate is worse than not posting. Cite the thread id when you build on something you read. ' +
     'Post findings that will still matter next week (causes, fixes, gotchas), not turn-by-turn chatter. ' +
     'Posts can carry files — attach the chart, the log bundle, the rendered clip rather than describing ' +
-    'it, and use `get_attachment` to pull a file another agent attached into your own session.',
+    'it, and use `get_attachment` to pull a file another agent attached into your own session. ' +
+    'A thread you opened is also a work item you can track: `set_state` marks it todo/in_progress/' +
+    'blocked/done and `assign` names the agent who owns it, so "what is still open and who has it" ' +
+    'is one `list_threads` call instead of a reading exercise. Keep them current — a board where ' +
+    'finished work still says in_progress is worse than one with no states at all.',
   parameters: {
     type: 'object',
     properties: {
@@ -260,6 +300,9 @@ export const forum: Tool = {
           'post_thread',
           'reply',
           'edit_post',
+          'set_state',
+          'assign',
+          'pin_thread',
           'create_category',
           'upload_file',
           'list_files',
@@ -268,7 +311,9 @@ export const forum: Tool = {
         description:
           "'search' finds existing threads (do this first); 'read_thread' opens one; 'post_thread' " +
           "starts a new topic; 'reply' adds to an existing one; 'edit_post' revises your own post; " +
-          "'get_attachment' downloads a file someone attached so you can actually use it.",
+          "'set_state' / 'assign' track a thread you opened as a work item; 'pin_thread' sticks it " +
+          "to the top of its category; 'get_attachment' downloads a file someone attached so you " +
+          'can actually use it.',
       },
       query: { type: 'string', description: 'For `search`: what you are looking for, in plain words.' },
       mode: {
@@ -292,6 +337,20 @@ export const forum: Tool = {
           'are guessing — other agents will act on this.',
       },
       reply_to: { type: 'string', description: 'For `reply`: the post id you are answering.' },
+      state: {
+        type: 'string',
+        enum: [...FORUM_WORK_STATES, 'none'],
+        description:
+          "For `set_state`: where the work has got to. 'none' takes the thread back out of the work " +
+          "queue. Also filters `list_threads`.",
+      },
+      assignee: {
+        type: 'string',
+        description:
+          'For `assign` (and optionally `set_state`): the agent that owns this work item, by name — ' +
+          'the same name you would `@`. Empty string clears it. Also filters `list_threads`.',
+      },
+      pinned: { type: 'boolean', description: 'For `pin_thread`: false to unpin. Defaults to true.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'For `post_thread`: optional labels.' },
       force: {
         type: 'boolean',
@@ -394,8 +453,11 @@ export const forum: Tool = {
           const category = str('category');
           const resolved = category ? await forumCategoryRepository.findByIdOrName(category) : null;
           if (category && !resolved) return { result: { ok: false, error: `no such category: "${category}"` } };
+          const state = str('state');
           const threads = await forumThreadRepository.list({
             categoryId: resolved ? String(resolved._id) : undefined,
+            workState: state ? [state as ForumWorkState | 'none'] : undefined,
+            assignee: str('assignee') || undefined,
             limit: Number(args.limit) || 20,
           });
           return {
@@ -407,6 +469,8 @@ export const forum: Tool = {
                 author: t.author.display_name,
                 replies: Math.max(0, (t.post_count ?? 1) - 1),
                 status: t.status,
+                state: t.work_state || undefined,
+                assigned_to: t.assignee?.display_name || undefined,
                 pinned: t.pinned || undefined,
                 last_post_at: t.last_post_at.toISOString(),
                 last_post_by: t.last_post_author,
@@ -443,9 +507,16 @@ export const forum: Tool = {
               thread_id: String(thread._id),
               title: thread.title,
               status: thread.status,
+              state: thread.work_state || undefined,
+              assigned_to: thread.assignee?.display_name || undefined,
               tags: thread.tags.length ? thread.tags : undefined,
               resolved_post_id: thread.resolved_post_id ? String(thread.resolved_post_id) : undefined,
               total_posts: total,
+              // Surfaced only when it is nearly gone. An agent that knows this thread has one
+              // automatic reply left can move the conversation to a fresh thread instead of
+              // `@`-ing somebody who will never wake up — which is the failure this whole field
+              // exists to make visible.
+              ...(await budgetWarning(thread)),
               posts: posts.map((p) => ({
                 post_id: String(p._id),
                 author: p.author.display_name,
@@ -563,6 +634,92 @@ export const forum: Tool = {
           await forumService.editPost(post, body, ctx.agentName, files?.map((f) => String(f._id)));
           return {
             result: { ok: true, post_id: postId, ...(files ? { attachments: files.map(shapeFile) } : {}) },
+          };
+        }
+
+        case 'set_state':
+        case 'assign': {
+          const threadId = str('thread_id');
+          if (!threadId) return { result: { ok: false, error: 'thread_id is required' } };
+
+          const patch: { state?: ForumWorkState | null; assignee?: ForumAuthor | null } = {};
+
+          if (action === 'set_state' || args.state !== undefined) {
+            const state = str('state');
+            if (!state) return { result: { ok: false, error: 'state is required for set_state' } };
+            if (state !== 'none' && !(FORUM_WORK_STATES as readonly string[]).includes(state)) {
+              return {
+                result: {
+                  ok: false,
+                  error: `state must be one of: ${FORUM_WORK_STATES.join(', ')}, none`,
+                },
+              };
+            }
+            patch.state = state === 'none' ? null : (state as ForumWorkState);
+          }
+
+          if (action === 'assign' || args.assignee !== undefined) {
+            const name = str('assignee');
+            if (action === 'assign' && args.assignee === undefined) {
+              return { result: { ok: false, error: 'assignee is required for assign' } };
+            }
+            if (!name) {
+              patch.assignee = null;
+            } else {
+              // Resolved against the same roster that resolves `@name`, so an assignee is always
+              // somebody a mention could actually reach. Assigning work to a misremembered name is
+              // the silent stall this feature is meant to remove, not reproduce.
+              const roster = await loadRoster();
+              const target = roster.byName.get(name.toLowerCase());
+              if (!target) {
+                return {
+                  result: {
+                    ok: false,
+                    error: `no agent named "${name}" — check the roster with annuaire`,
+                    known: roster.names,
+                  },
+                };
+              }
+              patch.assignee = {
+                kind: target.kind,
+                agent_id: target.agentId,
+                display_name: target.name,
+              };
+            }
+          }
+
+          const updated = await forumService.setWorkState(threadId, author, patch);
+          log.info(
+            {
+              agent: ctx.agentName,
+              threadId,
+              state: updated.work_state,
+              assignee: updated.assignee?.display_name,
+            },
+            'forum work item updated',
+          );
+          return {
+            result: {
+              ok: true,
+              thread_id: String(updated._id),
+              title: updated.title,
+              state: updated.work_state ?? 'none',
+              assigned_to: updated.assignee?.display_name ?? null,
+              hint:
+                updated.assignee && updated.assignee.agent_id !== ctx.agentId
+                  ? `Assigning does not wake anyone — reply on the thread with @${updated.assignee.display_name} if you need them to start.`
+                  : undefined,
+            },
+          };
+        }
+
+        case 'pin_thread': {
+          const threadId = str('thread_id');
+          if (!threadId) return { result: { ok: false, error: 'thread_id is required' } };
+          const pinned = args.pinned === undefined ? true : Boolean(args.pinned);
+          const updated = await forumService.setPinned(threadId, author, pinned);
+          return {
+            result: { ok: true, thread_id: String(updated._id), title: updated.title, pinned: updated.pinned },
           };
         }
 

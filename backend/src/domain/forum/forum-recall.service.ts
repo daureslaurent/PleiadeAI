@@ -48,6 +48,8 @@ export interface ForumPointer {
   lastPostAuthor?: string;
   /** Present for digest pointers: whether the thread itself is new, or just newly replied to. */
   opening?: boolean;
+  /** Present for assignment pointers: the work state the thread is sitting in. */
+  workState?: string;
   /** Files attached anywhere in the thread. A pointer that says "2 files" is worth opening. */
   attachments?: number;
 }
@@ -191,6 +193,39 @@ export const forumRecall = {
   },
 
   /**
+   * The work items this agent owns and has not finished (§13).
+   *
+   * A mention pointer disappears the moment the agent answers, which is right for a question and
+   * wrong for a task: "you own this, it is still open" is true on every turn until the work is
+   * actually done, and an assignment that scrolls out of view after one reply is an assignment
+   * nobody tracks. `done` is excluded — it is finished by definition — and so are archived threads.
+   *
+   * Cheap by construction: one indexed find on `assignee.display_name` + `work_state`.
+   */
+  async assigned(agentId: string, limit = MAX_POINTERS): Promise<ForumPointer[]> {
+    if (!agentId) return [];
+    try {
+      const rows = await ForumThreadModel.find({
+        'assignee.agent_id': agentId,
+        work_state: { $in: ['todo', 'in_progress', 'blocked'] },
+        status: { $ne: 'archived' },
+      })
+        .sort({ last_post_at: -1 })
+        .limit(limit)
+        .exec();
+      return rows.map((t) => ({
+        threadId: String(t._id),
+        title: clip(t.title),
+        workState: t.work_state ?? 'todo',
+        lastPostAuthor: t.last_post_author,
+      }));
+    } catch (err) {
+      log.warn({ err, agentId }, 'forum assignment pointers unavailable this turn');
+      return [];
+    }
+  },
+
+  /**
    * What has happened on the board *since a moment in time* — for the auto-loop agent
    * (`AUTO_AGENT_PLAN.md` §4), which wakes up every few minutes and would otherwise have no way to
    * notice work it was never directly addressed in.
@@ -305,12 +340,22 @@ export interface ForumBlockInput {
   mentions?: ForumPointer[];
   /** `@name — role` lines from `forumRecall.roster`. */
   roster?: string[];
+  /** Open work items assigned to this agent (spec §13). */
+  assigned?: ForumPointer[];
   /** Whether the board runs mentions on its own (`settings.forum_auto_reply`, spec §11.6). */
   autoReply?: boolean;
 }
 
 export function buildForumBlock(input: ForumBlockInput): string | null {
-  const { related, replies, digest = [], mentions = [], roster = [], autoReply = false } = input;
+  const {
+    related,
+    replies,
+    digest = [],
+    mentions = [],
+    assigned = [],
+    roster = [],
+    autoReply = false,
+  } = input;
 
   // The roster alone is not a reason to spend tokens: an agent with nothing pending and nothing
   // related gets the block only because the instructions below are what change its behaviour.
@@ -323,6 +368,18 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
       'You were addressed by name on the forum and have not answered yet. Read the thread and',
       '`reply` to it in this turn — your reply is posted straight back to whoever asked:',
       ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
+    );
+  }
+
+  // Straight after mentions: an assignment outranks anything merely topical, and unlike a mention
+  // it stays here every turn until the agent marks it done — which is the nudge to actually do so.
+  if (assigned.length) {
+    lines.push(
+      '',
+      'Work items on the forum assigned to **you**, still open. Move them along, and keep their',
+      'state honest with `forum` `set_state` (`in_progress` when you start, `blocked` with a reply',
+      'saying what you are waiting on, `done` when it is finished):',
+      ...assigned.map((p) => `- \`${p.threadId}\` — ${p.title} [${p.workState}]${files(p)}`),
     );
   }
 

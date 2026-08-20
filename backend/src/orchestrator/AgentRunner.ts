@@ -336,23 +336,30 @@ export class AgentRunner {
     // The digest stays exclusive to an auto-loop turn: it is time-scoped rather than
     // similarity-scoped ("what changed while I was working?"), which is a looping agent's question
     // and nobody else's.
-    const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumRoster] = hasForum
-      ? await Promise.all([
-          forumRecall.pointers(recallVector),
-          forumRecall.unansweredReplies(ctx.agentId, agent.name),
-          input.autoLoop
-            ? forumRecall.digest(input.autoLoop.forumSeenAt, agent.name)
-            : Promise.resolve([]),
-          forumRecall.mentions(ctx.agentId),
-          forumRecall.roster(agent.name),
-        ])
-      : [[], [], [], [], []];
+    //
+    // Assignments ride every turn for a different reason than either: a mention stops being pending
+    // the moment it is answered, but a work item this agent owns is still its problem until it is
+    // marked done, and an assignment that scrolls out of view after one reply is one nobody tracks.
+    const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumAssigned, forumRoster] =
+      hasForum
+        ? await Promise.all([
+            forumRecall.pointers(recallVector),
+            forumRecall.unansweredReplies(ctx.agentId, agent.name),
+            input.autoLoop
+              ? forumRecall.digest(input.autoLoop.forumSeenAt, agent.name)
+              : Promise.resolve([]),
+            forumRecall.mentions(ctx.agentId),
+            forumRecall.assigned(ctx.agentId),
+            forumRecall.roster(agent.name),
+          ])
+        : [[], [], [], [], [], []];
     const forumBlock = hasForum
       ? buildForumBlock({
           related: forumRelated,
           replies: forumReplyPointers,
           digest: forumDigest,
           mentions: forumMentions,
+          assigned: forumAssigned,
           roster: forumRoster,
           // Whether a handoff actually runs on its own changes what the agent should *expect* after
           // posting one, so the block says which of the two worlds it is in rather than guessing.

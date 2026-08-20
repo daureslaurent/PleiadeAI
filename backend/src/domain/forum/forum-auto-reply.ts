@@ -1,8 +1,9 @@
 import { createLogger } from '../../config/logger';
+import { notificationRepository } from '../notifications/notification.repository';
 import { settingsService } from '../settings/settings.service';
 import { forumMentionRepository } from './forum-mention.repository';
 import { forumMentionRunner } from './forum-mention-runner';
-import { forumThreadRepository } from './forum-thread.repository';
+import { autoRunWindowMs, forumThreadRepository } from './forum-thread.repository';
 
 const log = createLogger('forum-auto-reply');
 
@@ -108,21 +109,52 @@ async function runOne(item: Queued): Promise<void> {
   // The loop guard. Claimed *before* the run, not after, so a run that dies on an unreachable
   // endpoint still spends its unit — otherwise a failing pair of agents would retry each other
   // forever, which is the exact shape the budget exists to stop.
-  const spent = await forumThreadRepository.claimAutoRun(thread._id, settings.forum_auto_reply_max_per_thread);
+  const budget = settings.forum_auto_reply_max_per_thread;
+  const windowMs = autoRunWindowMs(settings.forum_auto_reply_window_hours);
+  const spent = await forumThreadRepository.claimAutoRun(thread._id, budget, windowMs);
   if (spent === null) {
     log.warn(
-      { threadId: item.threadId, title: item.threadTitle, budget: settings.forum_auto_reply_max_per_thread },
+      { threadId: item.threadId, title: item.threadTitle, budget, windowMs },
       'thread has spent its auto-reply budget — mention left pending for a manual run',
     );
+    await notifyExhausted(item, budget, windowMs);
     return;
   }
 
   log.info(
-    { agent: item.agentName, thread: item.threadTitle, spent, budget: settings.forum_auto_reply_max_per_thread },
+    { agent: item.agentName, thread: item.threadTitle, spent, budget },
     'auto-replying to mention',
   );
   const run = await forumMentionRunner.begin(item.mentionId);
   // Waiting is the point: the next agent named in the same post must read this answer on the thread
   // before it forms its own.
   await run.done;
+}
+
+/**
+ * Tell the operator a thread has stopped answering itself.
+ *
+ * Without this, exhaustion is a `log.warn` in a container nobody is tailing: the mentions stay
+ * pending, the agents never wake, and a coordination thread that has quietly stopped moving is
+ * indistinguishable from one where everybody is simply busy. The alert names the thread and says
+ * what to do about it, because both fixes — press Run, or raise the ceiling — are the operator's.
+ *
+ * One alert per window, claimed atomically on the thread, so a thread being mentioned every minute
+ * does not fill the inbox with the same sentence.
+ */
+async function notifyExhausted(item: Queued, budget: number, windowMs: number): Promise<void> {
+  if (!(await forumThreadRepository.claimAutoRunNotice(item.threadId))) return;
+  const window = windowMs > 0 ? `in the last ${Math.round(windowMs / 3_600_000)}h` : 'in total';
+  await notificationRepository
+    .create({
+      title: `Forum thread out of auto-reply budget: ${item.threadTitle}`,
+      content:
+        `"${item.threadTitle}" has spent its ${budget} automatic replies ${window}, so \`@${item.agentName}\` ` +
+        'was not woken and its mention is waiting. Nothing is lost — run the mention by hand from ' +
+        'the thread, or raise the budget in Settings. If agents are paging each other in circles ' +
+        'here, that is what this limit caught.',
+      kind: 'forum_thread',
+      ref_id: item.threadId,
+    })
+    .catch((err) => log.error({ err: String(err), threadId: item.threadId }, 'exhaustion alert failed'));
 }

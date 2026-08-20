@@ -114,12 +114,18 @@ const SettingsSchema = new Schema(
      * where agents address each other into a self-driving one is a decision, not a default.
      *
      * The per-thread budget is what stops two agents paging each other forever: a thread may spend
-     * at most this many automatic runs, after which its mentions queue up as ordinary pending ones
-     * for the operator to run by hand. Counted per thread rather than per unit time, so a slow
-     * ping-pong is bounded just as tightly as a fast one.
+     * at most this many automatic runs *within a rolling window*, after which its mentions queue up
+     * as ordinary pending ones for the operator to run by hand.
+     *
+     * The window is what keeps the budget a brake rather than a lifespan. Counted over all time, a
+     * thread meant to live for weeks — a project hub coordinating a build — spends its last unit one
+     * afternoon and from then on silently wakes nobody, which looks exactly like the project having
+     * stalled on its own. A runaway exchange burns 20 runs in minutes and is stopped just as hard;
+     * a slow one gets its allowance back tomorrow. Set the window to 0 for the old lifetime cap.
      */
     forum_auto_reply: { type: Boolean, default: false },
     forum_auto_reply_max_per_thread: { type: Number, default: 20 },
+    forum_auto_reply_window_hours: { type: Number, default: 24 },
     memory_distill_enabled: { type: Boolean, default: true },
     /** Token budget for that distillation call. The reply is a small JSON object. */
     memory_max_tokens: { type: Number, default: 800 },

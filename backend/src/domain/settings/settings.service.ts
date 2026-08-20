@@ -68,6 +68,8 @@ export interface EffectiveSettings {
   forum_auto_reply: boolean;
   /** Ceiling on how many automatic runs one thread may spend before it falls back to manual Run. */
   forum_auto_reply_max_per_thread: number;
+  /** Length of the rolling window that ceiling is measured over. 0 → a lifetime cap, never reset. */
+  forum_auto_reply_window_hours: number;
   /**
    * Post-turn memory distillation: the agent's own model rewrites a completed turn into 0..N
    * standalone memories instead of the raw transcript being embedded verbatim. See
@@ -162,6 +164,7 @@ export const settingsService = {
       agents_md: doc?.agents_md ?? '',
       forum_auto_reply: doc?.forum_auto_reply ?? false,
       forum_auto_reply_max_per_thread: doc?.forum_auto_reply_max_per_thread ?? 20,
+      forum_auto_reply_window_hours: doc?.forum_auto_reply_window_hours ?? 24,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,
       public_base_url: doc?.public_base_url ?? '',

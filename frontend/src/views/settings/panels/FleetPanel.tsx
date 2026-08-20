@@ -37,8 +37,14 @@ export function FleetPanel() {
           <SettingNumber
             field="forum_auto_reply_max_per_thread"
             label="Automatic runs per thread"
-            hint="The loop guard: once a thread has spent this many automatic runs, further mentions on it queue up as ordinary pending ones for you to run by hand. It is what stops two agents paging each other forever. Raising it revives threads that hit the old ceiling."
+            hint="The loop guard: once a thread has spent this many automatic runs within the window below, further mentions on it queue up as ordinary pending ones for you to run by hand. It is what stops two agents paging each other forever. Raising it revives threads that hit the old ceiling."
             min={1}
+          />
+          <SettingNumber
+            field="forum_auto_reply_window_hours"
+            label="Budget window (hours)"
+            hint="The allowance above is spent over this rolling window and then refills — so a runaway exchange is stopped in minutes while a thread that coordinates a project for weeks keeps working. Set to 0 to count over the thread's whole life instead, which caps how long it can usefully live. You get a notification whenever a thread runs out."
+            min={0}
           />
         </div>
       </Section>
