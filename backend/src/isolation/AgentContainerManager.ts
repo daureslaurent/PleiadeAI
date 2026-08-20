@@ -170,10 +170,31 @@ export class AgentExecutor {
    * @param controlPersistSec  How long the multiplexed SSH connection is kept warm between calls.
    */
   constructor(
+    private readonly agentId: string,
     private readonly container: string,
     private readonly remote?: RemoteTarget,
     private readonly controlPersistSec: number = 1_800,
   ) {}
+
+  /**
+   * Bracket one command: mark the container busy for its duration and make sure it is actually up.
+   *
+   * A turn holds a *single* executor for its whole life, so without this the idle timer armed once
+   * at `ensureReady` fires mid-turn and stops the container out from under the agent — every later
+   * `bash` call failing with "container … is not running" while the backend-side tools keep working.
+   * The activity count keeps the timer disarmed while work is in flight; `reviveContainer` repairs a
+   * container stopped by anything else (an operator, a host reboot, a timer that fired in the gap
+   * between two tool calls).
+   */
+  private async begin(): Promise<void> {
+    agentContainerManager.beginActivity(this.agentId);
+    try {
+      await agentContainerManager.reviveContainer(this.agentId, this.container, this.remote);
+    } catch (err) {
+      agentContainerManager.endActivity(this.agentId);
+      throw err;
+    }
+  }
 
   /**
    * Run a shell command in the agent's execution environment, streaming combined stdout/stderr
@@ -199,15 +220,20 @@ export class AgentExecutor {
         })
       : ['bash', '-lc', wrapWithSession(command)];
 
-    const res = await dockerService.exec(this.container, argv, {
-      timeoutMs: opts.timeoutMs,
-      onOutput: opts.onOutput,
-      // Large payloads (e.g. writing a fetched blob to a file) arrive on stdin, not as an argv
-      // string — an arg that big overflows ARG_MAX (`E2BIG`). Over SSH, stdin is forwarded to the
-      // remote command (which is why the remote script is `eval`'d rather than piped into bash).
-      stdin: opts.stdin,
-    });
-    return this.remote ? this.explainTransportFailure(res) : res;
+    await this.begin();
+    try {
+      const res = await dockerService.exec(this.container, argv, {
+        timeoutMs: opts.timeoutMs,
+        onOutput: opts.onOutput,
+        // Large payloads (e.g. writing a fetched blob to a file) arrive on stdin, not as an argv
+        // string — an arg that big overflows ARG_MAX (`E2BIG`). Over SSH, stdin is forwarded to the
+        // remote command (which is why the remote script is `eval`'d rather than piped into bash).
+        stdin: opts.stdin,
+      });
+      return this.remote ? this.explainTransportFailure(res) : res;
+    } finally {
+      agentContainerManager.endActivity(this.agentId);
+    }
   }
 
   /**
@@ -236,10 +262,16 @@ export class AgentExecutor {
             : `${HARNESS_DIR}/node_runner.cjs`,
         ];
 
-    const res = await dockerService.exec(this.container, argv, {
-      stdin: JSON.stringify(payload),
-      timeoutMs: opts.timeoutMs,
-    });
+    await this.begin();
+    let res;
+    try {
+      res = await dockerService.exec(this.container, argv, {
+        stdin: JSON.stringify(payload),
+        timeoutMs: opts.timeoutMs,
+      });
+    } finally {
+      agentContainerManager.endActivity(this.agentId);
+    }
     if (!this.remote) return res;
     // The remote login shell may source an rc file that prints to stdout, which would corrupt the
     // harness's single JSON document. Keep only the JSON envelope; the caller parses it strictly.
@@ -279,6 +311,10 @@ class AgentContainerManager {
   private readonly inflight = new Map<string, Promise<AgentExecutor>>();
   /** Idle auto-stop timers, keyed by agent id. */
   private readonly idleTimers = new Map<string, NodeJS.Timeout>();
+  /** Each agent's idle window (ms) from its profile, so a re-arm keeps it instead of the global default. */
+  private readonly idleWindows = new Map<string, number>();
+  /** Commands in flight per agent; while this is non-zero the container is never idle-stopped. */
+  private readonly activeExecs = new Map<string, number>();
   /** Booted visual sessions, keyed by agent id (host/port/password for the VNC proxy). */
   private readonly visualSessions = new Map<string, VisualEndpoint>();
   /** Serialises concurrent `ensureVisual` calls for the same agent. */
@@ -380,7 +416,7 @@ class AgentContainerManager {
     session = { container, vncSock: VISUAL_VNC_SOCK, password };
     this.visualSessions.set(agentId, session);
     // Keep the container alive while a desktop is attached.
-    this.resetIdle(agentId, 0);
+    this.resetIdle(agentId);
     log.info({ agentId, container }, 'visual desktop ready');
     return session;
   }
@@ -512,7 +548,7 @@ class AgentContainerManager {
     }
 
     // Keep the container alive while a mirror is attached.
-    this.resetIdle(agentId, 0);
+    this.resetIdle(agentId);
     const streams: AndroidMirrorEndpoint['streams'] = audio
       ? ['video', 'audio', 'control']
       : ['video', 'control'];
@@ -629,12 +665,13 @@ class AgentContainerManager {
     }
 
     this.resetIdle(agentId, iso.idle_timeout_ms);
-    if (!remote) return new AgentExecutor(container);
+    if (!remote) return new AgentExecutor(agentId, container);
 
     // Preflight the hop and plant the skill harnesses on the remote. Any failure throws
     // IsolationNotReadyError → tools surface it and never fall back to executing in the container.
     await this.ensureRemote(container, agentId, remote, created);
     return new AgentExecutor(
+      agentId,
       container,
       remote,
       Math.floor((iso.idle_timeout_ms || env.AGENT_CONTAINER_IDLE_MS) / 1000),
@@ -850,11 +887,18 @@ class AgentContainerManager {
     }
   }
 
-  /** (Re)arm the idle auto-stop timer; each exec pushes the stop further out. */
-  private resetIdle(agentId: string, idleMs: number): void {
+  /**
+   * (Re)arm the idle auto-stop timer; each finished exec pushes the stop further out. `idleMs` comes
+   * from the profile and is remembered per agent, so a later re-arm uses the profile's window rather
+   * than the global default. No timer is armed while the agent still has a command in flight — the
+   * container is only "idle" once nothing is running in it.
+   */
+  private resetIdle(agentId: string, idleMs?: number): void {
+    if (idleMs && idleMs > 0) this.idleWindows.set(agentId, idleMs);
+    if ((this.activeExecs.get(agentId) ?? 0) > 0) return;
     const prev = this.idleTimers.get(agentId);
     if (prev) clearTimeout(prev);
-    const ms = idleMs > 0 ? idleMs : env.AGENT_CONTAINER_IDLE_MS;
+    const ms = this.idleWindows.get(agentId) ?? env.AGENT_CONTAINER_IDLE_MS;
     const timer = setTimeout(() => {
       this.idleTimers.delete(agentId);
       this.visualSessions.delete(agentId);
@@ -874,6 +918,50 @@ class AgentContainerManager {
     this.idleTimers.delete(agentId);
   }
 
+  /**
+   * Mark one command as in flight. Disarms the pending idle stop: a container with work running in
+   * it is not idle, however long that work takes.
+   */
+  beginActivity(agentId: string): void {
+    this.clearIdle(agentId);
+    this.activeExecs.set(agentId, (this.activeExecs.get(agentId) ?? 0) + 1);
+  }
+
+  /** The command finished; re-arm the idle stop once nothing else is running for this agent. */
+  endActivity(agentId: string): void {
+    const left = (this.activeExecs.get(agentId) ?? 1) - 1;
+    if (left > 0) {
+      this.activeExecs.set(agentId, left);
+      return;
+    }
+    this.activeExecs.delete(agentId);
+    this.resetIdle(agentId);
+  }
+
+  /**
+   * Restart the container behind a live executor if it stopped, so a turn survives a stop that
+   * happened between two of its tool calls. A container that no longer *exists* is not revived
+   * here: `ensureReady` owns creation, and silently recreating one mid-turn would hand the agent a
+   * different, empty machine than the one it has been working in — better an honest error.
+   */
+  async reviveContainer(agentId: string, container: string, remote?: RemoteTarget): Promise<void> {
+    const state = await dockerService.containerState(container);
+    if (state === 'running') return;
+    if (state === null) {
+      throw new IsolationNotReadyError(
+        "This agent's container no longer exists — it was removed (a rebuild or a profile change). Start a new turn and it will be recreated; anything outside the workspace volume is gone.",
+      );
+    }
+    log.warn({ agentId, state }, 'container was not running mid-turn — restarting it');
+    await dockerService.startContainer(container);
+    // Whatever lived in the stopped container's memory is gone: the desktop stack, and the SSH
+    // control sockets an `ssh`-mode hop multiplexes over. Drop those caches so they are
+    // re-established on demand rather than assumed still good.
+    this.visualSessions.delete(agentId);
+    this.remoteProvisioned.delete(agentId);
+    if (remote) await this.ensureRemote(container, agentId, remote, true);
+  }
+
   /** Stop (but keep) the agent's container. */
   async stopAgent(agentId: string): Promise<void> {
     this.clearIdle(agentId);
@@ -885,6 +973,7 @@ class AgentContainerManager {
   /** Remove just the agent's container (e.g. after a rebuild or profile change → recreated fresh). */
   async removeAgentContainer(agentId: string): Promise<void> {
     this.clearIdle(agentId);
+    this.idleWindows.delete(agentId);
     this.visualSessions.delete(agentId);
     this.remoteProvisioned.delete(agentId);
     await dockerService.removeContainer(agentContainerName(agentId));
