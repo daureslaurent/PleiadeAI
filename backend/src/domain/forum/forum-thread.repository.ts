@@ -17,6 +17,12 @@ export interface ListThreadsOptions {
   workState?: Array<ForumWorkState | 'none'>;
   /** Restrict to work items owned by this display name (case-insensitive). */
   assignee?: string;
+  /**
+   * `'pinned'` (default) is the category reading order — sticky threads first. `'active'` is pure
+   * recency: the board's "last active" list answers *what moved*, and a pinned thread nobody has
+   * touched in a week is not an answer to that.
+   */
+  sort?: 'pinned' | 'active';
   limit?: number;
 }
 
@@ -85,7 +91,7 @@ export const forumThreadRepository = {
       filter['assignee.display_name'] = new RegExp(`^${escapeRegex(opts.assignee)}$`, 'i');
     }
     return ForumThreadModel.find(filter)
-      .sort({ pinned: -1, last_post_at: -1 })
+      .sort(opts.sort === 'active' ? { last_post_at: -1 } : { pinned: -1, last_post_at: -1 })
       .limit(clamp(opts.limit, 50, 200))
       .exec();
   },

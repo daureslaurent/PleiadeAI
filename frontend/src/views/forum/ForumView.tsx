@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AtSign, Lock, MessageSquareText, Plus, Search, Sparkles, Type } from 'lucide-react';
-import { forumApi, type ForumCategory, type ForumSearchHit } from '../../lib/api';
+import { Activity, AtSign, Lock, MessageSquareText, Pin, Plus, Search, Sparkles, Type } from 'lucide-react';
+import { forumApi, type ForumCategory, type ForumSearchHit, type ForumThread } from '../../lib/api';
 import { useForum } from '../../store/forum';
 import {
   Button,
@@ -15,7 +15,11 @@ import {
   Spinner,
   Textarea,
 } from '../../components/ui';
-import { ago } from './forumBits';
+import { ago, AuthorAvatar, WorkStateChip } from './forumBits';
+
+/** How many recently-active threads the board shows. The operator picks; the choice sticks. */
+const ACTIVE_COUNTS = [5, 10, 25] as const;
+const ACTIVE_COUNT_KEY = 'forum.activeCount';
 
 type SearchMode = 'both' | 'keyword' | 'semantic';
 
@@ -32,6 +36,11 @@ const MODE_HINT: Record<SearchMode, string> = {
 export function ForumView() {
   const navigate = useNavigate();
   const [categories, setCategories] = useState<ForumCategory[] | null>(null);
+  const [active, setActive] = useState<ForumThread[] | null>(null);
+  const [activeCount, setActiveCount] = useState<number>(() => {
+    const stored = Number(localStorage.getItem(ACTIVE_COUNT_KEY));
+    return ACTIVE_COUNTS.includes(stored as (typeof ACTIVE_COUNTS)[number]) ? stored : 10;
+  });
   const [error, setError] = useState(false);
   const [composing, setComposing] = useState(false);
   const mounted = useRef(true);
@@ -43,14 +52,18 @@ export function ForumView() {
 
   const load = useCallback(async () => {
     try {
-      const list = await forumApi.categories();
+      const [list, recent] = await Promise.all([
+        forumApi.categories(),
+        forumApi.threads(undefined, activeCount, false, { sort: 'active' }),
+      ]);
       if (!mounted.current) return;
       setCategories(list);
+      setActive(recent);
       setError(false);
     } catch {
       if (mounted.current) setError(true);
     }
-  }, []);
+  }, [activeCount]);
 
   useEffect(() => {
     mounted.current = true;
@@ -97,6 +110,46 @@ export function ForumView() {
         {error && <Callout tone="error">Could not load the forum.</Callout>}
 
         <Section
+          title="Recently active"
+          icon={<Activity size={13} />}
+          right={
+            <span className="flex items-center gap-1">
+              {ACTIVE_COUNTS.map((n) => (
+                <button
+                  key={n}
+                  onClick={() => {
+                    setActiveCount(n);
+                    localStorage.setItem(ACTIVE_COUNT_KEY, String(n));
+                  }}
+                  className={`rounded-md px-2 py-1 text-[10px] font-mono transition-colors ${
+                    activeCount === n ? 'bg-accent/15 text-accent' : 'text-slate-500 hover:bg-white/[0.05]'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </span>
+          }
+        >
+          {!active ? (
+            <Spinner />
+          ) : active.length === 0 ? (
+            <EmptyState icon={<MessageSquareText size={28} />}>Nothing has been posted yet.</EmptyState>
+          ) : (
+            <div className="space-y-2">
+              {active.map((t) => (
+                <ActiveThreadRow
+                  key={t.id}
+                  thread={t}
+                  categoryName={categories?.find((c) => c.id === t.categoryId)?.name}
+                  onClick={() => navigate(`/forum/t/${t.id}`)}
+                />
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section
           title="Categories"
           icon={<MessageSquareText size={13} />}
           right={
@@ -129,6 +182,47 @@ export function ForumView() {
         </Section>
       </div>
     </div>
+  );
+}
+
+/**
+ * One line of the board's "what moved" list. Unlike the category thread list this is cross-category,
+ * so it carries the category name — without it a title alone leaves the operator guessing where a
+ * thread lives.
+ */
+function ActiveThreadRow({
+  thread,
+  categoryName,
+  onClick,
+}: {
+  thread: ForumThread;
+  categoryName?: string;
+  onClick: () => void;
+}) {
+  return (
+    <Row onClick={onClick} className="flex items-center gap-3 p-3">
+      <AuthorAvatar author={thread.author} />
+
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          {thread.pinned && <Pin size={11} className="shrink-0 text-accent" />}
+          {thread.status === 'locked' && <Lock size={11} className="shrink-0 text-amber-400" />}
+          <span className="truncate text-sm text-slate-100">{thread.title}</span>
+          {thread.workState && <WorkStateChip state={thread.workState} />}
+          {thread.resolvedPostId && <Chip className="!text-emerald-400/80">resolved</Chip>}
+        </span>
+        <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+          {categoryName && <>{categoryName} · </>}
+          {Math.max(0, thread.postCount - 1)} replies
+          {thread.assignee && <> · owned by {thread.assignee.display_name}</>}
+        </span>
+      </span>
+
+      <span className="w-32 shrink-0 border-l border-white/[0.06] pl-3 text-[11px] text-slate-500">
+        <span className="block truncate text-slate-400">{thread.lastPostAuthor || '—'}</span>
+        <span className="block">{ago(thread.lastPostAt)}</span>
+      </span>
+    </Row>
   );
 }
 

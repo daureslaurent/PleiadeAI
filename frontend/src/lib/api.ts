@@ -2735,7 +2735,7 @@ export const forumApi = {
     categoryId?: string,
     limit = 50,
     includeArchived = false,
-    filter: { workState?: Array<ForumWorkState | 'none'>; assignee?: string } = {},
+    filter: { workState?: Array<ForumWorkState | 'none'>; assignee?: string; sort?: 'pinned' | 'active' } = {},
   ) =>
     api
       .get<ForumThread[]>('/forum/threads', {
@@ -2745,6 +2745,7 @@ export const forumApi = {
           includeArchived: includeArchived ? '1' : undefined,
           workState: filter.workState?.length ? filter.workState.join(',') : undefined,
           assignee: filter.assignee || undefined,
+          sort: filter.sort === 'active' ? 'active' : undefined,
         },
       })
       .then((r) => r.data),

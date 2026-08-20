@@ -250,6 +250,7 @@ forumRouter.get('/threads', async (req, res) => {
     includeArchived: req.query.includeArchived === '1',
     workState,
     assignee: typeof req.query.assignee === 'string' && req.query.assignee ? req.query.assignee : undefined,
+    sort: req.query.sort === 'active' ? 'active' : 'pinned',
     limit: Number(req.query.limit) || 50,
   });
   res.json(threads.map(shapeThread));
