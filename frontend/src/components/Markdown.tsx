@@ -1,12 +1,26 @@
 import { memo, useState, type ReactNode } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Check, Copy } from 'lucide-react';
 import { MermaidBlock } from './Mermaid';
-import { MentionChip, mentionName } from './Mention';
-import { linkifyThreadIds, ThreadRefChip, threadRefId } from './ThreadRef';
+import { MENTION_SCHEME, MentionChip, mentionName } from './Mention';
+import { linkifyThreadIds, THREAD_SCHEME, ThreadRefChip, threadRefId } from './ThreadRef';
+
+/**
+ * Keep our own link schemes intact.
+ *
+ * react-markdown sanitises every href it doesn't recognise down to `''` (only `http(s)`, `irc(s)`,
+ * `mailto` and `xmpp` survive). Our chips are *carried* by a custom scheme, so the default transform
+ * silently erased them: the `a` handler saw an empty href, fell through to a plain link, and a
+ * `#thread` chip became underlined text that reopened the current page in a new tab. Anything else
+ * still goes through the default sanitiser.
+ */
+function urlTransform(url: string): string {
+  if (url.startsWith(THREAD_SCHEME) || url.startsWith(MENTION_SCHEME)) return url;
+  return defaultUrlTransform(url);
+}
 
 /** Extract the raw text out of a code block's children for copying. */
 function childrenToText(children: ReactNode): string {
@@ -140,7 +154,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
   const source = linkifyThreadIds(children);
   return (
     <div className="min-w-0 max-w-full break-words text-sm [overflow-wrap:anywhere]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
         {source}
       </ReactMarkdown>
     </div>

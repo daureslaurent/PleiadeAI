@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Archive, ArrowRight, Hash, Lock, MessageSquare, Pin, X } from 'lucide-react';
@@ -123,6 +123,31 @@ export function ThreadRefChip({ id }: { id: string }) {
   const [thread, setThread] = useState<ForumThreadRef | null | undefined>(() => cache.get(id));
   const [card, setCard] = useState<{ x: number; y: number } | null>(null);
   const navigate = useNavigate();
+  // The card is a *hover*card: pointing at a reference is the cheap gesture, and it costs nothing
+  // to undo, so that is what previews the thread; clicking goes there. Both edges are delayed — a
+  // chip brushed on the way past a line shouldn't flash a card, and the gap between the chip and
+  // the card below it shouldn't close it while the pointer crosses.
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function cancel() {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  }
+
+  function openAt(el: HTMLElement) {
+    cancel();
+    timer.current = setTimeout(() => {
+      const r = el.getBoundingClientRect();
+      setCard({ x: r.left, y: r.bottom + 6 });
+    }, 130);
+  }
+
+  function scheduleClose() {
+    cancel();
+    timer.current = setTimeout(() => setCard(null), 200);
+  }
+
+  useEffect(() => cancel, []);
 
   useEffect(() => {
     if (cache.get(id) !== undefined) {
@@ -151,6 +176,7 @@ export function ThreadRefChip({ id }: { id: string }) {
   const StateIcon = thread.status === 'locked' ? Lock : thread.status === 'archived' ? Archive : null;
 
   function open() {
+    cancel();
     setCard(null);
     navigate(`/forum/t/${id}`);
   }
@@ -160,11 +186,13 @@ export function ThreadRefChip({ id }: { id: string }) {
       <button
         style={tint}
         className="mx-[1px] inline-flex max-w-full items-center gap-0.5 rounded-md border px-1 py-[1px] align-baseline text-[0.85em] font-medium leading-tight transition-opacity hover:opacity-80"
-        title={`${thread.title} — ${thread.postCount} post(s)`}
+        onMouseEnter={(e) => openAt(e.currentTarget)}
+        onMouseLeave={scheduleClose}
+        onFocus={(e) => openAt(e.currentTarget)}
+        onBlur={scheduleClose}
         onClick={(e) => {
           e.preventDefault();
-          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          setCard((c) => (c ? null : { x: r.left, y: r.bottom + 6 }));
+          open();
         }}
       >
         <Hash size={11} className="shrink-0 opacity-70" />
@@ -176,9 +204,10 @@ export function ThreadRefChip({ id }: { id: string }) {
       {card &&
         createPortal(
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setCard(null)} />
             <div
               className="glass-card fixed z-50 rounded-xl border border-white/[0.08] p-3 shadow-2xl"
+              onMouseEnter={cancel}
+              onMouseLeave={scheduleClose}
               style={{
                 width: CARD_WIDTH,
                 left: Math.max(8, Math.min(card.x, window.innerWidth - CARD_WIDTH - 8)),
@@ -204,7 +233,13 @@ export function ThreadRefChip({ id }: { id: string }) {
                     {thread.resolvedPostId && <span className="text-emerald-400/80">· resolved</span>}
                   </p>
                 </div>
-                <button className="text-slate-600 hover:text-slate-300" onClick={() => setCard(null)}>
+                <button
+                  className="text-slate-600 hover:text-slate-300"
+                  onClick={() => {
+                    cancel();
+                    setCard(null);
+                  }}
+                >
                   <X size={13} />
                 </button>
               </div>
