@@ -82,6 +82,11 @@ settingsRouter.put('/', async (req, res) => {
     patch.max_agent_hops = Math.min(10, Math.max(1, Number(b.max_agent_hops) || 5));
   // Fleet-wide AGENTS.md house rules. Operator-only — agents read this block, no tool writes it.
   if (typeof b.agents_md === 'string') patch.agents_md = b.agents_md;
+  // Forum auto-reply: mentions run themselves, bounded by a per-thread budget. Floor of 1 — zero
+  // would mean "enabled but nothing may ever run", which is just the switch being off.
+  if (b.forum_auto_reply !== undefined) patch.forum_auto_reply = Boolean(b.forum_auto_reply);
+  if (b.forum_auto_reply_max_per_thread !== undefined)
+    patch.forum_auto_reply_max_per_thread = Math.max(1, Number(b.forum_auto_reply_max_per_thread) || 20);
   // Post-turn memory distillation (docs/memory-souvenirs.md).
   if (b.memory_distill_enabled !== undefined)
     patch.memory_distill_enabled = Boolean(b.memory_distill_enabled);

@@ -75,16 +75,33 @@ export const forumMentionRunner = {
   /**
    * Turn a pending mention into an ordinary conversation the operator can watch and continue.
    *
-   * Deliberately *not* automatic (spec §11.2): the session, the inference and the reply all happen
-   * because the operator asked for them. What this buys over a plain "notify" is the closing half —
-   * the answer goes back to the thread, so the agent that asked sees it without the operator acting
-   * as a courier.
+   * The operator's "yes, answer this" (spec §11.3). What this buys over a plain "notify" is the
+   * closing half — the answer goes back to the thread, so the agent that asked sees it without the
+   * operator acting as a courier.
+   *
+   * The same path serves fleet-wide auto-reply (§11.6), which presses this button by itself; every
+   * safeguard here — the in-flight guard, the locked-thread skip, the `SessionLock` yield to a live
+   * operator chat — therefore covers the automatic case unchanged.
    *
    * Returns the session id straight away; the turn itself runs detached, streaming to any Workspace
    * that subscribes. Waiting on it would make the route hang for the length of an inference call for
    * no benefit — the whole point is to *watch* the answer arrive.
    */
   async start(mentionId: string): Promise<{ sessionId: string; agentName: string }> {
+    const { sessionId, agentName } = await this.begin(mentionId);
+    return { sessionId, agentName };
+  },
+
+  /**
+   * `start`, plus a handle on the turn itself.
+   *
+   * The HTTP route wants the session id the moment it exists and nothing else — waiting would make
+   * it hang for the length of an inference call, and the whole point is to *watch* the answer
+   * arrive. The auto-reply queue wants the opposite: it runs one mention at a time, in the order
+   * they were written, and each agent must see the previous one's posted reply before it starts. So
+   * `done` is offered rather than imposed — it settles when the reply has been posted back.
+   */
+  async begin(mentionId: string): Promise<{ sessionId: string; agentName: string; done: Promise<void> }> {
     const mention = await forumMentionRepository.findById(mentionId);
     if (!mention) throw new MentionRunError('no such mention', 404);
     if (mention.target.kind !== 'agent' || !mention.target.agent_id) {
@@ -125,11 +142,11 @@ export const forumMentionRunner = {
       origin: 'forum',
     });
 
-    void this.drive(mention, post.body, sessionId, agent.name, String(agent._id))
+    const done = this.drive(mention, post.body, sessionId, agent.name, String(agent._id))
       .catch((err) => log.error({ err: String(err), mentionId }, 'mention run failed'))
       .finally(() => inFlight.delete(String(mention._id)));
 
-    return { sessionId, agentName: agent.name };
+    return { sessionId, agentName: agent.name, done };
   },
 
   /**

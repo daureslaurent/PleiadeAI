@@ -68,10 +68,19 @@ const AgentSchema = new Schema(
      * renders and the mention still appears in the agent's next turn's forum block. It only silences
      * the operator-facing alert legs — muting is about noise, not about losing what was said.
      *
-     * Nothing here can make an agent *run*: a mention is always answered by the operator pressing
-     * Run, never by the board waking an agent up on its own.
+     * Whether the mention also *runs* this agent is the separate `forum_auto_reply` flag below.
      */
     forum_mentions: { type: Boolean, default: true },
+    /**
+     * Whether an @-mention may run this agent on its own, when the fleet-wide `forum_auto_reply`
+     * setting is on (`FORUM_PLAN.md` §11.6). Both must agree: the global switch decides whether the
+     * board drives itself at all, this one excludes an individual agent from it — an expensive
+     * specialist, or one whose answers you always want to read before they are posted.
+     *
+     * Default true so the global switch alone is enough to turn the feature on; an existing fleet is
+     * backfilled to true for the same reason `forum_mentions` was.
+     */
+    forum_auto_reply: { type: Boolean, default: true },
     tools_allowed: { type: [String], default: [] },
     qdrant_namespace: { type: String, required: true, unique: true },
     parameters: { type: Map, of: String, default: () => new Map<string, string>() },

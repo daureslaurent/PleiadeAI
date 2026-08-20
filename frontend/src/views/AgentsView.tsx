@@ -53,6 +53,8 @@ interface Draft {
   auto_mode: boolean;
   /** Whether an @-mention of this agent on the forum raises an alert (`FORUM_PLAN.md` §11.2). */
   forum_mentions: boolean;
+  /** Whether an @-mention may run this agent by itself, when fleet-wide auto-reply is on (§11.6). */
+  forum_auto_reply: boolean;
   system_prompt: string;
   tools_allowed: string[];
   qdrant_namespace: string;
@@ -85,6 +87,7 @@ const blank = (): Draft => ({
   subagent: true,
   auto_mode: false,
   forum_mentions: true,
+  forum_auto_reply: true,
   builtin: '',
   system_prompt: '',
   tools_allowed: [],
@@ -160,6 +163,7 @@ export function AgentsView() {
       subagent: a.subagent ?? true,
       auto_mode: a.auto_mode ?? false,
       forum_mentions: a.forum_mentions !== false,
+      forum_auto_reply: a.forum_auto_reply !== false,
       system_prompt: a.system_prompt,
       tools_allowed: a.tools_allowed ?? [],
       qdrant_namespace: a.qdrant_namespace,
@@ -216,6 +220,7 @@ export function AgentsView() {
         subagent: draft.subagent,
         auto_mode: draft.auto_mode,
         forum_mentions: draft.forum_mentions,
+        forum_auto_reply: draft.forum_auto_reply,
         system_prompt: draft.system_prompt,
         tools_allowed: draft.tools_allowed,
         qdrant_namespace: draft.qdrant_namespace || draft.name,
@@ -240,6 +245,7 @@ export function AgentsView() {
         subagent: draft.subagent,
         auto_mode: draft.auto_mode,
         forum_mentions: draft.forum_mentions,
+        forum_auto_reply: draft.forum_auto_reply,
         system_prompt: draft.system_prompt,
         tools_allowed: draft.tools_allowed,
         max_tool_iterations: draft.max_tool_iterations,
@@ -499,6 +505,32 @@ export function AgentsView() {
                   <>
                     Muted: mentions are still recorded, still shown on the board, and still reach this
                     agent in its next turn's forum block — they just raise no alert.
+                  </>
+                )}
+              </span>
+            </span>
+          </label>
+
+          <label className="mt-2 flex items-start gap-3 rounded-md border border-border bg-panel px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.forum_auto_reply}
+              onChange={(e) => setDraft({ ...draft, forum_auto_reply: e.target.checked })}
+              className="mt-0.5 accent-accent"
+            />
+            <span className="leading-snug text-slate-300">
+              <span className="font-medium text-slate-200">Answer mentions automatically</span>
+              <span className="block text-xs text-slate-500">
+                {draft.forum_auto_reply ? (
+                  <>
+                    When fleet-wide auto-reply is on (Settings → Fleet), an{' '}
+                    <code>@{draft.name || 'agent'}</code> runs this agent by itself and its answer is
+                    posted back to the thread. With the fleet switch off, nothing here runs on its own.
+                  </>
+                ) : (
+                  <>
+                    Excluded from auto-reply: mentions of this agent always wait for you to press Run,
+                    even while the rest of the board answers itself.
                   </>
                 )}
               </span>

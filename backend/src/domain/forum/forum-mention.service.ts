@@ -2,6 +2,7 @@ import { createLogger } from '../../config/logger';
 import { eventBus } from '../../core/event-bus/EventBus';
 import { alertEngine } from '../../alerts/AlertEngine';
 import { agentRepository } from '../agents/agent.repository';
+import { forumAutoReply } from './forum-auto-reply';
 import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumAuthor } from './forum-author';
 import { snippetOf } from './forum-index.service';
@@ -22,6 +23,8 @@ export interface MentionTarget {
   name: string;
   /** False when the agent has `forum_mentions` off — the row is written, nothing is dispatched. */
   notify: boolean;
+  /** False when this target may not be run automatically: the operator, or an agent opted out. */
+  autoReply: boolean;
 }
 
 interface Roster {
@@ -46,7 +49,11 @@ export async function loadRoster(force = false): Promise<Roster> {
   if (!force && cached && Date.now() - cached.at < ROSTER_TTL_MS) return cached;
   const agents = await agentRepository.list();
   const byName = new Map<string, MentionTarget>([
-    [OPERATOR_HANDLE.toLowerCase(), { kind: 'operator', agentId: null, name: OPERATOR_HANDLE, notify: true }],
+    [
+      OPERATOR_HANDLE.toLowerCase(),
+      // The operator is addressable but never runnable — @Operator is a question for a person.
+      { kind: 'operator', agentId: null, name: OPERATOR_HANDLE, notify: true, autoReply: false },
+    ],
   ]);
   for (const agent of agents) {
     byName.set(agent.name.toLowerCase(), {
@@ -54,6 +61,7 @@ export async function loadRoster(force = false): Promise<Roster> {
       agentId: String(agent._id),
       name: agent.name,
       notify: agent.forum_mentions !== false,
+      autoReply: agent.forum_auto_reply !== false,
     });
   }
   cached = {
@@ -132,9 +140,9 @@ export const forumMentionService = {
    * same reason indexing is: a mention that could fail somebody's post would cost more than the
    * feature is worth.
    *
-   * Notification is deliberately *not* a run. The operator's alert legs fire immediately; the agent
-   * learns about it on its next turn through `forumRecall.mentions`, and answers only when the
-   * operator hits Run.
+   * Notification is not, by itself, a run. The operator's alert legs fire immediately; the agent
+   * learns about it on its next turn through `forumRecall.mentions`, and answers when the operator
+   * hits Run — or on its own, if fleet-wide auto-reply is on and the agent is in it (§11.6).
    */
   async record(input: { post: ForumPostDoc; thread: ForumThreadDoc; author: ForumAuthor }): Promise<void> {
     const roster = await loadRoster();
@@ -196,6 +204,25 @@ export const forumMentionService = {
       { thread: String(input.thread._id), by: input.author.display_name, targets: targets.map((t) => t.name) },
       'forum mentions recorded',
     );
+
+    // Auto-reply (§11.6). `rows` mirrors `targets`, which `parseMentions` returns in the order the
+    // handles appear in the body — so "ask @architect, then @developer" is queued as written, and
+    // each agent runs only once the one before it has posted. Fire-and-forget like the rest of this
+    // method: the queue drains on its own clock, and a post must never fail because of it.
+    void forumAutoReply
+      .enqueue(
+        rows
+          .map((row, i) => ({
+            mentionId: String(row._id),
+            threadId: String(input.thread._id),
+            threadTitle: input.thread.title,
+            agentId: row.target.agent_id ?? null,
+            agentName: row.target.display_name,
+            isAgent: row.target.kind === 'agent' && targets[i]?.autoReply === true,
+          }))
+          .filter((r) => r.isAgent),
+      )
+      .catch((err) => log.warn({ err: String(err) }, 'auto-reply queueing failed'));
   },
 
   /** Operator triage: this one didn't need a turn. Reversible — reopening just flips it back. */

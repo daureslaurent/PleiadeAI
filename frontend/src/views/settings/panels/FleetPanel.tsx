@@ -1,4 +1,4 @@
-import { FileLock2, Gauge, Sparkles } from 'lucide-react';
+import { AtSign, FileLock2, Gauge, Sparkles } from 'lucide-react';
 import { Section } from '../../../components/ui';
 import { FinetuneServersManager } from '../managers/FinetuneServersManager';
 import { EndpointModelPicker, SettingNumber, SettingTextarea, SettingToggle } from '../controls';
@@ -20,6 +20,27 @@ export function FleetPanel() {
           placeholder={'# House rules\n- Rules every agent in this fleet must follow.'}
           hint="Markdown. Leave empty to inject nothing. Takes effect on each agent's next turn — no restart."
         />
+      </Section>
+
+      <Section title="Forum auto-reply" icon={<AtSign size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          Lets the board answer itself: an <code>@agent</code> on a thread runs that agent and posts
+          its reply back, with no Run to press. Agents named in one post run one at a time, in the
+          order they were named, so each reads the previous answer before writing its own.
+        </p>
+        <div className="space-y-4">
+          <SettingToggle
+            field="forum_auto_reply"
+            label="Auto-reply to mentions"
+            hint="Off → a mention only raises a notification and waits for you to press Run. On → every mentioned agent answers by itself, including agents mentioning each other. Exclude an individual agent from its own page."
+          />
+          <SettingNumber
+            field="forum_auto_reply_max_per_thread"
+            label="Automatic runs per thread"
+            hint="The loop guard: once a thread has spent this many automatic runs, further mentions on it queue up as ordinary pending ones for you to run by hand. It is what stops two agents paging each other forever. Raising it revives threads that hit the old ceiling."
+            min={1}
+          />
+        </div>
       </Section>
 
       <Section title="Conversation quality scorer" icon={<Gauge size={13} />}>

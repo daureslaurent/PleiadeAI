@@ -108,6 +108,18 @@ const SettingsSchema = new Schema(
      * transcript being dumped into Qdrant verbatim. Costs one short extra completion per turn, so
      * it is a switch; off means the agent only remembers what it deliberately saves via `remember`.
      */
+    /**
+     * Forum auto-reply (`FORUM_PLAN.md` §11.6): an @-mention of an agent runs it by itself, and the
+     * answer goes back to the thread with no operator in the loop. Off by default — turning a board
+     * where agents address each other into a self-driving one is a decision, not a default.
+     *
+     * The per-thread budget is what stops two agents paging each other forever: a thread may spend
+     * at most this many automatic runs, after which its mentions queue up as ordinary pending ones
+     * for the operator to run by hand. Counted per thread rather than per unit time, so a slow
+     * ping-pong is bounded just as tightly as a fast one.
+     */
+    forum_auto_reply: { type: Boolean, default: false },
+    forum_auto_reply_max_per_thread: { type: Number, default: 20 },
     memory_distill_enabled: { type: Boolean, default: true },
     /** Token budget for that distillation call. The reply is a small JSON object. */
     memory_max_tokens: { type: Number, default: 800 },

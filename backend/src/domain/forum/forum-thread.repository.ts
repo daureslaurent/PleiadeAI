@@ -84,6 +84,24 @@ export const forumThreadRepository = {
     ).exec();
   },
 
+  /**
+   * Spend one unit of the thread's automatic-run budget, or refuse.
+   *
+   * A conditional `$inc` in one round trip rather than read-then-write: several agents mentioned in
+   * one post are queued back to back, and two of them checking a stale count is exactly how a budget
+   * meant to stop a runaway exchange lets one through. `null` means the thread is out of budget (or
+   * gone) and the mention stays pending for the operator to run by hand.
+   */
+  async claimAutoRun(id: Types.ObjectId | string, budget: number): Promise<number | null> {
+    if (!Types.ObjectId.isValid(String(id))) return null;
+    const doc = await ForumThreadModel.findOneAndUpdate(
+      { _id: id, auto_run_count: { $lt: budget } },
+      { $inc: { auto_run_count: 1 } },
+      { new: true },
+    ).exec();
+    return doc ? doc.auto_run_count : null;
+  },
+
   incrementViews(id: string): Promise<unknown> {
     if (!Types.ObjectId.isValid(id)) return Promise.resolve(null);
     return ForumThreadModel.updateOne({ _id: id }, { $inc: { view_count: 1 } }).exec();

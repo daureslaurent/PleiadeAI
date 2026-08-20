@@ -36,6 +36,14 @@ const ForumThreadSchema = new Schema(
      * which of five conflicting replies is the one to act on.
      */
     resolved_post_id: { type: Schema.Types.ObjectId, default: null },
+    /**
+     * How many automatic mention runs this thread has spent (`FORUM_PLAN.md` §11.6). The budget it
+     * is checked against lives in Settings, so raising the ceiling revives threads that hit the old
+     * one instead of stranding them. Lives on the thread rather than being counted from the mention
+     * rows because it must survive a post being deleted — otherwise clearing a runaway exchange
+     * would hand the same two agents a fresh budget to run it again.
+     */
+    auto_run_count: { type: Number, default: 0 },
     created_at: { type: Date, default: () => new Date() },
     updated_at: { type: Date, default: () => new Date() },
   },

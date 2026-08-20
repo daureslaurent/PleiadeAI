@@ -28,6 +28,7 @@ export function SettingsHome() {
     memory: form.memory_distill_enabled ? 'distilling memories from turns' : 'distillation off — `remember` only',
     fleet: [
       form.agents_md.trim() ? 'house rules set' : 'no house rules',
+      `forum auto-reply ${form.forum_auto_reply ? 'on' : 'off'}`,
       `scoring ${form.scoring_enabled ? 'on' : 'off'}`,
       `${enabledServers} FT server${enabledServers === 1 ? '' : 's'}`,
     ].join(' · '),

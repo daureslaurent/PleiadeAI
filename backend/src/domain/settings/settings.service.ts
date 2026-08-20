@@ -62,6 +62,13 @@ export interface EffectiveSettings {
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
   /**
+   * Forum auto-reply: an @-mention of an agent on the board runs it without the operator pressing
+   * Run, and the answer is posted back to the thread. Off → a mention only ever raises an alert.
+   */
+  forum_auto_reply: boolean;
+  /** Ceiling on how many automatic runs one thread may spend before it falls back to manual Run. */
+  forum_auto_reply_max_per_thread: number;
+  /**
    * Post-turn memory distillation: the agent's own model rewrites a completed turn into 0..N
    * standalone memories instead of the raw transcript being embedded verbatim. See
    * `docs/memory-souvenirs.md`. Off → the agent only remembers what it saves via `remember`.
@@ -153,6 +160,8 @@ export const settingsService = {
       max_tool_iterations: doc?.max_tool_iterations ?? 50,
       max_agent_hops: doc?.max_agent_hops ?? env.MAX_AGENT_HOPS,
       agents_md: doc?.agents_md ?? '',
+      forum_auto_reply: doc?.forum_auto_reply ?? false,
+      forum_auto_reply_max_per_thread: doc?.forum_auto_reply_max_per_thread ?? 20,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,
       public_base_url: doc?.public_base_url ?? '',

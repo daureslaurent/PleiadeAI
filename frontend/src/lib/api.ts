@@ -325,9 +325,14 @@ export interface Agent {
   /**
    * Whether an @-mention of this agent on the forum raises an alert (`FORUM_PLAN.md` §11.2). Off
    * only silences the alert: the mention is still recorded, still shown, and still reaches the agent
-   * in its next turn's forum block. Nothing here makes an agent run on its own.
+   * in its next turn's forum block. Whether a mention also *runs* it is `forum_auto_reply`.
    */
   forum_mentions?: boolean;
+  /**
+   * Whether an @-mention may run this agent on its own, when fleet-wide auto-reply is on
+   * (`FORUM_PLAN.md` §11.6). Both must agree — this is the per-agent exclusion from it.
+   */
+  forum_auto_reply?: boolean;
   system_prompt: string;
   tools_allowed: string[];
   qdrant_namespace: string;
@@ -446,6 +451,7 @@ export const agentsApi = {
         | 'subagent'
         | 'auto_mode'
         | 'forum_mentions'
+        | 'forum_auto_reply'
         | 'system_prompt'
         | 'tools_allowed'
         | 'isolation_id'
@@ -1587,6 +1593,10 @@ export interface InferenceSettings {
   update_enabled: boolean;
   /** How often the backend triggers a read-only host update check (git fetch + compare). */
   update_check_interval_hours: number;
+  /** Forum auto-reply: an @-mention runs the agent by itself and posts the answer back to the thread. */
+  forum_auto_reply: boolean;
+  /** How many automatic runs one thread may spend before its mentions fall back to a manual Run. */
+  forum_auto_reply_max_per_thread: number;
   /** Conversation Quality Scorer: auto-score each turn on completion. */
   scoring_enabled: boolean;
   /** Judge endpoint ('' → reuse the responding agent's own endpoint). */
