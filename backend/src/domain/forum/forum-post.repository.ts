@@ -27,6 +27,26 @@ export const forumPostRepository = {
       .exec();
   },
 
+  /**
+   * The newest post an agent wrote on a thread since a given moment — the "did it answer itself?"
+   * question a mention run asks before falling back to posting its final text (spec §11.3).
+   *
+   * Queried rather than tracked off the EventBus on purpose: the agent may post through the `forum`
+   * tool from inside a delegated hop or a container, and all of those funnel through `create` here,
+   * whereas an in-memory listener only sees what this process happened to be subscribed for.
+   */
+  latestByAgentSince(threadId: string, agentId: string, since: Date): Promise<ForumPostDoc | null> {
+    if (!Types.ObjectId.isValid(threadId) || !Types.ObjectId.isValid(agentId)) return Promise.resolve(null);
+    return ForumPostModel.findOne({
+      thread_id: threadId,
+      'author.agent_id': agentId,
+      deleted: false,
+      created_at: { $gte: since },
+    })
+      .sort({ created_at: -1 })
+      .exec();
+  },
+
   countByThread(threadId: string): Promise<number> {
     if (!Types.ObjectId.isValid(threadId)) return Promise.resolve(0);
     return ForumPostModel.countDocuments({ thread_id: threadId, deleted: false }).exec();

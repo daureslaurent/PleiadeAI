@@ -51,6 +51,12 @@ function quote(body: string): string {
  * It has to carry four things or the agent answers the wrong question: who is asking, where, what
  * they actually said, and the fact that the reply is going back to the board — that last one changes
  * the register from "chat with the operator" to "post on a thread other agents will read".
+ *
+ * It also has to be explicit about *how* the reply lands. The brief used to promise the final text
+ * would be posted automatically; agents replied with the `forum` tool anyway and then narrated what
+ * they had just done, so every mention got answered twice — once with the real answer and once with
+ * a summary of it. The tool is now the only intended route, and `drive` only posts for itself when
+ * the agent posted nothing at all.
  */
 function brief(mention: ForumMentionDoc, body: string): string {
   return [
@@ -65,9 +71,14 @@ function brief(mention: ForumMentionDoc, body: string): string {
     `Read the rest of the thread first if you need the context — \`forum\` with ` +
       `\`read_thread\` and thread_id \`${String(mention.thread_id)}\`.`,
     '',
-    'Answer them directly. **Your answer is posted back to that thread as your reply**, so write it ' +
-      'for the board: address what was asked, say what you verified versus what you suspect, and ' +
-      'skip the pleasantries.',
+    '**Post your answer yourself**, with the `forum` tool: `action: "reply"`, ' +
+      `thread_id \`${String(mention.thread_id)}\`, reply_to \`${String(mention.post_id)}\`, and your ` +
+      'answer as `body` (attach files there too if you produced any). That post *is* your reply — ' +
+      'write it for the board: address what was asked, say what you verified versus what you ' +
+      'suspect, skip the pleasantries.',
+    '',
+    'Reply **once**. After the tool returns, stop — do not repeat or summarise the post in your ' +
+      'closing message, it is already on the thread.',
   ].join('\n');
 }
 
@@ -163,6 +174,9 @@ export const forumMentionRunner = {
   ): Promise<void> {
     const ctx: EventContext = { sessionId, agentId, agentName, depth: 0 };
     const text = brief(mention, postBody);
+    // Anything this agent posts on the thread from here on is its reply. Taken before the first
+    // message rather than after the run, so a tool call that lands early still counts.
+    const runStartedAt = new Date();
 
     await sessionRepository.addMessage(sessionId, { role: 'user', text });
     eventBus.emit('chat:user_message', { ctx, content: text });
@@ -232,13 +246,38 @@ export const forumMentionRunner = {
       liveRuns.end(sessionId);
     }
 
+    // Did the agent answer for itself? The brief tells it to, and a post it wrote through the `forum`
+    // tool is a better reply than its closing narration in every case: it chose the wording, it could
+    // attach files, and it may have posted several. Posting the final text *as well* is what used to
+    // put two replies on every mention. So the auto post-back below is now strictly the fallback for
+    // a turn that posted nothing — a mention must never end up silently unanswered.
+    const own = await forumPostRepository
+      .latestByAgentSince(String(mention.thread_id), agentId, runStartedAt)
+      .catch((err) => {
+        log.error({ err: String(err), mentionId: String(mention._id) }, 'could not check for the agent’s own reply');
+        return null;
+      });
+    if (own) {
+      await forumMentionRepository.update(mention._id, {
+        status: 'answered',
+        answered_at: new Date(),
+        reply_post_id: own._id,
+      });
+      log.info(
+        { mentionId: String(mention._id), post: String(own._id), agent: agentName },
+        'mention answered by the agent’s own forum post',
+      );
+      return;
+    }
+
     if (failure || !answer.trim()) {
       log.warn({ mentionId: String(mention._id), failure }, 'mention run produced nothing to post');
       return;
     }
 
-    // Post the answer back as the agent's reply. Skipped rather than forced when the thread has since
-    // been locked — moderation closed it on purpose, and the answer still lives in the session.
+    // Nothing was posted during the turn: fall back to the final text, so the agent that asked still
+    // gets an answer on the thread. Skipped rather than forced when the thread has since been locked
+    // — moderation closed it on purpose, and the answer still lives in the session.
     try {
       const thread = await forumThreadRepository.findById(String(mention.thread_id));
       if (!thread || thread.status !== 'open') {
@@ -259,7 +298,7 @@ export const forumMentionRunner = {
       });
       log.info(
         { mentionId: String(mention._id), thread: String(thread._id), agent: agentName },
-        'mention answered and posted back',
+        'mention answered by fallback post-back — the agent did not reply with the forum tool',
       );
     } catch (err) {
       log.error({ err: String(err), mentionId: String(mention._id) }, 'could not post the answer back');
