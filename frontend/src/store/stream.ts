@@ -404,7 +404,6 @@ interface StreamState {
     sessionId: string,
     images?: string[],
     /** Composer's forum toggle: ask the agent to also pick up threads awaiting its reply. */
-    forumReplies?: boolean,
   ) => void;
   /** Ask the backend to stop the in-flight run for the active session (the "stop" button). */
   stop: () => void;
@@ -1110,7 +1109,7 @@ export const useStream = create<StreamState>((set, get) => ({
       turnTraceStart: 0,
     }),
 
-  send: (agentName, content, sessionId, images, forumReplies) => {
+  send: (agentName, content, sessionId, images) => {
     get().wire();
     const history = turnsToHistory(get().turns);
     const imgs = images?.length ? images : undefined;
@@ -1150,7 +1149,6 @@ export const useStream = create<StreamState>((set, get) => ({
       sessionId,
       history,
       images: imgs?.map((dataUrl) => ({ dataUrl })),
-      forumReplies,
     });
   },
 

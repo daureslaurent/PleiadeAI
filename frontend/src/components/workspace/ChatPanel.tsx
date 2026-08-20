@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AtSign, RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, MessageSquareText, ScrollText } from 'lucide-react';
+import { AtSign, RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, ScrollText } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
@@ -11,7 +11,6 @@ import { iconFor } from '../../lib/agentIcons';
 import { ScoreBadge } from '../ScoreBadge';
 import { MemoriesBadge } from '../MemoriesBadge';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
-import { usePersistentState } from '../../hooks/usePersistentState';
 import type { Agent } from '../../lib/api';
 
 /**
@@ -99,7 +98,7 @@ interface Props {
   onTogglePrompt: () => void;
   onOpenVisual: () => void;
   onOpenAndroid: () => void;
-  onSend: (text: string, images?: string[], forumReplies?: boolean) => void;
+  onSend: (text: string, images?: string[]) => void;
   /**
    * Creates (and activates) a session, returning its id. The Loop panel needs it because a loop is
    * armed against a conversation, and the operator may arm one on a chat they haven't typed into yet
@@ -266,7 +265,6 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
   );
   const [autoContinue, setAutoContinue] = useState(false);
   // Persisted: an operator who works through the forum wants the toggle to stay where they left it.
-  const [forumReplies, setForumReplies] = usePersistentState('forum:pickup', false);
   const [editingContinue, setEditingContinue] = useState(false);
   // Auto-loop panel, offered only for an `auto_mode` agent (see the Agents page).
   const [loopOpen, setLoopOpen] = useState(false);
@@ -336,7 +334,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
     const text = input.trim();
     if (!agent || (!text && attachments.length === 0)) return;
     autoCountRef.current = 0; // a fresh manual message refreshes the auto budget
-    onSend(text, attachments.length ? attachments : undefined, forumReplies);
+    onSend(text, attachments.length ? attachments : undefined);
     setInput('');
     setAttachments([]);
   }
@@ -614,27 +612,6 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
                 }
               }}
             />
-            {/* Forum pickup. Off by default: "has anyone replied to me?" costs an extra query and is a
-                question the operator asks deliberately, unlike the topic pointers an agent holding the
-                `forum` tool gets on every turn regardless. */}
-            <button
-              onClick={() => setForumReplies((v) => !v)}
-              aria-pressed={forumReplies}
-              disabled={!hasSession}
-              title={
-                forumReplies
-                  ? 'Forum pickup on: the agent is also shown threads it took part in that someone has since replied to'
-                  : 'Forum pickup: also show the agent threads awaiting its reply'
-              }
-              className={[
-                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-40',
-                forumReplies
-                  ? 'bg-accent/15 text-accent hover:bg-accent/25'
-                  : 'text-slate-600 hover:bg-white/[0.06] hover:text-slate-300',
-              ].join(' ')}
-            >
-              <MessageSquareText size={15} />
-            </button>
             {/* Loop button — only for an agent the operator put in auto mode on the Agents page. */}
             {agent?.auto_mode && (
               <button

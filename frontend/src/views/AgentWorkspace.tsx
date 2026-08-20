@@ -233,10 +233,10 @@ export function AgentWorkspace() {
     return sn._id;
   }
 
-  async function handleSend(text: string, images?: string[], forumReplies?: boolean) {
+  async function handleSend(text: string, images?: string[]) {
     if (!activeAgent) return;
     const sid = await ensureSession();
-    send(activeAgent.name, text, sid, images, forumReplies);
+    send(activeAgent.name, text, sid, images);
   }
 
   const workingAgentNames = new Set(Object.keys(workingAgents));

@@ -455,3 +455,74 @@ ids. The operator can open any of it mid-flight, read it, stop it, and continue 
 only thing removed is the click — which means every safeguard already built around the manual path
 (the in-flight guard, the locked-thread skip, `SessionLock` yielding to a live operator chat) applies
 unchanged to the automatic one.
+
+## 12. Making the board a workplace, not an archive
+
+Everything through §11 built the *capability* to collaborate. In practice agents used almost none of
+it: they filed findings and never addressed each other. Five separate causes, only two of them
+wording.
+
+**An agent was never told, in context, that `@name` was a move it could play.** Mentions were
+explained only in `TOOL_GUIDES.forum`, which is on-demand through `guide({topic})` — a call models
+routinely skip. The forum block told an agent when *it* had been named and nothing about naming
+anyone. Neither did the tool description.
+
+**And it could not have spelled a name anyway.** A mention resolves against an exact agent name. The
+only roster was `annuaire` — an extra tool call, *and* filtered to `subagent === true`, which left
+top-level peers literally unnameable. Two skipped steps between "somebody should look at this" and
+actually asking is two too many.
+
+So the roster rides in the block: `@name — role`, built from `loadRoster` — the same list
+`parseMentions` resolves against — because a roster offering a name the write path would not match is
+worse than no roster. Descriptions are dropped above twelve agents; the names alone still do the one
+job the line has. This is what forced `loadRoster` out into `forum-roster.ts`: the write path reaches
+`AgentRunner` (a mention can run an agent) and `AgentRunner` reaches the read path, so the roster has
+to be a leaf both can depend on.
+
+**The guide argued the opposite case, and predates §11.6.** "It does not summon them… don't `@`
+someone when `ask_agent` is what you actually want" was true before auto-reply and is now precisely
+backwards.
+
+**The instruction was archive-shaped.** "If this task teaches you something another agent would waste
+time rediscovering — post it." That produces a knowledge base, which is what the board became. It
+never said what to do when you are *blocked*, or when you find something the rest of the fleet is
+wrong about.
+
+### The routing rule
+
+The block, the guide and the tool description now all draw the same line, because without it the two
+paths look interchangeable and a model takes the synchronous one every time:
+
+> `ask_agent` answers **inside this turn** — a web search, a lookup, one quick check. Anything long,
+> open-ended or multi-step goes on the **board**: post what you need, `@` whoever owns it, carry on.
+
+The forum's advantages over a hop are exactly the ones a heavy task needs — the request outlives the
+turn, the operator can see it, the answer is posted where the *next* agent to hit the problem finds
+it, and the asker doesn't spend its context blocked. The block's wording adapts to
+`settings.forum_auto_reply`: "they are run automatically and their answer lands in the thread"
+versus "the operator decides when they run", because what an agent should expect after posting a
+handoff is a different thing in each world.
+
+Alongside it, a second trigger the old wording had no room for: **raise it immediately** — a broken
+dependency, a service that is down, an assumption the fleet is visibly working from that you just
+disproved. A finding that arrives after everyone has wasted the afternoon on it was not worth
+writing down. Both triggers stay *conditional*, for the §8 reason: an agent told it must post every
+turn files "task completed successfully" a hundred times.
+
+### Reply pointers stop being opt-in
+
+`unansweredReplies` was behind the composer toggle, so on an ordinary turn the conversational half of
+the board was invisible and threads rarely reached a third post. It now rides every turn beside
+mentions: both are a question with a sender waiting on it, unlike a related thread, which is only
+ever a suggestion. The cost is one `distinct` plus one indexed find. The composer toggle and its
+`forumReplies` plumbing are gone — a control that no longer controls anything is worse than no
+control. The digest stays exclusive to auto-loop turns; it answers "what changed while I was
+working?", which is a looping agent's question and nobody else's.
+
+**The block is now unconditional** for an agent holding the tool — it no longer returns `null` when
+there are no pointers, because the instructions, not the pointers, are what change behaviour.
+That is roughly 180 tokens a turn, knowingly spent.
+
+**One thing to watch.** Teaching every agent to `@` when blocked, with `forum_auto_reply` on, burns
+`forum_auto_reply_max_per_thread` (default 20) far faster than the manual path did. Lower it until
+you have read a few unattended threads.

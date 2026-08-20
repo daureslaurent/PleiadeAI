@@ -1,8 +1,8 @@
 import { createLogger } from '../../config/logger';
 import { eventBus } from '../../core/event-bus/EventBus';
 import { alertEngine } from '../../alerts/AlertEngine';
-import { agentRepository } from '../agents/agent.repository';
 import { forumAutoReply } from './forum-auto-reply';
+import { loadRoster, OPERATOR_HANDLE, type MentionTarget, type Roster } from './forum-roster';
 import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumAuthor } from './forum-author';
 import { snippetOf } from './forum-index.service';
@@ -11,71 +11,9 @@ import type { ForumPostDoc } from './forum-post.model';
 
 const log = createLogger('forum-mentions');
 
-/** The operator's handle on the board. Matches `OPERATOR_AUTHOR.display_name`, case-insensitively. */
-export const OPERATOR_HANDLE = 'Operator';
-
-/** How long the agent roster is reused before being re-read. Mentions are written on a hot path. */
-const ROSTER_TTL_MS = 30_000;
-
-export interface MentionTarget {
-  kind: 'agent' | 'operator';
-  agentId: string | null;
-  name: string;
-  /** False when the agent has `forum_mentions` off — the row is written, nothing is dispatched. */
-  notify: boolean;
-  /** False when this target may not be run automatically: the operator, or an agent opted out. */
-  autoReply: boolean;
-}
-
-interface Roster {
-  /** Lower-cased name → target, so resolution is case-insensitive but the stored name is canonical. */
-  byName: Map<string, MentionTarget>;
-  /** Names longest-first: `@image smith` must win over an agent literally called `image`. */
-  names: string[];
-  at: number;
-}
-
-let cached: Roster | null = null;
-
-/**
- * Resolution runs against the live agent roster, not a `@\w+` pattern.
- *
- * Agent names are operator-chosen and may contain spaces or punctuation, so a pattern would both
- * miss `@image smith` and invent mentions out of `user@host`. Matching known names instead means an
- * unknown `@foo` is simply prose — there is no such thing on this board as a mention that goes
- * nowhere to be delivered.
- */
-export async function loadRoster(force = false): Promise<Roster> {
-  if (!force && cached && Date.now() - cached.at < ROSTER_TTL_MS) return cached;
-  const agents = await agentRepository.list();
-  const byName = new Map<string, MentionTarget>([
-    [
-      OPERATOR_HANDLE.toLowerCase(),
-      // The operator is addressable but never runnable — @Operator is a question for a person.
-      { kind: 'operator', agentId: null, name: OPERATOR_HANDLE, notify: true, autoReply: false },
-    ],
-  ]);
-  for (const agent of agents) {
-    byName.set(agent.name.toLowerCase(), {
-      kind: 'agent',
-      agentId: String(agent._id),
-      name: agent.name,
-      notify: agent.forum_mentions !== false,
-      autoReply: agent.forum_auto_reply !== false,
-    });
-  }
-  cached = {
-    byName,
-    names: [...byName.values()].map((t) => t.name).sort((a, b) => b.length - a.length),
-    at: Date.now(),
-  };
-  return cached;
-}
-
-/** Drop the roster cache — called when an agent is created, renamed or deleted. */
-export function invalidateRoster(): void {
-  cached = null;
-}
+// Re-exported so the roster's long-standing import site keeps working; it now lives in
+// `forum-roster.ts` (a leaf) because the prompt-side reader cannot import this module.
+export { loadRoster, invalidateRoster, OPERATOR_HANDLE, type MentionTarget } from './forum-roster';
 
 /**
  * Blank out fenced blocks and inline code, keeping the string's length so offsets still line up.

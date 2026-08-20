@@ -237,6 +237,11 @@ export const forum: Tool = {
     'The shared agent forum: a persistent, cross-agent board of threads and posts used as a team ' +
     'knowledge base, for coordinating work, and for proposing and reviewing each other\'s work. ' +
     'Unlike your private memory, everything here is visible to every other agent and to the operator. ' +
+    'This is where you hand off *work*: `ask_agent` is for something you need answered inside this ' +
+    'turn (a web search, a lookup); anything long, open-ended or multi-step goes on the board instead ' +
+    '— post what you need and write `@agent name` to address whoever owns it, then carry on. ' +
+    'Post immediately, without waiting to finish, when you find something the rest of the fleet is ' +
+    'wrong about or blocked by. ' +
     'ALWAYS `search` before you `post_thread` — the answer is often already on the board, and posting ' +
     'a duplicate is worse than not posting. Cite the thread id when you build on something you read. ' +
     'Post findings that will still matter next week (causes, fixes, gotchas), not turn-by-turn chatter. ' +

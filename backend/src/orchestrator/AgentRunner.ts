@@ -119,12 +119,6 @@ export interface RunInput {
   userText: string;
   images?: ImageBlock[];
   /**
-   * Include "someone replied to your thread and you haven't answered" pointers in the forum block.
-   * Driven by the composer's forum toggle rather than always-on: it costs an extra query, and it is
-   * a question the operator asks deliberately when they want the agent to go finish a conversation.
-   */
-  forumReplies?: boolean;
-  /**
    * Set when this run is one iteration of a self-driving conversation (`AUTO_AGENT_PLAN.md`), by
    * `AutoLoopRunner` — never by the socket layer. Carries the standing goal and the progress recap
    * folded into the prompt, plus the watermark for the "new on the forum since your last turn"
@@ -312,6 +306,11 @@ export class AgentRunner {
     // (see agent-memory.service), so an irrelevant turn legitimately retrieves *nothing* — the
     // block is absent rather than padded with noise. Best-effort: an embeddings outage yields none.
     // One embedding, two searches: memory and the forum index are both queried with this vector.
+    // Read per turn (not cached with the agent doc) so an edit on the Settings page binds every
+    // agent on its next turn without a restart. Needed here rather than at prompt-assembly time
+    // because the forum block below is worded differently depending on `forum_auto_reply`.
+    const settings = await settingsService.get();
+
     const recallQuery = buildRecallQuery(input);
     const recallVector = await embedRecallQuery(recallQuery);
     const recalled = await agentMemory.recall(agent.qdrant_namespace, recallQuery, undefined, recallVector);
@@ -320,30 +319,46 @@ export class AgentRunner {
     // Passive forum awareness (FORUM_PLAN.md §8), for agents that actually hold the `forum` tool —
     // never point an agent at a thread it has no way to open. Pointers only (thread id + title): the
     // agent still has to call `forum` to read one, which is what keeps the board from flooding the
-    // context. `forumReplies` is opt-in per message (the composer's toggle), because "who replied to
-    // me" is a question the operator asks on purpose, not something worth paying for every turn.
     //
     // An auto-loop turn is the exception to the opt-in: it forces the reply pointers on and adds a
     // time-scoped digest of everything new since its last turn. A looping agent has no operator to
     // tick a box for it, and the whole reason it can follow a *shared* goal is that it notices what
     // the other agents posted while it was working.
     const hasForum = tools.some((t) => t.name === forum.name);
-    const wantsReplies = input.forumReplies || Boolean(input.autoLoop);
     //
-    // Mentions are the exception to *both* toggles: they ride every turn. Somebody addressed this
-    // agent by name, which is a question with a sender waiting on it — unlike a related thread,
-    // which is only ever a suggestion. It costs one indexed find (§11.2).
-    const [forumRelated, forumReplyPointers, forumDigest, forumMentions] = hasForum
+    // Mentions and unanswered replies ride *every* turn, and neither is behind the composer toggle.
+    // Both are a question with a sender waiting on it — somebody named this agent, or answered a
+    // thread it is in — unlike a related thread, which is only ever a suggestion. Gating the reply
+    // pointers on an operator tick is what kept threads from ever reaching a third post: the
+    // conversation half of the board was invisible on an ordinary turn. Together they cost one
+    // indexed find plus one distinct (§11.2).
+    //
+    // The digest stays exclusive to an auto-loop turn: it is time-scoped rather than
+    // similarity-scoped ("what changed while I was working?"), which is a looping agent's question
+    // and nobody else's.
+    const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumRoster] = hasForum
       ? await Promise.all([
           forumRecall.pointers(recallVector),
-          wantsReplies ? forumRecall.unansweredReplies(ctx.agentId, agent.name) : Promise.resolve([]),
+          forumRecall.unansweredReplies(ctx.agentId, agent.name),
           input.autoLoop
             ? forumRecall.digest(input.autoLoop.forumSeenAt, agent.name)
             : Promise.resolve([]),
           forumRecall.mentions(ctx.agentId),
+          forumRecall.roster(agent.name),
         ])
-      : [[], [], [], []];
-    const forumBlock = buildForumBlock(forumRelated, forumReplyPointers, forumDigest, forumMentions);
+      : [[], [], [], [], []];
+    const forumBlock = hasForum
+      ? buildForumBlock({
+          related: forumRelated,
+          replies: forumReplyPointers,
+          digest: forumDigest,
+          mentions: forumMentions,
+          roster: forumRoster,
+          // Whether a handoff actually runs on its own changes what the agent should *expect* after
+          // posting one, so the block says which of the two worlds it is in rather than guessing.
+          autoReply: settings.forum_auto_reply,
+        })
+      : null;
 
     // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
     // recall instead of guessing. Only fires when something was injected — the badge's presence in
@@ -372,7 +387,7 @@ export class AgentRunner {
     // Fleet-wide AGENTS.md house rules ride into the prompt as a read-only block, ahead of the
     // agent's own charter (see `buildSystemMessage`). Read per turn so an edit on the Settings page
     // binds every agent on its next turn without a restart.
-    const { agents_md: houseRules } = await settingsService.get();
+    const houseRules = settings.agents_md;
     // The agent's own checklist rides into the prompt too. Read per turn (not cached with the agent
     // doc) because `todowrite` mutates it mid-turn — and because an item left `in_progress` when the
     // last turn ended is exactly what this block exists to put back in front of the model.

@@ -4,6 +4,7 @@ import { ForumPostModel } from './forum-post.model';
 import { ForumThreadModel } from './forum-thread.model';
 import { forumIndexService } from './forum-index.service';
 import { ForumMentionModel } from './forum-mention.model';
+import { loadRoster, OPERATOR_HANDLE } from './forum-roster';
 
 const log = createLogger('forum-recall');
 
@@ -30,6 +31,13 @@ const POINTER_THRESHOLD = 0.62;
 const MAX_POINTERS = 3;
 /** Titles are truncated so one absurd title can't dominate the block. */
 const MAX_TITLE_CHARS = 90;
+/** Roster descriptions are clipped hard — the line exists to make `@name` spellable, not to brief. */
+const MAX_ROSTER_DESC_CHARS = 60;
+/**
+ * Above this many agents the roster is names-only. A fleet of forty with a description each is a
+ * paragraph nobody reads; the names alone still do the one job the roster has to do.
+ */
+const MAX_ROSTER_WITH_DESC = 12;
 
 export interface ForumPointer {
   threadId: string;
@@ -219,37 +227,101 @@ export const forumRecall = {
       return [];
     }
   },
+
+  /**
+   * Who this agent can address by name.
+   *
+   * An `@mention` only resolves against an *exact* agent name, so an agent that cannot spell the
+   * roster cannot use the feature at all — and the only way to learn a name was `annuaire`, which is
+   * an extra tool call *and* lists subagents only, leaving top-level peers literally unnameable. Two
+   * skipped steps between "I should ask someone" and actually asking is two too many, so the names
+   * ride in the block instead.
+   *
+   * Built from `loadRoster` — the same list `parseMentions` resolves against, 30s-cached and shared
+   * with the write path — because a roster that offers a name mentions would not match is worse than
+   * no roster at all. The agent's own name is dropped: a self-mention is discarded on write.
+   */
+  async roster(agentName: string): Promise<string[]> {
+    try {
+      const { byName } = await loadRoster();
+      const targets = [...byName.values()].filter(
+        (t) => t.name.toLowerCase() !== agentName.toLowerCase(),
+      );
+      if (!targets.length) return [];
+
+      // Operator last: it is always present, and the agents are the part worth reading first.
+      targets.sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === 'operator' ? 1 : -1;
+        return a.name.localeCompare(b.name);
+      });
+
+      const withDesc = targets.length <= MAX_ROSTER_WITH_DESC;
+      return targets.map((t) => {
+        if (t.kind === 'operator') return `@${OPERATOR_HANDLE} — the human running this fleet`;
+        const desc = (t.description || '').replace(/\s+/g, ' ').trim();
+        if (!withDesc || !desc) return `@${t.name}`;
+        const clipped =
+          desc.length <= MAX_ROSTER_DESC_CHARS ? desc : `${desc.slice(0, MAX_ROSTER_DESC_CHARS)}…`;
+        return `@${t.name} — ${clipped}`;
+      });
+    } catch (err) {
+      log.warn({ err }, 'forum roster unavailable this turn');
+      return [];
+    }
+  },
 };
 
 /**
- * Render the pointers as the forum block folded into the leading system message.
+ * Render the forum block folded into the leading system message.
  *
- * The wording is load-bearing in two ways. It states plainly that these are *pointers*, so the model
- * doesn't answer from a title as though it had read the thread. And the posting instruction is
- * **conditional** — tied to having learned something durable — because an agent told it must post
- * every turn files "task completed successfully" a hundred times, and a board of that is one no
- * agent has any reason to read again.
+ * The wording is load-bearing, and it does three things the pointers alone cannot.
+ *
+ * It states plainly that the ids are *pointers*, so the model doesn't answer from a title as though
+ * it had read the thread.
+ *
+ * It carries the **roster**, because `@name` must match an agent's exact name and an agent that
+ * can't spell one can't address anybody — every instruction below is inert without it.
+ *
+ * And it draws the **routing rule**: `ask_agent` answers inside this turn and is right for a lookup
+ * or a web search; anything long, open-ended or multi-step belongs on the board, where it survives
+ * the turn, is visible to the operator, and can be picked up by whoever owns it. Without that
+ * sentence the two paths look interchangeable and the model picks the synchronous one every time,
+ * which is how a fleet ends up with a board that is an archive nobody writes to.
+ *
+ * The posting triggers stay **conditional** — tied to having learned something durable, being
+ * blocked, or finding something the fleet is wrong about — because an agent told it must post every
+ * turn files "task completed successfully" a hundred times, and a board of that is one no agent has
+ * any reason to read again.
  */
 /** ` · 2 files` — omitted entirely when a thread has none, so the common line stays as short as it was. */
 function files(p: ForumPointer): string {
   return p.attachments ? ` · ${p.attachments} file${p.attachments === 1 ? '' : 's'}` : '';
 }
 
-export function buildForumBlock(
-  related: ForumPointer[],
-  replies: ForumPointer[],
-  digest: ForumPointer[] = [],
-  mentions: ForumPointer[] = [],
-): string | null {
-  if (!related.length && !replies.length && !digest.length && !mentions.length) return null;
+export interface ForumBlockInput {
+  related: ForumPointer[];
+  replies: ForumPointer[];
+  digest?: ForumPointer[];
+  mentions?: ForumPointer[];
+  /** `@name — role` lines from `forumRecall.roster`. */
+  roster?: string[];
+  /** Whether the board runs mentions on its own (`settings.forum_auto_reply`, spec §11.6). */
+  autoReply?: boolean;
+}
 
+export function buildForumBlock(input: ForumBlockInput): string | null {
+  const { related, replies, digest = [], mentions = [], roster = [], autoReply = false } = input;
+
+  // The roster alone is not a reason to spend tokens: an agent with nothing pending and nothing
+  // related gets the block only because the instructions below are what change its behaviour.
   const lines = ['## Forum'];
 
   // Mentions lead: being asked something directly outranks a thread that merely looked topical.
   if (mentions.length) {
     lines.push(
       '',
-      'You were mentioned by name on the forum and have not answered yet:',
+      'You were addressed by name on the forum and have not answered yet. Read the thread and',
+      '`reply` to it in this turn — your reply is posted straight back to whoever asked:',
       ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
     );
   }
@@ -282,11 +354,36 @@ export function buildForumBlock(
     );
   }
 
+  if (roster.length) {
+    lines.push(
+      '',
+      'Agents you can address, by writing `@name` anywhere in a post (exact name, as written here):',
+      ...roster.map((line) => `- ${line}`),
+    );
+  }
+
   lines.push(
     '',
-    'If this task teaches you something another agent would waste time rediscovering — a root cause,',
-    'a fix that worked, a dead end worth not repeating — post it to the forum before you finish.',
-    'Nothing worth keeping, nothing to post.',
+    'The board is how this fleet works together, not just where it files notes. Use it to:',
+    '',
+    '- **Hand off heavy work.** `ask_agent` is for something you need answered *inside this turn* —',
+    '  a web search, a lookup, one quick check. Anything long, open-ended or multi-step should go on',
+    '  the board instead: open a thread saying what you need and why, `@` the agent whose job it is,',
+    '  and get on with your own part.' +
+      (roster.length
+        ? autoReply
+          ? ' They are run automatically and their answer lands in the thread.'
+          : ' The operator decides when they run.'
+        : ''),
+    '- **Raise anything the fleet is wrong about, immediately.** A broken dependency, a service that',
+    '  is down, an assumption other agents are working from that you have just disproved, a decision',
+    '  that changes how everyone should proceed. Post it when you find it, not when you finish.',
+    '- **Answer what you are asked.** Silence on a thread reads as a dropped request, and "I don\'t',
+    '  know, but X does" is a complete answer.',
+    '- **Record what would cost another agent an hour to rediscover** — a root cause, a fix that',
+    '  worked, a dead end worth not repeating. Nothing worth keeping, nothing to post.',
+    '',
+    'Search before you open a thread; reply to the existing one if there is one.',
   );
 
   return lines.join('\n');
