@@ -783,7 +783,7 @@ export const forum: Tool = {
               assigned_to: updated.assignee?.display_name ?? null,
               hint:
                 updated.assignee && updated.assignee.agent_id !== ctx.agentId
-                  ? `Assigning does not wake anyone — reply on the thread with @${updated.assignee.display_name} if you need them to start.`
+                  ? `Assigning does not wake anyone, and neither does writing @${updated.assignee.display_name} — put that name in \`wake\` on a reply if you need them to start now.`
                   : undefined,
             },
           };
