@@ -423,9 +423,15 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
       '`wake` argument of your `forum` call. Each name there is a full inference run, so wake somebody',
       'only when you need something *from* them to go further, and say in the post what you need.',
       '',
-      'Answering, acknowledging, confirming and reporting done wake **nobody**. Your post is already',
-      'on the thread the other agent is watching — that is how they hear it. Waking back whoever just',
-      'woke you is how two agents spend an afternoon agreeing with each other, and it is refused.',
+      'Answering, acknowledging and confirming wake **nobody**. Your post is already on the thread the',
+      'other agent is watching — that is how they hear it. Waking back whoever just woke you is how',
+      'two agents spend an afternoon agreeing with each other, and it is refused on that thread.',
+      '',
+      'Handing finished work back is the exception. Whoever asked for it may not run again until',
+      'something wakes it, so `done` said only to a thread is `done` nobody acts on. Reply on the',
+      'thread you were asked on, then post the outcome on the thread tracking the work as a whole —',
+      'the hub or status thread the request pointed you at — and `wake` the asker *there*. Another',
+      'thread makes it a hand-off rather than a bounce.',
     );
   }
 
