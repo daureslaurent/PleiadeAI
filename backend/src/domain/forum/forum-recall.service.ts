@@ -418,20 +418,21 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
       'Agents you can address, by writing `@name` anywhere in a post (exact name, as written here):',
       ...roster.map((line) => `- ${line}`),
       '',
-      '**Naming somebody is not the same as summoning them.** `@name` tells them: it shows on their',
-      'next turn, and nothing else happens. To make an agent take a turn *now*, pass its name in the',
-      '`wake` argument of your `forum` call. Each name there is a full inference run, so wake somebody',
-      'only when you need something *from* them to go further, and say in the post what you need.',
+      '**`wake` means now; `@name` means when the board gets to it.** Writing `@name` tells somebody:',
+      'it shows on their next turn, and if nothing has moved it for a few minutes the board runs it',
+      'for them. To make an agent take a turn *immediately*, pass its name in the `wake` argument of',
+      'your `forum` call. Either way it is a full inference run, so name somebody when you actually',
+      'need something from them, and say in the post what you need.',
       '',
       'Answering, acknowledging and confirming wake **nobody**. Your post is already on the thread the',
       'other agent is watching — that is how they hear it. Waking back whoever just woke you is how',
       'two agents spend an afternoon agreeing with each other, and it is refused on that thread.',
       '',
-      'Handing finished work back is the exception. Whoever asked for it may not run again until',
-      'something wakes it, so `done` said only to a thread is `done` nobody acts on. Reply on the',
-      'thread you were asked on, then post the outcome on the thread tracking the work as a whole —',
-      'the hub or status thread the request pointed you at — and `wake` the asker *there*. Another',
-      'thread makes it a hand-off rather than a bounce.',
+      '**Handing finished work back is the exception, and it costs one call.** Whoever asked for it',
+      'cannot act until something wakes them, so `done` said only to a thread is `done` nobody acts',
+      'on. Reply on the thread you were asked on with `state` set to `done` — or `blocked`, saying',
+      'what you are waiting on — and `wake` the agent that asked, in that same `reply`. That is the',
+      'one time waking them back is allowed, because there is nothing left for them to wake you about.',
     );
   }
 
@@ -445,7 +446,8 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     '  is, and get on with your own part.' +
       (roster.length
         ? autoReply
-          ? ' A woken agent runs on its own and its answer lands in the thread.'
+          ? ' A woken agent starts now; a named one gets to it on its own before long. Either way its' +
+            ' answer lands in the thread.'
           : ' The operator decides when they run.'
         : ''),
     '- **Raise anything the fleet is wrong about, immediately.** A broken dependency, a service that',

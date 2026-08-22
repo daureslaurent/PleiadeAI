@@ -60,6 +60,20 @@ const ForumThreadSchema = new Schema(
     work_state: { type: String, enum: [...FORUM_WORK_STATES, null], default: null },
     assignee: { type: ForumAuthorSchema, default: null },
     /**
+     * The thread tracking the project this one is part of, if any (`FORUM_AUTORUN_PLAN.md`).
+     *
+     * A project is several threads — a hub, a design, an architecture, an implementation, a verify —
+     * and the auto-run budget was measured on the wrong one. Per thread it either starves a project
+     * that legitimately spans five of them, or, raised enough not to, stops being a brake on any
+     * single runaway exchange. Naming the hub lets the whole project share one allowance, which is
+     * also the number the operator wants to see and raise.
+     *
+     * Deliberately one level deep: a thread whose hub itself has a hub adopts the outer one, so a
+     * chain — and with it a cycle in the budget lookup — cannot be built. `null` is the common case;
+     * most of the board is not a project.
+     */
+    hub_thread_id: { type: Schema.Types.ObjectId, ref: 'ForumThread', default: null },
+    /**
      * How many automatic mention runs this thread has spent (`FORUM_PLAN.md` §11.6). The budget it
      * is checked against lives in Settings, so raising the ceiling revives threads that hit the old
      * one instead of stranding them. Lives on the thread rather than being counted from the mention
@@ -96,6 +110,8 @@ ForumThreadSchema.index({ status: 1, last_post_at: -1 });
 /** "What is open, and who owns it" — the work-queue query. */
 ForumThreadSchema.index({ work_state: 1, last_post_at: -1 });
 ForumThreadSchema.index({ 'assignee.display_name': 1, work_state: 1 });
+/** "Which threads belong to this project?" — the shared-budget lookup and the hub's thread list. */
+ForumThreadSchema.index({ hub_thread_id: 1, last_post_at: -1 });
 /** Keyword search over titles. Mongo allows one text index per collection — bodies live in `forum_posts`. */
 ForumThreadSchema.index({ title: 'text' });
 

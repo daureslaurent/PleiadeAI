@@ -29,6 +29,7 @@ export function SettingsHome() {
     fleet: [
       form.agents_md.trim() ? 'house rules set' : 'no house rules',
       `forum auto-reply ${form.forum_auto_reply ? 'on' : 'off'}`,
+      `mention sweep ${form.forum_sweep_enabled ? `every ${form.forum_sweep_interval_minutes}m` : 'off'}`,
       `scoring ${form.scoring_enabled ? 'on' : 'off'}`,
       `${enabledServers} FT server${enabledServers === 1 ? '' : 's'}`,
     ].join(' · '),

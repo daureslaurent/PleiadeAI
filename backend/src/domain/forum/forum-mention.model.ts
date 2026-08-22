@@ -87,6 +87,8 @@ ForumMentionSchema.index({ 'target.agent_id': 1, status: 1, created_at: -1 });
 ForumMentionSchema.index({ status: 1, created_at: -1 });
 /** The pair-rate guard: "how often has A summoned B on this thread lately?" (`countPair`). */
 ForumMentionSchema.index({ thread_id: 1, 'author.agent_id': 1, 'target.agent_id': 1, created_at: -1 });
+/** The sweeper's candidate query: the oldest pending mention no guard has withheld. */
+ForumMentionSchema.index({ status: 1, 'target.kind': 1, run_blocked: 1, created_at: 1 });
 
 export type ForumMention = InferSchemaType<typeof ForumMentionSchema>;
 export type ForumMentionDoc = HydratedDocument<ForumMention>;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, AtSign, BellOff, CheckCircle2, MessageSquare, Play, ShieldAlert, X } from 'lucide-react';
+import { ArrowLeft, AtSign, BellOff, CheckCircle2, Clock, MessageSquare, Play, ShieldAlert, X } from 'lucide-react';
 import { forumApi, type ForumMention } from '../../lib/api';
 import { useForum } from '../../store/forum';
 import { agentColor } from '../../lib/agentColor';
@@ -170,7 +170,7 @@ const BLOCK_REASONS: Record<NonNullable<ForumMention['runBlocked']>, string> = {
     'This exchange is already several hand-offs deep with no human in it (Settings → Fleet sets the ceiling).',
   pair_rate:
     'These two have summoned each other on this thread too often lately (Settings → Fleet sets the cap).',
-  budget: 'The thread has spent its automatic replies for this window.',
+  budget: 'The thread — or its whole project, if it names a hub — has spent its automatic runs for this window.',
 };
 
 function MentionRow({
@@ -220,6 +220,25 @@ function MentionRow({
                 title={BLOCK_REASONS[mention.runBlocked]}
               >
                 <ShieldAlert size={10} /> not run
+              </span>
+            )}
+            {/* A pending row means one of three different things, and they used to look identical.
+                Which one it is decides whether the operator has anything to do: a queued row will
+                answer itself, a tried one will not, and a blocked one is above. */}
+            {!answered && !mention.runBlocked && mention.sessionId && (
+              <span
+                className="inline-flex items-center gap-1 text-amber-400/80"
+                title="This mention was given a turn and no reply was posted back. It is not retried automatically — open the session to see what happened, then Run it again if it should have answered."
+              >
+                <ShieldAlert size={10} /> ran, no reply
+              </span>
+            )}
+            {!answered && !mention.runBlocked && !mention.sessionId && (
+              <span
+                className="inline-flex items-center gap-1 text-slate-500"
+                title="Waiting for the board to get to it — usually a few minutes. Run it yourself if you want it answered now."
+              >
+                <Clock size={10} /> queued
               </span>
             )}
             {answered && (

@@ -59,6 +59,8 @@ export const sessionRepository = {
     generatorId?: string | Types.ObjectId;
     forumThreadId?: string | Types.ObjectId;
     forumMentionId?: string | Types.ObjectId;
+    /** Forum-origin only: this run answers a mention but starts a fresh summons chain. */
+    forumChainReset?: boolean;
   }): Promise<SessionDoc> {
     return SessionModel.create({
       agent_id: input.agentId,
@@ -68,6 +70,7 @@ export const sessionRepository = {
       generator_id: input.generatorId ?? null,
       forum_thread_id: input.forumThreadId ?? null,
       forum_mention_id: input.forumMentionId ?? null,
+      forum_chain_reset: input.forumChainReset ?? false,
     });
   },
 

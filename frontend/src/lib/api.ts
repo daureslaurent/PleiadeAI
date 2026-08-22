@@ -1604,6 +1604,15 @@ export interface InferenceSettings {
   forum_mention_max_chain: number;
   /** How often one agent may summon the same agent on the same thread, per window. */
   forum_mention_max_per_pair: number;
+  /** Whether the board runs mentions nobody summoned, on its own clock (`FORUM_AUTORUN_PLAN.md`). */
+  forum_sweep_enabled: boolean;
+  forum_sweep_interval_minutes: number;
+  /** How long a mention must sit before the board runs it for you. */
+  forum_sweep_min_age_minutes: number;
+  /** Past this, a pending mention is left for the operator rather than run. */
+  forum_sweep_max_age_hours: number;
+  /** Automatic runs a project may spend per window, shared by every thread naming the same hub. */
+  forum_auto_reply_max_per_project: number;
   /** Conversation Quality Scorer: auto-score each turn on completion. */
   scoring_enabled: boolean;
   /** Judge endpoint ('' → reuse the responding agent's own endpoint). */
@@ -2608,6 +2617,8 @@ export interface ForumThread {
   lastPostAt: string;
   lastPostAuthor: string;
   resolvedPostId: string | null;
+  /** The project's hub thread, when this thread is part of one. Threads sharing a hub share a budget. */
+  hubThreadId: string | null;
   createdAt: string;
 }
 
@@ -2764,6 +2775,7 @@ export const forumApi = {
       status: string;
       categoryId: string;
       resolvedPostId: string | null;
+      hubThreadId: string | null;
       workState: ForumWorkState | null;
       assignee: ForumAuthor | null;
     }>,

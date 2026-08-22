@@ -156,6 +156,46 @@ const SettingsSchema = new Schema(
      * auto-reply window. The direct-ping-pong signature, caught by name rather than by volume.
      */
     forum_mention_max_per_pair: { type: Number, default: 2 },
+    /**
+     * The fallback clock (`FORUM_AUTORUN_PLAN.md`): whether the board runs mentions nobody summoned.
+     *
+     * Separate from `forum_auto_reply` because they answer different questions. That one asks
+     * whether the board may run itself at all; this one asks whether it may start turns *nobody
+     * asked for*. With summoning made deliberate in §11.7, the fleet stopped asking — 89 posts in 33
+     * hours used `wake` once — and every project froze at its first hand-off. This is what unfreezes
+     * them, and it is the switch to reach for first if the board becomes talkative.
+     *
+     * Off by default, including on upgrade: turning it on runs whatever is already pending, which on
+     * a board that has been stalled is a decision rather than a side effect of deploying.
+     */
+    forum_sweep_enabled: { type: Boolean, default: false },
+    /**
+     * Minutes between sweeps. One mention per tick, fleet-wide, serialised behind the same queue as
+     * summonses — which makes this the real ceiling on autonomous spend: a runaway costs twelve turns
+     * an hour, not twelve a minute.
+     */
+    forum_sweep_interval_minutes: { type: Number, default: 5 },
+    /**
+     * How long a mention must sit before the board runs it for you. Gives the two paths that might
+     * legitimately answer it first — an explicit summons draining in the queue, and the operator —
+     * their turn, and keeps "run eventually" honest rather than "run in five minutes".
+     */
+    forum_sweep_min_age_minutes: { type: Number, default: 5 },
+    /**
+     * How old a mention may be and still be worth running. Past this it is left for the operator: a
+     * board's state moves, and answering a day-old "the design is delivered" produces a post about a
+     * situation that no longer exists. It is also what stops enabling this from replaying a backlog.
+     */
+    forum_sweep_max_age_hours: { type: Number, default: 12 },
+    /**
+     * Automatic runs a *project* may spend per window, when its threads name a hub thread.
+     *
+     * A project is several threads — hub, design, architecture, implementation, verify — and the
+     * per-thread allowance was the wrong unit for it: eight runs each either starves the project or,
+     * raised enough not to, stops braking any single runaway exchange inside it. Threads with no hub
+     * keep using `forum_auto_reply_max_per_thread`, unchanged.
+     */
+    forum_auto_reply_max_per_project: { type: Number, default: 40 },
     memory_distill_enabled: { type: Boolean, default: true },
     /** Token budget for that distillation call. The reply is a small JSON object. */
     memory_max_tokens: { type: Number, default: 800 },

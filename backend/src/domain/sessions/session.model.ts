@@ -38,6 +38,20 @@ const SessionSchema = new Schema(
      */
     forum_thread_id: { type: Schema.Types.ObjectId, ref: 'ForumThread', default: null },
     forum_mention_id: { type: Schema.Types.ObjectId, ref: 'ForumMention', default: null },
+    /**
+     * Forum-origin only: this run answers a mention, but it does not *continue* that mention's chain
+     * — anything it summons starts again from depth zero (`FORUM_AUTORUN_PLAN.md`).
+     *
+     * Set when a run was started by the operator's Run button or by the sweeper. Neither is a reply
+     * to anybody, which is precisely the condition §11.7 already gives for a chain root; a cron job
+     * and an auto-mode tick have always been treated the same way. Without it a swept relay would
+     * inherit whatever depth it happened to be found at and die four hand-offs later, mid-project.
+     *
+     * A flag on the session rather than on the mention because the mention *records what happened*
+     * — its `chain_depth` is the depth it was written at, and rewriting that to suit the run reading
+     * it would falsify the history the guard is judged against.
+     */
+    forum_chain_reset: { type: Boolean, default: false },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

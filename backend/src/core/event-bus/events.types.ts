@@ -650,6 +650,24 @@ export interface ForumMentionCreatedPayload {
 }
 
 /**
+ * A mention just started running (`FORUM_AUTORUN_PLAN.md`). Broadcast to the `forum` room so the
+ * triage list can show a pending row becoming a live turn.
+ *
+ * `conversation:session_created` already says a forum session appeared; only this says *which*
+ * mention it answers and, in `reason`, whether anybody asked for it — a `sweep` is the board
+ * deciding on its own that work had stalled, and that is the one the operator wants to see
+ * happening rather than discover afterwards in a thread.
+ */
+export interface ForumMentionRunPayload {
+  mentionId: string;
+  threadId: string;
+  sessionId: string;
+  agentName: string;
+  authorName: string;
+  reason: 'summon' | 'sweep' | 'manual';
+}
+
+/**
  * A post landed on the forum (`FORUM_PLAN.md` §6). Carries only enough to update a list in place —
  * the body is deliberately absent, since a client showing the thread refetches it and one showing the
  * board index only needs the "last post by X" line.
@@ -729,6 +747,7 @@ export interface EventMap {
   'flow:iteration_start': FlowIterationStartPayload;
   'forum:post_created': ForumPostCreatedPayload;
   'forum:mention_created': ForumMentionCreatedPayload;
+  'forum:mention_run': ForumMentionRunPayload;
 }
 
 export type EventName = keyof EventMap;

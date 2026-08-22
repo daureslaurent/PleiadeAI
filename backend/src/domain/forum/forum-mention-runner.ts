@@ -12,6 +12,7 @@ import { forumThreadRepository } from './forum-thread.repository';
 import { forumPostRepository } from './forum-post.repository';
 import { forumService } from './forum.service';
 import type { ForumMentionDoc } from './forum-mention.model';
+import type { AutoReplyReason } from './forum-auto-reply';
 
 const log = createLogger('forum-mention-run');
 
@@ -62,12 +63,25 @@ function quote(body: string): string {
  * required to produce a post, every post opened with the name of whoever it answered, and — while a
  * bare `@name` still summoned — that name woke them straight back. Three agents spent twenty posts
  * and 107 minutes agreeing with each other about a design that had been settled in the first two.
- * The last two paragraphs below are the fix that costs nothing: answer, and if you are not asking
- * for anything, stop.
+ *
+ * Removing that, though, removed the *useful* wake with it: told never to wake the asker back, an
+ * agent finishing a job said "done" to a thread nobody was reading, and the project stopped
+ * (`FORUM_AUTORUN_PLAN.md`). So the closing paragraphs now draw the line where it belongs —
+ * acknowledging wakes nobody, handing the finished work back wakes exactly one person — and say how
+ * to do the second in one call.
  */
-function brief(mention: ForumMentionDoc, body: string): string {
+function brief(mention: ForumMentionDoc, body: string, reason: AutoReplyReason | 'manual'): string {
+  // A swept run was nobody's request. Told the same "you were asked, post your answer" brief as a
+  // summons, an agent that has nothing to add writes an acknowledgement anyway — which is the board
+  // full of pleasantries this whole mechanism exists to avoid. Say plainly which of the two happened.
+  const opening =
+    reason === 'sweep'
+      ? `You were named on the agent forum by **${mention.author.display_name}**. Nobody asked you ` +
+        'for a turn; the board is giving you one because this has been sitting unanswered and the ' +
+        'work should not stop here.'
+      : `You were mentioned on the agent forum by **${mention.author.display_name}**.`;
   return [
-    `You were mentioned on the agent forum by **${mention.author.display_name}**.`,
+    opening,
     '',
     `Thread: **${mention.thread_title}** (\`${String(mention.thread_id)}\`)`,
     '',
@@ -87,15 +101,19 @@ function brief(mention: ForumMentionDoc, body: string): string {
     'Reply **once**. After the tool returns, stop — do not repeat or summarise the post in your ' +
       'closing message, it is already on the thread.',
     '',
-    `**Do not wake ${mention.author.display_name} back.** Your reply lands on the thread they are ` +
-      'watching; that is how they hear it. Naming somebody in `wake` starts a whole new run for ' +
-      'them, so use it only when you genuinely need something *from* another agent to go further — ' +
-      'and say in the post what you need. An acknowledgement, a confirmation, or "done" needs ' +
-      'nobody woken at all.',
+    `**You do not need to wake ${mention.author.display_name} back to acknowledge this.** Your ` +
+      'reply lands on the thread they are watching, and the board gets them to it. Naming somebody ' +
+      'in `wake` starts a whole new run for them, so use it when you genuinely need something ' +
+      '*from* another agent to go further — and say in the post what you need.',
     '',
-    'If the work this thread is about is finished, say so once and `set_state` it `done`. If you ' +
-      'have nothing to add beyond what the thread already says, say that in one line rather than ' +
-      'restating the agreed conclusion — a post that repeats your own previous one is refused.',
+    `**The exception is handing the work back finished.** If it is done, reply with \`state: "done"\` ` +
+      `and \`wake: ["${mention.author.display_name}"]\` in the *same* \`reply\` call — that is ` +
+      'allowed here, and it is what makes the next step happen: whoever asked cannot act on your ' +
+      'answer until something wakes them. If you are stuck instead, `state: "blocked"` and the same ' +
+      'wake, saying what you are waiting on.',
+    '',
+    'If you have nothing to add beyond what the thread already says, say that in one line rather ' +
+      'than restating the agreed conclusion — a post that repeats your own previous one is refused.',
   ].join('\n');
 }
 
@@ -116,7 +134,11 @@ export const forumMentionRunner = {
    * no benefit — the whole point is to *watch* the answer arrive.
    */
   async start(mentionId: string): Promise<{ sessionId: string; agentName: string }> {
-    const { sessionId, agentName } = await this.begin(mentionId);
+    // The operator pressing Run starts a chain rather than continuing one — a human deciding this
+    // deserves a turn is not a reply to anybody, which is the same reading §11.7 already gives a
+    // cron job and an auto-mode tick. Without it, running a mention by hand to unstick a relay
+    // handed the relay back whatever depth had stalled it.
+    const { sessionId, agentName } = await this.begin(mentionId, { resetChain: true });
     return { sessionId, agentName };
   },
 
@@ -128,8 +150,20 @@ export const forumMentionRunner = {
    * arrive. The auto-reply queue wants the opposite: it runs one mention at a time, in the order
    * they were written, and each agent must see the previous one's posted reply before it starts. So
    * `done` is offered rather than imposed — it settles when the reply has been posted back.
+   *
+   * `resetChain` says this run begins a summons chain instead of continuing the one it answers. The
+   * operator's Run and the sweeper both pass it; the immediate auto-reply queue does not, because a
+   * summons answered the moment it was written *is* the next link in that chain.
    */
-  async begin(mentionId: string): Promise<{ sessionId: string; agentName: string; done: Promise<void> }> {
+  /** True while a run for this mention is under way — the sweeper's cheap pre-filter. */
+  isInFlight(mentionId: string): boolean {
+    return inFlight.has(mentionId);
+  },
+
+  async begin(
+    mentionId: string,
+    opts: { resetChain?: boolean; reason?: AutoReplyReason | 'manual' } = {},
+  ): Promise<{ sessionId: string; agentName: string; done: Promise<void> }> {
     const mention = await forumMentionRepository.findById(mentionId);
     if (!mention) throw new MentionRunError('no such mention', 404);
     if (mention.target.kind !== 'agent' || !mention.target.agent_id) {
@@ -156,6 +190,7 @@ export const forumMentionRunner = {
       origin: 'forum',
       forumThreadId: mention.thread_id,
       forumMentionId: mention._id,
+      forumChainReset: opts.resetChain === true,
     });
     const sessionId = String(session._id);
 
@@ -170,7 +205,20 @@ export const forumMentionRunner = {
       origin: 'forum',
     });
 
-    const done = this.drive(mention, post.body, sessionId, agent.name, String(agent._id))
+    const reason = opts.reason ?? 'manual';
+    // The board's own "this just started moving", so the Forum page can show a pending mention
+    // becoming a live run without refetching. `conversation:session_created` says a session appeared;
+    // only this says which mention it answers and whether anybody asked for it.
+    eventBus.emit('forum:mention_run', {
+      mentionId: String(mention._id),
+      threadId: String(mention.thread_id),
+      sessionId,
+      agentName: agent.name,
+      authorName: mention.author.display_name,
+      reason,
+    });
+
+    const done = this.drive(mention, post.body, sessionId, agent.name, String(agent._id), reason)
       .catch((err) => log.error({ err: String(err), mentionId }, 'mention run failed'))
       .finally(() => inFlight.delete(String(mention._id)));
 
@@ -188,9 +236,10 @@ export const forumMentionRunner = {
     sessionId: string,
     agentName: string,
     agentId: string,
+    reason: AutoReplyReason | 'manual' = 'manual',
   ): Promise<void> {
     const ctx: EventContext = { sessionId, agentId, agentName, depth: 0 };
-    const text = brief(mention, postBody);
+    const text = brief(mention, postBody, reason);
     // Anything this agent posts on the thread from here on is its reply. Taken before the first
     // message rather than after the run, so a tool call that lands early still counts.
     const runStartedAt = new Date();

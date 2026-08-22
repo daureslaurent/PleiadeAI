@@ -12,10 +12,23 @@ import { alertEngine } from '../alerts/AlertEngine';
 import { conversationGenService } from '../domain/conversation-gen/conversation-gen.service';
 import { generatorRepository } from '../domain/conversation-gen/generator.repository';
 import type { ConversationGeneratorDoc } from '../domain/conversation-gen/generator.model';
+import { forumSweeper } from '../domain/forum/forum-sweeper';
+import { settingsService } from '../domain/settings/settings.service';
 
 const log = createLogger('agenda');
 
 export const AUTONOMOUS_RUN_JOB = 'agent:autonomous_run';
+
+/**
+ * The forum's fallback clock (`FORUM_AUTORUN_PLAN.md`).
+ *
+ * Through Agenda rather than an in-process interval, which is the house rule for anything
+ * cron-shaped: the schedule survives a restart with no bespoke `restore()`, the job is locked in
+ * Mongo so nothing can double-sweep, and the operator can see it in `agenda_jobs` beside every other
+ * scheduled thing. `TimerScheduler`'s in-process timers are the exception, and only because a stream
+ * ticks in seconds — a five-minute sweep has no such excuse.
+ */
+export const FORUM_SWEEP_JOB = 'forum:mention_sweep';
 
 /** Scheduled execution of a saved flow (FLOWS_PLAN.md §7). */
 export const FLOW_RUN_JOB = 'flow:scheduled_run';
@@ -214,12 +227,20 @@ export async function setupAgenda(): Promise<Agenda> {
     await conversationGenService.runOnce(generatorId);
   });
 
+  // The handler is only the clock: it hands the queue one mention and returns in milliseconds. It
+  // must never await the turn — an inference run can outlast the job's lock, and a scheduler that
+  // re-fires a job it believes died would start a second turn on the same mention.
+  agenda.define(FORUM_SWEEP_JOB, async () => {
+    await forumSweeper.tick();
+  });
+
   agenda.on('fail', (err: Error, job: Job) => {
     log.error({ err, job: job.attrs.name }, 'agenda job failed');
   });
 
   await agenda.start();
   await syncConversationGenerators();
+  await syncForumSweep();
   log.info('agenda started');
   return agenda;
 }
@@ -263,4 +284,23 @@ export async function syncConversationGenerators(): Promise<void> {
   const enabled = await generatorRepository.listEnabled();
   for (const gen of enabled) await scheduleGenerator(gen);
   log.info({ count: enabled.length }, 'conversation generators synced');
+}
+
+/**
+ * (Re)register the forum sweep tick. Cancel-then-create, like the generators, so a changed interval
+ * takes effect without a restart and a restart cannot leave two ticks racing.
+ *
+ * Registered whether or not sweeping is enabled: the switch is re-read inside `tick()`, so toggling
+ * it in Settings takes effect on the next tick rather than needing the schedule rebuilt. `skipImmediate`
+ * so saving an unrelated setting never fires a sweep on the spot.
+ */
+export async function syncForumSweep(): Promise<void> {
+  const a = getAgenda();
+  await a.cancel({ name: FORUM_SWEEP_JOB });
+  const settings = await settingsService.get();
+  const minutes = Math.max(1, settings.forum_sweep_interval_minutes ?? 5);
+  const job = a.create(FORUM_SWEEP_JOB, {});
+  job.repeatEvery(`${minutes} minutes`, { skipImmediate: true });
+  await job.save();
+  log.info({ every: minutes, enabled: settings.forum_sweep_enabled === true }, 'forum sweep scheduled');
 }

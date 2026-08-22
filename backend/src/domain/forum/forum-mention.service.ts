@@ -9,7 +9,7 @@ import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumSummonBlock } from './forum-mention.model';
 import type { ForumAuthor } from './forum-author';
 import { snippetOf } from './forum-index.service';
-import type { ForumThreadDoc } from './forum-thread.model';
+import type { ForumThreadDoc, ForumWorkState } from './forum-thread.model';
 import type { ForumPostDoc } from './forum-post.model';
 
 const log = createLogger('forum-mentions');
@@ -130,7 +130,11 @@ export async function summonContextFor(sessionId: string): Promise<SummonContext
       mentionId: String(mention._id),
       wokenBy: mention.author,
       threadId: String(mention.thread_id),
-      depth: mention.chain_depth ?? 0,
+      // A run the operator or the sweeper started answers this mention without continuing its chain
+      // — neither is a reply to anybody, the same reading a cron job and an auto-mode tick already
+      // get. `wokenBy` and `threadId` deliberately stay: starting a fresh chain must not also switch
+      // off the back-summon guard, which is about *who* is being bounced, not how deep.
+      depth: session.forum_chain_reset ? 0 : (mention.chain_depth ?? 0),
     };
   } catch (err) {
     // A depth we cannot read is treated as a root, which is the permissive answer — but the pair
@@ -192,6 +196,13 @@ export async function planSummons(input: {
   context?: SummonContext;
   /** The thread being posted to — needed to tell a back-summon from an ordinary hand-off. */
   threadId?: string | null;
+  /**
+   * The work state this post sets, when it sets one. `done` or `blocked` makes the post a hand-back,
+   * which is the one case allowed to summon back the agent that woke you.
+   */
+  state?: ForumWorkState | 'none' | null;
+  /** How many files this post carries. Delivering something is also handing work back. */
+  attachmentCount?: number;
 }): Promise<SummonPlan> {
   const roster = await loadRoster();
   const settings = await settingsService.get();
@@ -219,6 +230,18 @@ export async function planSummons(input: {
   const bareSummons = input.author.kind === 'operator' || settings.forum_bare_mention_summons === true;
   const maxChain = Math.max(1, settings.forum_mention_max_chain ?? 4);
 
+  /**
+   * Is this post handing finished work back, rather than acknowledging?
+   *
+   * The distinction the back-summon guard could not previously make. Both look like "a reply to the
+   * agent that woke me", but one of them is the moment the asker has to run again — it commissioned
+   * this work and cannot act on it until something wakes it — and the other is the salutation that
+   * ate a thread. A state transition and an attachment are the two things a courtesy reply does not
+   * have, and both are structured: an agent cannot produce either by reflex.
+   */
+  const handBack =
+    input.state === 'done' || input.state === 'blocked' || (input.attachmentCount ?? 0) > 0;
+
   const mentions: PlannedMention[] = parsed.map(({ target, explicit }) => {
     // The operator is addressable but never runnable — @Operator is a question for a person.
     // An agent excluded from auto-reply is *not* handled here: it was still genuinely asked, and
@@ -233,11 +256,18 @@ export async function planSummons(input: {
     // thread A is watching. Waking A *again* from that reply is the two-post cycle that ate a whole
     // thread's budget on prod. Only on the same thread: summoning A on a different thread is a
     // genuine hand-off, not a bounce.
+    //
+    // Unless B is handing the finished work back, which is the case this guard was refusing on the
+    // live board: A commissioned the work and will not run again on its own, so "done" said only to
+    // a thread is done nobody acts on. The old answer — go and post it on some other thread — asked
+    // a model to route around a rule it could not see; delivering it where it was asked for and
+    // waking the asker is what everybody was trying to do anyway. The pair cap remains the leash.
     if (
       ctx.mentionId &&
       isSame(ctx.wokenBy, asAuthor(target)) &&
       input.threadId &&
-      ctx.threadId === String(input.threadId)
+      ctx.threadId === String(input.threadId) &&
+      !handBack
     ) {
       return { target, summon: true, blocked: 'back_summon' };
     }
@@ -253,7 +283,7 @@ export async function planSummons(input: {
 export function blockReason(block: ForumSummonBlock, name: string): string {
   switch (block) {
     case 'back_summon':
-      return `you are answering @${name} — your reply already reaches them on this thread. Summon them again only from a different thread, or leave it to them to pick up.`;
+      return `you are answering @${name} — your reply already reaches them on this thread, and they will read it when they next run. If you are handing them finished work rather than acknowledging, say so: reply with \`state\` set to "done" (or "blocked", if you are stuck), or attach what you produced, and they are woken to pick it up.`;
     case 'chain_depth':
       return `this exchange is already several hand-offs deep with no human in it. @${name} was told, but will answer when the operator runs it.`;
     case 'pair_rate':

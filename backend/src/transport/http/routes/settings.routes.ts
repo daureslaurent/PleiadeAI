@@ -5,6 +5,7 @@ import { endpointHealth } from '../../../inference/endpoint-health';
 import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
 import { applyTelegramConfig } from '../../../telegram/telegram-config';
 import { telegramBot } from '../../../telegram/TelegramBot';
+import { syncForumSweep } from '../../../autonomy/agenda.setup';
 import { createLogger } from '../../../config/logger';
 
 const log = createLogger('settings-routes');
@@ -101,6 +102,26 @@ settingsRouter.put('/', async (req, res) => {
     patch.forum_mention_max_chain = Math.min(12, Math.max(1, Number(b.forum_mention_max_chain) || 4));
   if (b.forum_mention_max_per_pair !== undefined)
     patch.forum_mention_max_per_pair = Math.min(20, Math.max(1, Number(b.forum_mention_max_per_pair) || 2));
+  // The fallback clock (`FORUM_AUTORUN_PLAN.md`) and the project-wide budget. Same rule as above:
+  // whitelisted here or the field silently never persists.
+  if (b.forum_sweep_enabled !== undefined) patch.forum_sweep_enabled = Boolean(b.forum_sweep_enabled);
+  if (b.forum_sweep_interval_minutes !== undefined)
+    patch.forum_sweep_interval_minutes = Math.min(
+      1440,
+      Math.max(1, Number(b.forum_sweep_interval_minutes) || 5),
+    );
+  if (b.forum_sweep_min_age_minutes !== undefined)
+    patch.forum_sweep_min_age_minutes = Math.min(
+      1440,
+      Math.max(1, Number(b.forum_sweep_min_age_minutes) || 5),
+    );
+  if (b.forum_sweep_max_age_hours !== undefined)
+    patch.forum_sweep_max_age_hours = Math.min(720, Math.max(1, Number(b.forum_sweep_max_age_hours) || 12));
+  if (b.forum_auto_reply_max_per_project !== undefined)
+    patch.forum_auto_reply_max_per_project = Math.max(
+      1,
+      Number(b.forum_auto_reply_max_per_project) || 40,
+    );
   // Post-turn memory distillation (docs/memory-souvenirs.md).
   if (b.memory_distill_enabled !== undefined)
     patch.memory_distill_enabled = Boolean(b.memory_distill_enabled);
@@ -155,6 +176,12 @@ settingsRouter.put('/', async (req, res) => {
   if (patch.telegram_bot_token !== undefined || patch.telegram_chat_ids !== undefined) {
     applyTelegramConfig(updated);
     void telegramBot.restart().catch((err) => log.error({ err }, 'telegram bot restart failed'));
+  }
+  // Re-arm the forum sweep only when its *cadence* changed. The enable switch is re-read inside the
+  // tick, so toggling it needs no reschedule — rebuilding the job for that would just move the next
+  // sweep a full interval away every time the operator flipped it.
+  if (patch.forum_sweep_interval_minutes !== undefined) {
+    void syncForumSweep().catch((err) => log.error({ err }, 'forum sweep reschedule failed'));
   }
   res.json(updated);
 });

@@ -164,6 +164,41 @@ export const forumService = {
   },
 
   /**
+   * Validate a hub reference — the thread whose project this one belongs to.
+   *
+   * `undefined` when the caller never mentioned it (leave whatever is there alone), `null` when it
+   * asked to clear it, otherwise the hub's id.
+   *
+   * The refusal that matters is the last one: a hub may not itself have a hub. One level is not a
+   * simplification to revisit later — it is what makes a cycle impossible by construction rather
+   * than by a graph walk that has to be right every time. A thread pointed at a child is redirected
+   * to that child's hub, which is what the caller meant anyway.
+   */
+  async resolveHub(
+    raw: string | null | undefined,
+    selfId: string | null,
+  ): Promise<Types.ObjectId | null | undefined> {
+    if (raw === undefined) return undefined;
+    const id = String(raw ?? '').trim();
+    if (!id || id === 'none') return null;
+    if (selfId && id === selfId) throw new ForumRuleError('a thread cannot be its own hub', 400);
+
+    const hub = await forumThreadRepository.findById(id);
+    if (!hub) throw new ForumRuleError(`no such thread: "${id}" — pass the hub thread's id`, 404);
+    if (hub.status === 'archived') {
+      throw new ForumRuleError(`that hub thread is archived — point at the project's live hub`, 409);
+    }
+    // Already inside a project: adopt its hub rather than building a chain of them.
+    if (hub.hub_thread_id) {
+      if (selfId && String(hub.hub_thread_id) === selfId) {
+        throw new ForumRuleError('a thread cannot be its own hub', 400);
+      }
+      return hub.hub_thread_id;
+    }
+    return hub._id;
+  },
+
+  /**
    * Open a thread and write its first post in one call. The opening post is a real `forum_posts`
    * document rather than a `body` field on the thread, so it is searchable, quotable, editable and
    * countable by exactly the same code as every reply.
@@ -178,13 +213,19 @@ export const forumService = {
     byAgent: boolean;
     /** Who the opening post addresses and who it summons (§11.7), decided by the caller. */
     summons?: SummonPlan;
+    /** The project's hub thread, when this one is opened as part of a project. */
+    hubThreadId?: string | null;
   }): Promise<{ thread: ForumThreadDoc; post: ForumPostDoc }> {
     const category = await this.requirePostableCategory(input.category, input.byAgent);
+    // Resolved before the thread exists, so a bad hub reference refuses the whole call rather than
+    // leaving an orphan thread behind it.
+    const hub = await this.resolveHub(input.hubThreadId, null);
     const thread = await forumThreadRepository.create({
       category_id: category._id,
       title: input.title,
       author: input.author,
       tags: input.tags ?? [],
+      hub_thread_id: hub ?? null,
     });
     const post = await this.addPost({
       thread,
@@ -332,7 +373,12 @@ export const forumService = {
   async setWorkState(
     threadId: string,
     actor: ForumAuthor,
-    patch: { state?: ForumWorkState | null; assignee?: ForumAuthor | null },
+    patch: {
+      state?: ForumWorkState | null;
+      assignee?: ForumAuthor | null;
+      /** Raw hub reference from the caller: an id, `'none'` to clear, absent to leave alone. */
+      hubThreadId?: string | null;
+    },
   ): Promise<ForumThreadDoc> {
     const thread = await forumThreadRepository.findById(threadId);
     if (!thread) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);
@@ -355,6 +401,12 @@ export const forumService = {
     // `null` clears the owner, which is a real intention ("nobody is on this any more"), so the key
     // being present matters more than its value being truthy.
     if (patch.assignee !== undefined) update.assignee = patch.assignee;
+    // Deliberately behind the same author-or-assignee check above rather than its own: saying which
+    // project a thread belongs to is the same kind of act as saying who owns it and where it has got
+    // to, and a second authorisation path for a third bookkeeping field is one to get wrong.
+    if (patch.hubThreadId !== undefined) {
+      update.hub_thread_id = await this.resolveHub(patch.hubThreadId, String(thread._id));
+    }
 
     const updated = await forumThreadRepository.update(threadId, update);
     if (!updated) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);

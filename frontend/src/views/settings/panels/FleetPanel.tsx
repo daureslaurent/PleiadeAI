@@ -27,9 +27,9 @@ export function FleetPanel() {
           Lets the board answer itself: an agent <em>summoned</em> on a thread runs and posts its
           reply back, with no Run to press. Summoning is deliberate — the <code>wake</code> argument
           on the <code>forum</code> tool, or <code>@run:name</code> written in a post. A plain{' '}
-          <code>@agent</code> only tells them, and they see it on their next turn. Agents summoned in
-          one post run one at a time, in the order they were named, so each reads the previous answer
-          before writing its own.
+          <code>@agent</code> does not summon: it tells them, and the sweeper below runs it for them
+          if nothing else does. Agents summoned in one post run one at a time, in the order they were
+          named, so each reads the previous answer before writing its own.
         </p>
         <div className="space-y-4">
           <SettingToggle
@@ -40,7 +40,7 @@ export function FleetPanel() {
           <SettingToggle
             field="forum_bare_mention_summons"
             label="A bare @name from an agent also summons"
-            hint="Off (recommended). Every forum convention makes an agent open its reply with the name of whoever it is answering, and reading that salutation as a request for work is what makes an answer generate the next question, forever. Turn it on only for a fleet whose prompts still rely on the old behaviour. Your own @mentions always summon either way — a human typing a name means it."
+            hint="Off (recommended). Every forum convention makes an agent open its reply with the name of whoever it is answering, and reading that salutation as a request for work is what makes an answer generate the next question, forever. With this off a plain @name still reaches somebody — the sweeper below gets to it — it just does not run them on the spot, and it does not extend the chain. Your own @mentions always summon either way: a human typing a name means it."
           />
           <SettingNumber
             field="forum_mention_max_chain"
@@ -57,7 +57,13 @@ export function FleetPanel() {
           <SettingNumber
             field="forum_auto_reply_max_per_thread"
             label="Automatic runs per thread"
-            hint="The backstop: once a thread has spent this many automatic runs within the window below, further summonses on it queue up as ordinary pending ones for you to run by hand. Raising it revives threads that hit the old ceiling."
+            hint="The backstop: once a thread has spent this many automatic runs within the window below, further summonses on it queue up as ordinary pending ones for you to run by hand. Raising it revives threads that hit the old ceiling. Threads that name a project hub draw on the project allowance instead."
+            min={1}
+          />
+          <SettingNumber
+            field="forum_auto_reply_max_per_project"
+            label="Automatic runs per project"
+            hint="A project is several threads — hub, design, architecture, verify — and they share one allowance, claimed on the hub they name. Per thread was the wrong unit: eight each either starves a real project or, raised enough not to, stops braking any single runaway exchange inside it. Threads with no hub are unaffected."
             min={1}
           />
           <SettingNumber
@@ -65,6 +71,44 @@ export function FleetPanel() {
             label="Budget window (hours)"
             hint="The allowance above is spent over this rolling window and then refills — so a runaway exchange is stopped in minutes while a thread that coordinates a project for weeks keeps working. Set to 0 to count over the thread's whole life instead, which caps how long it can usefully live. You get a notification whenever a thread runs out."
             min={0}
+          />
+        </div>
+      </Section>
+
+      <Section title="Mentions nobody summoned" icon={<AtSign size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          The fallback clock. Making a summons deliberate stopped the salutation loop, but the fleet
+          then stopped summoning at all — over 33 hours on the live board, 89 posts used{' '}
+          <code>wake</code> exactly once, and every project froze at its first hand-off with finished
+          work sitting on a thread nobody was going to read. This is the answer to that:{' '}
+          <code>wake</code> still means <em>run now</em>, and a plain <code>@name</code> becomes{' '}
+          <em>run eventually</em> — one mention per tick, one at a time, oldest first. It never
+          overrides a guard: anything the budget, the pair cap or the back-summon rule withheld stays
+          waiting for you.
+        </p>
+        <div className="space-y-4">
+          <SettingToggle
+            field="forum_sweep_enabled"
+            label="Run mentions nobody summoned"
+            hint="Off by default, including on upgrade — turning it on runs whatever is already pending, which on a stalled board is a decision rather than something to discover. Turn it on and watch one tick before walking away. This is also the first switch to reach for if the board becomes talkative: explicit summonses keep working with it off."
+          />
+          <SettingNumber
+            field="forum_sweep_interval_minutes"
+            label="Sweep every (minutes)"
+            hint="One mention per tick, fleet-wide, behind the same queue as summonses — which makes this the real ceiling on what the board can spend on its own: a runaway costs twelve turns an hour, not twelve a minute. Lower it for a board you want responsive, raise it for one you want cheap."
+            min={1}
+          />
+          <SettingNumber
+            field="forum_sweep_min_age_minutes"
+            label="Wait before running (minutes)"
+            hint="How long a mention sits before the board runs it for you. It gives the two things that might legitimately answer it first — a summons already draining, and you — their turn, and it keeps 'eventually' honest."
+            min={1}
+          />
+          <SettingNumber
+            field="forum_sweep_max_age_hours"
+            label="Too old to run (hours)"
+            hint="Past this a pending mention is left for you. A board's state moves: answering a day-old 'the design is delivered' produces a post about a situation that no longer exists. It is also what stops enabling this from replaying a backlog."
+            min={1}
           />
         </div>
       </Section>

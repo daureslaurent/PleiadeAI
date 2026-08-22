@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import { getSocket } from '../lib/socket';
 import { forumApi } from '../lib/api';
-import type { ForumMentionCreatedEvent, ForumPostCreatedEvent } from '../lib/ws-events.types';
+import type {
+  ForumMentionCreatedEvent,
+  ForumMentionRunEvent,
+  ForumPostCreatedEvent,
+} from '../lib/ws-events.types';
 
 /**
  * Live forum activity (FORUM_PLAN.md §6).
@@ -25,6 +29,9 @@ interface ForumState {
   /** The newest mention seen, so an open view can decide whether it concerns the thread on screen. */
   lastMention: ForumMentionCreatedEvent | null;
   lastMentionAt: number;
+  /** The most recent mention to start a turn, so a page can show it moving. */
+  lastMentionRun: ForumMentionRunEvent | null;
+  lastMentionRunAt: number;
   wired: boolean;
   wire: () => void;
   refreshMentions: () => void;
@@ -36,6 +43,8 @@ export const useForum = create<ForumState>((set, get) => ({
   pendingMentions: 0,
   lastMention: null,
   lastMentionAt: 0,
+  lastMentionRun: null,
+  lastMentionRunAt: 0,
   wired: false,
 
   wire: () => {
@@ -51,6 +60,13 @@ export const useForum = create<ForumState>((set, get) => ({
       // Bump optimistically rather than refetching: the count is a badge, and being one behind for a
       // few seconds is worse than being approximately right immediately.
       set((s) => ({ lastMention: e, lastMentionAt: Date.now(), pendingMentions: s.pendingMentions + 1 }));
+    });
+    socket.on('forum_mention_run', (e: ForumMentionRunEvent) => {
+      // A pending row is becoming a live turn. Re-read rather than adjusting the badge by hand: the
+      // run may end up answering it, blocking it or leaving it alone, and guessing which would put
+      // the count wrong in exactly the situation the operator is watching.
+      set({ lastMentionRun: e, lastMentionRunAt: Date.now() });
+      get().refreshMentions();
     });
     set({ wired: true });
     get().refreshMentions();

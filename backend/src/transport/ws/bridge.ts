@@ -342,6 +342,12 @@ export function attachBridge(io: Server): void {
     io.to('forum').emit('forum_mention_created', { type: 'forum_mention_created', ...m });
   });
 
+  // ...and a mention starting its turn, so a pending row visibly becomes a run rather than changing
+  // silently under a page the operator is already looking at.
+  eventBus.on('forum:mention_run', (m) => {
+    io.to('forum').emit('forum_mention_run', { type: 'forum_mention_run', ...m });
+  });
+
   // --- Flows (FLOWS_PLAN.md §5) ---------------------------------------------------------------
   // A run's `ctx.sessionId` *is* its run id, so these relay through the same room machinery as chat —
   // and the Flow page, having joined that room, also receives the agent/tool/media events emitted by

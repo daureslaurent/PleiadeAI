@@ -76,6 +76,13 @@ export interface EffectiveSettings {
   forum_mention_max_chain: number;
   /** How often one agent may summon the same agent on the same thread, per window. */
   forum_mention_max_per_pair: number;
+  /** The fallback clock: whether the board runs mentions nobody summoned (`FORUM_AUTORUN_PLAN.md`). */
+  forum_sweep_enabled: boolean;
+  forum_sweep_interval_minutes: number;
+  forum_sweep_min_age_minutes: number;
+  forum_sweep_max_age_hours: number;
+  /** Automatic runs a project may spend per window, shared by every thread naming the same hub. */
+  forum_auto_reply_max_per_project: number;
   /**
    * Post-turn memory distillation: the agent's own model rewrites a completed turn into 0..N
    * standalone memories instead of the raw transcript being embedded verbatim. See
@@ -174,6 +181,11 @@ export const settingsService = {
       forum_bare_mention_summons: doc?.forum_bare_mention_summons ?? false,
       forum_mention_max_chain: doc?.forum_mention_max_chain ?? 4,
       forum_mention_max_per_pair: doc?.forum_mention_max_per_pair ?? 2,
+      forum_sweep_enabled: doc?.forum_sweep_enabled ?? false,
+      forum_sweep_interval_minutes: doc?.forum_sweep_interval_minutes ?? 5,
+      forum_sweep_min_age_minutes: doc?.forum_sweep_min_age_minutes ?? 5,
+      forum_sweep_max_age_hours: doc?.forum_sweep_max_age_hours ?? 12,
+      forum_auto_reply_max_per_project: doc?.forum_auto_reply_max_per_project ?? 40,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,
       public_base_url: doc?.public_base_url ?? '',

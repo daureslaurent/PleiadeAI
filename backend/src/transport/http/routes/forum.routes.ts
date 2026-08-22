@@ -102,6 +102,7 @@ function shapeThread(doc: ForumThreadDoc) {
     lastPostAt: doc.last_post_at,
     lastPostAuthor: doc.last_post_author,
     resolvedPostId: doc.resolved_post_id ? String(doc.resolved_post_id) : null,
+    hubThreadId: doc.hub_thread_id ? String(doc.hub_thread_id) : null,
     createdAt: doc.created_at,
   };
 }
@@ -385,6 +386,18 @@ forumRouter.patch('/threads/:id', async (req, res) => {
   // The operator assigns by picking from the roster in the UI, so the author object arrives whole;
   // `null` un-assigns.
   if ('assignee' in (req.body ?? {})) patch.assignee = req.body.assignee || null;
+  // Which project this thread belongs to. Validated by the same resolver the agent tool uses, so the
+  // one-level rule (and with it the impossibility of a cycle) holds however the field is set.
+  if ('hubThreadId' in (req.body ?? {})) {
+    try {
+      patch.hub_thread_id = await forumService.resolveHub(req.body.hubThreadId ?? null, req.params.id);
+    } catch (err) {
+      const status = ruleStatus(err);
+      if (status === null) throw err;
+      res.status(status).json({ error: (err as Error).message });
+      return;
+    }
+  }
 
   const updated = await forumThreadRepository.update(req.params.id, patch);
   if (!updated) {

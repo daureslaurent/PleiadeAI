@@ -1,11 +1,22 @@
+import type { Types } from 'mongoose';
 import { createLogger } from '../../config/logger';
 import { notificationRepository } from '../notifications/notification.repository';
 import { settingsService } from '../settings/settings.service';
 import { forumMentionRepository } from './forum-mention.repository';
 import { forumMentionRunner } from './forum-mention-runner';
-import { autoRunWindowMs, forumThreadRepository } from './forum-thread.repository';
+import { autoRunWindowMs, budgetTargetFor, forumThreadRepository } from './forum-thread.repository';
 
 const log = createLogger('forum-auto-reply');
+
+/**
+ * Why this mention is being run.
+ *
+ * `summon` — somebody asked for a turn (`wake`, `@run:`, or the operator naming somebody), and the
+ * run happens the moment the post lands. `sweep` — nobody asked, the mention has been sitting
+ * unanswered, and the board is running it so the work does not stop. The two differ in what they are
+ * allowed to run and in what depth the resulting posts sit at, and nowhere else.
+ */
+export type AutoReplyReason = 'summon' | 'sweep';
 
 /** One mention waiting for its turn to run, with enough context to log why it did or didn't. */
 interface Queued {
@@ -15,6 +26,7 @@ interface Queued {
   agentName: string;
   /** Who summoned it — half of the pair the rate guard counts. */
   authorName: string;
+  reason: AutoReplyReason;
 }
 
 /**
@@ -68,6 +80,7 @@ export const forumAutoReply = {
         threadTitle: row.threadTitle,
         agentName: row.agentName,
         authorName: row.authorName,
+        reason: 'summon',
       });
     }
     log.info(
@@ -75,6 +88,34 @@ export const forumAutoReply = {
       'mentions queued for auto-reply',
     );
     void drain();
+  },
+
+  /**
+   * The sweeper's door onto the same queue (`FORUM_AUTORUN_PLAN.md`).
+   *
+   * Deliberately the same queue and the same `runOne`, not a parallel path: every guard that makes
+   * an automatic run safe — the pair cap, the budget claim, the thread-open check, the yield to a
+   * live operator chat — has to apply identically whether an agent asked for the turn or the board
+   * decided to give it one. A second drain loop would be a second place for those to drift.
+   *
+   * Returns false when the mention is already waiting, which is the cheap half of the double-run
+   * guard; the durable half is the `session_id` filter on the candidate query.
+   */
+  offer(row: Omit<Queued, 'reason'>): boolean {
+    if (queue.some((q) => q.mentionId === row.mentionId)) return false;
+    queue.push({ ...row, reason: 'sweep' });
+    void drain();
+    return true;
+  },
+
+  /**
+   * True while anything is queued or running.
+   *
+   * The sweeper's overlap guard: a fan-out of three summonses drains serially and each one is a full
+   * turn, so a tick landing in the middle of that should stand aside rather than add a fourth.
+   */
+  isBusy(): boolean {
+    return draining || queue.length > 0;
   },
 };
 
@@ -111,9 +152,14 @@ async function runOne(item: Queued): Promise<void> {
   const mention = await forumMentionRepository.findById(item.mentionId);
   // Already answered (the operator got there first), dismissed, or the post was deleted under it.
   if (!mention || mention.status !== 'pending') return;
+  // A guard withheld this one and the operator was told; nothing automatic may overturn that.
+  if (mention.run_blocked) return;
   // A summons the plan already withheld never reaches the queue; this covers the row being
-  // re-examined after the fact, and costs one field read.
-  if (!mention.summon || mention.run_blocked) return;
+  // re-examined after the fact, and costs one field read. A swept row is by definition not a
+  // summons — that is the whole point of sweeping it — so the check applies only to the other path.
+  if (item.reason === 'summon' && !mention.summon) return;
+  // Something ran it while it waited its turn: the operator's Run, or an earlier sweep.
+  if (item.reason === 'sweep' && mention.session_id) return;
 
   const thread = await forumThreadRepository.findById(item.threadId);
   if (!thread || thread.status !== 'open') {
@@ -137,10 +183,14 @@ async function runOne(item: Queued): Promise<void> {
       targetAgentId,
       windowStart(autoRunWindowMs(settings.forum_auto_reply_window_hours)),
     );
-    // `>` not `>=`: this mention is itself already counted, so the cap is "this many, then stop".
-    if (seen > pairCap) {
+    // `>` not `>=` *when this row is already inside the count* — a summons is, and so is anything
+    // that has already been given a session. A swept bare mention is neither at this instant, so it
+    // has to add itself or every pair would get one free run beyond the cap, on precisely the path
+    // with no chain ceiling behind it.
+    const selfCounted = mention.summon === true || mention.session_id != null;
+    if (seen + (selfCounted ? 0 : 1) > pairCap) {
       log.warn(
-        { thread: item.threadTitle, from: item.authorName, to: item.agentName, seen, pairCap },
+        { thread: item.threadTitle, from: item.authorName, to: item.agentName, seen, pairCap, reason: item.reason },
         'pair has summoned each other too often on this thread — mention left pending for a manual run',
       );
       await forumMentionRepository.update(mention._id, { run_blocked: 'pair_rate' });
@@ -151,24 +201,39 @@ async function runOne(item: Queued): Promise<void> {
   // The loop guard. Claimed *before* the run, not after, so a run that dies on an unreachable
   // endpoint still spends its unit — otherwise a failing pair of agents would retry each other
   // forever, which is the exact shape the budget exists to stop.
-  const budget = settings.forum_auto_reply_max_per_thread;
+  // A thread inside a project draws on the project's allowance, claimed on the hub, so opening a
+  // fifth thread for the same work does not buy four more budgets.
+  const target = budgetTargetFor(thread, settings);
   const windowMs = autoRunWindowMs(settings.forum_auto_reply_window_hours);
-  const spent = await forumThreadRepository.claimAutoRun(thread._id, budget, windowMs);
+  const spent = await forumThreadRepository.claimAutoRun(target.id, target.budget, windowMs);
   if (spent === null) {
     log.warn(
-      { threadId: item.threadId, title: item.threadTitle, budget, windowMs },
+      {
+        threadId: item.threadId,
+        title: item.threadTitle,
+        budgetThreadId: String(target.id),
+        isProject: target.isProject,
+        budget: target.budget,
+        windowMs,
+        reason: item.reason,
+      },
       'thread has spent its auto-reply budget — mention left pending for a manual run',
     );
     await forumMentionRepository.update(mention._id, { run_blocked: 'budget' });
-    await notifyExhausted(item, budget, windowMs);
+    await notifyExhausted(item, target, windowMs);
     return;
   }
 
   log.info(
-    { agent: item.agentName, thread: item.threadTitle, spent, budget },
+    { agent: item.agentName, thread: item.threadTitle, spent, budget: target.budget, reason: item.reason },
     'auto-replying to mention',
   );
-  const run = await forumMentionRunner.begin(item.mentionId);
+  // A swept run begins a chain rather than continuing one — nobody asked for it, which is the same
+  // reading a cron start and an auto-mode tick already get.
+  const run = await forumMentionRunner.begin(item.mentionId, {
+    resetChain: item.reason === 'sweep',
+    reason: item.reason,
+  });
   // Waiting is the point: the next agent named in the same post must read this answer on the thread
   // before it forms its own.
   await run.done;
@@ -185,19 +250,37 @@ async function runOne(item: Queued): Promise<void> {
  * One alert per window, claimed atomically on the thread, so a thread being mentioned every minute
  * does not fill the inbox with the same sentence.
  */
-async function notifyExhausted(item: Queued, budget: number, windowMs: number): Promise<void> {
-  if (!(await forumThreadRepository.claimAutoRunNotice(item.threadId))) return;
+async function notifyExhausted(
+  item: Queued,
+  target: { id: Types.ObjectId; budget: number; isProject: boolean },
+  windowMs: number,
+): Promise<void> {
+  // Claimed on whichever thread carries the counter, so a project raises one alert rather than one
+  // per child thread.
+  if (!(await forumThreadRepository.claimAutoRunNotice(String(target.id)))) return;
   const window = windowMs > 0 ? `in the last ${Math.round(windowMs / 3_600_000)}h` : 'in total';
+
+  // Naming the *project* matters more than it looks: told only the child thread's name, the operator
+  // opens it, sees `auto_run_count: 0` on it, and concludes the budget is broken.
+  const hub = target.isProject ? await forumThreadRepository.findById(String(target.id)) : null;
+  const subject = hub ? `project "${hub.title}"` : `"${item.threadTitle}"`;
+  const scope = hub
+    ? `Every thread in it shares one allowance, so opening another thread under it does not buy more. `
+    : '';
+
   await notificationRepository
     .create({
-      title: `Forum thread out of auto-reply budget: ${item.threadTitle}`,
+      title: hub
+        ? `Forum project out of auto-reply budget: ${hub.title}`
+        : `Forum thread out of auto-reply budget: ${item.threadTitle}`,
       content:
-        `"${item.threadTitle}" has spent its ${budget} automatic replies ${window}, so ` +
-        `\`${item.authorName}\` → \`@${item.agentName}\` was not woken and its mention is waiting. ` +
+        `${subject} has spent its ${target.budget} automatic replies ${window}, so ` +
+        `\`${item.authorName}\` → \`@${item.agentName}\` on "${item.threadTitle}" was not woken and ` +
+        `its mention is waiting. ${scope}` +
         'Nothing is lost — run the mention by hand from the thread, or raise the budget in Settings. ' +
         'If those two are paging each other in circles here, that is what this limit caught.',
       kind: 'forum_thread',
-      ref_id: item.threadId,
+      ref_id: String(target.id),
     })
     .catch((err) => log.error({ err: String(err), threadId: item.threadId }, 'exhaustion alert failed'));
 }

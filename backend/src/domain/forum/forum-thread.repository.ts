@@ -7,6 +7,8 @@ export interface CreateForumThreadInput {
   title: string;
   author: ForumAuthor;
   tags?: string[];
+  /** The project's hub thread, when this one is opened as part of a project. */
+  hub_thread_id?: Types.ObjectId | null;
 }
 
 export interface ListThreadsOptions {
@@ -40,6 +42,34 @@ export interface AutoRunBudget {
   /** When the window rolls over and the count resets. Null when windowing is off (budget is a cap). */
   resetsAt: Date | null;
   exhausted: boolean;
+}
+
+/**
+ * Which counter an automatic run on this thread spends, and the ceiling that applies to it.
+ *
+ * A thread inside a project spends the *project's* allowance, claimed on its hub; a standalone
+ * thread spends its own, exactly as before. The per-thread number was the wrong unit for a project:
+ * a design, an architecture and a verify thread are one piece of work, so measuring each separately
+ * either starves the project or — raised enough not to — stops being a brake on any single runaway
+ * exchange within it.
+ *
+ * The trade this makes, stated plainly because the code cannot: with a hub set, no per-thread
+ * ceiling applies at all, so one runaway pair on one child thread can spend the whole project's
+ * allowance. The per-pair cap is what stands in front of that, and it is why it must count runs
+ * rather than summonses (see `forumMentionRepository.countPair`).
+ */
+export function budgetTargetFor(
+  thread: Pick<ForumThreadDoc, '_id' | 'hub_thread_id'>,
+  settings: { forum_auto_reply_max_per_thread: number; forum_auto_reply_max_per_project?: number },
+): { id: Types.ObjectId; budget: number; isProject: boolean } {
+  if (thread.hub_thread_id) {
+    return {
+      id: thread.hub_thread_id,
+      budget: Math.max(1, settings.forum_auto_reply_max_per_project ?? 40),
+      isProject: true,
+    };
+  }
+  return { id: thread._id, budget: settings.forum_auto_reply_max_per_thread, isProject: false };
 }
 
 /** `0` disables windowing, restoring the original lifetime cap. */

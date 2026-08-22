@@ -61,6 +61,36 @@ export const forumMentionRepository = {
       .exec();
   },
 
+  /**
+   * The sweeper's candidates: pending mentions addressed to an agent that no guard has withheld,
+   * oldest first (`FORUM_AUTORUN_PLAN.md`).
+   *
+   * `run_blocked: null` is what keeps "the board stops and tells you" true. A row the budget, the
+   * pair cap or the back-summon guard withheld was a decision, and the operator was told about it;
+   * sweeping it up minutes later would quietly overturn that decision, which is the one behaviour
+   * nobody could debug.
+   *
+   * Bounded at both ends. `notBefore` stops a deploy resurrecting a week of mentions written under
+   * different assumptions; `notAfter` gives the immediate queue — and the operator — first refusal
+   * on anything just written.
+   */
+  sweepCandidates(opts: { notBefore: Date; notAfter: Date; limit?: number }): Promise<ForumMentionDoc[]> {
+    return ForumMentionModel.find({
+      status: 'pending',
+      'target.kind': 'agent',
+      run_blocked: null,
+      // Nothing has ever tried to run it. The durable half of the double-run guard: a row that
+      // carries a session was already given a turn — by the operator, by the queue, or by an earlier
+      // sweep — and if that turn produced no reply, retrying it on a timer would post twice as
+      // readily as it would recover. Left for the operator, who can see what the first one did.
+      session_id: null,
+      created_at: { $gte: opts.notBefore, $lte: opts.notAfter },
+    })
+      .sort({ created_at: 1 })
+      .limit(Math.max(1, Math.min(50, opts.limit ?? 20)))
+      .exec();
+  },
+
   /** Mentions on a set of posts — how a thread page paints its chips without a query per post. */
   listByPosts(postIds: Array<Types.ObjectId | string>): Promise<ForumMentionDoc[]> {
     const ids = postIds.map(String).filter((id) => Types.ObjectId.isValid(id));
@@ -69,12 +99,18 @@ export const forumMentionRepository = {
   },
 
   /**
-   * How many times `authorAgentId` has summoned `targetAgentId` on this thread since `since` — the
+   * How many times `authorAgentId` has *run* `targetAgentId` on this thread since `since` — the
    * direct-ping-pong signature, counted by name rather than by volume.
    *
    * The per-thread budget cannot see this: twenty runs spread over five agents relaying work is a
-   * project moving, and twenty runs between two agents is a loop. Only summonses count; being
-   * addressed was never going to run anything.
+   * project moving, and twenty runs between two agents is a loop.
+   *
+   * Counts exchanges rather than summonses. It used to require `summon: true`, which was the same
+   * thing right up until the sweeper started running bare mentions (`FORUM_AUTORUN_PLAN.md`): a pair
+   * addressing each other by name every few minutes would each time be swept, run, and counted by
+   * nothing — the one guard aimed at that exact shape, blind to it. A row that carries a
+   * `session_id` cost a turn, whoever or whatever started it, and that is what the cap is about.
+   * `$or` over one collection, so a row that is both is still one row.
    */
   countPair(threadId: string, authorAgentId: string, targetAgentId: string, since: Date | null): Promise<number> {
     if (!Types.ObjectId.isValid(threadId)) return Promise.resolve(0);
@@ -82,7 +118,7 @@ export const forumMentionRepository = {
       thread_id: new Types.ObjectId(threadId),
       'author.agent_id': authorAgentId,
       'target.agent_id': targetAgentId,
-      summon: true,
+      $or: [{ summon: true }, { session_id: { $ne: null } }],
     };
     if (since) filter.created_at = { $gte: since };
     return ForumMentionModel.countDocuments(filter).exec();

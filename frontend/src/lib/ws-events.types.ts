@@ -508,6 +508,21 @@ export interface ForumMentionCreatedEvent {
   createdAt: string;
 }
 
+/**
+ * A mention just started running (`FORUM_AUTORUN_PLAN.md`). `reason` says who decided: a `summon`
+ * was asked for, `manual` is the operator's Run, and `sweep` is the board getting to a mention
+ * nobody summoned — the one worth showing as it happens rather than discovering in a thread.
+ */
+export interface ForumMentionRunEvent {
+  type: 'forum_mention_run';
+  mentionId: string;
+  threadId: string;
+  sessionId: string;
+  agentName: string;
+  authorName: string;
+  reason: 'summon' | 'sweep' | 'manual';
+}
+
 export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
