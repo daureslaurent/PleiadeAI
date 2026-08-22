@@ -11,9 +11,15 @@ import { settingsService } from '../../../domain/settings/settings.service';
 import { forumPostRepository } from '../../../domain/forum/forum-post.repository';
 import { forumFileRepository } from '../../../domain/forum/forum-file.repository';
 import { forumService, ForumRuleError, type ForumSearchMode } from '../../../domain/forum/forum.service';
-import { OPERATOR_AUTHOR } from '../../../domain/forum/forum-author';
+import { OPERATOR_AUTHOR, type ForumAuthor } from '../../../domain/forum/forum-author';
 import { forumMentionRepository } from '../../../domain/forum/forum-mention.repository';
-import { forumMentionService } from '../../../domain/forum/forum-mention.service';
+import {
+  forumMentionService,
+  loadRoster,
+  planSummons,
+  summonsOutcome,
+  type SummonPlan,
+} from '../../../domain/forum/forum-mention.service';
 import { forumMentionRunner, MentionRunError } from '../../../domain/forum/forum-mention-runner';
 import type { ForumMentionDoc, ForumMentionStatus } from '../../../domain/forum/forum-mention.model';
 import { FORUM_THREAD_STATUSES, FORUM_WORK_STATES } from '../../../domain/forum/forum-thread.model';
@@ -105,6 +111,44 @@ function shapeThread(doc: ForumThreadDoc) {
     hubThreadId: doc.hub_thread_id ? String(doc.hub_thread_id) : null,
     createdAt: doc.created_at,
   };
+}
+
+/**
+ * Resolve an agent name the operator picked into a board identity.
+ *
+ * Against the same roster that resolves `@name`, so the composer can never assign work to somebody a
+ * mention could not reach — which is exactly the silent stall the work-item fields exist to remove.
+ */
+function workStateFrom(raw: unknown): ForumWorkState | null | undefined {
+  if (raw === undefined) return undefined;
+  const value = String(raw ?? '').trim();
+  if (!value || value === 'none') return null;
+  if (!(FORUM_WORK_STATES as readonly string[]).includes(value)) {
+    throw new ForumRuleError(`workState must be one of: ${FORUM_WORK_STATES.join(', ')}, none`, 400);
+  }
+  return value as ForumWorkState;
+}
+
+async function resolveAssignee(name: unknown): Promise<ForumAuthor | null | undefined> {
+  if (name === undefined) return undefined;
+  const wanted = String(name ?? '').trim();
+  if (!wanted) return null;
+  const roster = await loadRoster();
+  const target = roster.byName.get(wanted.toLowerCase());
+  if (!target) throw new ForumRuleError(`no agent named "${wanted}"`, 400);
+  return { kind: target.kind, agent_id: target.agentId, display_name: target.name };
+}
+
+/**
+ * What the operator's post actually did, for the composer to render.
+ *
+ * The `forum` tool has always reported this back to the agent that wrote the post; the operator's
+ * composer reported nothing, which is how a thread that summoned nobody sat unnoticed for seven
+ * hours. Same decision, same helper — only the wire format differs.
+ */
+function shapeSummons(plan: SummonPlan) {
+  const { woke, addressed, notWoken } = summonsOutcome(plan);
+  return { woke, addressed, notWoken };
 }
 
 /** First lines of a post, stripped of the markdown that reads as noise in a one-line preview. */
@@ -266,6 +310,14 @@ forumRouter.post('/threads', async (req, res) => {
     return;
   }
   try {
+    // `wake` is the composer's version of the tool's argument of the same name: agents to run over
+    // this post, whether or not the prose names them. A bare `@name` from the operator already
+    // summons — a human typing a name means it — so this is additive, and it is what lets the
+    // composer say *before* posting who is about to spend a turn.
+    const wake = Array.isArray(req.body?.wake) ? req.body.wake.map(String) : [];
+    const assignee = await resolveAssignee(req.body?.assignee);
+    const summons = await planSummons({ body, author: OPERATOR_AUTHOR, wake, threadId: null });
+
     const { thread, post } = await forumService.createThread({
       category,
       title,
@@ -274,10 +326,15 @@ forumRouter.post('/threads', async (req, res) => {
       tags: Array.isArray(req.body?.tags) ? req.body.tags.map(String) : [],
       attachments: attachmentIds(req.body?.attachments),
       byAgent: false,
+      summons,
+      hubThreadId: typeof req.body?.hubThreadId === 'string' ? req.body.hubThreadId : undefined,
+      assignee,
+      workState: workStateFrom(req.body?.workState),
     });
     res.status(201).json({
       ...shapeThread(thread),
       posts: [shapePost(post, await forumFileRepository.findByIds(post.attachments ?? []))],
+      summons: shapeSummons(summons),
     });
   } catch (err) {
     const status = ruleStatus(err);
@@ -427,14 +484,25 @@ forumRouter.post('/threads/:id/posts', async (req, res) => {
   }
   try {
     const thread = await forumService.requireOpenThread(req.params.id);
+    const wake = Array.isArray(req.body?.wake) ? req.body.wake.map(String) : [];
+    const summons = await planSummons({
+      body,
+      author: OPERATOR_AUTHOR,
+      wake,
+      threadId: String(thread._id),
+    });
     const post = await forumService.addPost({
       thread,
       body,
       author: OPERATOR_AUTHOR,
       replyTo: typeof req.body?.replyTo === 'string' ? req.body.replyTo : null,
       attachments: attachmentIds(req.body?.attachments),
+      summons,
     });
-    res.status(201).json(shapePost(post, await forumFileRepository.findByIds(post.attachments ?? [])));
+    res.status(201).json({
+      ...shapePost(post, await forumFileRepository.findByIds(post.attachments ?? [])),
+      summons: shapeSummons(summons),
+    });
   } catch (err) {
     const status = ruleStatus(err);
     if (status === null) throw err;

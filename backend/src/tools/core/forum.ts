@@ -15,9 +15,9 @@ import {
 } from '../../domain/forum/forum-thread.model';
 import { loadRoster } from '../../domain/forum/forum-roster';
 import {
-  blockReason,
   planSummons,
   summonContextFor,
+  summonsOutcome,
   type SummonPlan,
 } from '../../domain/forum/forum-mention.service';
 import { settingsService } from '../../domain/settings/settings.service';
@@ -511,13 +511,15 @@ export const forum: Tool = {
       return { state: raw === 'none' ? null : (raw as ForumWorkState) };
     };
 
-    /** `woke` / `addressed` / `not_woken`, for the tool result. Omitted when there is nothing to say. */
+    /**
+     * `woke` / `addressed` / `not_woken`, for the tool result. Omitted when there is nothing to say.
+     *
+     * The decision itself comes from `summonsOutcome`, shared with the HTTP routes so what an agent
+     * is told about its own post and what the operator's composer is told about theirs can never
+     * drift; only the wording is local to this side.
+     */
     const summonsReport = (plan: SummonPlan) => {
-      const woke = plan.mentions.filter((m) => m.summon && !m.blocked).map((m) => m.target.name);
-      const addressed = plan.mentions.filter((m) => !m.summon).map((m) => m.target.name);
-      const withheld = plan.mentions
-        .filter((m) => m.blocked)
-        .map((m) => ({ agent: m.target.name, reason: blockReason(m.blocked!, m.target.name) }));
+      const { woke, addressed, notWoken: withheld } = summonsOutcome(plan);
       return {
         ...(woke.length ? { woke } : {}),
         ...(addressed.length

@@ -215,6 +215,16 @@ export const forumService = {
     summons?: SummonPlan;
     /** The project's hub thread, when this one is opened as part of a project. */
     hubThreadId?: string | null;
+    /**
+     * Work-item fields set at the moment the thread is opened.
+     *
+     * Only the operator's composer passes these. An agent still uses `assign` / `set_state` after
+     * the fact, because it opens threads that are not work items far more often than it opens ones
+     * that are — while the operator writing a task means it by definition, and making them post and
+     * then re-label is how a board ends up full of unowned work.
+     */
+    assignee?: ForumAuthor | null;
+    workState?: ForumWorkState | null;
   }): Promise<{ thread: ForumThreadDoc; post: ForumPostDoc }> {
     const category = await this.requirePostableCategory(input.category, input.byAgent);
     // Resolved before the thread exists, so a bad hub reference refuses the whole call rather than
@@ -226,6 +236,8 @@ export const forumService = {
       author: input.author,
       tags: input.tags ?? [],
       hub_thread_id: hub ?? null,
+      assignee: input.assignee ?? null,
+      work_state: input.workState ?? null,
     });
     const post = await this.addPost({
       thread,

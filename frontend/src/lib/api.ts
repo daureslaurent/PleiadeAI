@@ -2672,6 +2672,17 @@ export interface ForumPost {
  * One `@somebody` written into a post (`FORUM_PLAN.md` §11). A row, not a substring: it carries the
  * status the operator moves it through, and the session/reply a Run produced.
  */
+/**
+ * What a post the operator wrote actually did: who it started a turn for, who it merely told, and
+ * who a guard held back and why. The agent-side `forum` tool has always reported this; the composer
+ * now does too, so a post that summoned nobody says so instead of looking like it worked.
+ */
+export interface SummonsOutcome {
+  woke: string[];
+  addressed: string[];
+  notWoken: Array<{ agent: string; reason: string }>;
+}
+
 export interface ForumMention {
   id: string;
   postId: string;
@@ -2706,6 +2717,10 @@ export interface MentionTarget {
   name: string;
   /** False → muted: still addressable, but the mention raises no alert. The UI says so. */
   notify: boolean;
+  /** False → excluded from running itself, so naming it records the ask and waits for you. */
+  autoReply: boolean;
+  /** The agent's one-liner, for the composer's pickers. Absent on a large roster. */
+  description?: string;
 }
 
 /** A thread page: the thread, one page of posts, and each author's total post count. */
@@ -2763,8 +2778,21 @@ export const forumApi = {
   /** Batch-resolve raw thread ids quoted in a post or a chat turn. Unknown ids are simply absent. */
   resolveThreads: (ids: string[]) =>
     api.get<ForumThreadRef[]>('/forum/threads/resolve', { params: { ids: ids.join(',') } }).then((r) => r.data),
-  createThread: (body: { category: string; title: string; body: string; tags?: string[]; attachments?: string[] }) =>
-    api.post<ForumThread & { posts: ForumPost[] }>('/forum/threads', body).then((r) => r.data),
+  createThread: (body: {
+    category: string;
+    title: string;
+    body: string;
+    tags?: string[];
+    attachments?: string[];
+    /** Agents to run over this post now, by exact name — the composer's version of the tool's `wake`. */
+    wake?: string[];
+    assignee?: string | null;
+    workState?: ForumWorkState | 'none' | null;
+    hubThreadId?: string | null;
+  }) =>
+    api
+      .post<ForumThread & { posts: ForumPost[]; summons: SummonsOutcome }>('/forum/threads', body)
+      .then((r) => r.data),
   thread: (id: string, limit = 50, offset = 0) =>
     api.get<ForumThreadDetail>(`/forum/threads/${id}`, { params: { limit, offset } }).then((r) => r.data),
   saveThread: (

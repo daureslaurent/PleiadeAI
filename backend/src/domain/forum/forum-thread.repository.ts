@@ -9,6 +9,9 @@ export interface CreateForumThreadInput {
   tags?: string[];
   /** The project's hub thread, when this one is opened as part of a project. */
   hub_thread_id?: Types.ObjectId | null;
+  /** Work-item fields, when the thread is opened as one (the operator's composer). */
+  assignee?: ForumAuthor | null;
+  work_state?: ForumWorkState | null;
 }
 
 export interface ListThreadsOptions {

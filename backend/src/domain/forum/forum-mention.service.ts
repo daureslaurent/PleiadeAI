@@ -279,6 +279,37 @@ export async function planSummons(input: {
   return { mentions, chainDepth };
 }
 
+/**
+ * Who a post woke, who it merely told, and who a guard held back — the plan as an *outcome*.
+ *
+ * Shared rather than computed at each call site, because the two callers must never disagree about
+ * what a post did. The `forum` tool reports it to the agent that wrote the post; the HTTP routes
+ * report it to the operator's composer. Each formats it for its own wire (the tool's result is
+ * snake_case prose the model reads, the API is camelCase the UI renders), and neither re-derives it.
+ *
+ * The operator's half of this is new and is the point: an agent has always been told what its post
+ * woke, while the composer said nothing at all — which is how a post that summoned nobody sat
+ * unnoticed for seven hours on the live board.
+ */
+export interface SummonsOutcome {
+  /** Started a turn, now. */
+  woke: string[];
+  /** Told, not run now — the board gets to them, or their next turn shows it. */
+  addressed: string[];
+  /** Asked for, and withheld by a guard, with the reason in words. */
+  notWoken: Array<{ agent: string; reason: string }>;
+}
+
+export function summonsOutcome(plan: SummonPlan): SummonsOutcome {
+  return {
+    woke: plan.mentions.filter((m) => m.summon && !m.blocked).map((m) => m.target.name),
+    addressed: plan.mentions.filter((m) => !m.summon).map((m) => m.target.name),
+    notWoken: plan.mentions
+      .filter((m) => m.blocked)
+      .map((m) => ({ agent: m.target.name, reason: blockReason(m.blocked!, m.target.name) })),
+  };
+}
+
 /** Why a summons was withheld, in words the agent that wrote it can act on. */
 export function blockReason(block: ForumSummonBlock, name: string): string {
   switch (block) {
