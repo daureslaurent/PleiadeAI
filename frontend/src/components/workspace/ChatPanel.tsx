@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AtSign, RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, ScrollText } from 'lucide-react';
+import { AtSign, RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, ScrollText, ChevronDown, ChevronUp, ArrowDown } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from './Blocks';
+import { Collapsible } from './Collapsible';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
 import { LoopPanel } from './LoopPanel';
@@ -28,6 +29,7 @@ function MessageRow({
   score,
   memories,
   generated,
+  collapsible = false,
   children,
 }: {
   role: Turn['role'];
@@ -38,6 +40,8 @@ function MessageRow({
   memories?: RecalledMemory[];
   /** This session was produced by the Conversation Generator → the "user" turns are the interviewer. */
   generated?: boolean;
+  /** Clamp an over-long turn behind a "Show more" pill. Off for the live turn and the newest one. */
+  collapsible?: boolean;
   children: React.ReactNode;
 }) {
   if (role === 'user') {
@@ -55,7 +59,13 @@ function MessageRow({
               : 'bg-gradient-to-br from-accent/90 via-accent/75 to-indigo-500/80 shadow-[0_4px_20px_rgba(59,130,246,0.25)]'
           }`}
         >
-          {children}
+          {collapsible ? (
+            <Collapsible maxHeight={200} tone="bubble">
+              {children}
+            </Collapsible>
+          ) : (
+            children
+          )}
         </div>
       </div>
     );
@@ -79,7 +89,7 @@ function MessageRow({
         {memories && memories.length > 0 && <MemoriesBadge memories={memories} />}
       </div>
       <div className="min-w-0 overflow-hidden break-words pl-9 text-sm text-slate-100">
-        {children}
+        {collapsible ? <Collapsible maxHeight={380}>{children}</Collapsible> : children}
       </div>
     </div>
   );
@@ -142,6 +152,8 @@ const DEFAULT_CONTINUE = 'Continue where you left off and complete the task. Do 
 const CONTINUE_KEY = 'pleiades.continuePhrase';
 /** Safety ceiling on consecutive auto-continues so a stuck agent can't loop forever unattended. */
 const MAX_AUTO_CONTINUE = 25;
+/** How many turns stay unfolded at the tail of a long session; the rest hide behind one divider. */
+const RECENT_TURNS = 6;
 
 /** Compact tokens value: 1234 → "1.2K", 512 → "512". */
 function fmtTokens(n: number): string {
@@ -293,10 +305,29 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
   const activeAgent =
     activeFrameId && activeFrameId !== 'root' ? liveFrames[activeFrameId]?.agent : undefined;
 
-  const { ref: scrollRef, onScroll } = useStickyScroll<HTMLDivElement>(
+  const { ref: scrollRef, onScroll: onStickyScroll } = useStickyScroll<HTMLDivElement>(
     [turns, liveBlocks, liveReasoning, streaming],
     { behavior: 'smooth' },
   );
+
+  // "Older messages" fold: a long session opens on its recent tail rather than on its whole
+  // history, with one divider that unfolds the rest. Re-folds whenever the open session changes.
+  const [showAllTurns, setShowAllTurns] = useState(false);
+  useEffect(() => setShowAllTurns(false), [activeSessionId]);
+  const hiddenTurns = showAllTurns ? 0 : Math.max(0, turns.length - RECENT_TURNS);
+  const shownTurns = hiddenTurns > 0 ? turns.slice(hiddenTurns) : turns;
+
+  // Jump-to-latest pill: only offered once the reader has actually left the bottom.
+  const [atBottom, setAtBottom] = useState(true);
+  function onScroll(e: React.UIEvent<HTMLDivElement>) {
+    onStickyScroll();
+    const el = e.currentTarget;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+  }
+  function jumpToLatest() {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }
 
   // Persist the continue phrase so the operator's wording survives reloads.
   useEffect(() => {
@@ -458,12 +489,37 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
           </div>
         ) : (
           <div className="mx-auto max-w-3xl space-y-6">
-            {turns.map((t, i) => (
+            {hiddenTurns > 0 && (
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-white/[0.07]" />
+                <button
+                  onClick={() => setShowAllTurns(true)}
+                  className="glass flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium text-slate-400 transition-colors hover:text-slate-100"
+                >
+                  <ChevronUp size={12} />
+                  Show {hiddenTurns} earlier {hiddenTurns === 1 ? 'message' : 'messages'}
+                </button>
+                <div className="h-px flex-1 bg-white/[0.07]" />
+              </div>
+            )}
+            {showAllTurns && turns.length > RECENT_TURNS && (
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setShowAllTurns(false)}
+                  className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] text-slate-500 transition-colors hover:text-slate-300"
+                >
+                  <ChevronDown size={12} /> Fold history back
+                </button>
+              </div>
+            )}
+            {shownTurns.map((t, i) => (
               <MessageRow
-                key={i}
+                key={hiddenTurns + i}
                 role={t.role}
                 agentName={agentName}
                 generated={generatedSession}
+                /* The tail of the conversation reads in full; everything above it clamps. */
+                collapsible={streaming || hiddenTurns + i < turns.length - 1}
                 score={t.role === 'assistant' ? t.score : undefined}
                 memories={t.role === 'assistant' ? t.memories : undefined}
               >
@@ -507,6 +563,18 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
           </div>
         )}
       </div>
+
+      {/* Jump back to the live end of a conversation the reader has scrolled up through. */}
+      {hasSession && !atBottom && (
+        <div className="relative h-0">
+          <button
+            onClick={jumpToLatest}
+            className="glass-card absolute bottom-1 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-colors hover:text-white"
+          >
+            <ArrowDown size={12} /> Latest
+          </button>
+        </div>
+      )}
 
       {/* The agent's live plan, pinned so steps stay visible while the turn runs */}
       {activeSessionId && <TodoPanel items={todos} sessionId={activeSessionId} />}
