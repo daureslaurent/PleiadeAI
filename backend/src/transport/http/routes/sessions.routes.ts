@@ -9,9 +9,14 @@ import { todoRepository } from '../../../domain/todos/todo.repository';
 export const sessionsRouter = Router();
 
 /**
- * List sessions for an agent: `GET /api/sessions?agentId=…&origin=user|synthetic|all`.
+ * List sessions for an agent: `GET /api/sessions?agentId=…&origin=user|synthetic|all[&limit=&skip=]`.
  * `origin` defaults to `user` — the Workspace shows the operator's own chats, not the (potentially
  * thousands of) conversations produced by the Conversation Generator.
+ *
+ * Passing `limit` switches the response to the paged shape `{ sessions, total }`: the Workspace
+ * navigator shows a handful of recent conversations per agent and pages the rest in on demand, and
+ * it needs the unwindowed total to say how many are still hidden. Without `limit` the response stays
+ * the bare array every other consumer already expects.
  */
 sessionsRouter.get('/', async (req, res) => {
   const agentId = req.query.agentId as string | undefined;
@@ -21,7 +26,19 @@ sessionsRouter.get('/', async (req, res) => {
   }
   const raw = req.query.origin;
   const origin = raw === 'synthetic' || raw === 'all' ? raw : 'user';
-  res.json(await sessionRepository.listByAgent(agentId, origin));
+
+  const limit = Number(req.query.limit);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    res.json(await sessionRepository.listByAgent(agentId, origin));
+    return;
+  }
+  const skip = Math.max(0, Number(req.query.skip) || 0);
+  // Capped so a hand-rolled `?limit=100000` can't be used to dump the whole collection in one call.
+  const [sessions, total] = await Promise.all([
+    sessionRepository.listByAgent(agentId, origin, { limit: Math.min(200, limit), skip }),
+    sessionRepository.countByAgent(agentId, origin),
+  ]);
+  res.json({ sessions, total });
 });
 
 sessionsRouter.post('/', async (req, res) => {

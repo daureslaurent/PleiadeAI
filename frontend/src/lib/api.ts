@@ -880,6 +880,25 @@ export const sessionsApi = {
    */
   listByAgent: (agentId: string, origin: 'user' | 'synthetic' | 'forum' | 'all' = 'all') =>
     api.get<Session[]>('/sessions', { params: { agentId, origin } }).then((r) => r.data),
+  /**
+   * A window of that same list plus the unwindowed `total` — what the Workspace navigator loads so
+   * an agent with hundreds of conversations costs five documents, not hundreds. `total` is what the
+   * "N more" affordance counts down.
+   */
+  pageByAgent: (
+    agentId: string,
+    opts: { limit: number; skip?: number; origin?: 'user' | 'synthetic' | 'forum' | 'all' },
+  ) =>
+    api
+      .get<{ sessions: Session[]; total: number }>('/sessions', {
+        params: {
+          agentId,
+          origin: opts.origin ?? 'all',
+          limit: opts.limit,
+          skip: opts.skip ?? 0,
+        },
+      })
+      .then((r) => r.data),
   /** One session — resolves the owning agent when a `?session=` deep link opens the Workspace. */
   get: (id: string) => api.get<Session>(`/sessions/${id}`).then((r) => r.data),
   create: (agentId: string) => api.post<Session>('/sessions', { agentId }).then((r) => r.data),

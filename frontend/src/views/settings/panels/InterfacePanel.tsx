@@ -1,6 +1,7 @@
-import { MonitorCog } from 'lucide-react';
-import { Section, Toggle } from '../../../components/ui';
-import { usePrefs } from '../../../store/prefs';
+import { useState } from 'react';
+import { MonitorCog, PanelLeft } from 'lucide-react';
+import { Field, Input, Section, Toggle } from '../../../components/ui';
+import { SESSIONS_PER_AGENT_MAX, SESSIONS_PER_AGENT_MIN, usePrefs } from '../../../store/prefs';
 
 /**
  * `/settings/interface` — client-side display preferences. These live in localStorage (`store/prefs`),
@@ -9,6 +10,11 @@ import { usePrefs } from '../../../store/prefs';
 export function InterfacePanel() {
   const showSubagentThinking = usePrefs((s) => s.showSubagentThinking);
   const setShowSubagentThinking = usePrefs((s) => s.setShowSubagentThinking);
+  const sessionsPerAgent = usePrefs((s) => s.sessionsPerAgent);
+  const setSessionsPerAgent = usePrefs((s) => s.setSessionsPerAgent);
+  // The number field is edited as free text (so it can be cleared mid-typing) and only committed —
+  // clamped — on blur; the store is the source of truth the moment it is.
+  const [draft, setDraft] = useState(String(sessionsPerAgent));
 
   return (
     <div className="animate-fade-up space-y-5">
@@ -28,6 +34,27 @@ export function InterfacePanel() {
             <Toggle checked={showSubagentThinking} onChange={setShowSubagentThinking} />
           </div>
         </div>
+      </Section>
+
+      <Section title="Workspace navigator" icon={<PanelLeft size={13} />}>
+        <Field
+          label="Conversations shown per agent"
+          hint={`How many recent conversations an expanded agent lists before the rest fold behind "Show more" — and how many each click loads. ${SESSIONS_PER_AGENT_MIN}–${SESSIONS_PER_AGENT_MAX}.`}
+          className="max-w-[220px]"
+        >
+          <Input
+            type="number"
+            min={SESSIONS_PER_AGENT_MIN}
+            max={SESSIONS_PER_AGENT_MAX}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => {
+              if (draft.trim()) setSessionsPerAgent(Number(draft));
+              // Re-read: an out-of-range or empty entry snaps back to what was actually stored.
+              setDraft(String(usePrefs.getState().sessionsPerAgent));
+            }}
+          />
+        </Field>
       </Section>
     </div>
   );

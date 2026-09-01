@@ -9,6 +9,21 @@ function deriveTitle(text: string): string {
 }
 
 /**
+ * The `origin` narrowing shared by the list and the count, so a paged window and its total can never
+ * disagree about what they're counting. Sessions predating the `origin` field are the operator's own
+ * — matched as `user`. Mention runs ride along with `user`: the operator started them deliberately
+ * and will want to continue them, which is not true of a generated interview.
+ */
+export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'all';
+
+function originFilter(agentId: string | Types.ObjectId, origin: SessionOrigin): Record<string, unknown> {
+  const filter: Record<string, unknown> = { agent_id: agentId };
+  if (origin === 'user') filter.origin = { $ne: 'synthetic' };
+  else if (origin !== 'all') filter.origin = origin;
+  return filter;
+}
+
+/**
  * Data-access for conversation sessions and their messages. The transport layer and the WS
  * handler go through here so the persistence shape stays in one place.
  */
@@ -20,15 +35,22 @@ export const sessionRepository = {
    */
   listByAgent(
     agentId: string | Types.ObjectId,
-    origin: 'user' | 'synthetic' | 'forum' | 'all' = 'user',
+    origin: SessionOrigin = 'user',
+    page: { limit?: number; skip?: number } = {},
   ): Promise<SessionDoc[]> {
-    const filter: Record<string, unknown> = { agent_id: agentId };
-    // Sessions predating the `origin` field are the operator's own — match them as `user`. Mention
-    // runs ride along with `user`: the operator started them deliberately and will want to continue
-    // them, which is not true of a generated interview.
-    if (origin === 'user') filter.origin = { $ne: 'synthetic' };
-    else if (origin !== 'all') filter.origin = origin;
-    return SessionModel.find(filter).sort({ updated_at: -1 }).exec();
+    const q = SessionModel.find(originFilter(agentId, origin)).sort({ updated_at: -1 });
+    // Skip without limit is meaningless here (the caller wants a window, not a tail) but harmless.
+    if (page.skip) q.skip(page.skip);
+    if (page.limit) q.limit(page.limit);
+    return q.exec();
+  },
+
+  /**
+   * How many sessions that same filter matches — what the Workspace needs to say "12 more" beside a
+   * truncated list without shipping the twelve documents.
+   */
+  countByAgent(agentId: string | Types.ObjectId, origin: SessionOrigin = 'user'): Promise<number> {
+    return SessionModel.countDocuments(originFilter(agentId, origin)).exec();
   },
 
   /** Generated sessions, newest first — optionally narrowed to one generator. */

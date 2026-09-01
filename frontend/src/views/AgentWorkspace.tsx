@@ -1,10 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { agentsApi, sessionsApi, type Agent, type Session } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { registerAgentIdentities } from '../lib/agentColor';
 import { useStream } from '../store/stream';
 import { usePersistentState } from '../hooks/usePersistentState';
+import { usePrefs } from '../store/prefs';
 import { WorkspaceNav } from '../components/workspace/WorkspaceNav';
 import { ChatPanel } from '../components/workspace/ChatPanel';
 import { DebuggerDrawer } from '../components/workspace/DebuggerDrawer';
@@ -26,7 +27,20 @@ const AndroidPanel = lazy(() =>
  */
 export function AgentWorkspace() {
   const [agents, setAgents] = useState<Agent[]>([]);
+  // Only a *window* of each agent's conversations is held — the most recent `sessionsPerAgent`,
+  // plus whatever "Show more" has paged in. `sessionTotals` is the unwindowed count, so the sidebar
+  // can say how many are still hidden without holding them.
   const [sessionsByAgent, setSessionsByAgent] = useState<Record<string, Session[]>>({});
+  const [sessionTotals, setSessionTotals] = useState<Record<string, number>>({});
+  const [loadingMoreAgentIds, setLoadingMoreAgentIds] = useState<Set<string>>(new Set());
+  // Mirror of the windows, for the paging callbacks — they need the current length without taking a
+  // dependency on it (which would re-create them, and the boot effect, on every list change).
+  const sessionsRef = useRef<Record<string, Session[]>>({});
+  sessionsRef.current = sessionsByAgent;
+  // The open conversation, kept whole: once the list is windowed it may sit outside the loaded page
+  // (a `?session=` deep link, or a restored session buried under newer ones), and the sidebar still
+  // has to show it and the chat still has to know its origin.
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [groupOpen, setGroupOpen] = useState(true);
   const [navCollapsed, setNavCollapsed] = usePersistentState('workspaceNav:collapsed', false);
@@ -49,16 +63,68 @@ export function AgentWorkspace() {
 
   const { wire, hydrate, clearActive, send, workingSessions, workingAgents } = useStream();
 
-  const loadSessions = useCallback(async (agentId: string): Promise<Session[]> => {
-    const list = await sessionsApi.listByAgent(agentId);
-    setSessionsByAgent((prev) => ({ ...prev, [agentId]: list }));
-    return list;
+  const pageSize = usePrefs((s) => s.sessionsPerAgent);
+  // Read through a ref inside callbacks so changing the preference doesn't re-create them (and with
+  // them the boot effect), while a later call still uses the new size.
+  const pageSizeRef = useRef(pageSize);
+  pageSizeRef.current = pageSize;
+
+  /**
+   * (Re)load an agent's window from the top. `keepLoaded` re-fetches as many rows as are already on
+   * screen — a refresh after a run must not silently collapse a list the operator had expanded.
+   */
+  const loadSessions = useCallback(
+    async (agentId: string, opts: { keepLoaded?: boolean } = {}): Promise<Session[]> => {
+      const shown = opts.keepLoaded ? (sessionsRef.current[agentId]?.length ?? 0) : 0;
+      const limit = Math.max(pageSizeRef.current, shown);
+      const { sessions, total } = await sessionsApi.pageByAgent(agentId, { limit });
+      setSessionsByAgent((prev) => ({ ...prev, [agentId]: sessions }));
+      setSessionTotals((prev) => ({ ...prev, [agentId]: total }));
+      return sessions;
+    },
+    [],
+  );
+
+  /** Collapse a paged-open agent back to a single page — the sidebar's "Show fewer". */
+  const showFewerSessions = useCallback((agent: Agent) => {
+    setSessionsByAgent((prev) => {
+      const current = prev[agent._id];
+      if (!current) return prev;
+      return { ...prev, [agent._id]: current.slice(0, pageSizeRef.current) };
+    });
+  }, []);
+
+  /** Append the next page to an agent's window — the sidebar's "Show more". */
+  const loadMoreSessions = useCallback(async (agent: Agent) => {
+    const agentId = agent._id;
+    const skip = sessionsRef.current[agentId]?.length ?? 0;
+    setLoadingMoreAgentIds((prev) => new Set(prev).add(agentId));
+    try {
+      const { sessions, total } = await sessionsApi.pageByAgent(agentId, {
+        limit: pageSizeRef.current,
+        skip,
+      });
+      setSessionsByAgent((prev) => {
+        const current = prev[agentId] ?? [];
+        const seen = new Set(current.map((s) => s._id));
+        // A session created (or bumped) since the first page can shift the window and repeat a row.
+        return { ...prev, [agentId]: [...current, ...sessions.filter((s) => !seen.has(s._id))] };
+      });
+      setSessionTotals((prev) => ({ ...prev, [agentId]: total }));
+    } finally {
+      setLoadingMoreAgentIds((prev) => {
+        const next = new Set(prev);
+        next.delete(agentId);
+        return next;
+      });
+    }
   }, []);
 
   const openSession = useCallback(
     async (agent: Agent, session: Session) => {
       setActiveAgentId(agent._id);
       setActiveSessionId(session._id);
+      setActiveSession(session);
       const msgs = await sessionsApi.messages(session._id);
       hydrate(session._id, msgs, agent._id);
     },
@@ -108,6 +174,9 @@ export function AgentWorkspace() {
       if (restoreAgent && activeSessionId) {
         setExpanded(new Set([restoreAgent._id]));
         void loadSessions(restoreAgent._id);
+        // Resolved explicitly: the restored conversation can be older than the loaded window.
+        const restored = await sessionsApi.get(activeSessionId).catch(() => null);
+        if (restored) setActiveSession(restored);
         const msgs = await sessionsApi.messages(activeSessionId).catch(() => []);
         hydrate(activeSessionId, msgs, restoreAgent._id);
       } else if (list[0]) {
@@ -139,6 +208,7 @@ export function AgentWorkspace() {
         return next;
       });
       if (!title) return;
+      setActiveSession((prev) => (prev && prev._id === sessionId ? { ...prev, title } : prev));
       setSessionsByAgent((prev) => {
         const next: Record<string, Session[]> = {};
         for (const [agentId, list] of Object.entries(prev)) {
@@ -180,6 +250,10 @@ export function AgentWorkspace() {
         };
         return { ...prev, [s.agentId]: [session, ...list] };
       });
+      setSessionTotals((prev) => {
+        const known = prev[s.agentId];
+        return known === undefined ? prev : { ...prev, [s.agentId]: known + 1 };
+      });
     };
     socket.on('session:created', onCreated);
     return () => {
@@ -187,19 +261,28 @@ export function AgentWorkspace() {
     };
   }, []);
 
+  // Re-window every open agent when the operator changes the per-agent cap in Settings → Interface,
+  // so the new size applies to the lists already on screen rather than only to the next expand.
+  useEffect(() => {
+    for (const id of expanded) void loadSessions(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageSize]);
+
   // Refresh any expanded agent's session list when runs start/finish (new titles, reordering).
   const workingCount = workingSessions.length;
   useEffect(() => {
-    for (const id of expanded) void loadSessions(id);
+    for (const id of expanded) void loadSessions(id, { keepLoaded: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workingCount]);
 
   async function newSession(agent: Agent) {
     const sn = await sessionsApi.create(agent._id);
     setSessionsByAgent((prev) => ({ ...prev, [agent._id]: [sn, ...(prev[agent._id] ?? [])] }));
+    setSessionTotals((prev) => ({ ...prev, [agent._id]: (prev[agent._id] ?? 0) + 1 }));
     setExpanded((prev) => new Set(prev).add(agent._id));
     setActiveAgentId(agent._id);
     setActiveSessionId(sn._id);
+    setActiveSession(sn);
     hydrate(sn._id, [], agent._id);
   }
 
@@ -209,8 +292,13 @@ export function AgentWorkspace() {
       ...prev,
       [agent._id]: (prev[agent._id] ?? []).filter((s) => s._id !== sn._id),
     }));
+    setSessionTotals((prev) => {
+      const known = prev[agent._id];
+      return known === undefined ? prev : { ...prev, [agent._id]: Math.max(0, known - 1) };
+    });
     if (sn._id === activeSessionId) {
       setActiveSessionId(null);
+      setActiveSession(null);
       clearActive();
     }
   }
@@ -228,7 +316,9 @@ export function AgentWorkspace() {
       ...prev,
       [activeAgent._id]: [sn, ...(prev[activeAgent._id] ?? [])],
     }));
+    setSessionTotals((prev) => ({ ...prev, [activeAgent._id]: (prev[activeAgent._id] ?? 0) + 1 }));
     setActiveSessionId(sn._id);
+    setActiveSession(sn);
     hydrate(sn._id, [], activeAgent._id);
     return sn._id;
   }
@@ -243,11 +333,7 @@ export function AgentWorkspace() {
   const workingSessionSet = new Set(workingSessions);
 
   // A generated conversation (Conversation Generator) reads as a normal chat, except the right-hand
-  // speaker is the interviewer agent — never the operator. Found across the loaded agents' lists
-  // because a restored session may belong to an agent whose list is keyed elsewhere.
-  const activeSession = Object.values(sessionsByAgent)
-    .flat()
-    .find((s) => s._id === activeSessionId);
+  // speaker is the interviewer agent — never the operator.
   const generatedSession = activeSession?.origin === 'synthetic';
 
   return (
@@ -261,6 +347,11 @@ export function AgentWorkspace() {
         expandedAgentIds={expanded}
         onToggleAgent={toggleAgent}
         sessionsByAgent={sessionsByAgent}
+        sessionTotals={sessionTotals}
+        loadingMoreAgentIds={loadingMoreAgentIds}
+        onLoadMoreSessions={loadMoreSessions}
+        onShowFewerSessions={showFewerSessions}
+        activeSession={activeSession}
         workingAgentNames={workingAgentNames}
         workingSessionIds={workingSessionSet}
         titlingSessionIds={titlingSessionIds}
