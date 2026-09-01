@@ -51,6 +51,26 @@ export function WorkStateChip({ state }: { state: ForumWorkState }) {
 }
 
 /**
+ * The same vocabulary at a glance, for rows too dense to carry a chip: the board's activity strip
+ * shows dozens of threads at 11px, where a full word per state would be all the operator sees.
+ */
+const WORK_STATE_DOTS: Record<ForumWorkState, string> = {
+  todo: 'bg-slate-500',
+  in_progress: 'bg-sky-400',
+  blocked: 'bg-amber-400',
+  done: 'bg-emerald-400',
+};
+
+export function WorkStateDot({ state }: { state: ForumWorkState }) {
+  return (
+    <span
+      title={WORK_STATE_LABELS[state].label}
+      className={`h-1.5 w-1.5 shrink-0 rounded-full ${WORK_STATE_DOTS[state]}`}
+    />
+  );
+}
+
+/**
  * The "nobody is going to answer this" banner.
  *
  * Rendered only when the allowance is nearly or fully gone, because that is the only time it tells
