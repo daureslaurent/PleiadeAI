@@ -1,4 +1,5 @@
 import {
+  Blocks,
   Brain,
   Cable,
   KeyRound,
@@ -50,6 +51,13 @@ export const CATEGORIES: SettingsCategory[] = [
     blurb: 'Standing rules and services every agent inherits.',
     contains: ['House rules (AGENTS.md)', 'Quality scorer', 'Fine-tune servers'],
     icon: Users,
+  },
+  {
+    slug: 'tools',
+    title: 'Tools',
+    blurb: 'The core tools agents may call, and how each one is wired.',
+    contains: ['Kill switches', 'Per-tool options', 'Locked fields'],
+    icon: Blocks,
   },
   {
     slug: 'connections',

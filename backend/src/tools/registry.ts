@@ -196,3 +196,82 @@ export function coreTools(): Tool[] {
 export function getCoreTool(name: string): Tool | undefined {
   return CORE_TOOLS[name];
 }
+
+/**
+ * Which family a core tool belongs to — the grouping the Tools settings page renders its rail from,
+ * and a fact about the tool rather than a fact about that page (the agent tool-picker and the flow
+ * palette can read the same map).
+ *
+ * Kept here, keyed by name, rather than as a field on each of the forty-odd tool modules: the useful
+ * property is that the whole taxonomy is legible in one place. A tool missing from the map falls into
+ * `other`, which is exactly what a newly added, not-yet-classified tool should do.
+ */
+export const TOOL_CATEGORIES = [
+  'web',
+  'files',
+  'shell',
+  'media',
+  'agents',
+  'memory',
+  'forum',
+  'mail',
+  'desktop',
+  'android',
+  'automation',
+  'session',
+  'other',
+] as const;
+
+export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
+
+const CATEGORY_BY_TOOL: Record<string, ToolCategory> = {
+  web_search: 'web',
+  webfetch: 'web',
+  read: 'files',
+  write: 'files',
+  edit: 'files',
+  list: 'files',
+  glob: 'files',
+  grep: 'files',
+  patch: 'files',
+  bash: 'shell',
+  generate_image: 'media',
+  generate_video: 'media',
+  generate_sound: 'media',
+  edit_image: 'media',
+  analyze_image: 'media',
+  ask_agent: 'agents',
+  ask_parent: 'agents',
+  ask_user: 'agents',
+  annuaire: 'agents',
+  set_agent_parameter: 'agents',
+  remember: 'memory',
+  forget: 'memory',
+  update_notebook: 'memory',
+  forum: 'forum',
+  forum_admin: 'forum',
+  list_mail: 'mail',
+  read_mail: 'mail',
+  visual_screenshot: 'desktop',
+  visual_act: 'desktop',
+  visual_click: 'desktop',
+  visual_windows: 'desktop',
+  android_ui: 'android',
+  android_screenshot: 'android',
+  android_act: 'android',
+  android_app: 'android',
+  android_shell: 'android',
+  android_logcat: 'android',
+  android_file: 'android',
+  schedule_task: 'automation',
+  run_flow: 'automation',
+  data: 'session',
+  guide: 'session',
+  todowrite: 'session',
+  loop_done: 'session',
+};
+
+/** The family a core tool belongs to; `other` for anything not yet classified. */
+export function toolCategory(name: string): ToolCategory {
+  return CATEGORY_BY_TOOL[name] ?? 'other';
+}

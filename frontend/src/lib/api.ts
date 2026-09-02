@@ -1005,9 +1005,27 @@ export interface ToolConfigField {
   lockable?: boolean;
 }
 
+/** Tool families, in the order the Tools settings rail lists them. Mirrors `TOOL_CATEGORIES`. */
+export type ToolCategory =
+  | 'web'
+  | 'files'
+  | 'shell'
+  | 'media'
+  | 'agents'
+  | 'memory'
+  | 'forum'
+  | 'mail'
+  | 'desktop'
+  | 'android'
+  | 'automation'
+  | 'session'
+  | 'other';
+
 export interface ToolInfo {
   name: string;
   description: string;
+  /** Family the tool belongs to, assigned server-side (`registry.ts`); `other` when unclassified. */
+  category: ToolCategory;
   configSchema: ToolConfigField[];
   config: Record<string, string | number | boolean>;
   enabled: boolean;

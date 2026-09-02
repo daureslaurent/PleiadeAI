@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench, Blocks } from 'lucide-react';
+import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
 import { useAuth } from '../store/auth';
 import { useForum } from '../store/forum';
@@ -31,7 +31,6 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/workspace', label: 'Workspace', icon: MessagesSquare },
       { to: '/agents', label: 'Agents', icon: Users },
       { to: '/skills', label: 'Skills', icon: Wrench },
-      { to: '/tools', label: 'Tools', icon: Blocks },
       { to: '/media', label: 'Media', icon: Clapperboard },
       // Sits next to Media because that's what most flows drive: an agent writes the prompt, a
       // ComfyUI workflow renders it.

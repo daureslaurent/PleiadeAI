@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { coreTools, getCoreTool } from '../../../tools/registry';
+import { coreTools, getCoreTool, toolCategory } from '../../../tools/registry';
 import { toolConfigService } from '../../../domain/tools/tool-config.service';
 import { resolveDynamicOptions } from '../../../tools/config-options';
 
@@ -19,6 +19,7 @@ toolsRouter.get('/', async (_req, res) => {
       return {
         name: tool.name,
         description: tool.description,
+        category: toolCategory(tool.name),
         // Fields whose choices live in the database (e.g. the ComfyUI workflow list) get filled in
         // here rather than being frozen into the tool module.
         configSchema: await resolveDynamicOptions(schema, config),
@@ -48,6 +49,7 @@ toolsRouter.put('/:name', async (req, res) => {
   res.json({
     name: tool.name,
     description: tool.description,
+    category: toolCategory(tool.name),
     configSchema: await resolveDynamicOptions(schema, config),
     config,
     enabled,

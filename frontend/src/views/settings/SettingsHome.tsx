@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { toolsApi } from '../../lib/api';
 import { usePrefs } from '../../store/prefs';
 import { APP_VERSION } from '../../version';
 import { CATEGORIES, type SettingsCategory } from './categories';
@@ -13,6 +15,20 @@ import { useSettings } from './context';
 export function SettingsHome() {
   const { form, endpoints, finetuneServers } = useSettings();
   const showSubagentThinking = usePrefs((s) => s.showSubagentThinking);
+
+  // Tool state doesn't live in the settings doc (it's its own collection), so the one fact worth
+  // printing on the card is fetched here rather than loaded for every category page.
+  const [tools, setTools] = useState<{ total: number; off: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    toolsApi
+      .list()
+      .then((ts) => alive && setTools({ total: ts.length, off: ts.filter((t) => !t.enabled).length }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const defaultEndpoint = endpoints.find((e) => e.is_default);
   const defaultModel = defaultEndpoint?.default_model || defaultEndpoint?.models[0];
@@ -33,6 +49,9 @@ export function SettingsHome() {
       `scoring ${form.scoring_enabled ? 'on' : 'off'}`,
       `${enabledServers} FT server${enabledServers === 1 ? '' : 's'}`,
     ].join(' · '),
+    tools: tools
+      ? `${tools.total} tools · ${tools.off ? `${tools.off} disabled` : 'all enabled'}`
+      : 'loading…',
     interface: `sub-agent thinking ${showSubagentThinking ? 'shown' : 'hidden'}`,
     system: `v${APP_VERSION} · updates ${form.update_enabled ? 'enabled' : 'disabled'}`,
     access: 'keys, export/import, clear data',

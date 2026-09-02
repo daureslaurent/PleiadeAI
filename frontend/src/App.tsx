@@ -8,7 +8,6 @@ import { AuthGuard } from './views/AuthGuard';
 import { AgentWorkspace } from './views/AgentWorkspace';
 import { AgentsView } from './views/AgentsView';
 import { SkillsView } from './views/SkillsView';
-import { ToolsView } from './views/ToolsView';
 import { MediaView } from './views/media/MediaView';
 import { FlowsView } from './views/flows/FlowsView';
 import { ForumView } from './views/forum/ForumView';
@@ -28,6 +27,7 @@ import { ConversationsView } from './views/ConversationsView';
 import { FineTuningView } from './views/FineTuningView';
 import { SettingsView, SettingsCategoryPage } from './views/settings/SettingsLayout';
 import { SettingsHome } from './views/settings/SettingsHome';
+import { ToolsSettings } from './views/settings/ToolsSettings';
 import { VisualDesktopWindow } from './views/VisualDesktopWindow';
 import { AndroidPhoneWindow } from './views/AndroidPhoneWindow';
 import { StreamWindow } from './views/StreamWindow';
@@ -92,7 +92,8 @@ export default function App() {
           <Route path="/workspace" element={<AgentWorkspace />} />
           <Route path="/agents" element={<AgentsView />} />
           <Route path="/skills" element={<SkillsView />} />
-          <Route path="/tools" element={<ToolsView />} />
+          {/* Tools moved under Settings; the old top-level path stays as a redirect. */}
+          <Route path="/tools" element={<Navigate to="/settings/tools" replace />} />
           <Route path="/media" element={<MediaView />} />
           <Route path="/flows" element={<FlowsView />} />
           {/* `PageHeader` matches on prefix, so the nested board pages keep the "Forum" title. */}
@@ -116,6 +117,11 @@ export default function App() {
               category never refetches — see views/settings/context.tsx. */}
           <Route path="/settings" element={<SettingsView />}>
             <Route index element={<SettingsHome />} />
+            {/* Tools is the one category with its own layout (a searchable rail over ~40
+                tools), and it carries the selected tool in the URL. Declared before the
+                `:category` route so the static segment wins. */}
+            <Route path="tools" element={<ToolsSettings />} />
+            <Route path="tools/:tool" element={<ToolsSettings />} />
             <Route path=":category" element={<SettingsCategoryPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/workspace" replace />} />
