@@ -1797,7 +1797,8 @@ export interface EndpointMode {
   name: string;
   type: 'sampling' | 'prompt';
   enabled: boolean;
-  params: Partial<Record<ModeSampler, number>>;
+  /** Only the samplers the operator set. Absent on documents stored before `minimize: false`. */
+  params?: Partial<Record<ModeSampler, number>>;
   text: string;
   placement: 'system_suffix' | 'user_suffix';
 }

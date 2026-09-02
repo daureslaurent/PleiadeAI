@@ -487,12 +487,13 @@ function ModeRow({
               <Input
                 type="number"
                 step="0.01"
-                defaultValue={mode.params[sampler] ?? ''}
+                defaultValue={mode.params?.[sampler] ?? ''}
                 placeholder="unset"
                 title="Empty = not sent, so the global setting (or the server's own default) stands"
                 onBlur={(ev) => {
                   const raw = ev.target.value.trim();
                   const params = { ...mode.params };
+                  // `mode.params` can be absent on a document written before `minimize: false`.
                   if (raw === '' || !Number.isFinite(Number(raw))) delete params[sampler];
                   else params[sampler] = Number(raw);
                   onChange({ ...mode, params });

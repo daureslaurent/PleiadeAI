@@ -78,6 +78,6 @@ export function ModeBar({ agentId, sessionId }: { agentId: string; sessionId: st
 
 /** The samplers a mode actually overrides, for its tooltip — an unset field is not sent at all. */
 function describeSampling(mode: EndpointMode): string {
-  const set = Object.entries(mode.params).filter(([, v]) => typeof v === 'number');
+  const set = Object.entries(mode.params ?? {}).filter(([, v]) => typeof v === 'number');
   return set.length ? set.map(([k, v]) => `${k}=${v}`).join(', ') : 'nothing set';
 }

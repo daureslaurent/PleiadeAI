@@ -25,7 +25,10 @@ const ModeSchema = new Schema(
      */
     placement: { type: String, enum: ['system_suffix', 'user_suffix'], default: 'system_suffix' },
   },
-  { _id: false },
+  // `minimize: false` keeps `params: {}` on the document. Mongoose's default is to strip empty
+  // objects on save, so a freshly created sampling mode (nothing filled in yet) came back with no
+  // `params` key at all and the editor read `undefined.temperature`.
+  { _id: false, minimize: false },
 );
 
 /**
@@ -153,7 +156,8 @@ export interface EndpointMode {
   name: string;
   type: 'sampling' | 'prompt';
   enabled: boolean;
-  params: Partial<Record<ModeSampler, number | null>>;
+  /** Only the samplers the operator set. May be absent on rows written before `minimize: false`. */
+  params?: Partial<Record<ModeSampler, number | null>>;
   text: string;
   placement: 'system_suffix' | 'user_suffix';
 }
