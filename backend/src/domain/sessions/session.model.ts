@@ -52,6 +52,13 @@ const SessionSchema = new Schema(
      * it would falsify the history the guard is judged against.
      */
     forum_chain_reset: { type: Boolean, default: false },
+    /**
+     * Inference modes switched on for this conversation (`MODES_PLAN.md`): ids of entries in the
+     * resolved endpoint's `modes[]`. Stored on the session rather than held in the composer so an
+     * auto-loop tick, a `continue` nudge and a reload all run the conversation the way the operator
+     * set it up. Only the depth-0 run consults them; ids that no longer resolve are ignored.
+     */
+    mode_ids: { type: [String], default: [] },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

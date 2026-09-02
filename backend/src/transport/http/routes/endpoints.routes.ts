@@ -1,5 +1,12 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
+import { agentRepository } from '../../../domain/agents/agent.repository';
 import { endpointRepository } from '../../../domain/endpoints/endpoint.repository';
+import {
+  modesForModel,
+  MODE_SAMPLERS,
+  type EndpointMode,
+} from '../../../domain/endpoints/endpoint.model';
 import { endpointService } from '../../../domain/endpoints/endpoint.service';
 import { createLogger } from '../../../config/logger';
 
@@ -8,6 +15,48 @@ const log = createLogger('endpoints-routes');
 /** CRUD for OpenAI-compatible inference endpoints + on-demand model autodiscovery. */
 export const endpointsRouter = Router();
 
+/**
+ * Normalize the operator's `modes` array (`MODES_PLAN.md`) before it is stored. The UI PATCHes the
+ * whole array on every edit, so ids are minted here and *preserved* when present — a re-minted id
+ * would orphan the sessions that selected the mode. Only the fields the mode's own type uses are
+ * kept, and only samplers set to a finite number survive: an empty box means "don't send this
+ * field", which is not the same as sending a 0 llama.cpp would sample on.
+ */
+function normalizeModes(raw: unknown): EndpointMode[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry): EndpointMode[] => {
+    const m = (entry ?? {}) as Record<string, unknown>;
+    const type = m.type === 'prompt' ? 'prompt' : 'sampling';
+    const name = typeof m.name === 'string' ? m.name.trim() : '';
+    const model = typeof m.model === 'string' ? m.model.trim() : '';
+    if (!name || !model) return [];
+    const params: EndpointMode['params'] = {};
+    if (type === 'sampling') {
+      const given = (m.params ?? {}) as Record<string, unknown>;
+      for (const sampler of MODE_SAMPLERS) {
+        const value = Number(given[sampler]);
+        if (given[sampler] !== null && given[sampler] !== undefined && given[sampler] !== '' && Number.isFinite(value)) {
+          params[sampler] = value;
+        }
+      }
+    }
+    return [
+      {
+        id: typeof m.id === 'string' && m.id ? m.id : new Types.ObjectId().toString(),
+        model,
+        name,
+        type,
+        enabled: m.enabled !== false,
+        params,
+        text: type === 'prompt' && typeof m.text === 'string' ? m.text : '',
+        placement: m.placement === 'user_suffix' ? 'user_suffix' : 'system_suffix',
+      },
+    ];
+  });
+}
+
+
+
 endpointsRouter.get('/', async (_req, res) => {
   res.json(await endpointRepository.list());
 });
@@ -15,6 +64,27 @@ endpointsRouter.get('/', async (_req, res) => {
 /** Live reachability probe of every endpoint (header badge). Never 5xx: down endpoints report `up: false`. */
 endpointsRouter.get('/health', async (_req, res) => {
   res.json(await endpointService.probeHealth());
+});
+
+/**
+ * The inference modes offered for one agent's *resolved* model — what the chat composer renders as
+ * chips. Resolved server-side (agent's endpoint → default endpoint; agent's model → the endpoint's
+ * default → its first discovered model) so the client never re-implements that precedence and can't
+ * offer a mode the turn wouldn't actually apply. An agent with no modes returns an empty list, which
+ * is what hides the chip row entirely.
+ */
+endpointsRouter.get('/modes', async (req, res) => {
+  const agentId = String(req.query.agentId ?? '');
+  const agent = agentId && Types.ObjectId.isValid(agentId) ? await agentRepository.findById(agentId) : null;
+  if (!agent) {
+    res.status(404).json({ error: 'agent not found' });
+    return;
+  }
+  const endpoint = agent.endpoint_id
+    ? await endpointRepository.findById(agent.endpoint_id)
+    : await endpointRepository.findDefault();
+  const model = agent.model || endpoint?.default_model || endpoint?.models?.[0] || '';
+  res.json({ endpointId: endpoint ? String(endpoint._id) : null, model, modes: modesForModel(endpoint, model) });
 });
 
 endpointsRouter.post('/', async (req, res) => {
@@ -55,6 +125,7 @@ endpointsRouter.patch('/:id', async (req, res) => {
   }
   if (b.fallback_order !== undefined) patch.fallback_order = Number(b.fallback_order);
   if (b.supports_vision !== undefined) patch.supports_vision = Boolean(b.supports_vision);
+  if (b.modes !== undefined) patch.modes = normalizeModes(b.modes);
   const ep = await endpointRepository.update(req.params.id, patch);
   if (!ep) {
     res.status(404).json({ error: 'not found' });

@@ -67,6 +67,19 @@ sessionsRouter.get('/:id', async (req, res) => {
 });
 
 sessionsRouter.patch('/:id', async (req, res) => {
+  // Two independent edits share this route: the title (a rename freezes the auto-titler) and the
+  // conversation's inference modes (`MODES_PLAN.md`). The composer PATCHes only `mode_ids`, so a
+  // title is renamed only when one was actually sent — otherwise toggling a chip would blank it.
+  if (Array.isArray(req.body?.mode_ids)) {
+    const ids = (req.body.mode_ids as unknown[]).filter((id): id is string => typeof id === 'string');
+    const session = await sessionRepository.setModes(req.params.id, ids);
+    if (!session) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(session);
+    return;
+  }
   const session = await sessionRepository.rename(req.params.id, String(req.body?.title ?? ''));
   if (!session) {
     res.status(404).json({ error: 'not found' });

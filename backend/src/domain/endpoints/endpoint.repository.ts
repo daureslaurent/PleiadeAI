@@ -63,6 +63,7 @@ export const endpointRepository = {
         | 'context_window_mode'
         | 'default_model'
         | 'fallback_order'
+        | 'modes'
       >
     >,
   ): Promise<EndpointDoc | null> {

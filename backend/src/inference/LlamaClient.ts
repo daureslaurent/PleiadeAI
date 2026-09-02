@@ -649,19 +649,29 @@ export class LlamaClient {
     // the request. (Node ≥18.17 / 20 `AbortSignal.any`; this backend runs Node ≥22.)
     const attemptSignal = signal ? AbortSignal.any([signal, ttftCtrl.signal]) : ttftCtrl.signal;
 
+    // Extra samplers, present only when an inference mode set them (`MODES_PLAN.md`). `top_k`,
+    // `min_p` and `repeat_penalty` are llama.cpp extensions to the OpenAI body — outside the SDK's
+    // types, hence the cast — and every one of them is *omitted* rather than defaulted when unset,
+    // so a server with no mode in play samples exactly as it did before.
+    const body: OpenAI.Chat.ChatCompletionCreateParamsStreaming & Record<string, unknown> = {
+      model: target.model,
+      max_tokens: overrides?.maxTokens ?? target.maxTokens,
+      temperature: overrides?.temperature ?? target.temperature,
+      top_p: target.topP,
+      messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+      stream: true,
+      // Ask the server for a final usage-only chunk so we can report live context size.
+      stream_options: { include_usage: true },
+      tools: wireTools,
+    };
+    if (target.topK != null) body.top_k = target.topK;
+    if (target.minP != null) body.min_p = target.minP;
+    if (target.presencePenalty != null) body.presence_penalty = target.presencePenalty;
+    if (target.repetitionPenalty != null) body.repeat_penalty = target.repetitionPenalty;
+
     try {
       const stream = await client.chat.completions.create(
-        {
-          model: target.model,
-          max_tokens: overrides?.maxTokens ?? target.maxTokens,
-          temperature: overrides?.temperature ?? target.temperature,
-          top_p: target.topP,
-          messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
-          stream: true,
-          // Ask the server for a final usage-only chunk so we can report live context size.
-          stream_options: { include_usage: true },
-          tools: wireTools,
-        },
+        body,
         // The combined signal: a user "stop" or the first-token timeout tears down the in-flight
         // request promptly instead of waiting for the model (or a dead endpoint) to respond.
         { signal: attemptSignal },

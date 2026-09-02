@@ -1,7 +1,15 @@
 import { useState } from 'react';
-import { Eye, Plus, RefreshCw, Server, Star, Trash2 } from 'lucide-react';
-import { Button, Callout, Checkbox, Input, Row, Select, useConfirm } from '../../../components/ui';
-import { endpointsApi, endpointVision, type Endpoint, type EndpointPatch } from '../../../lib/api';
+import { ChevronDown, Eye, EyeOff, Plus, RefreshCw, Server, SlidersHorizontal, Star, Trash2, Type } from 'lucide-react';
+import { Button, Callout, Checkbox, Input, Row, Select, Textarea, useConfirm } from '../../../components/ui';
+import {
+  endpointsApi,
+  endpointVision,
+  MODE_SAMPLERS,
+  type Endpoint,
+  type EndpointMode,
+  type EndpointPatch,
+} from '../../../lib/api';
+import { modeTone } from '../../../lib/modeTone';
 import { useSettings } from '../context';
 
 /**
@@ -190,6 +198,8 @@ export function EndpointsManager() {
           </label>
 
           <VisionControl endpoint={e} onPatch={(p) => void patch(e._id, p)} />
+
+          <ModesEditor endpoint={e} onPatch={(p) => void patch(e._id, p)} />
         </Row>
       ))}
 
@@ -312,6 +322,212 @@ function ContextWindowControl({
           }
           className="w-28 py-1.5"
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Per-model inference modes (`MODES_PLAN.md`). A mode belongs to one model on this endpoint and is
+ * either a **sampling** preset (accent blue — a knob on the machine) or a **prompt** snippet
+ * (reasoning purple — words entering the model's head); the composer reuses that same colour split,
+ * so a chip in the chat is recognisable as the thing configured here.
+ *
+ * The whole array is PATCHed on every edit; the backend mints missing ids and preserves existing
+ * ones, so a mode a conversation already selected survives being edited.
+ */
+function ModesEditor({ endpoint: e, onPatch }: { endpoint: Endpoint; onPatch: (p: EndpointPatch) => void }) {
+  const modes = e.modes ?? [];
+  const [openId, setOpenId] = useState<string | null>(null);
+  const models = e.models.length ? e.models : e.default_model ? [e.default_model] : [];
+
+  /** Replace one mode (by index) and save; `null` deletes it. */
+  function save(index: number, next: EndpointMode | null) {
+    const list = modes.slice();
+    if (next) list[index] = next;
+    else list.splice(index, 1);
+    onPatch({ modes: list });
+  }
+
+  function add(type: EndpointMode['type']) {
+    const mode: EndpointMode = {
+      // Provisional id — the backend keeps it, so the row stays open across the reload.
+      id: `new-${Date.now()}`,
+      model: e.default_model || models[0] || '',
+      name: type === 'sampling' ? 'New preset' : 'New snippet',
+      type,
+      enabled: true,
+      params: {},
+      text: '',
+      placement: type === 'prompt' ? 'user_suffix' : 'system_suffix',
+    };
+    setOpenId(mode.id);
+    onPatch({ modes: [...modes, mode] });
+  }
+
+  return (
+    <div className="space-y-2 border-t border-white/[0.06] pt-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Modes</span>
+        <span className="text-[11px] text-slate-600">
+          {modes.length
+            ? `${modes.length} configured — offered in chat for the matching model`
+            : 'None — the chat composer stays as it is'}
+        </span>
+        <div className="ml-auto flex gap-1.5">
+          <Button
+            onClick={() => add('sampling')}
+            disabled={!models.length}
+            title={models.length ? 'Sampling preset: overrides temperature, top_p, top_k…' : 'Refresh models first'}
+            icon={<SlidersHorizontal size={12} />}
+            className="py-0.5 text-[10px] uppercase tracking-wide"
+          >
+            Sampling
+          </Button>
+          <Button
+            onClick={() => add('prompt')}
+            disabled={!models.length}
+            title={models.length ? 'Prompt snippet: appends text to the system prompt or the user turn' : 'Refresh models first'}
+            icon={<Type size={12} />}
+            className="py-0.5 text-[10px] uppercase tracking-wide"
+          >
+            Prompt
+          </Button>
+        </div>
+      </div>
+
+      {modes.map((m, i) => (
+        <ModeRow
+          key={m.id}
+          mode={m}
+          models={models}
+          open={openId === m.id}
+          onToggleOpen={() => setOpenId(openId === m.id ? null : m.id)}
+          onChange={(next) => save(i, next)}
+          onDelete={() => save(i, null)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** One mode: a compact identity row that unfolds into the fields its type actually uses. */
+function ModeRow({
+  mode,
+  models,
+  open,
+  onToggleOpen,
+  onChange,
+  onDelete,
+}: {
+  mode: EndpointMode;
+  models: string[];
+  open: boolean;
+  onToggleOpen: () => void;
+  onChange: (next: EndpointMode) => void;
+  onDelete: () => void;
+}) {
+  const tone = modeTone(mode.type);
+
+  return (
+    <div className="rounded-lg border border-white/[0.06] bg-black/20">
+      <div className="flex items-center gap-2 p-2">
+        <span
+          className={`flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${tone.border} ${tone.text}`}
+          title={mode.type === 'sampling' ? 'Overrides the samplers it sets' : 'Appends text to the turn'}
+        >
+          {mode.type === 'sampling' ? <SlidersHorizontal size={10} /> : <Type size={10} />}
+          {mode.type}
+        </span>
+        <Input
+          defaultValue={mode.name}
+          placeholder="Name (shown in chat)"
+          onBlur={(ev) => ev.target.value !== mode.name && onChange({ ...mode, name: ev.target.value })}
+          className="min-w-0 flex-1 py-1 text-xs"
+        />
+        <Select
+          value={mode.model}
+          title="The model this mode belongs to — it is only offered when that model is the one running"
+          onChange={(ev) => onChange({ ...mode, model: ev.target.value })}
+          className="w-40 py-1 text-[11px]"
+        >
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+          {mode.model && !models.includes(mode.model) && (
+            <option value={mode.model}>{mode.model} (unknown)</option>
+          )}
+        </Select>
+        <button
+          onClick={() => onChange({ ...mode, enabled: !mode.enabled })}
+          title={mode.enabled ? 'Enabled — offered in chat' : 'Disabled — kept, but not offered'}
+          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/[0.06] ${mode.enabled ? tone.text : 'text-slate-600'}`}
+        >
+          {mode.enabled ? <Eye size={13} /> : <EyeOff size={13} />}
+        </button>
+        <button
+          onClick={onToggleOpen}
+          title={open ? 'Collapse' : 'Edit'}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+        >
+          <ChevronDown size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
+        </button>
+        <Button variant="danger" onClick={onDelete} title="Delete mode" className="px-2 py-1">
+          <Trash2 size={12} />
+        </Button>
+      </div>
+
+      {open && mode.type === 'sampling' && (
+        <div className="grid grid-cols-3 gap-2 border-t border-white/[0.06] p-2">
+          {MODE_SAMPLERS.map((sampler) => (
+            <label key={sampler} className="space-y-1">
+              <span className="block font-mono text-[10px] text-slate-500">{sampler}</span>
+              <Input
+                type="number"
+                step="0.01"
+                defaultValue={mode.params[sampler] ?? ''}
+                placeholder="unset"
+                title="Empty = not sent, so the global setting (or the server's own default) stands"
+                onBlur={(ev) => {
+                  const raw = ev.target.value.trim();
+                  const params = { ...mode.params };
+                  if (raw === '' || !Number.isFinite(Number(raw))) delete params[sampler];
+                  else params[sampler] = Number(raw);
+                  onChange({ ...mode, params });
+                }}
+                className="w-full py-1 font-mono text-[11px]"
+              />
+            </label>
+          ))}
+          <p className="col-span-3 text-[11px] text-slate-600">
+            An empty field is never put on the wire — only the samplers you fill in are overridden.
+          </p>
+        </div>
+      )}
+
+      {open && mode.type === 'prompt' && (
+        <div className="space-y-2 border-t border-white/[0.06] p-2">
+          <Textarea
+            rows={3}
+            defaultValue={mode.text}
+            placeholder="/no_think"
+            onBlur={(ev) => ev.target.value !== mode.text && onChange({ ...mode, text: ev.target.value })}
+            className="w-full"
+          />
+          <label className="flex items-center gap-2">
+            <span className="shrink-0 text-[11px] text-slate-400">Append to</span>
+            <Select
+              value={mode.placement}
+              onChange={(ev) => onChange({ ...mode, placement: ev.target.value as EndpointMode['placement'] })}
+              className="flex-1 py-1 text-[11px]"
+            >
+              <option value="user_suffix">The user turn — required for control tokens (/no_think)</option>
+              <option value="system_suffix">The system prompt — for standing style directives</option>
+            </Select>
+          </label>
+        </div>
       )}
     </div>
   );

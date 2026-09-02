@@ -73,6 +73,23 @@ export const sessionRepository = {
     return SessionModel.findById(id).exec();
   },
 
+  /**
+   * The inference modes switched on for this conversation (`MODES_PLAN.md`), or `[]`. Guarded by an
+   * id-shape check because not every `sessionId` in the system is a session document: a flow run uses
+   * its run id as the session id, and handing that to `findById` would throw a CastError on a lookup
+   * that only ever wanted "no modes".
+   */
+  async modeIds(id: string | Types.ObjectId): Promise<string[]> {
+    if (!Types.ObjectId.isValid(id)) return [];
+    const session = await SessionModel.findById(id).select('mode_ids').lean().exec();
+    return (session?.mode_ids as string[] | undefined) ?? [];
+  },
+
+  /** Replace the conversation's mode selection (the composer's chips). */
+  setModes(id: string | Types.ObjectId, modeIds: string[]): Promise<SessionDoc | null> {
+    return SessionModel.findByIdAndUpdate(id, { $set: { mode_ids: modeIds } }, { new: true }).exec();
+  },
+
   create(input: {
     agentId: string | Types.ObjectId;
     agentName: string;

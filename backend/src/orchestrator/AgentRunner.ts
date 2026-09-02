@@ -228,7 +228,12 @@ export class AgentRunner {
     // Resolve the inference target before picking tools: whether the agent's own model is multimodal
     // decides both what enters its context (raw pixels vs. a note) and whether it is granted
     // `analyze_image` at all. (Failover chain resolved alongside.)
-    const inference = await resolveInference(agent);
+    // Inference modes (`MODES_PLAN.md`): the operator's per-conversation picks, read from the session
+    // rather than passed in, so an auto-loop tick and a `continue` nudge run in the same modes the
+    // chips show. Depth 0 only — a mode is the operator's choice for *this* chat, not a standing
+    // instruction inherited by every agent the turn delegates to.
+    const modeIds = input.depth === 0 ? await sessionRepository.modeIds(input.sessionId) : [];
+    const inference = await resolveInference(agent, modeIds);
     const fallbacks = await resolveFallbacks(inference.url);
 
     // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides
@@ -410,6 +415,11 @@ export class AgentRunner {
     if (forumBlock && typeof systemMessage.content === 'string') {
       systemMessage.content = `${systemMessage.content}\n\n${forumBlock}`;
     }
+    // A `prompt` mode set to `system_suffix` lands last of all: operator text chosen for this
+    // conversation outranks (and so follows) everything the JIT builder assembled for the agent.
+    if (inference.promptSuffixes.system.length && typeof systemMessage.content === 'string') {
+      systemMessage.content = `${systemMessage.content}\n\n${inference.promptSuffixes.system.join('\n\n')}`;
+    }
 
     // Tell the model, in the user turn, what images it can act on and how — otherwise it has no
     // reliable signal an image exists and silently ignores it. What the note says depends on whether
@@ -479,8 +489,13 @@ export class AgentRunner {
     // carried-over set is the *only* thing that keeps an earlier image answerable — the note above
     // marks them as old so they aren't mistaken for a fresh attachment. `attachedImages` is already
     // "this turn's if any, else the session's", so old images are never re-fed alongside a new one.
+    // A `prompt` mode set to `user_suffix` is appended to the user turn — the only placement
+    // llama.cpp chat-template control tokens (`/no_think`) are honoured in.
+    const modedUserText = inference.promptSuffixes.user.length
+      ? [userText, ...inference.promptSuffixes.user].filter(Boolean).join('\n\n')
+      : userText;
     const userMessage = buildUserMessage(
-      userText,
+      modedUserText,
       inference.supportsVision ? attachedImages : undefined,
     );
     const messages: ChatMessage[] = [systemMessage, ...(input.history ?? []), userMessage];
@@ -488,7 +503,14 @@ export class AgentRunner {
     // The clean conversational context to hand any sub-agent this run delegates to: everything up to
     // (and including) this turn's user message, but *not* the in-flight tool activity. Threaded down
     // so a sub-agent's `ask_parent` re-runs this agent with a well-formed, context-aware history.
-    const callerHistory: ChatMessage[] = [...(input.history ?? []), userMessage];
+    // Built from the operator's own words, without this turn's mode suffix: a control token aimed at
+    // *this* model would read as gibberish quoted into another agent's conversation.
+    const callerHistory: ChatMessage[] = [
+      ...(input.history ?? []),
+      inference.promptSuffixes.user.length
+        ? buildUserMessage(userText, inference.supportsVision ? attachedImages : undefined)
+        : userMessage,
+    ];
 
     // Isolation: when the agent is assigned an isolation profile (resolved above), lazily bring up
     // its container on first tool use and reuse the executor for the rest of the turn (memoised so

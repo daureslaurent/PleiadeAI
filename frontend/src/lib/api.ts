@@ -793,6 +793,8 @@ export interface Session {
   /** Forum-origin only: the thread the mention came from, so the Workspace can link back to it. */
   forum_thread_id?: string | null;
   forum_mention_id?: string | null;
+  /** Inference modes switched on for this conversation (`MODES_PLAN.md`); ids of endpoint modes. */
+  mode_ids?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -904,6 +906,9 @@ export const sessionsApi = {
   create: (agentId: string) => api.post<Session>('/sessions', { agentId }).then((r) => r.data),
   rename: (id: string, title: string) =>
     api.patch<Session>(`/sessions/${id}`, { title }).then((r) => r.data),
+  /** Replace the conversation's active inference modes (the composer's chips). */
+  setModes: (id: string, modeIds: string[]) =>
+    api.patch<Session>(`/sessions/${id}`, { mode_ids: modeIds }).then((r) => r.data),
   remove: (id: string) => api.delete(`/sessions/${id}`).then((r) => r.data),
   messages: (id: string) => api.get<StoredMessage[]>(`/sessions/${id}/messages`).then((r) => r.data),
   /** Every agent's task list in the session, so a reload restores the pinned checklist. */
@@ -1769,6 +1774,34 @@ export const mailApi = {
 };
 
 /** One OpenAI-compatible inference endpoint with its autodiscovered model list. */
+/** The llama.cpp samplers a `sampling` mode may override, in the order the editor renders them. */
+export const MODE_SAMPLERS = [
+  'temperature',
+  'top_p',
+  'top_k',
+  'min_p',
+  'presence_penalty',
+  'repetition_penalty',
+] as const;
+
+export type ModeSampler = (typeof MODE_SAMPLERS)[number];
+
+/**
+ * One operator-defined inference mode (`MODES_PLAN.md`), attached to a single model on an endpoint.
+ * A `sampling` mode overrides the samplers it sets (an absent field is not sent at all); a `prompt`
+ * mode appends `text` to the system prompt or to the user turn.
+ */
+export interface EndpointMode {
+  id: string;
+  model: string;
+  name: string;
+  type: 'sampling' | 'prompt';
+  enabled: boolean;
+  params: Partial<Record<ModeSampler, number>>;
+  text: string;
+  placement: 'system_suffix' | 'user_suffix';
+}
+
 export interface Endpoint {
   _id: string;
   name: string;
@@ -1799,6 +1832,11 @@ export interface Endpoint {
    * absent from the map is undetectable and falls back to `supports_vision`.
    */
   model_vision?: Record<string, boolean>;
+  /**
+   * Operator-defined modes for this endpoint's models. Empty on an endpoint nobody has configured,
+   * which is what keeps the composer's chip row hidden.
+   */
+  modes?: EndpointMode[];
 }
 
 /**
@@ -1858,6 +1896,7 @@ export type EndpointPatch = Partial<
     | 'default_model'
     | 'fallback_order'
     | 'supports_vision'
+    | 'modes'
   >
 >;
 
@@ -2075,6 +2114,16 @@ export const endpointsApi = {
   discover: (id: string) => api.post<Endpoint>(`/endpoints/${id}/discover`).then((r) => r.data),
   setDefault: (id: string) => api.post<Endpoint>(`/endpoints/${id}/default`).then((r) => r.data),
   remove: (id: string) => api.delete(`/endpoints/${id}`).then((r) => r.data),
+  /**
+   * The modes offered for one agent's resolved model — what the composer renders as chips. Resolved
+   * server-side so the client never re-implements the endpoint/model precedence.
+   */
+  modesForAgent: (agentId: string) =>
+    api
+      .get<{ endpointId: string | null; model: string; modes: EndpointMode[] }>('/endpoints/modes', {
+        params: { agentId },
+      })
+      .then((r) => r.data),
 };
 
 // ---------------------------------------------------------------------------

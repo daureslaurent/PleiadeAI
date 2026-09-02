@@ -6,6 +6,7 @@ import { Collapsible } from './Collapsible';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
 import { LoopPanel } from './LoopPanel';
+import { ModeBar } from './ModeBar';
 import { useStream, buildBlocks, type ContextUsage, type RecalledMemory, type Turn, type TurnScore } from '../../store/stream';
 import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
@@ -634,6 +635,12 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               onEnsureSession={onEnsureSession}
               onClose={() => setLoopOpen(false)}
             />
+          )}
+
+          {/* Inference modes for this conversation (`MODES_PLAN.md`). Absent unless the agent's model
+              has modes configured in Settings → Connections. */}
+          {hasSession && agent && activeSessionId && (
+            <ModeBar agentId={agent._id} sessionId={activeSessionId} />
           )}
 
           <div className="flex items-end gap-2">

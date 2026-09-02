@@ -1,6 +1,34 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 
 /**
+ * One mode. `params` holds only the sampling fields the operator actually set — a `null` (or absent)
+ * field is never put on the wire, so the global setting / the server's own default stands. Stored as
+ * `Mixed` so an unset sampler is genuinely absent rather than coerced to 0, which llama.cpp would
+ * read as a real (and destructive) value.
+ */
+const ModeSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    /** The model id on this endpoint the mode belongs to. */
+    model: { type: String, required: true },
+    name: { type: String, required: true, trim: true },
+    type: { type: String, enum: ['sampling', 'prompt'], required: true },
+    /** Unticked modes stay configured but are hidden from the composer. */
+    enabled: { type: Boolean, default: true },
+    /** `sampling` only: the subset of samplers this mode overrides. */
+    params: { type: Schema.Types.Mixed, default: {} },
+    /** `prompt` only: the text appended to the turn. */
+    text: { type: String, default: '' },
+    /**
+     * `prompt` only: where the text lands. `user_suffix` is required by llama.cpp chat-template
+     * control tokens (`/no_think`), which are only honoured on the user turn.
+     */
+    placement: { type: String, enum: ['system_suffix', 'user_suffix'], default: 'system_suffix' },
+  },
+  { _id: false },
+);
+
+/**
  * `endpoints` collection. Each document is one OpenAI-compatible inference server (llama.cpp,
  * vLLM, Ollama, TGI, …). Agents point at an endpoint + model; when they don't, the single
  * `is_default` endpoint is used. Models are autodiscovered from the server's `GET /v1/models`
@@ -44,6 +72,17 @@ const EndpointSchema = new Schema(
      * query into this object (only whole-object read + keyed lookup by real model id), so `Mixed` is safe.
      */
     model_contexts: { type: Schema.Types.Mixed, default: {} },
+    /**
+     * Operator-defined **modes** for the models on this endpoint (`MODES_PLAN.md`). A mode is either a
+     * `sampling` preset (a subset of llama.cpp's samplers, applied over the global settings) or a
+     * `prompt` snippet appended to the turn. Each entry names the model it belongs to, so a control
+     * token only one family understands (`/no_think`) is never offered for another model. Empty by
+     * default — an endpoint with no modes behaves exactly as it did before the feature existed.
+     *
+     * `id` is an explicit string rather than a subdocument `_id` because the UI saves the whole array
+     * at once: Mongoose would re-mint `_id`s on every save and orphan the sessions referencing them.
+     */
+    modes: { type: [ModeSchema], default: [] },
     /** Exactly one endpoint is the default (used by agents that don't pick one). Enforced on write. */
     is_default: { type: Boolean, default: false },
     /**
@@ -92,6 +131,45 @@ export function effectiveVision(endpoint: Pick<Endpoint, 'model_vision' | 'suppo
   if (!endpoint) return false;
   const detected = model ? (endpoint.model_vision as Record<string, unknown> | undefined)?.[model] : undefined;
   return typeof detected === 'boolean' ? detected : Boolean(endpoint.supports_vision);
+}
+
+
+/** The sampling fields a `sampling` mode may override, in the order the UI renders them. */
+export const MODE_SAMPLERS = [
+  'temperature',
+  'top_p',
+  'top_k',
+  'min_p',
+  'presence_penalty',
+  'repetition_penalty',
+] as const;
+
+export type ModeSampler = (typeof MODE_SAMPLERS)[number];
+
+/** One operator-defined mode (`MODES_PLAN.md`). Mirrors `ModeSchema`. */
+export interface EndpointMode {
+  id: string;
+  model: string;
+  name: string;
+  type: 'sampling' | 'prompt';
+  enabled: boolean;
+  params: Partial<Record<ModeSampler, number | null>>;
+  text: string;
+  placement: 'system_suffix' | 'user_suffix';
+}
+
+/**
+ * The modes configured for `model` on this endpoint, enabled ones only. Ordering is the operator's
+ * array order, which is also the order overlapping sampling fields resolve in (last wins).
+ */
+export function modesForModel(
+  endpoint: Pick<Endpoint, 'modes'> | null,
+  model: string,
+): EndpointMode[] {
+  if (!endpoint || !model) return [];
+  return ((endpoint.modes ?? []) as unknown as EndpointMode[]).filter(
+    (m) => m.enabled !== false && m.model === model,
+  );
 }
 
 export const EndpointModel = model('Endpoint', EndpointSchema);

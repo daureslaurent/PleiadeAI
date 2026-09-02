@@ -2,6 +2,7 @@ import type { Types } from 'mongoose';
 import { endpointRepository } from '../domain/endpoints/endpoint.repository';
 import { settingsService } from '../domain/settings/settings.service';
 import { effectiveVision, type EndpointDoc } from '../domain/endpoints/endpoint.model';
+import { modePrompts, modeSampling, selectModes, type ModePrompts } from './modes';
 
 /**
  * The probed real context size for a specific model on this endpoint (`n_ctx`), or `0` if we never
@@ -45,6 +46,20 @@ export interface ResolvedInference {
   temperature: number;
   topP: number;
   /**
+   * Extra llama.cpp samplers, set only by an active `sampling` mode (`MODES_PLAN.md`). `null` means
+   * "don't put this field on the wire" — the server keeps its own default, which is why they are
+   * nullable rather than defaulted here.
+   */
+  topK: number | null;
+  minP: number | null;
+  presencePenalty: number | null;
+  repetitionPenalty: number | null;
+  /**
+   * Operator text the active `prompt` modes append to this turn: `system` at the end of the single
+   * leading system message, `user` at the end of the user turn. Empty on every turn with no modes.
+   */
+  promptSuffixes: ModePrompts;
+  /**
    * The resolved model is multimodal (vision): auto-detected at model discovery (`--mmproj` in the
    * server's launch args), falling back to the endpoint's manual flag. Gates image attachment.
    */
@@ -52,6 +67,18 @@ export interface ResolvedInference {
   /** Fleet default per-turn tool-round ceiling; applies when the agent doesn't override it. */
   maxToolIterations: number;
 }
+
+/** No modes: the shape every non-mode caller (fallbacks, side tasks) resolves to. */
+const NO_MODES: Pick<
+  ResolvedInference,
+  'topK' | 'minP' | 'presencePenalty' | 'repetitionPenalty' | 'promptSuffixes'
+> = {
+  topK: null,
+  minP: null,
+  presencePenalty: null,
+  repetitionPenalty: null,
+  promptSuffixes: { system: [], user: [] },
+};
 
 /**
  * Whose inference target to resolve. Structural rather than `Pick<AgentDoc, …>` so a caller with no
@@ -67,9 +94,13 @@ export interface InferenceTarget {
  * Resolve the endpoint + model an agent should use this turn, layering global sampling settings
  * on top. Precedence: the agent's assigned endpoint → the default endpoint → the legacy global
  * settings connection. The model follows the agent's pick, then the endpoint's first discovered
- * model, then the global default model. Sampling always comes from global settings.
+ * model, then the global default model. Sampling comes from global settings, overridden field by
+ * field by whichever of `modeIds` resolve to `sampling` modes on this endpoint's chosen model.
  */
-export async function resolveInference(agent: InferenceTarget): Promise<ResolvedInference> {
+export async function resolveInference(
+  agent: InferenceTarget,
+  modeIds?: readonly string[],
+): Promise<ResolvedInference> {
   const settings = await settingsService.get();
   const endpoint = agent.endpoint_id
     ? await endpointRepository.findById(agent.endpoint_id)
@@ -83,14 +114,25 @@ export async function resolveInference(agent: InferenceTarget): Promise<Resolved
   // value. Keeps the meter honest against the server's --ctx-size when auto-detection is on.
   const contextWindow = resolveContextWindow(endpoint, model, settings);
 
+  // Inference modes (`MODES_PLAN.md`): the operator's picks for this conversation, narrowed to the
+  // ones defined for the model we actually resolved. Sampling overrides layer on top of the global
+  // settings; prompt suffixes ride along for the runner to fold into the messages.
+  const modes = selectModes(endpoint, model, modeIds);
+  const sampling = modeSampling(modes);
+
   return {
     url,
     apiKey,
     model,
     contextWindow,
     maxTokens: settings.max_tokens,
-    temperature: settings.temperature,
-    topP: settings.top_p,
+    temperature: sampling.temperature ?? settings.temperature,
+    topP: sampling.topP ?? settings.top_p,
+    topK: sampling.topK ?? null,
+    minP: sampling.minP ?? null,
+    presencePenalty: sampling.presencePenalty ?? null,
+    repetitionPenalty: sampling.repetitionPenalty ?? null,
+    promptSuffixes: modePrompts(modes),
     supportsVision: effectiveVision(endpoint, model),
     maxToolIterations: settings.max_tool_iterations,
   };
@@ -100,7 +142,8 @@ export async function resolveInference(agent: InferenceTarget): Promise<Resolved
  * Resolve a specific endpoint (by id) into an inference target, layering global sampling on top.
  * `modelOverride` wins over the endpoint's own default model. Returns `null` if the endpoint is
  * gone (deleted after being selected). Used by side tasks that target a fixed endpoint, e.g. title
- * generation pointed at a cheap model.
+ * generation pointed at a cheap model — side tasks run unmoded, since a mode is the operator's
+ * choice for one *conversation*.
  */
 export async function resolveForEndpoint(
   endpointId: string,
@@ -118,6 +161,7 @@ export async function resolveForEndpoint(
     maxTokens: settings.max_tokens,
     temperature: settings.temperature,
     topP: settings.top_p,
+    ...NO_MODES,
     supportsVision: effectiveVision(endpoint, model),
     maxToolIterations: settings.max_tool_iterations,
   };
@@ -128,6 +172,9 @@ export async function resolveForEndpoint(
  * lowest order first, each fully resolved with its own default model + the global sampling settings.
  * `excludeUrl` drops the primary target so we never immediately retry the box that just failed.
  * Returns `[]` when no fallbacks are configured (the normal single-endpoint case).
+ *
+ * No modes here: a mode belongs to one model on one endpoint, and a failover target is by definition
+ * a different box running a different model, so the operator's picks cannot be said to apply.
  */
 export async function resolveFallbacks(excludeUrl?: string): Promise<ResolvedInference[]> {
   const fallbacks = await endpointRepository.listFallbacks();
@@ -149,6 +196,7 @@ export async function resolveFallbacks(excludeUrl?: string): Promise<ResolvedInf
         maxTokens: settings.max_tokens,
         temperature: settings.temperature,
         topP: settings.top_p,
+        ...NO_MODES,
         supportsVision: effectiveVision(ep, model),
         maxToolIterations: settings.max_tool_iterations,
       };
