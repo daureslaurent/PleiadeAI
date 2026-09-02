@@ -1573,6 +1573,13 @@ export const telegramApi = {
 };
 
 export interface InferenceSettings {
+  /**
+   * Fleet-wide prompt modes: the app's own built-ins (marked, read-only) followed by the operator's
+   * own. Offered in every conversation on top of the per-model endpoint modes.
+   */
+  global_modes: GlobalMode[];
+  /** Ids of built-in modes switched off — the built-ins are code-defined, so "off" is stored here. */
+  global_modes_disabled: string[];
   llama_url: string;
   llama_model: string;
   llama_api_key: string;
@@ -1802,6 +1809,17 @@ export interface EndpointMode {
   text: string;
   placement: 'system_suffix' | 'user_suffix';
 }
+
+/**
+ * A **global** mode: offered in every conversation whatever endpoint and model it runs on. Always a
+ * prompt snippet — a sampler value that suits one model is not a claim about the whole fleet.
+ * Stored on the settings singleton (`InferenceSettings.global_modes`), not on an endpoint.
+ */
+export type GlobalMode = Omit<EndpointMode, 'model' | 'type'> & {
+  type: 'prompt';
+  /** Code-defined and shipped with the app: read-only here, and switched off via `global_modes_disabled`. */
+  builtin?: boolean;
+};
 
 export interface Endpoint {
   _id: string;

@@ -6,12 +6,41 @@ import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
 import { applyTelegramConfig } from '../../../telegram/telegram-config';
 import { telegramBot } from '../../../telegram/TelegramBot';
 import { syncForumSweep } from '../../../autonomy/agenda.setup';
+import { Types } from 'mongoose';
+import type { GlobalMode } from '../../../domain/endpoints/endpoint.model';
+import { BUILTIN_GLOBAL_MODES, isBuiltinModeId } from '../../../domain/settings/builtin-modes';
 import { createLogger } from '../../../config/logger';
 
 const log = createLogger('settings-routes');
 
 /** Runtime inference settings (llama.cpp options) for the Settings page. */
 export const settingsRouter = Router();
+
+/**
+ * Normalize the operator's global modes (`MODES_PLAN.md`). Same contract as the endpoint-level
+ * normalizer: the client PUTs the whole array, ids are minted here and *preserved* when present so
+ * the conversations that selected a mode keep it, and a cleared name falls back rather than deleting
+ * the entry. No `type` or `model` to coerce — a global mode is a prompt, on every model.
+ */
+function normalizeGlobalModes(raw: unknown): GlobalMode[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry): GlobalMode[] => {
+    const m = (entry ?? {}) as Record<string, unknown>;
+    // The built-ins are code-defined and composed in on read; storing one would fork it from the
+    // source and let it go stale. Dropping them here is also the guard against a client inventing a
+    // `builtin:` id to smuggle a fake built-in into the document.
+    if (typeof m.id === 'string' && isBuiltinModeId(m.id)) return [];
+    return [{
+      id: typeof m.id === 'string' && m.id ? m.id : new Types.ObjectId().toString(),
+      name: (typeof m.name === 'string' ? m.name.trim() : '') || 'Untitled mode',
+      type: 'prompt',
+      enabled: m.enabled !== false,
+      params: {},
+      text: typeof m.text === 'string' ? m.text : '',
+      placement: m.placement === 'user_suffix' ? 'user_suffix' : 'system_suffix',
+    }];
+  });
+}
 
 settingsRouter.get('/', async (_req, res) => {
   res.json(await settingsService.get());
@@ -83,6 +112,17 @@ settingsRouter.put('/', async (req, res) => {
     patch.max_agent_hops = Math.min(10, Math.max(1, Number(b.max_agent_hops) || 5));
   // Fleet-wide AGENTS.md house rules. Operator-only — agents read this block, no tool writes it.
   if (typeof b.agents_md === 'string') patch.agents_md = b.agents_md;
+  // Fleet-wide prompt modes, offered in every conversation. Whitelisted here or they silently
+  // never persist, like every other settings key.
+  if (b.global_modes !== undefined) patch.global_modes = normalizeGlobalModes(b.global_modes);
+  // Which built-ins are switched off. Narrowed to ids that actually name one, so a stale id can't
+  // accumulate in the document forever.
+  if (Array.isArray(b.global_modes_disabled)) {
+    const known = new Set(BUILTIN_GLOBAL_MODES.map((m) => m.id));
+    patch.global_modes_disabled = (b.global_modes_disabled as unknown[]).filter(
+      (id): id is string => typeof id === 'string' && known.has(id),
+    );
+  }
   // Forum auto-reply: mentions run themselves, bounded by a per-thread budget. Floor of 1 — zero
   // would mean "enabled but nothing may ever run", which is just the switch being off.
   if (b.forum_auto_reply !== undefined) patch.forum_auto_reply = Boolean(b.forum_auto_reply);

@@ -1,5 +1,7 @@
 import { env } from '../../config/env';
 import { SettingsModel } from './settings.model';
+import type { GlobalMode } from '../endpoints/endpoint.model';
+import { BUILTIN_GLOBAL_MODES } from './builtin-modes';
 
 /** Effective inference settings the rest of the app reads. */
 export interface EffectiveSettings {
@@ -61,6 +63,14 @@ export interface EffectiveSettings {
   max_agent_hops: number;
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
+  /**
+   * Fleet-wide prompt modes, offered in every conversation on top of the per-model endpoint ones:
+   * the app's own built-ins first (marked, read-only, switched off via `global_modes_disabled`),
+   * then the operator's own.
+   */
+  global_modes: GlobalMode[];
+  /** Ids of built-in modes the operator switched off — the built-ins are code-defined, so "off" lives here. */
+  global_modes_disabled: string[];
   /**
    * Forum auto-reply: a *summons* of an agent on the board runs it without the operator pressing
    * Run, and the answer is posted back to the thread. Off → a mention only ever raises an alert.
@@ -129,6 +139,7 @@ const KEY = 'global';
 export const settingsService = {
   async get(): Promise<EffectiveSettings> {
     const doc = await SettingsModel.findOne({ key: KEY }).lean();
+    const disabled = (doc?.global_modes_disabled as string[] | undefined) ?? [];
     return {
       llama_url: doc?.llama_url ?? env.LLAMA_API_URL,
       llama_model: doc?.llama_model ?? env.LLAMA_MODEL,
@@ -175,6 +186,14 @@ export const settingsService = {
       max_tool_iterations: doc?.max_tool_iterations ?? 50,
       max_agent_hops: doc?.max_agent_hops ?? env.MAX_AGENT_HOPS,
       agents_md: doc?.agents_md ?? '',
+      // Built-ins are composed in on every read rather than seeded once, so they improve with the
+      // app instead of staying frozen at whatever a migration wrote. A disabled one is still
+      // returned (the Settings page has to render its row) but marked so nothing offers it in chat.
+      global_modes: [
+        ...BUILTIN_GLOBAL_MODES.map((m) => ({ ...m, enabled: !disabled.includes(m.id) })),
+        ...((doc?.global_modes as GlobalMode[] | undefined) ?? []),
+      ],
+      global_modes_disabled: disabled,
       forum_auto_reply: doc?.forum_auto_reply ?? false,
       forum_auto_reply_max_per_thread: doc?.forum_auto_reply_max_per_thread ?? 8,
       forum_auto_reply_window_hours: doc?.forum_auto_reply_window_hours ?? 24,

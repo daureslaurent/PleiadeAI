@@ -1,6 +1,7 @@
-import { Eye, HeartPulse, Server, SlidersHorizontal } from 'lucide-react';
+import { Eye, Globe, HeartPulse, Server, SlidersHorizontal } from 'lucide-react';
 import { Field, Section } from '../../../components/ui';
 import { EndpointsManager } from '../managers/EndpointsManager';
+import { GlobalModesManager } from '../managers/GlobalModesManager';
 import { useSettings } from '../context';
 import {
   EndpointModelPicker,
@@ -39,6 +40,16 @@ export function InferencePanel() {
           Give one a fallback priority for automatic failover.
         </p>
         <EndpointsManager />
+      </Section>
+
+      <Section title="Global modes" icon={<Globe size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          Prompt snippets offered in <em>every</em> conversation, whatever endpoint and model it runs
+          on — pick them from the chat composer alongside an endpoint's own per-model modes. Prompt
+          only: a sampler tuned for one model says nothing about the next one, so a sampling preset
+          stays on the model it was measured against, above.
+        </p>
+        <GlobalModesManager />
       </Section>
 
       <Section title="Generation" icon={<SlidersHorizontal size={13} />}>

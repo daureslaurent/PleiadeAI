@@ -115,9 +115,10 @@ export async function resolveInference(
   const contextWindow = resolveContextWindow(endpoint, model, settings);
 
   // Inference modes (`MODES_PLAN.md`): the operator's picks for this conversation, narrowed to the
-  // ones defined for the model we actually resolved. Sampling overrides layer on top of the global
+  // ones on offer here — defined for the model we actually resolved, or global (prompt-only, so a
+  // fleet-wide mode never claims a sampler value is right for every model). Sampling overrides layer on top of the global
   // settings; prompt suffixes ride along for the runner to fold into the messages.
-  const modes = selectModes(endpoint, model, modeIds);
+  const modes = selectModes(endpoint, model, modeIds, settings.global_modes);
   const sampling = modeSampling(modes);
 
   return {

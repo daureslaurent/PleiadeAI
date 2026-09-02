@@ -2,11 +2,9 @@ import { Router } from 'express';
 import { Types } from 'mongoose';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { endpointRepository } from '../../../domain/endpoints/endpoint.repository';
-import {
-  modesForModel,
-  MODE_SAMPLERS,
-  type EndpointMode,
-} from '../../../domain/endpoints/endpoint.model';
+import { MODE_SAMPLERS, type EndpointMode } from '../../../domain/endpoints/endpoint.model';
+import { offeredModes } from '../../../inference/modes';
+import { settingsService } from '../../../domain/settings/settings.service';
 import { endpointService } from '../../../domain/endpoints/endpoint.service';
 import { createLogger } from '../../../config/logger';
 
@@ -70,7 +68,7 @@ endpointsRouter.get('/health', async (_req, res) => {
 
 /**
  * The inference modes offered for one agent's *resolved* model — what the chat composer renders as
- * chips. Resolved server-side (agent's endpoint → default endpoint; agent's model → the endpoint's
+ * chips: the endpoint's per-model ones plus the fleet-wide global prompt modes. Resolved server-side (agent's endpoint → default endpoint; agent's model → the endpoint's
  * default → its first discovered model) so the client never re-implements that precedence and can't
  * offer a mode the turn wouldn't actually apply. An agent with no modes returns an empty list, which
  * is what hides the chip row entirely.
@@ -86,7 +84,12 @@ endpointsRouter.get('/modes', async (req, res) => {
     ? await endpointRepository.findById(agent.endpoint_id)
     : await endpointRepository.findDefault();
   const model = agent.model || endpoint?.default_model || endpoint?.models?.[0] || '';
-  res.json({ endpointId: endpoint ? String(endpoint._id) : null, model, modes: modesForModel(endpoint, model) });
+  const settings = await settingsService.get();
+  res.json({
+    endpointId: endpoint ? String(endpoint._id) : null,
+    model,
+    modes: offeredModes(endpoint, model, settings.global_modes),
+  });
 });
 
 endpointsRouter.post('/', async (req, res) => {

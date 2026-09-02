@@ -1,6 +1,22 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 
 /**
+ * One global mode. Mirrors the endpoint-level `ModeSchema` minus `model` (it applies to all of them)
+ * and minus `type` (always `prompt`). `minimize: false` for the same reason as there: an empty
+ * object must survive the write.
+ */
+const GlobalModeSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    name: { type: String, required: true, trim: true },
+    enabled: { type: Boolean, default: true },
+    text: { type: String, default: '' },
+    placement: { type: String, enum: ['system_suffix', 'user_suffix'], default: 'system_suffix' },
+  },
+  { _id: false, minimize: false },
+);
+
+/**
  * Singleton runtime settings (one document, `key: 'global'`). Holds llama.cpp inference options
  * that operators can tune from the Settings page without redeploying. Env values act as the
  * initial defaults (see settings.service).
@@ -102,6 +118,18 @@ const SettingsSchema = new Schema(
      * instructions live in `agent.agents_md`; the agent's own writable doc is `agent.notebook`.
      */
     agents_md: { type: String, default: '' },
+    /**
+     * Global inference modes (`MODES_PLAN.md`): prompt snippets offered in *every* conversation,
+     * whatever endpoint and model it runs on, alongside the per-model modes defined on the endpoint.
+     * Prompt-only by construction — a sampler tuned for one model says nothing about the next one.
+     */
+    global_modes: { type: [GlobalModeSchema], default: [] },
+    /**
+     * Built-in modes the operator has switched off. The built-ins themselves are code-defined and
+     * never stored (see `builtin-modes.ts`), so "off" cannot live on the mode — it lives here, as a
+     * list of their ids. A choice about which chips the composer offers, not an edit to the mode.
+     */
+    global_modes_disabled: { type: [String], default: [] },
     /**
      * Memory distillation (`docs/memory-souvenirs.md`). When on, a completed turn is passed back
      * through the agent's *own* model, which writes 0..N standalone memories instead of the raw

@@ -1,7 +1,9 @@
 import {
+  asEndpointModes,
   modesForModel,
   type Endpoint,
   type EndpointMode,
+  type GlobalMode,
   type ModeSampler,
 } from '../domain/endpoints/endpoint.model';
 
@@ -38,8 +40,8 @@ const SAMPLER_FIELD: Record<ModeSampler, keyof ModeSampling> = {
 };
 
 /**
- * The modes that actually apply to this turn: enabled, attached to the *resolved* model, and picked
- * by the operator — in the endpoint's array order, which is the order overlapping sampling fields
+ * The modes that actually apply to this turn: enabled, attached to the *resolved* model (or global,
+ * which every model gets), and picked by the operator — in the endpoint's array order, which is the order overlapping sampling fields
  * resolve in. An id that no longer resolves (the mode was deleted, or the agent moved to another
  * model) is silently dropped: a stale selection must never break the conversation that made it.
  */
@@ -47,10 +49,24 @@ export function selectModes(
   endpoint: Pick<Endpoint, 'modes'> | null,
   model: string,
   ids: readonly string[] | undefined,
+  globals?: GlobalMode[],
 ): EndpointMode[] {
   if (!ids?.length) return [];
   const wanted = new Set(ids);
-  return modesForModel(endpoint, model).filter((m) => wanted.has(m.id));
+  return offeredModes(endpoint, model, globals).filter((m) => wanted.has(m.id));
+}
+
+/**
+ * Every mode on offer for a turn on `model`: the endpoint's own per-model ones first, then the
+ * fleet-wide globals. One list, so a caller applies a single stack and never branches on where a
+ * mode came from; globals come last so a model-specific sampling preset can't be undone by one.
+ */
+export function offeredModes(
+  endpoint: Pick<Endpoint, 'modes'> | null,
+  model: string,
+  globals?: GlobalMode[],
+): EndpointMode[] {
+  return [...modesForModel(endpoint, model), ...asEndpointModes(globals)];
 }
 
 /**

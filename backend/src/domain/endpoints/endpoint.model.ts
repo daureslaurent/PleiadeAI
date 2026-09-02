@@ -163,6 +163,18 @@ export interface EndpointMode {
 }
 
 /**
+ * A **global** mode (`MODES_PLAN.md`): one that belongs to no endpoint and no model, and so is
+ * offered in every conversation. Necessarily `prompt`-typed — a sampler value that is right for one
+ * model is not a claim you can make about every model in the fleet, whereas a standing instruction
+ * ("answer in French") is. Stored on the settings singleton, not on any endpoint.
+ */
+export type GlobalMode = Omit<EndpointMode, 'model' | 'type'> & {
+  type: 'prompt';
+  /** Code-defined and shipped with the app: read-only in the UI, never written to the database. */
+  builtin?: boolean;
+};
+
+/**
  * The modes configured for `model` on this endpoint, enabled ones only. Ordering is the operator's
  * array order, which is also the order overlapping sampling fields resolve in (last wins).
  */
@@ -174,6 +186,15 @@ export function modesForModel(
   return ((endpoint.modes ?? []) as unknown as EndpointMode[]).filter(
     (m) => m.enabled !== false && m.model === model,
   );
+}
+
+/**
+ * Global modes as the common `EndpointMode` shape, so callers apply one stack and never branch on
+ * where a mode came from. `model: '*'` records "any model" — nothing matches on it, it is only there
+ * to make the value honest when it is logged or sent to the client.
+ */
+export function asEndpointModes(globals: GlobalMode[] | undefined): EndpointMode[] {
+  return (globals ?? []).filter((m) => m.enabled !== false).map((m) => ({ ...m, model: '*', type: 'prompt' }));
 }
 
 export const EndpointModel = model('Endpoint', EndpointSchema);

@@ -7,6 +7,8 @@ import {
   buildSystemMessage,
   buildMemoryMessage,
   buildUserMessage,
+  renderActiveModesBlock,
+  renderModeUserSuffix,
   type ChatMessage,
   type AutoLoopPromptState,
 } from '../domain/agents/jit-builder';
@@ -415,10 +417,10 @@ export class AgentRunner {
     if (forumBlock && typeof systemMessage.content === 'string') {
       systemMessage.content = `${systemMessage.content}\n\n${forumBlock}`;
     }
-    // A `prompt` mode set to `system_suffix` lands last of all: operator text chosen for this
-    // conversation outranks (and so follows) everything the JIT builder assembled for the agent.
+    // A `prompt` mode set to `system_suffix` lands last of all, inside a stamped block: operator text
+    // chosen for this conversation outranks (and so follows) everything the JIT builder assembled.
     if (inference.promptSuffixes.system.length && typeof systemMessage.content === 'string') {
-      systemMessage.content = `${systemMessage.content}\n\n${inference.promptSuffixes.system.join('\n\n')}`;
+      systemMessage.content = `${systemMessage.content}\n\n${renderActiveModesBlock(inference.promptSuffixes.system)}`;
     }
 
     // Tell the model, in the user turn, what images it can act on and how — otherwise it has no
@@ -492,7 +494,7 @@ export class AgentRunner {
     // A `prompt` mode set to `user_suffix` is appended to the user turn — the only placement
     // llama.cpp chat-template control tokens (`/no_think`) are honoured in.
     const modedUserText = inference.promptSuffixes.user.length
-      ? [userText, ...inference.promptSuffixes.user].filter(Boolean).join('\n\n')
+      ? [userText, renderModeUserSuffix(inference.promptSuffixes.user)].filter(Boolean).join('\n\n')
       : userText;
     const userMessage = buildUserMessage(
       modedUserText,
