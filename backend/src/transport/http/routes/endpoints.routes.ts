@@ -27,9 +27,11 @@ function normalizeModes(raw: unknown): EndpointMode[] {
   return raw.flatMap((entry): EndpointMode[] => {
     const m = (entry ?? {}) as Record<string, unknown>;
     const type = m.type === 'prompt' ? 'prompt' : 'sampling';
-    const name = typeof m.name === 'string' ? m.name.trim() : '';
     const model = typeof m.model === 'string' ? m.model.trim() : '';
-    if (!name || !model) return [];
+    if (!model) return [];
+    // A cleared name falls back rather than dropping the mode: the operator emptying a text box to
+    // retype it must not silently delete the thing they were editing (and its id with it).
+    const name = (typeof m.name === 'string' ? m.name.trim() : '') || 'Untitled mode';
     const params: EndpointMode['params'] = {};
     if (type === 'sampling') {
       const given = (m.params ?? {}) as Record<string, unknown>;

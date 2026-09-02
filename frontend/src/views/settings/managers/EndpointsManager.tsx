@@ -431,52 +431,65 @@ function ModeRow({
 
   return (
     <div className="rounded-lg border border-white/[0.06] bg-black/20">
-      <div className="flex items-center gap-2 p-2">
-        <span
-          className={`flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${tone.border} ${tone.text}`}
-          title={mode.type === 'sampling' ? 'Overrides the samplers it sets' : 'Appends text to the turn'}
-        >
-          {mode.type === 'sampling' ? <SlidersHorizontal size={10} /> : <Type size={10} />}
-          {mode.type}
-        </span>
-        <Input
-          defaultValue={mode.name}
-          placeholder="Name (shown in chat)"
-          onBlur={(ev) => ev.target.value !== mode.name && onChange({ ...mode, name: ev.target.value })}
-          className="min-w-0 flex-1 py-1 text-xs"
-        />
-        <Select
-          value={mode.model}
-          title="The model this mode belongs to — it is only offered when that model is the one running"
-          onChange={(ev) => onChange({ ...mode, model: ev.target.value })}
-          className="w-40 py-1 text-[11px]"
-        >
-          {models.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-          {mode.model && !models.includes(mode.model) && (
-            <option value={mode.model}>{mode.model} (unknown)</option>
-          )}
-        </Select>
-        <button
-          onClick={() => onChange({ ...mode, enabled: !mode.enabled })}
-          title={mode.enabled ? 'Enabled — offered in chat' : 'Disabled — kept, but not offered'}
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-white/[0.06] ${mode.enabled ? tone.text : 'text-slate-600'}`}
-        >
-          {mode.enabled ? <Eye size={13} /> : <EyeOff size={13} />}
-        </button>
-        <button
-          onClick={onToggleOpen}
-          title={open ? 'Collapse' : 'Edit'}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
-        >
-          <ChevronDown size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
-        </button>
-        <Button variant="danger" onClick={onDelete} title="Delete mode" className="px-2 py-1">
-          <Trash2 size={12} />
-        </Button>
+      {/* The name is what the operator reads on the chat chip, so it gets the whole first line and a
+          real text size; the model it is bound to is secondary metadata and sits on its own line.
+          (The shared control class carries `w-full`, which beats any width passed in — so a select
+          and an input cannot share a line without the input collapsing to a sliver.) */}
+      <div className="space-y-2 p-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={`flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${tone.border} ${tone.text}`}
+            title={mode.type === 'sampling' ? 'Overrides the samplers it sets' : 'Appends text to the turn'}
+          >
+            {mode.type === 'sampling' ? <SlidersHorizontal size={10} /> : <Type size={10} />}
+            {mode.type}
+          </span>
+          <Input
+            defaultValue={mode.name}
+            placeholder="Name — this is the label you'll click in chat"
+            title="Shown on the mode's chip in the chat composer"
+            onBlur={(ev) => ev.target.value !== mode.name && onChange({ ...mode, name: ev.target.value })}
+            className="min-w-0 flex-1 py-1.5 font-medium"
+          />
+          <button
+            onClick={() => onChange({ ...mode, enabled: !mode.enabled })}
+            title={mode.enabled ? 'Enabled — offered in chat' : 'Disabled — kept, but not offered'}
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-white/[0.06] ${mode.enabled ? tone.text : 'text-slate-600'}`}
+          >
+            {mode.enabled ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>
+          <button
+            onClick={onToggleOpen}
+            title={open ? 'Collapse' : 'Edit'}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+          >
+            <ChevronDown size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
+          </button>
+          <Button variant="danger" onClick={onDelete} title="Delete mode" className="shrink-0 px-2 py-1">
+            <Trash2 size={12} />
+          </Button>
+        </div>
+
+        <label className="flex items-center gap-2">
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            Model
+          </span>
+          <Select
+            value={mode.model}
+            title="The model this mode belongs to — it is only offered when that model is the one running"
+            onChange={(ev) => onChange({ ...mode, model: ev.target.value })}
+            className="min-w-0 flex-1 py-1 text-[11px]"
+          >
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            {mode.model && !models.includes(mode.model) && (
+              <option value={mode.model}>{mode.model} (unknown)</option>
+            )}
+          </Select>
+        </label>
       </div>
 
       {open && mode.type === 'sampling' && (
