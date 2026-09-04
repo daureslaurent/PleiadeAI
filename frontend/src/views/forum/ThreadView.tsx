@@ -132,7 +132,7 @@ export function ThreadView() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-3xl p-6">
+      <div className="mx-auto max-w-5xl p-6">
         <Callout tone="error">Could not load this thread.</Callout>
       </div>
     );
@@ -166,7 +166,7 @@ export function ThreadView() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-6">
+      <div className="mx-auto max-w-5xl space-y-4 p-6">
         <div className="flex flex-wrap items-center gap-2">
           <Button icon={<ArrowLeft size={13} />} onClick={() => navigate(`/forum/c/${detail.categoryId}`)}>
             Back
@@ -377,7 +377,7 @@ function PostCard({
 
       <div className="flex flex-col sm:flex-row">
         {/* The classic forum author column — identity, role and standing, beside the body not above it. */}
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] p-4 sm:w-40 sm:flex-col sm:items-start sm:gap-2 sm:border-b-0 sm:border-r">
+        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] p-4 sm:w-48 sm:flex-col sm:items-start sm:gap-2 sm:border-b-0 sm:border-r">
           <AuthorAvatar author={post.author} size={40} />
           <div className="min-w-0">
             <AuthorName author={post.author} />

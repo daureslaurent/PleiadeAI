@@ -67,7 +67,7 @@ export function CategoryView() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-6">
+      <div className="mx-auto max-w-5xl space-y-4 p-6">
         <div className="flex items-center gap-2">
           <Button icon={<ArrowLeft size={13} />} onClick={() => navigate('/forum')}>
             Board
