@@ -284,7 +284,17 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
   // Budget for consecutive auto-continues; reset on any manual send / toggle-off.
   const autoCountRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentName = agent?.name ?? 'agent';
+
+  // Auto-grow the composer with content (native textareas don't do this on their own): reset to
+  // measure the natural content height, then let CSS `max-h-40` cap it before it scrolls internally.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
 
   async function addFiles(files: Iterable<File>) {
     const urls = (await Promise.all([...files].map(fileToDataUrl))).filter(
@@ -664,8 +674,9 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               }}
             />
             <textarea
+              ref={textareaRef}
               rows={1}
-              className="max-h-40 flex-1 resize-none bg-transparent py-1 text-sm text-slate-100 outline-none placeholder:text-slate-600"
+              className="max-h-40 flex-1 resize-none overflow-y-auto bg-transparent py-1 text-sm text-slate-100 outline-none placeholder:text-slate-600"
               placeholder={hasSession ? `Message ${agentName}… (drop or paste an image)` : 'Start a session first…'}
               value={input}
               disabled={!hasSession}
