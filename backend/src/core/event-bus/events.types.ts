@@ -56,6 +56,15 @@ export interface ImageBlock {
   filename?: string;
   /** GridFS id of the persisted bytes, once stored. Lets a later turn/agent re-read by handle. */
   storageId?: string;
+  /**
+   * Marks a **live screen frame** — a desktop/device screenshot handed to a multimodal agent as
+   * pixels — and says how many such frames stay in its context. A GUI turn can capture a frame per
+   * tool iteration, so without a cap the agent's context fills with near-identical screens; the
+   * runner keeps the last `frameKeep` and replaces the pixels of older ones with a stub. `0` (or
+   * absent, for a non-frame resource) means never evict. Display-only: eviction touches the
+   * in-flight message array, never the persisted resource.
+   */
+  frameKeep?: number;
 }
 
 export interface UserMessagePayload {

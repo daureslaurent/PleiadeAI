@@ -23,6 +23,7 @@ import { agentRepository } from '../../domain/agents/agent.repository';
 import { isolationRepository } from '../../domain/isolations/isolation.repository';
 import { imageRepository } from '../../domain/images/image.repository';
 import { toolConfigService } from '../../domain/tools/tool-config.service';
+import { ownModelResult, resolveScreenAnalysis, screenAnalysisFields } from './screen-analysis';
 import { resolveForEndpoint } from '../../inference/inference-resolver';
 import { annotateIfDegenerate, visionSamplingOpts } from '../../inference/vision-analyze';
 import { llamaClient } from '../../inference/LlamaClient';
@@ -45,6 +46,9 @@ const VISUAL_CONFIG_SCHEMA: ToolConfigField[] = [
     default: 500,
     hint: 'Wait this long before grabbing the screen, so menus/animations settle. Applies to all screen captures (visual_screenshot, visual_click, visual_act). 0 = no delay.',
   },
+  // Who reads a describe-mode screenshot (the agent's own model vs. the Vision endpoint) and how many
+  // frames stay in its context. Shared verbatim with `android_screenshot` — see `screen-analysis.ts`.
+  ...screenAnalysisFields('desktop'),
 ];
 
 /**
@@ -685,7 +689,7 @@ export const visualScreenshot: Tool = {
   description:
     "Look at the agent's live desktop: captures a screenshot and a vision model answers about it. " +
     'Two modes, chosen from your `question`: ask to READ/DESCRIBE ("what is on screen?", "list the ' +
-    'search results", "read the error dialog") to get a plain-text answer; ask to LOCATE ("where is ' +
+    'search results", "read the error dialog") to get an answer about what is on screen; ask to LOCATE ("where is ' +
     'the Submit button?") to get precise pixel coordinates (also returned as structured `x`/`y`) you ' +
     'can pass to visual_act. To *click* a described element, prefer visual_click (it locates + clicks ' +
     'in one step, more accurately). Omit `question` for a general description. For closing/focusing/' +
@@ -751,6 +755,21 @@ export const visualScreenshot: Tool = {
     const height = cap.height;
     const thumbUrl = `data:image/jpeg;base64,${cap.thumbCleanB64 || cap.thumbGridB64 || cap.fullB64}`;
     if (cap.thumbCleanB64) rememberShot(ctx.agentId, thumbUrl, width, height);
+
+    // A multimodal agent reads its own screen: hand back the frame as a tool image (the runner pools,
+    // persists and folds it into context as pixels) instead of paying a Vision-endpoint round-trip for
+    // a description that is, by construction, worse than what the agent would see. `frameKeep` caps how
+    // many such frames stay in context so a long GUI session doesn't accumulate one per tool call.
+    // No `emitVision` card here — there is no question/answer pair to show, and the frame already
+    // renders in chat as a tool-result image.
+    const policy = await resolveScreenAnalysis('visual_screenshot', VISUAL_CONFIG_SCHEMA, ctx);
+    if (policy.ownModel) {
+      log.info({ agent: ctx.agentName, path: cap.rawPath, frameKeep: policy.framesKept }, 'visual screenshot handed to the agent');
+      return {
+        result: ownModelResult({ path: cap.rawPath, width, height }, 'desktop'),
+        images: [{ dataUrl: `data:image/png;base64,${cap.fullB64}`, frameKeep: policy.framesKept }],
+      };
+    }
 
     const settings = await settingsService.get();
     let analysis: string;

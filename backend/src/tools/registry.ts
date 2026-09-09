@@ -68,6 +68,24 @@ export const ANDROID_TOOL_NAMES = [
   'android_file',
 ] as const;
 
+/**
+ * Tools whose result is a *live observation* rather than a function of their arguments, exempt from
+ * the turn's duplicate-call short-circuit in `AgentRunner`.
+ *
+ * That short-circuit exists to break a model repeating an identical `ask_agent` every iteration, and
+ * it assumes same args → same answer. For a screen or a device that is false by construction: the
+ * whole point of `visual_screenshot({})` → `visual_act` → `visual_screenshot({})` is that the second
+ * capture shows a screen the first action changed. Blocking it strands the agent on a stale frame
+ * with an instruction not to look again.
+ */
+export const OBSERVATION_TOOL_NAMES = new Set<string>([
+  'visual_screenshot',
+  'visual_windows',
+  'android_screenshot',
+  'android_ui',
+  'android_logcat',
+]);
+
 /** Static core tools every agent implicitly gets, keyed by name. */
 const CORE_TOOLS: Record<string, Tool> = {
   [setAgentParameter.name]: setAgentParameter,

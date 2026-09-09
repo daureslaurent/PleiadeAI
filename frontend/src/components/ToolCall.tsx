@@ -14,7 +14,8 @@ export function ToolCall({ block }: { block: ToolBlock }) {
   if (block.status === 'drafting') return <DraftingBlock block={block} />;
   if (block.tool === 'bash') return <BashBlock block={block} />;
   if (block.tool === 'visual_act' || block.visualAct) return <VisualActBlock block={block} />;
-  if (block.tool === 'visual_screenshot' || block.tool === 'analyze_image' || block.vision)
+  if (block.tool === 'visual_screenshot' || block.tool === 'android_screenshot' ||
+      block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
   if (MEDIA_TOOLS.has(block.tool) || block.mediaGen) return <MediaGenBlock block={block} />;
   return <GenericToolBlock block={block} />;
@@ -201,13 +202,20 @@ function BashBlock({ block }: { block: ToolBlock }) {
 }
 
 /**
- * Vision card for `visual_screenshot`: shows the screenshot the vision model saw and the analysis it
- * returned (the "input/output" of the vision model, inline in the chat). Click the image to zoom.
+ * Vision card for the screen tools: shows the screenshot and, when the Vision endpoint did the
+ * reading, the analysis it returned (the "input/output" of the vision model, inline in the chat).
+ *
+ * A vision-capable agent reads its own screen instead, so there is no `vision` event and no answer to
+ * show — the frame arrives as an ordinary tool-result image. Fall back to it so the operator sees the
+ * same card either way, labelled with who actually did the reading. Click the image to zoom.
  */
 function VisionBlock({ block }: { block: ToolBlock }) {
   const [zoom, setZoom] = useState(false);
   const v = block.vision;
   const question = String(block.args?.question ?? v?.question ?? '').trim();
+  // The agent-read case: no vision event, but the captured frame rode back as a tool-result image.
+  const selfRead = !v && !!block.images?.length;
+  const image = v?.image ?? block.images?.[0]?.dataUrl;
 
   return (
     <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
@@ -233,22 +241,22 @@ function VisionBlock({ block }: { block: ToolBlock }) {
           </div>
         )}
 
-        {v?.image ? (
+        {image ? (
           <button onClick={() => setZoom((z) => !z)} className="block" title="Click to zoom">
             <span className="relative inline-block">
               <img
-                src={v.image}
-                alt="agent desktop screenshot"
+                src={image}
+                alt="agent screen capture"
                 className={`block rounded border border-border object-contain ${zoom ? 'w-full' : 'max-h-52'}`}
               />
-              {v.x != null && v.y != null && v.width && v.height && (
+              {v?.x != null && v?.y != null && v?.width && v?.height && (
                 <svg
                   className="pointer-events-none absolute inset-0 h-full w-full"
-                  viewBox={`0 0 ${v.width} ${v.height}`}
+                  viewBox={`0 0 ${v?.width} ${v?.height}`}
                   preserveAspectRatio="none"
                 >
                   {/* Cyan for contrast against the red coordinate grid in the preview. */}
-                  <ActMarker cx={v.x} cy={v.y} r={v.width} color="#22d3ee" />
+                  <ActMarker cx={v?.x} cy={v?.y} r={v?.width} color="#22d3ee" />
                 </svg>
               )}
             </span>
@@ -265,6 +273,12 @@ function VisionBlock({ block }: { block: ToolBlock }) {
               <Eye size={11} /> vision
             </div>
             <div className="whitespace-pre-wrap leading-relaxed text-slate-300">{v.answer}</div>
+          </div>
+        )}
+
+        {selfRead && (
+          <div className="text-[10px] uppercase tracking-wide text-slate-500">
+            read by the agent
           </div>
         )}
       </div>

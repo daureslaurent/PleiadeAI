@@ -22,7 +22,7 @@ import { resolveInference, resolveFallbacks, type ResolvedInference } from '../i
 import { runWithCaptureContext } from '../inference/capture-context';
 import { ReasoningParser } from './streaming/ReasoningParser';
 import { parseFallbackToolCalls, detectNarratedTools } from './streaming/ToolCallFallbackParser';
-import { resolveTools, ANDROID_TOOL_NAMES, VISUAL_TOOL_NAMES } from '../tools/registry';
+import { resolveTools, ANDROID_TOOL_NAMES, OBSERVATION_TOOL_NAMES, VISUAL_TOOL_NAMES } from '../tools/registry';
 import { annuaire } from '../tools/core/annuaire';
 import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
@@ -73,6 +73,18 @@ function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Evict a stale live screen frame from the in-flight context (see `ImageBlock.frameKeep`): drop its
+ * pixels — the expensive part, and by now a picture of a screen that has since changed — and replace
+ * the "…shown here, read it yourself" note with a stub, so the agent isn't told an image it can no
+ * longer see is in front of it. The handle survives, so the frame is still reachable by id.
+ */
+function evictFrame(message: ChatMessage, handles: string): void {
+  message.content =
+    `[An earlier screenshot (${handles}) was here and has been dropped from your context to make ` +
+    `room. You can no longer see it. Capture a fresh one if you need to look at the screen again.]`;
 }
 
 /**
@@ -559,6 +571,11 @@ export class AgentRunner {
     // re-running the tool. Combined with the tool-round cap this breaks the repeat loop.
     const toolResultCache = new Map<string, string>();
 
+    // Live screen frames (desktop/device screenshots) currently holding pixels in `messages`, oldest
+    // first. `executeToolCall` trims this to the capturing tool's `frameKeep` budget so a GUI turn
+    // doesn't accumulate one full frame per tool iteration. See `ImageBlock.frameKeep`.
+    const liveFrames: Array<{ msg: ChatMessage; handles: string }> = [];
+
     // Times we've nudged the model back onto the native tool channel this turn (see below).
     let narrationRetries = 0;
 
@@ -663,7 +680,9 @@ export class AgentRunner {
 
       for (const call of toolCalls) {
         const cacheKey = `${call.name}${call.argsJson}`;
-        const cached = toolResultCache.get(cacheKey);
+        // An observation tool is exempt: re-reading a screen after acting on it is the loop, not a
+        // repeat (see `OBSERVATION_TOOL_NAMES`).
+        const cached = OBSERVATION_TOOL_NAMES.has(call.name) ? undefined : toolResultCache.get(cacheKey);
         if (cached !== undefined) {
           log.warn(
             { agent: agent.name, tool: call.name },
@@ -688,6 +707,7 @@ export class AgentRunner {
           turnId,
           pool: imagePool,
           supportsVision: inference.supportsVision,
+          frames: liveFrames,
           persistMemory: input.persistMemory !== false,
         });
         // executeToolCall already appended the tool message (and any following image message) to
@@ -936,6 +956,13 @@ export class AgentRunner {
       pool: TurnImagePool;
       /** Whether the agent's model can see raw pixels — gates folding tool images into its context. */
       supportsVision: boolean;
+      /**
+       * The live screen frames currently holding pixels in `messages`, oldest first (with the handles
+       * their stub should name), so a new capture can evict the ones beyond the tool's `frameKeep`
+       * budget. Per-turn only: history is text-only, so a frame never survives into the next turn's
+       * message array anyway.
+       */
+      frames: Array<{ msg: ChatMessage; handles: string }>;
       /** Carried into any sub-agent hop, so a synthetic turn doesn't write memories anywhere. */
       persistMemory: boolean;
     },
@@ -1015,6 +1042,9 @@ export class AgentRunner {
       // stopping a turn also stops the GPU work nobody is waiting on any more.
       signal: delegation.signal,
       attachedImages: delegation.pool.all(),
+      // Lets a tool that would otherwise route pixels through the Vision endpoint hand the frame to
+      // the agent instead (`visual_screenshot` / `android_screenshot` in describe mode).
+      supportsVision: delegation.supportsVision,
       availableTools: [...toolMap.values()].map((t) => ({
         name: t.name,
         description: t.description,
@@ -1104,7 +1134,24 @@ export class AgentRunner {
         );
       }
       const note = `[${parts.join(' ')} Do not pass a file path.]`;
-      messages.push(buildUserMessage(note, delegation.supportsVision ? pics : undefined));
+      const framed = buildUserMessage(note, delegation.supportsVision ? pics : undefined);
+      messages.push(framed);
+      // A GUI turn captures a frame per tool iteration, so without a cap the agent's context fills
+      // with near-identical screens. A live screen frame carries `frameKeep`: keep the most recent
+      // that many, and strip the pixels out of the older ones (their text note stays, so the agent
+      // still knows the handle and that it looked). Only frames are evicted — an image a tool
+      // *produced* (a generated picture, a file read) is content, not a transient observation.
+      const keep = pics.find((p) => p.frameKeep != null)?.frameKeep ?? 0;
+      if (delegation.supportsVision && keep > 0) {
+        delegation.frames.push({
+          msg: framed,
+          handles: pics.map((i) => i.id).filter(Boolean).join(', '),
+        });
+        while (delegation.frames.length > keep) {
+          const stale = delegation.frames.shift()!;
+          evictFrame(stale.msg, stale.handles);
+        }
+      }
     }
     return toolMsg;
   }

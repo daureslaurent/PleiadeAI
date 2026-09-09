@@ -32,7 +32,8 @@ import { annotateIfDegenerate, visionSamplingOpts } from '../../inference/vision
 import { llamaClient } from '../../inference/LlamaClient';
 import { runWithCaptureContext } from '../../inference/capture-context';
 import type { ChatMessage } from '../../domain/agents/jit-builder';
-import type { Tool, ToolContext } from '../types';
+import type { Tool, ToolConfigField, ToolContext } from '../types';
+import { ownModelResult, resolveScreenAnalysis, screenAnalysisFields } from './screen-analysis';
 
 const log = createLogger('tool:android');
 
@@ -460,11 +461,14 @@ function contentPrompt(question: string, w: string, h: string): string {
  * read it. Describe-mode only, on purpose: locating a widget is `android_ui`'s job and it does it
  * exactly, so none of the desktop's grid / OCR-snap / calibration machinery is needed or wanted here.
  */
+/** Operator-tunable options for `android_screenshot`, surfaced on the Tools page. */
+const ANDROID_SCREENSHOT_CONFIG_SCHEMA: ToolConfigField[] = screenAnalysisFields('device');
+
 export const androidScreenshot: Tool = {
   name: 'android_screenshot',
   description:
-    "Look at the Android device's screen: captures a screenshot and a vision model reads or describes " +
-    'it. Use this to understand *what* is on screen (read a message, check a state, describe a page). ' +
+    "Look at the Android device's screen: captures a screenshot and reads it. Use this to understand " +
+    '*what* is on screen (read a message, check a state, describe a page). ' +
     'Do NOT use it to find tap coordinates — android_ui returns exact widget bounds and is always ' +
     'more reliable for that. Omit `question` for a general description.',
   parameters: {
@@ -477,6 +481,9 @@ export const androidScreenshot: Tool = {
     },
     additionalProperties: false,
   },
+  // Who reads the screenshot (the agent's own model vs. the Vision endpoint) and how many frames stay
+  // in its context. Shared verbatim with `visual_screenshot` — see `screen-analysis.ts`.
+  configSchema: ANDROID_SCREENSHOT_CONFIG_SCHEMA,
 
   async execute(args, ctx) {
     const question = String(args.question ?? '');
@@ -493,6 +500,19 @@ export const androidScreenshot: Tool = {
         height: cap.height,
         ts: Date.now(),
       });
+    }
+
+    // A multimodal agent reads the device screen itself: hand back the frame as a tool image rather
+    // than paying a Vision-endpoint round-trip for a description that is, by construction, worse than
+    // what the agent would see. `frameKeep` caps how many frames stay in context. No `emitVision` card
+    // — there is no question/answer pair to show, and the frame renders as a tool-result image.
+    const policy = await resolveScreenAnalysis('android_screenshot', ANDROID_SCREENSHOT_CONFIG_SCHEMA, ctx);
+    if (policy.ownModel) {
+      log.info({ agent: ctx.agentName, path: cap.path, frameKeep: policy.framesKept }, 'android screenshot handed to the agent');
+      return {
+        result: ownModelResult({ path: cap.path, width: cap.width, height: cap.height }, 'device'),
+        images: [{ dataUrl: `data:image/png;base64,${cap.fullB64}`, frameKeep: policy.framesKept }],
+      };
     }
 
     const settings = await settingsService.get();

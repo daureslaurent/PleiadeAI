@@ -157,6 +157,13 @@ export interface ToolContext {
    */
   attachedImages?: ImageBlock[];
   /**
+   * Whether the *calling* agent's own model is multimodal (`inference.supportsVision`). Tools that
+   * would otherwise route pixels through the separate Vision endpoint use this to hand the agent the
+   * image directly instead — a second, weaker model paraphrasing what the agent can read itself is
+   * strictly lossy. Absent on synthetic contexts (e.g. visual calibration), which read as text-only.
+   */
+  supportsVision?: boolean;
+  /**
    * The tools this agent can call this turn (name + description + JSON-schema parameters), as resolved
    * by the orchestrator. Lets the `guide` tool scope its index to what the agent actually has and
    * auto-generate a guide for any tool that lacks a curated one.

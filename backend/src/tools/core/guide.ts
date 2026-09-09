@@ -234,9 +234,18 @@ errors rather than silently running on the backend.`,
 
   visual_screenshot: `# visual_screenshot — see the desktop
 
-Captures the agent's live desktop and a vision model answers about it. Two modes, chosen from your
-\`question\`: ask to READ/DESCRIBE ("what's on screen?") for a text answer, or LOCATE ("where is the
-Submit button?") for pixel coordinates you pass to \`visual_act\`. To *click* a described element,
+Captures the agent's live desktop. Two modes, chosen from your \`question\`: ask to
+READ/DESCRIBE ("what's on screen?"), or LOCATE ("where is the Submit button?") for pixel coordinates
+you pass to \`visual_act\`.
+
+In READ/DESCRIBE mode, *who* reads the screen depends on you. If you are multimodal the frame is
+attached to your turn and you read it yourself — answer from the pixels, not from any summary. If you
+are not, a separate vision model reads it and you get its text back in \`analysis\`. Either way, only
+the last few frames stay in your context: act on what you just captured rather than assuming an
+earlier screenshot is still there, and re-capture after anything changes the screen.
+
+LOCATE always goes through the vision model — it reads coordinates off a reference grid and snaps them
+to on-screen text, which is more accurate than eyeballing a pixel. To *click* a described element,
 prefer \`visual_click\` (locate + click in one step). See the \`visual\` topic guide.`,
 
   generate_image: `# generate_image — text-to-image
@@ -408,7 +417,9 @@ hierarchy and taps its exact centre. A miss returns what *is* on screen, so the 
 from reality.
 
 \`android_screenshot\` is for *reading* a screen (what does this message say, what state is this in) —
-not for finding coordinates. \`android_app\` launches apps by package, which beats hunting for a
+not for finding coordinates. If you are multimodal the frame is attached to your turn and you read it
+yourself; otherwise a vision model reads it for you and returns \`analysis\`. Only the last few frames
+stay in your context, so re-capture after anything changes the screen. \`android_app\` launches apps by package, which beats hunting for a
 launcher icon. \`android_logcat\` tells you *why* something failed when the screen doesn't.
 \`android_shell\` runs on the **device**; \`bash\` runs in **your own container** — \`android_file\`
 moves files between the two.
