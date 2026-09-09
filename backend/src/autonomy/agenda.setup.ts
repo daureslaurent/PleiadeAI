@@ -1,4 +1,5 @@
 import { Agenda, type Job } from 'agenda';
+import { Types } from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env';
 import { createLogger } from '../config/logger';
@@ -113,6 +114,25 @@ export async function setupAgenda(): Promise<Agenda> {
     // Yield to an active user session; re-queue if it stays busy too long.
     const free = await sessionLock.waitUntilFree(agentId, YIELD_TIMEOUT_MS);
     if (!free) {
+      // A busy retry spawns a *fresh* ad-hoc job carrying the parent's `scheduleId`. Nothing ties
+      // that clone to the schedule's lifecycle: cancelling a schedule (`cancel` by `_id`) never
+      // touches its in-flight clones, and each clone, if it too finds the agent busy, requeues
+      // another. So a deleted schedule can leave a self-perpetuating chain of "agent busy →
+      // requeue" jobs firing forever — invisibly, since `/api/autonomy/jobs` hides clones. Anchor
+      // the retry to a still-existing schedule: if the owning schedule is gone, drop the retry so
+      // the chain dies. (`scheduleId === _id` is the schedule running itself — always live here.)
+      const isOwnSchedule = scheduleId === String(job.attrs._id);
+      const scheduleAlive =
+        isOwnSchedule ||
+        (Types.ObjectId.isValid(scheduleId) &&
+          (await agenda!.jobs({ _id: new Types.ObjectId(scheduleId) })).length > 0);
+      if (!scheduleAlive) {
+        log.info(
+          { agentName, scheduleId },
+          'agent busy but owning schedule is gone; dropping orphaned autonomous retry',
+        );
+        return;
+      }
       log.info({ agentName }, 'agent still busy; re-queuing autonomous job');
       await agenda?.schedule('in 1 minute', AUTONOMOUS_RUN_JOB, job.attrs.data);
       return;

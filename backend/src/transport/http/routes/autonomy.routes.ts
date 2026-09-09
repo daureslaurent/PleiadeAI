@@ -175,7 +175,13 @@ autonomyRouter.post('/jobs/:id/run', async (req, res) => {
 });
 
 autonomyRouter.delete('/jobs/:id', async (req, res) => {
-  const removed = await getAgenda().cancel({ _id: new Types.ObjectId(req.params.id) });
+  // Cancel the schedule *and* any in-flight clones it spawned. Run-now executions and busy-retry
+  // requeues both carry the schedule's id in `data.scheduleId` (and their own `_id`); cancelling
+  // by `_id` alone leaves them running — and a busy-retry clone keeps requeuing itself, so the
+  // schedule appears deleted yet its runs continue indefinitely.
+  const removed = await getAgenda().cancel({
+    $or: [{ _id: new Types.ObjectId(req.params.id) }, { 'data.scheduleId': req.params.id }],
+  });
   res.json({ cancelled: removed ?? 0 });
 });
 
