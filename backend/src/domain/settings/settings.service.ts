@@ -3,6 +3,10 @@ import { SettingsModel } from './settings.model';
 import type { GlobalMode } from '../endpoints/endpoint.model';
 import { BUILTIN_GLOBAL_MODES } from './builtin-modes';
 
+/** How a screen is read for the GUI-control tools. See `VISUAL_MODAL_PLAN.md`. */
+export const SCREEN_CONTROL_MODES = ['auto', 'modal', 'legacy'] as const;
+export type ScreenControlMode = (typeof SCREEN_CONTROL_MODES)[number];
+
 /** Effective inference settings the rest of the app reads. */
 export interface EffectiveSettings {
   llama_url: string;
@@ -35,6 +39,12 @@ export interface EffectiveSettings {
   vision_endpoint_id: string;
   /** Model on `vision_endpoint_id` for screenshot analysis ('' → that endpoint's default). */
   vision_model: string;
+  /**
+   * Who reads a screen for the GUI-control tools: `legacy` (the Vision endpoint, returning prose),
+   * `modal` (the calling agent's own multimodal model, receiving pixels), or `auto` — modal when the
+   * agent supports vision, else legacy. See `VISUAL_MODAL_PLAN.md`.
+   */
+  screen_control_mode: ScreenControlMode;
   /** Vision sampling params. `null` = disabled (not sent → server default); a number overrides it. */
   vision_temperature: number | null;
   vision_top_p: number | null;
@@ -165,6 +175,9 @@ export const settingsService = {
       title_max_tokens: doc?.title_max_tokens ?? 256,
       vision_endpoint_id: doc?.vision_endpoint_id ?? '',
       vision_model: doc?.vision_model ?? '',
+      screen_control_mode: SCREEN_CONTROL_MODES.includes(doc?.screen_control_mode as ScreenControlMode)
+        ? (doc!.screen_control_mode as ScreenControlMode)
+        : 'auto',
       // `null` is meaningful here (= disabled), so only fall back to the default when the field is
       // truly absent (old doc / never set). `??` would wrongly turn an explicit null back into a value.
       vision_temperature: doc?.vision_temperature === undefined ? 0.2 : doc.vision_temperature,

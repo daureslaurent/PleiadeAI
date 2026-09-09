@@ -23,7 +23,12 @@ import { agentRepository } from '../../domain/agents/agent.repository';
 import { isolationRepository } from '../../domain/isolations/isolation.repository';
 import { imageRepository } from '../../domain/images/image.repository';
 import { toolConfigService } from '../../domain/tools/tool-config.service';
-import { ownModelResult, resolveScreenAnalysis, screenAnalysisFields } from './screen-analysis';
+import {
+  ownModelResult,
+  resolveScreenAnalysis,
+  resolveScreenControlMode,
+  screenAnalysisFields,
+} from './screen-analysis';
 import { resolveForEndpoint } from '../../inference/inference-resolver';
 import { annotateIfDegenerate, visionSamplingOpts } from '../../inference/vision-analyze';
 import { llamaClient } from '../../inference/LlamaClient';
@@ -46,8 +51,8 @@ const VISUAL_CONFIG_SCHEMA: ToolConfigField[] = [
     default: 500,
     hint: 'Wait this long before grabbing the screen, so menus/animations settle. Applies to all screen captures (visual_screenshot, visual_click, visual_act). 0 = no delay.',
   },
-  // Who reads a describe-mode screenshot (the agent's own model vs. the Vision endpoint) and how many
-  // frames stay in its context. Shared verbatim with `android_screenshot` — see `screen-analysis.ts`.
+  // How many frames stay in a modal agent's context. *Who* reads the screen is the global
+  // `screen_control_mode` (Settings → Vision) — see `screen-analysis.ts`.
   ...screenAnalysisFields('desktop'),
 ];
 
@@ -614,7 +619,8 @@ export interface CalibrationResult {
  * Measure this desktop's click calibration: render synthetic targets at known pixels, run each
  * through the *same* localize pipeline (calibration + OCR-snap off), and fit a per-axis
  * affine that maps the model's reported coordinate back to the true one. Returns the fit (the caller
- * persists it on the image) or an error string. Feeds synthetic frames — it never touches or captures
+ * persists it on the image) or an error string. A **legacy-mode** concept: it fits the bias of one
+ * specific vision model at one resolution, which has no meaning once the agent reads the frame itself. Feeds synthetic frames — it never touches or captures
  * the real desktop content, so it's safe to run while the agent is idle.
  */
 export async function measureVisualCalibration(
@@ -676,24 +682,27 @@ export async function measureVisualCalibration(
 }
 
 /**
- * `visual_screenshot` — capture the agent's live desktop, then have the operator-configured **vision
- * model** (Settings → Vision endpoint) analyse it and return a **text answer + coordinates**. The raw
- * pixels go only to the vision model; the calling (text) agent receives the analysis. The screenshot
- * thumbnail + the Q&A are streamed to the chat via `emitVision` so the operator sees them.
+ * `visual_screenshot` — capture the agent's live desktop. What comes back depends on the operator's
+ * screen-control mode (Settings → Vision, see `screen-analysis.ts`):
  *
- * This is approach A (vision-as-a-tool): the orchestration model stays text-only and drives the GUI
- * fine-grained — screenshot(question) → reason over the analysis → visual_act(coords) → repeat.
+ *  - **modal** — the frame itself, as pixels the calling model reads. A locate-shaped question adds
+ *    the labelled reference grid it measures coordinates against; there is no second model in the
+ *    loop at all.
+ *  - **legacy** — the raw pixels go only to the configured **vision model**, which returns a text
+ *    answer (+ `x`/`y` when locating) to a text-only orchestrator: screenshot(question) → reason over
+ *    the analysis → visual_act(coords) → repeat. The thumbnail + Q&A are streamed to the chat via
+ *    `emitVision` so the operator sees what the agent was told.
  */
 export const visualScreenshot: Tool = {
   name: 'visual_screenshot',
   description:
-    "Look at the agent's live desktop: captures a screenshot and a vision model answers about it. " +
-    'Two modes, chosen from your `question`: ask to READ/DESCRIBE ("what is on screen?", "list the ' +
-    'search results", "read the error dialog") to get an answer about what is on screen; ask to LOCATE ("where is ' +
-    'the Submit button?") to get precise pixel coordinates (also returned as structured `x`/`y`) you ' +
-    'can pass to visual_act. To *click* a described element, prefer visual_click (it locates + clicks ' +
-    'in one step, more accurately). Omit `question` for a general description. For closing/focusing/' +
-    'finding *windows*, use visual_windows (exact geometry) instead of pixel-hunting the title bar.',
+    "Look at the agent's live desktop. Two modes, chosen from your `question`: ask to READ/DESCRIBE " +
+    '("what is on screen?", "list the search results", "read the error dialog") to learn what is on ' +
+    'screen; ask to LOCATE ("where is the Submit button?") to get pixel coordinates you can pass to ' +
+    'visual_act. Depending on the operator\'s screen-control mode you either receive the frame ' +
+    'itself and read it yourself, or a vision model reads it and returns `analysis` (plus `x`/`y` ' +
+    'when locating). Omit `question` for a general description. For closing/focusing/finding ' +
+    '*windows*, use visual_windows (exact geometry) instead of pixel-hunting the title bar.',
   parameters: {
     type: 'object',
     properties: {
@@ -702,6 +711,11 @@ export const visualScreenshot: Tool = {
         description:
           'What to look for or ask about the screen (e.g. "where is the address bar?"). Omit for a general description.',
       },
+      grid: {
+        type: 'boolean',
+        description:
+          'Overlay a labelled coordinate grid, for measuring where something is. Defaults to on when the `question` asks where something is, off when it asks what is on screen (the grid occludes text).',
+      },
     },
     additionalProperties: false,
   },
@@ -709,14 +723,44 @@ export const visualScreenshot: Tool = {
 
   async execute(args, ctx) {
     const question = String(args.question ?? '');
-    // Locating something needs coordinates + the grid; reading/describing content wants plain text on
-    // a *clean* image (the grid occludes text and biases the model into emitting coordinate tuples).
-    const localize = isLocalizeQuestion(question);
+    // Locating something needs coordinates + the grid; reading/describing content wants a *clean*
+    // image (the grid occludes text and biases a reader into emitting coordinate tuples instead of
+    // the content). Inferred from the question's shape unless the caller says outright.
+    const localize = typeof args.grid === 'boolean' ? args.grid : isLocalizeQuestion(question);
     const ready = await ensureVisual(ctx);
     if ('error' in ready) return { result: { ok: false, error: ready.error } };
     const exec = ready.exec;
 
-    // Localize mode: vision locate (+ OCR snap) → structured x/y. No degenerate-warning here (a short
+    // Modal mode: the caller's own model is the vision model, so *both* questions have the same
+    // answer — hand it the frame. Locating just means overlaying the reference grid it measures
+    // against; there is no Vision-endpoint round-trip, no coordinate-fraction prompt and no
+    // calibration, because the model reading the pixels is the one that will act on them.
+    const policy = await resolveScreenAnalysis('visual_screenshot', VISUAL_CONFIG_SCHEMA, ctx);
+    if (policy.ownModel) {
+      const cap = await captureScreen(exec, localize);
+      if ('error' in cap) return { result: { ok: false, error: cap.error } };
+      if (cap.thumbCleanB64) {
+        rememberShot(ctx.agentId, `data:image/jpeg;base64,${cap.thumbCleanB64}`, cap.width, cap.height);
+      }
+      const note = localize
+        ? `The desktop screenshot is attached to this turn, ${cap.width ?? '?'}x${cap.height ?? '?'} pixels, ` +
+          `with a red reference grid every 10% of the width and height. Each crossing is labelled with its ` +
+          `position as fractions of the screen in the form \`x,y\` — \`.4,.3\` is 40% across from the LEFT ` +
+          `and 30% down from the TOP. Read the target's position off the grid, convert it to pixels ` +
+          `(x_px = ${cap.width ?? '?'} × the x fraction, y_px = ${cap.height ?? '?'} × the y fraction), and ` +
+          `pass those to visual_act.`
+        : undefined;
+      log.info(
+        { agent: ctx.agentName, path: cap.rawPath, grid: localize, frameKeep: policy.framesKept },
+        'visual screenshot handed to the agent',
+      );
+      return {
+        result: ownModelResult({ path: cap.rawPath, width: cap.width, height: cap.height, grid: localize }, 'desktop', note),
+        images: [{ dataUrl: `data:image/png;base64,${cap.fullB64}`, frameKeep: policy.framesKept }],
+      };
+    }
+
+    // Legacy localize mode: vision locate (+ OCR snap) → structured x/y. No degenerate-warning here (a short
     // numeric answer like "(500, 640)" is exactly what we asked for, not a misconfigured endpoint).
     if (localize) {
       const loc = await locate(ctx, exec, question);
@@ -748,28 +792,13 @@ export const visualScreenshot: Tool = {
       };
     }
 
-    // Describe/read mode: clean capture, plain-text content answer.
+    // Legacy describe/read mode: clean capture, Vision-endpoint prose answer.
     const cap = await captureScreen(exec, false);
     if ('error' in cap) return { result: { ok: false, error: cap.error } };
     const width = cap.width;
     const height = cap.height;
     const thumbUrl = `data:image/jpeg;base64,${cap.thumbCleanB64 || cap.thumbGridB64 || cap.fullB64}`;
     if (cap.thumbCleanB64) rememberShot(ctx.agentId, thumbUrl, width, height);
-
-    // A multimodal agent reads its own screen: hand back the frame as a tool image (the runner pools,
-    // persists and folds it into context as pixels) instead of paying a Vision-endpoint round-trip for
-    // a description that is, by construction, worse than what the agent would see. `frameKeep` caps how
-    // many such frames stay in context so a long GUI session doesn't accumulate one per tool call.
-    // No `emitVision` card here — there is no question/answer pair to show, and the frame already
-    // renders in chat as a tool-result image.
-    const policy = await resolveScreenAnalysis('visual_screenshot', VISUAL_CONFIG_SCHEMA, ctx);
-    if (policy.ownModel) {
-      log.info({ agent: ctx.agentName, path: cap.rawPath, frameKeep: policy.framesKept }, 'visual screenshot handed to the agent');
-      return {
-        result: ownModelResult({ path: cap.rawPath, width, height }, 'desktop'),
-        images: [{ dataUrl: `data:image/png;base64,${cap.fullB64}`, frameKeep: policy.framesKept }],
-      };
-    }
 
     const settings = await settingsService.get();
     let analysis: string;
@@ -1056,12 +1085,18 @@ const CLICK_ACTIONS = ['click', 'double_click', 'right_click'] as const;
  * pyautogui driver. This keeps the text agent out of coordinate-handling — the
  * main cause of misplaced clicks — so prefer it over `visual_screenshot` + `visual_act` for clicking a
  * described element. Streams a marker card + a live-desktop pulse showing exactly where it clicked.
+ *
+ * **Legacy mode only.** Its whole job is to keep a *blind* agent out of coordinate-handling; a modal
+ * agent is not blind, and routing its click through a weaker model's guess would make it less
+ * accurate, not more. `AgentRunner` therefore withholds it from a modal agent the way it withholds
+ * `analyze_image` from a multimodal one; the guard below is the defensive second line.
  */
 export const visualClick: Tool = {
   name: 'visual_click',
   description:
     "Locate a described element on the agent's desktop and click it in one step — more accurate than " +
-    'reading coordinates from visual_screenshot and passing them to visual_act. Describe the target in ' +
+    'reading coordinates from visual_screenshot and passing them to visual_act when a vision model is ' +
+    'doing the reading for you. Describe the target in ' +
     '`target` (e.g. "the green Submit button", "the address bar", "the File menu"). Optional `action`: ' +
     'click (default), double_click, or right_click. Returns the pixel it clicked and the vision ' +
     "model's reasoning. For closing/focusing windows, prefer visual_windows (exact geometry).",
@@ -1085,6 +1120,17 @@ export const visualClick: Tool = {
   async execute(args, ctx) {
     const target = String(args.target ?? '').trim();
     if (!target) return { result: { ok: false, error: 'provide `target`: describe the element to click.' } };
+    if ((await resolveScreenControlMode(ctx)) === 'modal') {
+      return {
+        result: {
+          ok: false,
+          error:
+            'visual_click is unavailable in modal screen control: you read the screen yourself, so ' +
+            'locating through a second model would only be less accurate. Call visual_screenshot to ' +
+            'see the frame, then visual_act with the pixel coordinates you read off it.',
+        },
+      };
+    }
     const action = normalizeAction(String(args.action ?? 'click'));
     if (!CLICK_ACTIONS.includes(action as (typeof CLICK_ACTIONS)[number])) {
       return { result: { ok: false, error: `visual_click supports ${CLICK_ACTIONS.join('/')}, not ${action}` } };

@@ -65,6 +65,15 @@ const SettingsSchema = new Schema(
     vision_endpoint_id: { type: String, default: '' },
     vision_model: { type: String, default: '' },
     /**
+     * Who reads a screen for the GUI-control tools (`visual_*`, `android_*`) — see
+     * `VISUAL_MODAL_PLAN.md`. `legacy`: the Vision endpoint above reads/locates and the agent works
+     * from its prose. `modal`: the agent's own multimodal model receives the frame as pixels and
+     * points at it itself (no second model, no grid-fraction prompt, no calibration). `auto`
+     * (default): modal for a vision-capable agent, legacy otherwise — so a mixed fleet needs no
+     * per-agent config.
+     */
+    screen_control_mode: { type: String, enum: ['auto', 'modal', 'legacy'], default: 'auto' },
+    /**
      * Sampling params for the vision analysis call. `null` = **disabled** → the value is NOT sent to
      * the server, so llama.cpp applies its own default. A number overrides it. Defaults preserve the
      * previous hard-coded behaviour (low temperature + light penalties to avoid repetition loops).

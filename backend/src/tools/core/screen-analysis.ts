@@ -1,22 +1,30 @@
 /**
- * Shared policy for the "look at a screen" tools (`visual_screenshot`, `android_screenshot`).
+ * Shared policy for the GUI-control tools' screen reading (`visual_*`, `android_*`).
  *
- * Both capture a frame and, historically, always routed it through the operator-configured **Vision
- * endpoint** — handing the calling agent a second-hand *description* of its own screen. That is the
- * right shape for a text-only agent, and strictly lossy for a multimodal one: the runner already
- * feeds tool-returned images to a vision-capable agent as raw pixels (see `AgentRunner`'s
- * `supportsVision` gate), and `analyze_image` is withheld from such agents for exactly this reason —
- * a weaker second model paraphrasing what the agent could read itself.
+ * These tools were designed around a **text-only orchestrator**: every capture was routed through
+ * the operator-configured **Vision endpoint**, which handed the calling agent a second-hand *prose
+ * description* of its own screen. That is the right shape for a text-only agent, and strictly lossy
+ * for a multimodal one: the runner already feeds tool-returned images to a vision-capable agent as
+ * raw pixels (see `AgentRunner`'s `supportsVision` gate), and `analyze_image` is withheld from such
+ * agents for exactly this reason — a weaker second model paraphrasing what the agent could read
+ * itself.
  *
- * So describe/read mode now asks: can the *calling* agent see? If yes, skip the Vision endpoint and
- * hand back the frame itself. Localization is deliberately NOT covered here — reading a pixel
- * coordinate off a screen is a separate capability from accepting an image, and the desktop's grid +
- * OCR-snap + affine calibration pipeline stays on the Vision endpoint regardless.
+ * So there are now two modes, chosen globally in Settings → Vision (`screen_control_mode`, see
+ * `VISUAL_MODAL_PLAN.md`):
  *
- * Two operator knobs, shared verbatim by both tools so the behaviour is one concept:
- *  - `screen_analysis` — `auto` (follow the agent's own capability), or force either side.
- *  - `frames_kept` — how many live frames stay in the agent's context (see `ImageBlock.frameKeep`).
+ *  - **`legacy`** — the pre-existing behaviour: the Vision endpoint reads and locates, the agent
+ *    works from text it never verified.
+ *  - **`modal`** — the agent's own multimodal model *is* the vision model. Frames arrive as pixels;
+ *    the agent points at what it sees and the tools execute. No second model, no coordinate-fraction
+ *    prompt, no calibration.
+ *  - **`auto`** (default) — `modal` for a vision-capable caller, `legacy` otherwise, so a fleet
+ *    mixing text-only and multimodal agents needs no per-agent config.
+ *
+ * The mode is global rather than per-tool because it is one concept, not four: whether a screen is
+ * read by the agent or by a proxy. The only per-tool knob left here is `frames_kept`, which is a
+ * context budget, not a mode.
  */
+import { settingsService } from '../../domain/settings/settings.service';
 import { toolConfigService } from '../../domain/tools/tool-config.service';
 import type { ToolConfigField, ToolContext } from '../types';
 
@@ -24,36 +32,44 @@ import type { ToolConfigField, ToolContext } from '../types';
 const DEFAULT_FRAMES_KEPT = 2;
 
 /**
- * The two shared fields, spread into each screen tool's own `configSchema`. Kept as a factory so the
- * hints can name the tool's own vocabulary ("desktop" vs. "device") without duplicating the schema.
+ * The shared per-tool field, spread into each screen tool's own `configSchema`. Kept as a factory so
+ * the hint can name the tool's own vocabulary ("desktop" vs. "device") without duplicating the
+ * schema. The mode itself lives in Settings — see the module docblock.
  */
 export function screenAnalysisFields(surface: string): ToolConfigField[] {
   return [
-    {
-      key: 'screen_analysis',
-      label: 'Screen analysis',
-      type: 'select',
-      options: ['auto', 'own_model', 'vision_endpoint'],
-      default: 'auto',
-      hint:
-        `Who reads the ${surface} screenshot. \`auto\` (recommended): the agent's own model when it ` +
-        `is multimodal, else the Vision endpoint. \`own_model\`: always hand the agent the frame — ` +
-        `a text-only endpoint will choke on it. \`vision_endpoint\`: always route through Settings → ` +
-        `Vision endpoint and return text, the pre-existing behaviour. Describe/read mode only; ` +
-        `locating a target always uses the Vision endpoint.`,
-    },
     {
       key: 'frames_kept',
       label: 'Screen frames kept in context',
       type: 'number',
       default: DEFAULT_FRAMES_KEPT,
       hint:
-        `How many recent screenshots stay in a multimodal agent's context as pixels. Older frames are ` +
-        `replaced by a one-line stub, so a long GUI session doesn't accumulate a full frame per tool ` +
-        `call. 2 lets the agent compare before/after; 1 is the cheapest; 0 means keep every frame ` +
-        `(unbounded — it will hit the context ceiling). Ignored when the Vision endpoint does the reading.`,
+        `How many recent ${surface} screenshots stay in a multimodal agent's context as pixels. Older ` +
+        `frames are replaced by a one-line stub, so a long GUI session doesn't accumulate a full frame ` +
+        `per tool call. 2 lets the agent compare before/after; 1 is the cheapest; 0 means keep every ` +
+        `frame (unbounded — it will hit the context ceiling). Ignored in legacy mode, where the Vision ` +
+        `endpoint does the reading (Settings → Vision → Screen control).`,
     },
   ];
+}
+
+/**
+ * Resolve the effective screen-control mode for one caller: the global setting, with `auto` falling
+ * back to whether the calling agent's own model can accept an image. Defaults to `legacy` if the
+ * settings read fails — that is the behaviour every deployment already had.
+ */
+export async function resolveScreenControlMode(caller: {
+  /** Whether the calling agent's own model accepts images (`ToolContext.supportsVision`). */
+  supportsVision?: boolean;
+}): Promise<'modal' | 'legacy'> {
+  try {
+    const { screen_control_mode: mode } = await settingsService.get();
+    if (mode === 'modal') return 'modal';
+    if (mode === 'legacy') return 'legacy';
+    return caller.supportsVision === true ? 'modal' : 'legacy';
+  } catch {
+    return 'legacy';
+  }
 }
 
 export interface ScreenAnalysisPolicy {
@@ -63,43 +79,40 @@ export interface ScreenAnalysisPolicy {
   framesKept: number;
 }
 
-/**
- * Resolve the effective policy for one describe-mode capture. Falls back to the Vision endpoint on
- * any config read failure — that is the behaviour every existing deployment already has.
- */
+/** Resolve the mode *and* this tool's frame budget for one capture. */
 export async function resolveScreenAnalysis(
   toolName: string,
   schema: ToolConfigField[],
   ctx: ToolContext,
 ): Promise<ScreenAnalysisPolicy> {
-  let mode = 'auto';
   let framesKept: number = DEFAULT_FRAMES_KEPT;
   try {
     const { config } = await toolConfigService.resolve(toolName, schema);
-    mode = String(config.screen_analysis ?? 'auto');
     const n = Number(config.frames_kept);
     if (Number.isFinite(n) && n >= 0) framesKept = Math.trunc(n);
   } catch {
-    /* keep the defaults */
+    /* keep the default */
   }
-  const ownModel =
-    mode === 'own_model' || (mode !== 'vision_endpoint' && ctx.supportsVision === true);
-  return { ownModel, framesKept };
+  return { ownModel: (await resolveScreenControlMode(ctx)) === 'modal', framesKept };
 }
 
 /**
  * The tool-result payload for a frame the agent reads itself. There is no `analysis` field on
  * purpose: the model must read the attached pixels rather than a paraphrase, and a text-only-shaped
- * key here is exactly what invites it to answer from the description it doesn't have.
+ * key here is exactly what invites it to answer from the description it doesn't have. `note` carries
+ * whatever the caller must know about *this* frame (a plain read, or a grid it can measure against).
  */
 export function ownModelResult(
   base: Record<string, unknown>,
   surface: string,
+  note?: string,
 ): Record<string, unknown> {
   return {
     ...base,
     ok: true,
     read_by: 'agent',
-    note: `The ${surface} screenshot is attached to this turn — read it yourself and answer from what you see.`,
+    note:
+      note ??
+      `The ${surface} screenshot is attached to this turn — read it yourself and answer from what you see.`,
   };
 }

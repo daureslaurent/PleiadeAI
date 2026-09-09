@@ -7,6 +7,7 @@ import {
   EndpointModelPicker,
   SettingNullableNumber,
   SettingNumber,
+  SettingSelect,
   SettingSlider,
   SettingToggle,
 } from '../controls';
@@ -139,18 +140,34 @@ export function InferencePanel() {
       </Section>
 
       <Section title="Vision" icon={<Eye size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          How an agent driving a desktop or a phone <em>sees</em> it. In <strong>modal</strong> control
+          the agent's own model receives the screenshot as pixels and points at what it wants — no
+          second model, no coordinate grid to fit. In <strong>legacy</strong> control the screenshot
+          goes to the vision endpoint below and the agent works from its description.
+        </p>
         <div className="space-y-4">
+          <SettingSelect
+            field="screen_control_mode"
+            label="Screen control"
+            options={[
+              { value: 'auto', label: 'Auto — modal when the agent can see, legacy otherwise' },
+              { value: 'modal', label: 'Modal — the agent reads its own screen' },
+              { value: 'legacy', label: 'Legacy — the vision endpoint reads it for the agent' },
+            ]}
+            hint="Applies to visual_screenshot, visual_click and android_screenshot. In modal control visual_click disappears from a visual agent's toolset — it exists to keep a blind agent out of coordinate-handling, and an agent that can see the button clicks it more accurately itself. Auto decides per agent from its model, so a mixed fleet needs no other setting."
+          />
           <EndpointModelPicker
             endpointField="vision_endpoint_id"
             modelField="vision_model"
             label="Vision endpoint (for visual agents)"
             noneLabel="None — visual agents can't see the screen"
             warnUnlessVision
-            hint="Screenshots from visual_screenshot are analysed here and returned to the agent as text + coordinates. Pick an endpoint whose model supports vision (llama.cpp with --mmproj)."
+            hint="Where a screenshot goes in legacy control: analysed here and returned to the agent as text + coordinates. Pick an endpoint whose model supports vision (llama.cpp with --mmproj). Also backs analyze_image for text-only agents, and click calibration, whatever the mode above."
           />
           <Field
             label="Vision sampling"
-            hint="Sampling for the vision analysis call. Leave a box blank to disable it — that parameter is then not sent, so the model server uses its own default."
+            hint="Sampling for the vision analysis call (legacy control, analyze_image, calibration). Leave a box blank to disable it — that parameter is then not sent, so the model server uses its own default."
           >
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
               <SettingNullableNumber field="vision_temperature" label="temperature" min={0} step={0.05} />

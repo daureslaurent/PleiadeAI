@@ -1628,6 +1628,12 @@ export interface InferenceSettings {
   vision_endpoint_id: string;
   /** Model on `vision_endpoint_id` for screenshot analysis ('' → that endpoint's default). */
   vision_model: string;
+  /**
+   * Who reads a screen for the GUI-control tools: `legacy` (the Vision endpoint above, returning
+   * prose), `modal` (the calling agent's own multimodal model, receiving pixels), or `auto` — modal
+   * for a vision-capable agent, legacy otherwise.
+   */
+  screen_control_mode: 'auto' | 'modal' | 'legacy';
   /** Vision sampling params. `null` = disabled (not sent to the model → server default). */
   vision_temperature: number | null;
   vision_top_p: number | null;

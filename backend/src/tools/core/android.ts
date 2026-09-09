@@ -457,9 +457,12 @@ function contentPrompt(question: string, w: string, h: string): string {
 }
 
 /**
- * `android_screenshot` — capture the device screen and have the configured vision model describe or
- * read it. Describe-mode only, on purpose: locating a widget is `android_ui`'s job and it does it
- * exactly, so none of the desktop's grid / OCR-snap / calibration machinery is needed or wanted here.
+ * `android_screenshot` — capture the device screen and read it: in **modal** screen control the frame
+ * goes to the calling agent as pixels, in **legacy** the configured vision model describes it and the
+ * agent gets prose (see `screen-analysis.ts`). Describe-mode only in both, on purpose: locating a
+ * widget is `android_ui`'s job and it does it *exactly* from the view hierarchy, so none of the
+ * desktop's grid / OCR-snap / calibration machinery is needed or wanted here — and nothing about
+ * Android's structural path changes with the mode.
  */
 /** Operator-tunable options for `android_screenshot`, surfaced on the Tools page. */
 const ANDROID_SCREENSHOT_CONFIG_SCHEMA: ToolConfigField[] = screenAnalysisFields('device');
@@ -467,7 +470,9 @@ const ANDROID_SCREENSHOT_CONFIG_SCHEMA: ToolConfigField[] = screenAnalysisFields
 export const androidScreenshot: Tool = {
   name: 'android_screenshot',
   description:
-    "Look at the Android device's screen: captures a screenshot and reads it. Use this to understand " +
+    "Look at the Android device's screen: captures a screenshot and reads it (you receive the frame " +
+    'itself, or a vision model\'s description in `analysis`, per the operator\'s screen-control mode). ' +
+    'Use this to understand ' +
     '*what* is on screen (read a message, check a state, describe a page). ' +
     'Do NOT use it to find tap coordinates — android_ui returns exact widget bounds and is always ' +
     'more reliable for that. Omit `question` for a general description.',
@@ -481,8 +486,8 @@ export const androidScreenshot: Tool = {
     },
     additionalProperties: false,
   },
-  // Who reads the screenshot (the agent's own model vs. the Vision endpoint) and how many frames stay
-  // in its context. Shared verbatim with `visual_screenshot` — see `screen-analysis.ts`.
+  // How many frames stay in a modal agent's context. *Who* reads the screen is the global
+  // `screen_control_mode` (Settings → Vision) — see `screen-analysis.ts`.
   configSchema: ANDROID_SCREENSHOT_CONFIG_SCHEMA,
 
   async execute(args, ctx) {
@@ -502,10 +507,11 @@ export const androidScreenshot: Tool = {
       });
     }
 
-    // A multimodal agent reads the device screen itself: hand back the frame as a tool image rather
-    // than paying a Vision-endpoint round-trip for a description that is, by construction, worse than
-    // what the agent would see. `frameKeep` caps how many frames stay in context. No `emitVision` card
-    // — there is no question/answer pair to show, and the frame renders as a tool-result image.
+    // Modal mode: the agent reads the device screen itself — hand back the frame as a tool image
+    // rather than paying a Vision-endpoint round-trip for a description that is, by construction,
+    // worse than what the agent would see. `frameKeep` caps how many frames stay in context. No
+    // `emitVision` card — there is no question/answer pair to show, and the frame renders as a
+    // tool-result image.
     const policy = await resolveScreenAnalysis('android_screenshot', ANDROID_SCREENSHOT_CONFIG_SCHEMA, ctx);
     if (policy.ownModel) {
       log.info({ agent: ctx.agentName, path: cap.path, frameKeep: policy.framesKept }, 'android screenshot handed to the agent');

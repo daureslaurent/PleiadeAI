@@ -26,6 +26,8 @@ import { resolveTools, ANDROID_TOOL_NAMES, OBSERVATION_TOOL_NAMES, VISUAL_TOOL_N
 import { annuaire } from '../tools/core/annuaire';
 import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
+import { visualClick } from '../tools/core/visual';
+import { resolveScreenControlMode } from '../tools/core/screen-analysis';
 import { data } from '../tools/core/data';
 import { guide } from '../tools/core/guide';
 import { todoWrite } from '../tools/core/todo';
@@ -277,6 +279,13 @@ export class AgentRunner {
     // tool is withheld rather than tempting the model into a pointless round-trip through a second,
     // weaker model. Text-only agents keep it whenever an image is in scope now (attached / carried
     // over) or could be `read` into the pool mid-run; handles let them then name it by id, never path.
+    // The same argument governs the GUI-control tools. In **modal** screen control the agent reads
+    // its own screen, so `visual_click` — whose entire job is to keep a *blind* agent out of
+    // coordinate-handling by asking the Vision endpoint where a described element is — would route
+    // the click through a weaker model's guess than the one the agent just made itself. It is
+    // withheld there, exactly as `analyze_image` is. Read per turn, so flipping the setting binds on
+    // the next turn without a restart. See `VISUAL_MODAL_PLAN.md`.
+    const screenMode = await resolveScreenControlMode({ supportsVision: inference.supportsVision });
     const canReadImages = agent.tools_allowed.includes(read.name);
     const imageTools =
       !inference.supportsVision && (attachedImages.length || canReadImages)
@@ -319,7 +328,9 @@ export class AgentRunner {
       // A multimodal agent never gets `analyze_image` — not even if the operator ticked it in
       // `tools_allowed`. It sees the pixels itself; the tool would only route them through the
       // Vision endpoint's model and hand back a worse, second-hand description.
-      (name) => !(inference.supportsVision && name === analyzeImage.name),
+      (name) =>
+        !(inference.supportsVision && name === analyzeImage.name) &&
+        !(screenMode === 'modal' && name === visualClick.name),
     );
     const tools = await resolveTools(effectiveTools);
     const toolMap = new Map(tools.map((t) => [t.name, t]));

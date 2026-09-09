@@ -1,4 +1,5 @@
 import { createLogger } from '../../config/logger';
+import { resolveScreenControlMode } from './screen-analysis';
 import type { Tool } from '../types';
 
 const log = createLogger('tool:guide');
@@ -234,19 +235,19 @@ errors rather than silently running on the backend.`,
 
   visual_screenshot: `# visual_screenshot — see the desktop
 
-Captures the agent's live desktop. Two modes, chosen from your \`question\`: ask to
-READ/DESCRIBE ("what's on screen?"), or LOCATE ("where is the Submit button?") for pixel coordinates
-you pass to \`visual_act\`.
+Captures the agent's live desktop and has a **separate vision model** read it for you — you never see
+the pixels. Two modes, chosen from your \`question\`: ask to READ/DESCRIBE ("what's on screen?") and
+you get its text back in \`analysis\`; ask to LOCATE ("where is the Submit button?") and it reads
+coordinates off a reference grid, snaps them to on-screen text, and returns \`x\`/\`y\` you pass to
+\`visual_act\`.
 
-In READ/DESCRIBE mode, *who* reads the screen depends on you. If you are multimodal the frame is
-attached to your turn and you read it yourself — answer from the pixels, not from any summary. If you
-are not, a separate vision model reads it and you get its text back in \`analysis\`. Either way, only
-the last few frames stay in your context: act on what you just captured rather than assuming an
-earlier screenshot is still there, and re-capture after anything changes the screen.
+That analysis is second-hand: it is a description of the screen, not the screen. Ask a *specific*
+question rather than a general one, and re-capture after anything changes the screen — a stale
+description is indistinguishable from a current one.
 
-LOCATE always goes through the vision model — it reads coordinates off a reference grid and snaps them
-to on-screen text, which is more accurate than eyeballing a pixel. To *click* a described element,
-prefer \`visual_click\` (locate + click in one step). See the \`visual\` topic guide.`,
+To *click* a described element, prefer \`visual_click\` (locate + click in one step — it keeps the
+coordinates out of your hands, which is where most misplaced clicks come from). See the \`visual\`
+topic guide.`,
 
   generate_image: `# generate_image — text-to-image
 
@@ -417,9 +418,10 @@ hierarchy and taps its exact centre. A miss returns what *is* on screen, so the 
 from reality.
 
 \`android_screenshot\` is for *reading* a screen (what does this message say, what state is this in) —
-not for finding coordinates. If you are multimodal the frame is attached to your turn and you read it
-yourself; otherwise a vision model reads it for you and returns \`analysis\`. Only the last few frames
-stay in your context, so re-capture after anything changes the screen. \`android_app\` launches apps by package, which beats hunting for a
+not for finding coordinates. Depending on the operator's screen-control mode, either the frame is
+attached to your turn and you read it yourself, or a vision model reads it for you and returns
+\`analysis\`. When you get the frame, only the last few stay in your context, so re-capture after
+anything changes the screen. \`android_app\` launches apps by package, which beats hunting for a
 launcher icon. \`android_logcat\` tells you *why* something failed when the screen doesn't.
 \`android_shell\` runs on the **device**; \`bash\` runs in **your own container** — \`android_file\`
 moves files between the two.
@@ -458,6 +460,54 @@ function oneLine(text: string, max = 100): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+/**
+ * Modal-mode overrides. In modal screen control (Settings → Vision, see `VISUAL_MODAL_PLAN.md`) the
+ * agent *is* the vision model: frames arrive as pixels and it points at them itself. The curated
+ * guidance above describes the legacy path — a second model reading the screen on the agent's behalf
+ * — and would actively mislead a modal agent (it names `visual_click`, which it doesn't have, and
+ * tells it to reason over an `analysis` field it never receives). So both the tool guide and the
+ * workflow topic have a modal twin, picked at serve time.
+ */
+const MODAL_TOOL_GUIDES: Record<string, string> = {
+  visual_screenshot: `# visual_screenshot — see the desktop
+
+Captures the agent's live desktop and attaches the frame **to your turn as an image**. You are the
+one reading it: answer from the pixels, never from a summary of them.
+
+\`visual_screenshot({question})\` — the question shapes the capture, not the answer. A "what's on
+screen?" question gets a clean frame. A "where is …?" question additionally overlays a red reference
+grid every 10% of width and height, each crossing labelled with its position as fractions (\`.4,.3\`
+= 40% across, 30% down). Read the target off the grid and convert: \`x_px = fraction × width\`,
+\`y_px = fraction × height\` (the result carries \`width\`/\`height\`). Then act with
+\`visual_act({action:'click', x, y})\`. Force the overlay either way with \`grid: true|false\`.
+
+Only the last few frames stay in your context — older ones are replaced by a stub naming the handle.
+So act on what you *just* captured, don't assume an earlier screenshot is still visible, and
+re-capture after anything changes the screen.
+
+There is no \`visual_click\`: you can see the button, so nothing is gained by asking another model
+where it is. See the \`visual\` topic guide.`,
+};
+
+/** Modal replacements for the workflow topics whose loop changes shape. */
+const MODAL_TOPIC_BODIES: Record<string, string> = {
+  visual: `# Visual desktop
+
+You drive this GUI by **looking at it**. Loop: \`visual_screenshot\` (the frame is attached to your
+turn — read it) → decide the pixel → \`visual_act\` (move/click/type/press/scroll/drag at those
+coords) → screenshot again to confirm it landed. Coordinates are screen pixels from the top-left.
+
+Ask "where is …?" (or pass \`grid: true\`) to get the frame with a labelled reference grid overlaid,
+and read the coordinate off it as fractions × width/height — far more reliable than eyeballing a raw
+pixel. Ask "what's on screen?" for a clean frame when you're reading text instead of aiming.
+
+Two shortcuts that beat aiming entirely: \`visual_windows\` returns every window's exact rect for
+focus/close/minimize (never pixel-hunt a title bar), and keyboard actions —
+\`visual_act({action:'key', keys:['ctrl','l']})\` — reach things no click has to find.
+
+Always verify: a click you didn't confirm with a fresh screenshot is a click you don't know happened.`,
+};
+
 export const guide: Tool = {
   name: 'guide',
   description:
@@ -480,6 +530,9 @@ export const guide: Tool = {
     const available = ctx.availableTools ?? [];
     const toolByName = new Map(available.map((t) => [t.name, t]));
     const topic = String(args.topic ?? '').trim().toLowerCase();
+    // Which screen-control story to tell (see MODAL_TOOL_GUIDES). Resolved per call, so flipping the
+    // setting changes what agents are told on their very next `guide`.
+    const modal = (await resolveScreenControlMode(ctx)) === 'modal';
 
     // Workflow topics relevant to this agent = those whose tools intersect what the agent can call.
     const relevantTopics = Object.entries(TOPIC_GUIDES).filter(([, g]) =>
@@ -501,17 +554,18 @@ export const guide: Tool = {
 
     // A workflow topic?
     if (TOPIC_GUIDES[topic]) {
-      return { result: { ok: true, topic, kind: 'workflow', guide: TOPIC_GUIDES[topic].body } };
+      const body = (modal ? MODAL_TOPIC_BODIES[topic] : undefined) ?? TOPIC_GUIDES[topic].body;
+      return { result: { ok: true, topic, kind: 'workflow', guide: body } };
     }
 
     // A tool the agent actually has?
     const tool = toolByName.get(topic);
     if (tool) {
-      const body = TOOL_GUIDES[topic] ?? autoGuide(tool);
-      log.debug({ agent: ctx.agentName, topic, curated: topic in TOOL_GUIDES }, 'guide served');
-      return {
-        result: { ok: true, topic, kind: 'tool', curated: topic in TOOL_GUIDES, guide: body },
-      };
+      const override = modal ? MODAL_TOOL_GUIDES[topic] : undefined;
+      const body = override ?? TOOL_GUIDES[topic] ?? autoGuide(tool);
+      const curated = override !== undefined || topic in TOOL_GUIDES;
+      log.debug({ agent: ctx.agentName, topic, curated, modal }, 'guide served');
+      return { result: { ok: true, topic, kind: 'tool', curated, guide: body } };
     }
 
     // Unknown, or a tool the agent doesn't have.

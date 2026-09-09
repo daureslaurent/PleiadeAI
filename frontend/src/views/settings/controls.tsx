@@ -90,6 +90,36 @@ export function SettingText({
   );
 }
 
+/** Label + hint + a native select, committed on change — the shape every enum setting takes. */
+export function SettingSelect({
+  field,
+  label,
+  hint,
+  options,
+}: {
+  field: Of<string>;
+  label: string;
+  hint?: ReactNode;
+  options: Array<{ value: string; label: string }>;
+}) {
+  const { form, commit } = useSettings();
+  return (
+    <Field label={label} hint={hint}>
+      <Select
+        value={form[field]}
+        onChange={(e) => commit({ [field]: e.target.value } as Partial<S>)}
+        className="w-full"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
 export function SettingNumber({
   field,
   label,

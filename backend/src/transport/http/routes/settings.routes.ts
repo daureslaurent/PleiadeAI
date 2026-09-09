@@ -1,5 +1,10 @@
 import { Router } from 'express';
-import { settingsService, type EffectiveSettings } from '../../../domain/settings/settings.service';
+import {
+  settingsService,
+  SCREEN_CONTROL_MODES,
+  type EffectiveSettings,
+  type ScreenControlMode,
+} from '../../../domain/settings/settings.service';
 import { inferenceRuntime } from '../../../inference/runtime-config';
 import { endpointHealth } from '../../../inference/endpoint-health';
 import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
@@ -72,6 +77,10 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.title_model === 'string') patch.title_model = b.title_model;
   if (typeof b.vision_endpoint_id === 'string') patch.vision_endpoint_id = b.vision_endpoint_id;
   if (typeof b.vision_model === 'string') patch.vision_model = b.vision_model;
+  // Who reads a screen for the GUI-control tools (auto / modal / legacy). An unknown value is
+  // ignored rather than stored, so a typo can't leave the fleet in an undefined mode.
+  if (SCREEN_CONTROL_MODES.includes(b.screen_control_mode as ScreenControlMode))
+    patch.screen_control_mode = b.screen_control_mode as ScreenControlMode;
   // Vision sampling params: `null`/'' → disabled (stored null, not sent to the model); a finite
   // number overrides. Anything else for a present key is ignored.
   for (const key of [
