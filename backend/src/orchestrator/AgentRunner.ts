@@ -159,6 +159,15 @@ export interface RunInput {
  */
 export interface RunResult {
   text: string;
+  /**
+   * Everything the agent actually said this turn: the prose it emitted *alongside* its tool calls,
+   * followed by the final answer. `text` alone is only the last, tool-free message — an agent that
+   * writes its answer and then fires one last bookkeeping call (`todowrite`, `remember`) ends the
+   * turn on a throwaway line like "digest delivered above", and that is all a caller would receive.
+   * Cross-agent hops return this instead (see `hop`); a depth-0 run keeps `text`, since the UI has
+   * already streamed the interim prose as its own blocks and would otherwise render it twice.
+   */
+  fullText: string;
   images: ImageBlock[];
   /** The id grouping this turn's llama calls — surfaced so the caller can persist it + correlate runs. */
   turnId: string;
@@ -529,6 +538,9 @@ export class AgentRunner {
     const { signal } = input;
 
     let finalText = '';
+    // Prose the model emitted in the same message as a tool call. Kept so the turn's real content
+    // survives to `fullText` (above) even when the closing message carries none of it.
+    const interimTexts: string[] = [];
     // Latest usage across tool iterations; the final pass reflects the full session context size.
     let lastUsage: TokenUsage | null = null;
 
@@ -644,6 +656,8 @@ export class AgentRunner {
         break;
       }
 
+      if (assistantText.trim()) interimTexts.push(assistantText.trim());
+
       for (const call of toolCalls) {
         const cacheKey = `${call.name}${call.argsJson}`;
         const cached = toolResultCache.get(cacheKey);
@@ -744,7 +758,9 @@ export class AgentRunner {
       setTimeout(() => scoringService.autoScoreTurn(tid), 1500);
     }
 
-    return { text: finalText, images: handBack, turnId, runId };
+    const fullText = [...interimTexts, finalText.trim()].filter(Boolean).join('\n\n');
+
+    return { text: finalText, fullText, images: handBack, turnId, runId };
   }
 
   /**
@@ -1176,7 +1192,11 @@ export class AgentRunner {
         depth: childDepth,
         status: 'success',
       });
-      return answer;
+      // A hop hands back everything the delegate said, not just its closing message: an agent that
+      // writes its answer alongside a final `todowrite`/`remember` would otherwise return only the
+      // leftover "done, see above" line, and the caller — having never seen the answer — redoes the
+      // work. The UI is unaffected: it renders the sub-agent's prose from the streamed blocks.
+      return { ...answer, text: answer.fullText || answer.text };
     } catch (err) {
       eventBus.emit('agent:ask_agent_done', {
         ctx: fromCtx,
