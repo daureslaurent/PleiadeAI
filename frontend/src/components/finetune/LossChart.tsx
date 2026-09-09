@@ -64,7 +64,7 @@ export function LossChart({
   if (!geom) {
     return (
       <div
-        className="flex items-center justify-center rounded-xl border border-white/[0.06] bg-black/20 text-[11px] text-slate-600"
+        className="flex items-center justify-center rounded-xl border hairline well text-[11px] text-slate-600"
         style={{ height }}
       >
         {live ? (
@@ -77,7 +77,7 @@ export function LossChart({
   }
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-black/20 p-2">
+    <div className="rounded-xl border hairline well p-2">
       <div className="mb-1 flex items-center justify-between px-1">
         <span className="text-[10px] uppercase tracking-wider text-slate-500">
           {live ? <span className="text-shimmer">training loss</span> : 'training loss'}

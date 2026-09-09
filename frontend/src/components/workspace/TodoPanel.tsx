@@ -16,7 +16,7 @@ function ItemRow({ item }: { item: TodoItem }) {
     return (
       <li className="flex items-start gap-2 text-[12px] font-medium leading-snug text-slate-100">
         <span className="mt-1 flex h-3 w-3 shrink-0 items-center justify-center">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.7)]" />
+          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400 shadow-[0_0_8px_rgb(var(--c-amber-400)/0.7)]" />
         </span>
         <span>{item.content}</span>
       </li>
@@ -38,7 +38,7 @@ export function TodoList({ items }: { items: TodoItem[] }) {
   if (!items.length) return null;
   const done = items.filter((i) => i.status === 'completed').length;
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-black/20 p-2">
+    <div className="rounded-lg border hairline well p-2">
       <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
         <ListChecks size={11} /> tasks
         <span className="font-normal normal-case tracking-normal text-slate-600">
@@ -106,7 +106,7 @@ export function TodoPanel({ items, sessionId }: { items: TodoItem[]; sessionId: 
 
         {!collapsed && (
           <>
-            <div className="mx-1 my-2 h-px bg-white/[0.06]" />
+            <div className="mx-1 my-2 h-px raise-2" />
             <ul className="space-y-1.5 px-1">
               {items.map((it) => (
                 <ItemRow key={it.id} item={it} />

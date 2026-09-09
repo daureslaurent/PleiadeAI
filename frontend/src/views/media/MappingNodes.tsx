@@ -42,11 +42,11 @@ export const AppInputsNode = memo(function AppInputsNode({ data }: NodeProps) {
 
   return (
     <div
-      className={`w-[210px] rounded-xl bg-[#0d1424]/95 shadow-lg ring-1 ring-accent/30 backdrop-blur-sm ${
+      className={`w-[210px] rounded-xl bg-surface/95 shadow-lg ring-1 ring-accent/30 backdrop-blur-sm ${
         d.pulse ? 'node-pulse' : ''
       }`}
     >
-      <div className="flex items-center gap-1.5 border-b border-white/[0.06] px-2.5 py-2">
+      <div className="flex items-center gap-1.5 border-b hairline px-2.5 py-2">
         <Sparkles size={12} className="text-accent" />
         <span className="text-xs font-medium text-slate-100">App inputs</span>
       </div>
@@ -131,22 +131,22 @@ export const ComfyNodeCard = memo(function ComfyNodeCard({ data, selected }: Nod
 
   return (
     <div
-      className={`w-[230px] rounded-xl bg-[#0d1424]/95 shadow-lg ring-1 backdrop-blur-sm transition-shadow ${
-        selected ? 'ring-accent/60' : d.boundBy.size > 0 ? 'ring-white/[0.16]' : 'ring-white/[0.08]'
+      className={`w-[230px] rounded-xl bg-surface/95 shadow-lg ring-1 backdrop-blur-sm transition-shadow ${
+        selected ? 'ring-accent/60' : d.boundBy.size > 0 ? 'ring-hairline-strong' : 'ring-hairline'
       } ${d.pulse ? 'node-pulse' : ''}`}
       style={{ borderTop: `2px solid ${accent}` }}
     >
       <div className="px-2.5 pb-1 pt-2">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-xs font-medium text-slate-100">{node.title}</span>
-          <span className="ml-auto shrink-0 rounded bg-white/[0.06] px-1 font-mono text-[9px] text-slate-500">
+          <span className="ml-auto shrink-0 rounded raise-2 px-1 font-mono text-[9px] text-slate-500">
             #{node.id}
           </span>
         </div>
         <div className="truncate font-mono text-[9px] text-slate-500">{node.class_type}</div>
       </div>
 
-      <div className="border-t border-white/[0.06] py-1">
+      <div className="border-t hairline py-1">
         {bindable.map((input) => (
           <InputRow key={input.name} input={input} meta={d.boundBy.get(input.name)} onUnbind={d.onUnbind} />
         ))}
@@ -157,7 +157,7 @@ export const ComfyNodeCard = memo(function ComfyNodeCard({ data, selected }: Nod
 
       {/* Tensor inputs: shown so the wiring reads, but never a drop target. */}
       {linked.length > 0 && (
-        <div className="border-t border-white/[0.06] py-1">
+        <div className="border-t hairline py-1">
           {linked.map((input) => (
             <div key={input.name} className="relative px-2.5 py-[2px]">
               <Handle
@@ -184,7 +184,7 @@ export const ComfyNodeCard = memo(function ComfyNodeCard({ data, selected }: Nod
       )}
 
       {node.outputs.length > 0 && (
-        <div className="flex flex-col items-end border-t border-white/[0.06] py-1">
+        <div className="flex flex-col items-end border-t hairline py-1">
           {node.outputs.map((output) => (
             <div key={output.slot} className="relative px-2.5 py-[2px]">
               <span className="font-mono text-[9px] text-slate-600">{output.name}</span>
@@ -212,7 +212,7 @@ export const ComfyNodeCard = memo(function ComfyNodeCard({ data, selected }: Nod
 
       {/* The "this is the result" port. Only nodes that write files can carry it. */}
       {node.is_output && (
-        <div className="relative flex items-center justify-end gap-1 border-t border-white/[0.06] px-2.5 py-1.5">
+        <div className="relative flex items-center justify-end gap-1 border-t hairline px-2.5 py-1.5">
           <span className={`text-[9px] ${d.isResult ? 'text-emerald-400' : 'text-slate-600'}`}>
             {d.isResult ? 'result → app' : 'make result'}
           </span>
@@ -248,7 +248,7 @@ function InputRow({
   const color = meta ? bindingPortColor(meta.port) : '#475569';
   return (
     <div
-      className={`group relative flex items-center gap-1.5 px-2.5 py-[3px] ${meta ? 'bg-white/[0.04]' : ''}`}
+      className={`group relative flex items-center gap-1.5 px-2.5 py-[3px] ${meta ? 'raise-1' : ''}`}
       title={input.tooltip}
     >
       <Handle
@@ -307,7 +307,7 @@ export const AppOutputNode = memo(function AppOutputNode({ data }: NodeProps) {
   const Icon = OUTPUT_ICON[d.outputKind] ?? ImageIcon;
   return (
     <div
-      className={`relative w-[170px] rounded-xl bg-[#0d1424]/95 px-2.5 py-2 shadow-lg ring-1 backdrop-blur-sm ${
+      className={`relative w-[170px] rounded-xl bg-surface/95 px-2.5 py-2 shadow-lg ring-1 backdrop-blur-sm ${
         d.connected ? 'ring-emerald-500/30' : 'ring-amber-500/40'
       } ${d.pulse ? 'node-pulse' : ''}`}
     >

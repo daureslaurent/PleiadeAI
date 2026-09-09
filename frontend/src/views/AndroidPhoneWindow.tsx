@@ -26,8 +26,8 @@ export function AndroidPhoneWindow() {
   }, [agentName]);
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-[#0b0f19]">
-      <div className="flex items-center gap-2 border-b border-slate-800 bg-panel px-3 py-2">
+    <div className="flex h-screen w-screen flex-col bg-panel">
+      <div className="flex items-center gap-2 border-b border-border bg-panel px-3 py-2">
         <Smartphone size={15} className="text-reasoning" />
         <span className="truncate text-sm font-medium text-slate-200">{agentName} · Phone</span>
         <StatusPill status={mirror.status} />
@@ -38,7 +38,7 @@ export function AndroidPhoneWindow() {
 
       <AndroidScreen mirror={mirror} />
 
-      <div className="border-t border-slate-800 bg-panel px-3 py-1.5 text-[11px] text-slate-500">
+      <div className="border-t border-border bg-panel px-3 py-1.5 text-[11px] text-slate-500">
         {mirror.takeover
           ? 'You are driving. Taps and keystrokes go to the device — the agent’s android_act stands down until you release.'
           : mirror.info

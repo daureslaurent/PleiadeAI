@@ -609,25 +609,25 @@ function MediaLightbox({
 
   return (
     <div
-      className="absolute inset-0 z-20 flex flex-col bg-black/90 backdrop-blur-sm"
+      className="absolute inset-0 z-20 flex flex-col bg-scrim/90 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="flex items-center gap-2 border-b border-white/10 px-2.5 py-1.5"
+        className="flex items-center gap-2 border-b hairline-strong px-2.5 py-1.5"
         onClick={(e) => e.stopPropagation()}
       >
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-200">{name}</span>
         <button
           onClick={() => agentsApi.downloadFile(agentId, path)}
           title="Download"
-          className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+          className="rounded p-1 text-slate-400 hover:raise-3 hover:text-slate-200"
         >
           <Download size={14} />
         </button>
         <button
           onClick={onClose}
           title="Close"
-          className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+          className="rounded p-1 text-slate-400 hover:raise-3 hover:text-slate-200"
         >
           <X size={15} />
         </button>
@@ -685,7 +685,7 @@ function CtrlBtn({
   danger?: boolean;
 }) {
   const tone = accent
-    ? 'bg-accent text-white hover:bg-accent/90'
+    ? 'bg-accent text-oncolor hover:bg-accent/90'
     : danger
       ? 'border border-red-900 text-red-400 hover:bg-red-950'
       : 'border border-border text-slate-300 hover:bg-panel';

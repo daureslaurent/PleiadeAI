@@ -96,13 +96,13 @@ export function FineTuningView() {
             Fine-tune servers
           </h2>
           {serversError ? (
-            <section className="glass-card rounded-2xl border border-white/[0.06] p-5">
+            <section className="glass-card rounded-2xl border hairline p-5">
               <div className="flex items-center gap-2 text-sm text-red-300">
                 <AlertTriangle size={15} /> Failed to load fine-tune servers.
               </div>
             </section>
           ) : enabled.length === 0 ? (
-            <section className="glass-card rounded-2xl border border-white/[0.06] p-5 text-sm text-slate-500">
+            <section className="glass-card rounded-2xl border hairline p-5 text-sm text-slate-500">
               No enabled fine-tune servers. Add one in <span className="text-slate-300">Settings</span>.
             </section>
           ) : (

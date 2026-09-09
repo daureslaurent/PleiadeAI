@@ -106,7 +106,7 @@ export function MentionsView() {
                 className={`rounded-lg px-2.5 py-1 text-[11px] transition-colors ${
                   filter === f.key
                     ? 'bg-accent/15 text-accent'
-                    : 'text-slate-500 hover:bg-white/[0.05] hover:text-slate-300'
+                    : 'text-slate-500 hover:raise-2 hover:text-slate-300'
                 }`}
               >
                 {f.label}
@@ -193,7 +193,7 @@ function MentionRow({
   const answered = mention.status === 'answered';
   const isAgent = mention.target.kind === 'agent';
   return (
-    <div className="glass-card rounded-2xl border border-white/[0.06] p-3">
+    <div className="glass-card rounded-2xl border hairline p-3">
       <div className="flex items-start gap-3">
         <AuthorAvatar author={mention.author} size={30} />
         <div className="min-w-0 flex-1">

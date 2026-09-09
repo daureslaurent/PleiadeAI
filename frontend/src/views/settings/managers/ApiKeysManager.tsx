@@ -179,7 +179,7 @@ export function ApiKeysManager() {
       {error && <Callout tone="error">{error}</Callout>}
 
       {adding ? (
-        <div className="space-y-2 rounded-xl border border-dashed border-white/[0.12] bg-black/25 p-3">
+        <div className="space-y-2 rounded-xl border border-dashed hairline-strong well p-3">
           <Input
             autoFocus
             value={name}

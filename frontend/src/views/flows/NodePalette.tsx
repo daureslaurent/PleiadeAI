@@ -55,7 +55,7 @@ export function NodePalette({
                     key={type.type}
                     onClick={() => onAdd(type)}
                     title={type.description}
-                    className="group flex w-full items-center gap-2 rounded-md border border-white/[0.06] bg-black/25 px-2.5 py-1.5 text-left text-xs text-slate-300 transition-colors hover:border-accent/40 hover:bg-accent/[0.07] hover:text-accent"
+                    className="group flex w-full items-center gap-2 rounded-md border hairline well px-2.5 py-1.5 text-left text-xs text-slate-300 transition-colors hover:border-accent/40 hover:bg-accent/[0.07] hover:text-accent"
                   >
                     <span className="truncate">{type.label}</span>
                     <Plus size={12} className="ml-auto shrink-0 text-slate-600 group-hover:text-accent" />
@@ -67,7 +67,7 @@ export function NodePalette({
         ))}
       </div>
 
-      <div className="border-t border-white/[0.06] p-3">
+      <div className="border-t hairline p-3">
         <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
           Link types
         </div>

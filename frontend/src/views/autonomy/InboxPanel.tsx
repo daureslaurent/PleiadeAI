@@ -95,7 +95,7 @@ export function InboxPanel({
             className={`rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wider transition-colors ${
               unreadOnly
                 ? 'bg-accent/20 text-accent ring-1 ring-accent/40'
-                : 'text-slate-500 hover:bg-white/[0.06] hover:text-slate-300'
+                : 'text-slate-500 hover:raise-2 hover:text-slate-300'
             }`}
             title="Show unread only"
           >
@@ -105,7 +105,7 @@ export function InboxPanel({
             onClick={readAll}
             disabled={!unread}
             title="Mark all read"
-            className="rounded-md p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200 disabled:pointer-events-none disabled:opacity-40"
+            className="rounded-md p-1 text-slate-500 transition-colors hover:raise-2 hover:text-slate-200 disabled:pointer-events-none disabled:opacity-40"
           >
             <CheckCheck size={13} />
           </button>
@@ -132,8 +132,8 @@ export function InboxPanel({
               onClick={() => open(n)}
               className={`group cursor-pointer rounded-xl border px-2.5 py-2 text-xs transition-colors ${
                 isUnread
-                  ? 'border-white/[0.09] bg-white/[0.04] hover:border-white/[0.14]'
-                  : 'border-white/[0.05] bg-black/20 opacity-75 hover:opacity-100'
+                  ? 'hairline raise-1 hover:hairline-strong'
+                  : 'hairline well opacity-75 hover:opacity-100'
               }`}
             >
               <div className="flex items-center gap-1.5">
@@ -184,7 +184,7 @@ export function InboxPanel({
                       e.stopPropagation();
                       navigate('/forum/mentions');
                     }}
-                    className="inline-flex items-center gap-1 rounded border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-slate-400 transition-colors hover:bg-white/[0.06]"
+                    className="inline-flex items-center gap-1 rounded border hairline px-1.5 py-0.5 text-[10px] text-slate-400 transition-colors hover:raise-2"
                   >
                     <AtSign size={9} /> Mentions
                   </button>

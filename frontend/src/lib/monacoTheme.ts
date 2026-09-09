@@ -1,72 +1,97 @@
 import type { Monaco } from '@monaco-editor/react';
+import { THEMES, themeById, type ThemeId } from '../theme/themes';
+import { usePrefs } from '../store/prefs';
 
 /**
- * `pleiades-dark` — the Monaco theme for the deep-space art direction (DIRECT_ART §2).
+ * Monaco, re-skinned per app theme (THEME_SYSTEM_PLAN.md §1.5).
  *
- * Monaco's stock `vs-dark` paints an opaque `#1e1e1e`, which reads as a grey hole punched in the
- * glass. This theme makes the editor background fully transparent (`#00000000`) so the host well
- * (`bg-black/25`) shows through, and re-maps the token colors onto the palette: accent blue for
- * keywords/actions, reasoning purple for cognition-adjacent constructs (control flow), emerald for
- * strings, slate for structure. Cursor and selection are accent.
+ * Monaco owns its own colour registry and cannot read a CSS variable, so it is the one place a
+ * theme's palette has to be restated in hex. Each app theme contributes a `monaco` block
+ * (`src/theme/themes.ts`) and this module turns it into a registered Monaco theme.
+ *
+ * The editor background stays fully transparent (`#00000000`) in every theme so the host well
+ * (the `.well` utility) shows through — Monaco's stock grounds would punch an opaque hole in the
+ * page.
  */
-export const PLEIADES_THEME = 'pleiades-dark';
+
+/** The registered Monaco theme name for an app theme. */
+export const monacoThemeName = (id: ThemeId): string => `pleiades-${id}`;
 
 let registered = false;
 
-export function registerPleiadesTheme(monaco: Monaco): void {
-  // Monaco keeps themes on a global registry; defining it twice is harmless but pointless.
+/**
+ * Define every theme at once, on the first editor mount. Monaco keeps themes on a global registry
+ * and switching is a name lookup, so registering all five up front costs nothing and means a theme
+ * change never has to remount an editor.
+ */
+export function registerThemes(monaco: Monaco): void {
   if (registered) return;
   registered = true;
 
-  monaco.editor.defineTheme(PLEIADES_THEME, {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [
-      { token: 'comment', foreground: '64748b', fontStyle: 'italic' }, // slate-500
-      { token: 'keyword', foreground: '60a5fa' }, // accent-ish (blue-400)
-      { token: 'keyword.control', foreground: 'c084fc' }, // reasoning (purple-400)
-      { token: 'string', foreground: '34d399' }, // emerald-400
-      { token: 'number', foreground: 'fbbf24' }, // amber-400
-      { token: 'regexp', foreground: 'f472b6' },
-      { token: 'type', foreground: '7dd3fc' },
-      { token: 'type.identifier', foreground: '7dd3fc' },
-      { token: 'identifier', foreground: 'e2e8f0' }, // slate-200
-      { token: 'delimiter', foreground: '94a3b8' }, // slate-400
-      { token: 'operator', foreground: '94a3b8' },
-      // JSON
-      { token: 'string.key.json', foreground: '60a5fa' },
-      { token: 'string.value.json', foreground: '34d399' },
-      // Dockerfile
-      { token: 'keyword.dockerfile', foreground: '60a5fa' },
-      { token: 'variable', foreground: 'fbbf24' },
-    ],
-    colors: {
-      // Fully transparent: the glass well behind the editor is the background.
-      'editor.background': '#00000000',
-      'editor.foreground': '#e2e8f0',
-      'editorLineNumber.foreground': '#475569', // slate-600
-      'editorLineNumber.activeForeground': '#94a3b8',
-      'editorCursor.foreground': '#3b82f6', // accent
-      'editor.selectionBackground': '#3b82f640',
-      'editor.inactiveSelectionBackground': '#3b82f620',
-      'editor.lineHighlightBackground': '#ffffff08',
-      'editor.lineHighlightBorder': '#00000000',
-      'editorIndentGuide.background1': '#ffffff10',
-      'editorIndentGuide.activeBackground1': '#ffffff20',
-      'editorWhitespace.foreground': '#ffffff12',
-      'editorGutter.background': '#00000000',
-      'editorWidget.background': '#111620',
-      'editorWidget.border': '#ffffff12',
-      'editorSuggestWidget.background': '#111620',
-      'editorSuggestWidget.selectedBackground': '#3b82f626',
-      'editorHoverWidget.background': '#111620',
-      'scrollbarSlider.background': '#94a3b840',
-      'scrollbarSlider.hoverBackground': '#94a3b873',
-      'scrollbarSlider.activeBackground': '#94a3b899',
-      'editorOverviewRuler.border': '#00000000',
-    },
-  });
+  for (const theme of THEMES) {
+    const m = theme.monaco;
+    const dark = theme.mode === 'dark';
+    // Overlays the editor paints on top of the host surface: they must lighten on a dark ground
+    // and darken on a light one, or indent guides and whitespace dots vanish.
+    const veil = (alpha: string) => (dark ? `#ffffff${alpha}` : `#000000${alpha}`);
+
+    monaco.editor.defineTheme(monacoThemeName(theme.id), {
+      base: m.base,
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: m.comment, fontStyle: 'italic' },
+        { token: 'keyword', foreground: m.keyword },
+        { token: 'keyword.control', foreground: m.control },
+        { token: 'string', foreground: m.string },
+        { token: 'number', foreground: m.number },
+        { token: 'regexp', foreground: m.control },
+        { token: 'type', foreground: m.type },
+        { token: 'type.identifier', foreground: m.type },
+        { token: 'identifier', foreground: m.fg },
+        { token: 'delimiter', foreground: m.punctuation },
+        { token: 'operator', foreground: m.punctuation },
+        // JSON
+        { token: 'string.key.json', foreground: m.keyword },
+        { token: 'string.value.json', foreground: m.string },
+        // Dockerfile
+        { token: 'keyword.dockerfile', foreground: m.keyword },
+        { token: 'variable', foreground: m.number },
+      ],
+      colors: {
+        // Fully transparent: the well behind the editor is the background.
+        'editor.background': '#00000000',
+        'editor.foreground': `#${m.fg}`,
+        'editorLineNumber.foreground': `#${m.comment}`,
+        'editorLineNumber.activeForeground': `#${m.punctuation}`,
+        'editorCursor.foreground': `#${m.keyword}`,
+        'editor.selectionBackground': `#${m.selection}`,
+        'editor.inactiveSelectionBackground': `#${m.selection.slice(0, 6)}20`,
+        'editor.lineHighlightBackground': `#${m.lineHighlight}`,
+        'editor.lineHighlightBorder': '#00000000',
+        'editorIndentGuide.background1': veil('10'),
+        'editorIndentGuide.activeBackground1': veil('20'),
+        'editorWhitespace.foreground': veil('12'),
+        'editorGutter.background': '#00000000',
+        // The popups float over the page rather than over the well, so they need a real ground.
+        'editorWidget.background': theme.swatch[1],
+        'editorWidget.border': veil('12'),
+        'editorSuggestWidget.background': theme.swatch[1],
+        'editorSuggestWidget.selectedBackground': `#${m.selection.slice(0, 6)}26`,
+        'editorHoverWidget.background': theme.swatch[1],
+        'scrollbarSlider.background': `#${m.punctuation}40`,
+        'scrollbarSlider.hoverBackground': `#${m.punctuation}73`,
+        'scrollbarSlider.activeBackground': `#${m.punctuation}99`,
+        'editorOverviewRuler.border': '#00000000',
+      },
+    });
+  }
 }
+
+/** The Monaco theme name to hand an editor for the active app theme. */
+export const monacoThemeFor = (id: string | undefined): string => monacoThemeName(themeById(id).id);
+
+/** The Monaco theme name for whatever theme the app is wearing right now. Re-renders on a switch. */
+export const useMonacoTheme = (): string => monacoThemeFor(usePrefs((s) => s.theme));
 
 /** Editor options shared by every Monaco mount: quiet chrome, no minimap, dense mono. */
 export const MONACO_OPTIONS = {

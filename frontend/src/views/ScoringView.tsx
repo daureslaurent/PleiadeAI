@@ -80,7 +80,7 @@ export function ScoringView() {
             <Loader2 className="animate-spin" />
           </div>
         ) : scores.length === 0 ? (
-          <div className="glass-card rounded-2xl border border-white/[0.06] p-8 text-center text-sm text-slate-500">
+          <div className="glass-card rounded-2xl border hairline p-8 text-center text-sm text-slate-500">
             No scored turns yet. Enable auto-scoring in Settings, or run a batch above.
           </div>
         ) : (
@@ -97,7 +97,7 @@ export function ScoringView() {
 
 function SummaryBar({ summary, error }: { summary: ScoringSummary | null; error: boolean }) {
   return (
-    <div className="glass-card flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.06] px-4 py-3">
+    <div className="glass-card flex flex-wrap items-center gap-2 rounded-2xl border hairline px-4 py-3">
       <Gauge size={15} className="text-accent" />
       <span className="text-sm font-semibold text-slate-100">Dataset quality</span>
       {error && (
@@ -122,7 +122,7 @@ function Pill({ label, value, tone }: { label: string; value: string; tone?: 'ac
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] ${
         tone === 'accent'
           ? 'border-accent/25 bg-accent/10 text-accent'
-          : 'border-white/[0.07] bg-white/[0.03] text-slate-400'
+          : 'hairline raise-1 text-slate-400'
       }`}
     >
       <span className="uppercase tracking-wider opacity-70">{label}</span>
@@ -173,7 +173,7 @@ function Controls({ onDone }: { onDone: () => Promise<void> | void }) {
   };
 
   return (
-    <div className="glass-card flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-white/[0.06] px-4 py-3">
+    <div className="glass-card flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border hairline px-4 py-3">
       {/* Mode */}
       <div className="flex items-center gap-1.5">
         <span className="mr-1 text-[11px] uppercase tracking-wider text-slate-500">Batch</span>
@@ -206,7 +206,7 @@ function Controls({ onDone }: { onDone: () => Promise<void> | void }) {
         <button
           onClick={runExport}
           disabled={busy !== null}
-          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06] disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-300 ring-1 ring-hairline-strong transition hover:raise-2 disabled:opacity-50"
         >
           {busy === 'export' ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
           Export JSONL
@@ -214,7 +214,7 @@ function Controls({ onDone }: { onDone: () => Promise<void> | void }) {
       </div>
 
       {msg && (
-        <div className="flex w-full items-center gap-1.5 border-t border-white/[0.06] pt-2 text-[11px] text-slate-400">
+        <div className="flex w-full items-center gap-1.5 border-t hairline pt-2 text-[11px] text-slate-400">
           <RefreshCw size={11} /> {msg}
         </div>
       )}
@@ -224,7 +224,7 @@ function Controls({ onDone }: { onDone: () => Promise<void> | void }) {
 
 function ScoreRow({ score }: { score: ConversationScore }) {
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-black/25 px-3 py-2.5 backdrop-blur-sm">
+    <div className="rounded-xl border hairline well px-3 py-2.5 backdrop-blur-sm">
       <div className="flex items-center gap-2.5">
         <ScoreBadge score={score} size="sm" />
         <span className="font-mono text-[11px] text-slate-500">{(score.runId ?? '').slice(0, 8) || '—'}</span>
@@ -232,7 +232,7 @@ function ScoreRow({ score }: { score: ConversationScore }) {
           <span className="text-[11px] text-slate-400">{score.agentName}</span>
         )}
         {score.depth != null && score.depth > 0 && (
-          <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-slate-400">
+          <span className="rounded raise-2 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-slate-400">
             sub-agent
           </span>
         )}
@@ -251,7 +251,7 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
     <button
       onClick={onClick}
       className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-        active ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-slate-400 hover:bg-white/[0.05]'
+        active ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-slate-400 hover:raise-2'
       }`}
     >
       {children}
@@ -264,7 +264,7 @@ function Seg({ active, onClick, children }: { active: boolean; onClick: () => vo
     <button
       onClick={onClick}
       className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-        active ? 'bg-white/[0.1] text-slate-100 ring-1 ring-white/[0.15]' : 'text-slate-400 hover:bg-white/[0.05]'
+        active ? 'raise-3 text-slate-100 ring-1 ring-hairline-strong' : 'text-slate-400 hover:raise-2'
       }`}
     >
       {children}

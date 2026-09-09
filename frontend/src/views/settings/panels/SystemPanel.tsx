@@ -27,7 +27,7 @@ export function SystemPanel() {
             hint="How often the backend runs a read-only update check (git fetch + compare). Minimum 1."
             min={1}
           />
-          <div className="border-t border-white/[0.06] pt-4">
+          <div className="border-t hairline pt-4">
             <UpdatePanel enabled={form.update_enabled} />
           </div>
         </div>

@@ -85,7 +85,7 @@ export function AutoRunNotice({ autoRun }: { autoRun: ForumAutoRun | null }) {
       className={`rounded-md border px-3 py-2 text-[12px] ${
         autoRun.exhausted
           ? 'border-amber-500/30 bg-amber-500/[0.07] text-amber-200/90'
-          : 'border-white/[0.08] bg-white/[0.02] text-slate-400'
+          : 'hairline raise-1 text-slate-400'
       }`}
     >
       {autoRun.exhausted ? (
@@ -216,7 +216,7 @@ function MentionPicker({
   onHover: (i: number) => void;
 }) {
   return (
-    <div className="glass-card absolute bottom-full left-0 z-30 mb-1.5 max-h-64 w-72 overflow-auto rounded-xl border border-white/[0.08] p-1 shadow-2xl">
+    <div className="glass-card absolute bottom-full left-0 z-30 mb-1.5 max-h-64 w-72 overflow-auto rounded-xl border hairline p-1 shadow-2xl">
       {targets.map((t, i) => {
         const operator = t.kind === 'operator';
         const color = agentColor(t.name);
@@ -230,7 +230,7 @@ function MentionPicker({
               onPick(t);
             }}
             className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-              i === active ? 'bg-accent/15' : 'hover:bg-white/[0.05]'
+              i === active ? 'bg-accent/15' : 'hover:raise-2'
             }`}
           >
             <span
@@ -370,7 +370,7 @@ export function Composer({
   return (
     <div
       className={`glass-card rounded-2xl border p-3 transition-colors ${
-        dragging ? 'border-accent/60 bg-accent/[0.06]' : 'border-white/[0.06]'
+        dragging ? 'border-accent/60 bg-accent/[0.06]' : 'hairline'
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -437,7 +437,7 @@ export function Composer({
           {files.map((f) => (
             <span
               key={f.id}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300"
+              className="inline-flex items-center gap-1.5 rounded-lg border hairline raise-1 px-2 py-1 text-[11px] text-slate-300"
             >
               <FileKindIcon kind={f.kind} size={11} />
               <span className="max-w-[14rem] truncate">{f.filename}</span>
@@ -454,7 +454,7 @@ export function Composer({
           {uploading.map((name) => (
             <span
               key={name}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[11px] text-slate-500"
+              className="inline-flex items-center gap-1.5 rounded-lg border hairline raise-1 px-2 py-1 text-[11px] text-slate-500"
             >
               <Paperclip size={11} className="animate-pulse" />
               <span className="max-w-[14rem] truncate">{name}</span>
@@ -478,14 +478,14 @@ export function Composer({
         />
         <button
           title="Attach files"
-          className="rounded-md p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+          className="rounded-md p-1 text-slate-500 transition-colors hover:raise-2 hover:text-slate-300"
           onClick={() => fileInput.current?.click()}
         >
           <Paperclip size={13} />
         </button>
         <button
           title="Mention someone"
-          className="rounded-md p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+          className="rounded-md p-1 text-slate-500 transition-colors hover:raise-2 hover:text-slate-300"
           onMouseDown={(e) => {
             e.preventDefault();
             const el = ref.current;
@@ -576,7 +576,7 @@ export function AttachmentList({
                 alt={f.filename}
                 loading="lazy"
                 onClick={() => setLightbox(f)}
-                className="max-h-64 cursor-zoom-in rounded-xl border border-white/[0.08] object-contain"
+                className="max-h-64 cursor-zoom-in rounded-xl border hairline object-contain"
               />
               <figcaption className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-600">
                 <span className="max-w-[14rem] truncate">{f.filename}</span>
@@ -602,7 +602,7 @@ export function AttachmentList({
             src={forumApi.fileUrl(f.id)}
             controls
             preload="metadata"
-            className="max-h-80 w-full rounded-xl border border-white/[0.08] bg-black/40"
+            className="max-h-80 w-full rounded-xl border hairline well-strong"
           />
         ) : (
           <audio key={f.id} src={forumApi.fileUrl(f.id)} controls className="w-full" />
@@ -615,7 +615,7 @@ export function AttachmentList({
             <a
               key={f.id}
               href={forumApi.fileUrl(f.id, true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[11px] text-slate-300 transition-colors hover:border-white/[0.16] hover:text-slate-100"
+              className="inline-flex items-center gap-1.5 rounded-lg border hairline raise-1 px-2 py-1 text-[11px] text-slate-300 transition-colors hover:hairline-strong hover:text-slate-100"
             >
               <FileKindIcon kind={f.kind} size={11} />
               <span className="max-w-[16rem] truncate">{f.filename}</span>
@@ -628,7 +628,7 @@ export function AttachmentList({
               <button
                 key={`x-${f.id}`}
                 title={`Detach ${f.filename}`}
-                className="rounded-lg border border-white/[0.08] px-1.5 text-[11px] text-slate-600 hover:text-rose-400"
+                className="rounded-lg border hairline px-1.5 text-[11px] text-slate-600 hover:text-rose-400"
                 onClick={() => onDetach(f)}
               >
                 <X size={11} />
@@ -639,11 +639,11 @@ export function AttachmentList({
 
       {lightbox && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/80 p-8 backdrop-blur-sm"
           onClick={() => setLightbox(null)}
         >
           <img src={forumApi.fileUrl(lightbox.id)} alt={lightbox.filename} className="max-h-full max-w-full rounded-xl" />
-          <button className="absolute right-6 top-6 text-slate-300 hover:text-white" title="Close">
+          <button className="absolute right-6 top-6 text-slate-300 hover:text-slate-100" title="Close">
             <X size={20} />
           </button>
         </div>

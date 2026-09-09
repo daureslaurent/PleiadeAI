@@ -139,14 +139,14 @@ export function StartTrainingForm({
 
   if (servers.length === 0) {
     return (
-      <section className="glass-card animate-fade-up rounded-2xl border border-white/[0.06] p-5 text-sm text-slate-500">
+      <section className="glass-card animate-fade-up rounded-2xl border hairline p-5 text-sm text-slate-500">
         No fine-tune servers configured. Add one in <span className="text-slate-300">Settings</span>.
       </section>
     );
   }
 
   return (
-    <section className="glass-card animate-fade-up rounded-2xl border border-white/[0.06] p-5">
+    <section className="glass-card animate-fade-up rounded-2xl border hairline p-5">
       <header className="mb-4">
         <h2 className="text-sm font-semibold text-slate-100">Start a fine-tune</h2>
         <p className="text-xs text-slate-500">
@@ -159,7 +159,7 @@ export function StartTrainingForm({
           <select
             value={serverId}
             onChange={(e) => setServerId(e.target.value)}
-            className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-accent/40"
+            className="w-full rounded-lg border hairline well-strong px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-accent/40"
           >
             {servers.map((s) => (
               <option key={s._id} value={s._id} className="bg-panel">
@@ -198,7 +198,7 @@ export function StartTrainingForm({
       )}
 
       {/* Dataset source */}
-      <div className="mt-4 border-t border-white/[0.06] pt-4">
+      <div className="mt-4 border-t hairline pt-4">
         <div className="mb-2.5 flex items-center gap-1.5">
           <span className="mr-1 text-[10px] uppercase tracking-wider text-slate-500">Dataset</span>
           <Seg active={source === 'scored'} onClick={() => setSource('scored')}>
@@ -218,7 +218,7 @@ export function StartTrainingForm({
             )}
           </p>
         ) : (
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/[0.07] bg-black/30 px-3 py-1.5 text-[11px] text-slate-300 transition-colors hover:bg-white/[0.05]">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border hairline well-strong px-3 py-1.5 text-[11px] text-slate-300 transition-colors hover:raise-2">
             <Upload size={12} />
             {file ? <span className="font-mono">{file.name}</span> : 'Choose a .jsonl file'}
             <input
@@ -232,7 +232,7 @@ export function StartTrainingForm({
       </div>
 
       {/* Advanced */}
-      <div className="mt-4 border-t border-white/[0.06] pt-3">
+      <div className="mt-4 border-t hairline pt-3">
         <button
           onClick={() => setShowAdvanced((v) => !v)}
           className="flex items-center gap-1.5 text-[11px] text-slate-500 transition-colors hover:text-slate-300"
@@ -258,7 +258,7 @@ export function StartTrainingForm({
               <select
                 value={onInfeasible}
                 onChange={(e) => setOnInfeasible(e.target.value as 'auto_adjust' | 'warn_proceed')}
-                className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-accent/40"
+                className="w-full rounded-lg border hairline well-strong px-2.5 py-1.5 text-sm text-slate-100 outline-none focus:border-accent/40"
               >
                 <option value="auto_adjust" className="bg-panel">
                   Auto-adjust, else reject
@@ -355,7 +355,7 @@ function TextIn({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`w-full rounded-lg border border-white/[0.07] bg-black/30 px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-accent/40 ${
+      className={`w-full rounded-lg border hairline well-strong px-2.5 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-accent/40 ${
         mono ? 'font-mono' : ''
       }`}
     />
@@ -375,7 +375,7 @@ function Seg({
     <button
       onClick={onClick}
       className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${
-        active ? 'bg-accent/15 text-accent ring-1 ring-accent/30' : 'text-slate-500 hover:bg-white/[0.05]'
+        active ? 'bg-accent/15 text-accent ring-1 ring-accent/30' : 'text-slate-500 hover:raise-2'
       }`}
     >
       {children}

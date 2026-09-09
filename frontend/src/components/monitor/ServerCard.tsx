@@ -39,7 +39,7 @@ export function ServerCard({
     <button
       onClick={onOpen}
       style={critical && live.online ? ({ '--glow': 'rgba(239,68,68,0.18)' } as React.CSSProperties) : undefined}
-      className={`glass-card animate-fade-up group w-full rounded-2xl border p-4 text-left transition-shadow hover:border-white/[0.14] ${
+      className={`glass-card animate-fade-up group w-full rounded-2xl border p-4 text-left transition-shadow hover:hairline-strong ${
         TONE_RING[tone]
       } ${critical && live.online ? 'animate-glow-pulse' : ''}`}
     >
@@ -87,13 +87,13 @@ export function ServerCard({
           <div className="mt-1 text-[10px] text-slate-500">Last reading {ago(live.last_ok_at)}</div>
         </div>
       ) : !snap ? (
-        <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-[11px] text-slate-500">
+        <div className="rounded-xl border hairline well px-3 py-2 text-[11px] text-slate-500">
           Waiting for the first reading…
         </div>
       ) : (
         <div className="space-y-2.5">
           {/* CPU — the one series worth a shape on the overview card. */}
-          <div className="rounded-xl border border-white/[0.06] bg-black/20 p-2.5">
+          <div className="rounded-xl border hairline well p-2.5">
             <div className="mb-1.5 flex items-center gap-2 text-[11px]">
               <Cpu size={11} className={TONE_TEXT[loadTone(snap.cpu?.usage_percent)]} />
               <span className="truncate text-slate-300">{snap.cpu?.threads ?? '?'} threads</span>
@@ -117,7 +117,7 @@ export function ServerCard({
           />
 
           {snap.gpus.map((g) => (
-            <div key={g.uuid ?? g.index} className="rounded-xl border border-white/[0.06] bg-black/20 p-2.5">
+            <div key={g.uuid ?? g.index} className="rounded-xl border hairline well p-2.5">
               <div className="mb-1.5 flex items-center gap-2 text-[11px]">
                 <Zap size={11} className={TONE_TEXT[loadTone(g.utilization_percent)]} />
                 <span className="truncate text-slate-300">

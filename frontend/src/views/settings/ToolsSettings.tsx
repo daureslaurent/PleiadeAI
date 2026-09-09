@@ -178,7 +178,7 @@ export function ToolsSettings() {
           ))}
         </div>
 
-        <div className="border-t border-white/[0.06] px-3 py-2 font-mono text-[10px] text-slate-500">
+        <div className="border-t hairline px-3 py-2 font-mono text-[10px] text-slate-500">
           {toolSummary(tools)}
         </div>
       </aside>
@@ -216,8 +216,8 @@ function ToolRow({
       onClick={onSelect}
       className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
         active
-          ? 'bg-accent/15 text-accent shadow-[inset_2px_0_0_0_rgba(59,130,246,0.7)]'
-          : 'text-slate-300 hover:bg-white/[0.05]'
+          ? 'bg-accent/15 text-accent shadow-[inset_2px_0_0_0_rgb(var(--c-accent)/0.7)]'
+          : 'text-slate-300 hover:raise-2'
       }`}
     >
       <span
@@ -235,7 +235,7 @@ function ToolRow({
       {tool.configSchema.length > 0 && (
         <span
           title={`${tool.configSchema.length} option${tool.configSchema.length === 1 ? '' : 's'}`}
-          className="shrink-0 rounded bg-white/[0.05] px-1 text-[9px] text-slate-500"
+          className="shrink-0 rounded raise-2 px-1 text-[9px] text-slate-500"
         >
           {tool.configSchema.length}
         </span>
@@ -298,7 +298,7 @@ function Chip({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="rounded-md bg-white/[0.05] px-1.5 py-0.5 font-mono text-[10px] text-slate-400 transition-colors hover:bg-accent/15 hover:text-accent"
+      className="rounded-md raise-2 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 transition-colors hover:bg-accent/15 hover:text-accent"
     >
       {label}
     </button>
@@ -344,7 +344,7 @@ function ToolCard({ tool, onSaved }: { tool: ToolInfo; onSaved: (t: ToolInfo) =>
 
   return (
     <GlassCard className={`animate-fade-up transition-opacity ${enabled ? '' : 'opacity-60'}`}>
-      <div className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5">
+      <div className="flex items-center gap-3 border-b hairline px-5 py-3.5">
         <Wrench size={16} className={enabled ? 'text-accent' : 'text-slate-600'} />
         <div className="min-w-0 flex-1">
           <div className="font-mono text-sm font-semibold text-slate-100">{tool.name}</div>

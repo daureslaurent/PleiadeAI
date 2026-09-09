@@ -305,7 +305,7 @@ export function FlowCanvas({
       minZoom={0.2}
       maxZoom={1.75}
       defaultEdgeOptions={{ type: 'smoothstep' }}
-      connectionLineStyle={{ stroke: '#64748b', strokeWidth: 1.6 }}
+      connectionLineStyle={{ stroke: 'rgb(var(--c-slate-500))', strokeWidth: 1.6 }}
       className="flow-canvas"
     >
       {/* Faint dots only: the app's starfield is the backdrop, and a second strong grid over it

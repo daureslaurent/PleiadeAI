@@ -31,7 +31,7 @@ export function ModeRow({
   const tone = modeTone(mode.type);
 
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-black/20">
+    <div className="rounded-lg border hairline well">
       {/* The name is what the operator reads on the chat chip, so it gets the whole first line and a
           real text size; the model it is bound to is secondary metadata and sits on its own line.
           (The shared control class carries `w-full`, which beats any width passed in — so a select
@@ -57,7 +57,7 @@ export function ModeRow({
           />
           {readOnly && (
             <span
-              className="shrink-0 rounded-md border border-white/[0.12] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500"
+              className="shrink-0 rounded-md border hairline-strong px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500"
               title="Ships with the app — edit-proof, and it improves when PleiadesAI is updated"
             >
               built-in
@@ -66,14 +66,14 @@ export function ModeRow({
           <button
             onClick={() => onChange({ ...mode, enabled: !mode.enabled })}
             title={mode.enabled ? 'Enabled — offered in chat' : 'Disabled — kept, but not offered'}
-            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-white/[0.06] ${mode.enabled ? tone.text : 'text-slate-600'}`}
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:raise-2 ${mode.enabled ? tone.text : 'text-slate-600'}`}
           >
             {mode.enabled ? <Eye size={13} /> : <EyeOff size={13} />}
           </button>
           <button
             onClick={onToggleOpen}
             title={open ? 'Collapse' : 'Edit'}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:raise-2 hover:text-slate-200"
           >
             <ChevronDown size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
           </button>
@@ -113,7 +113,7 @@ export function ModeRow({
       </div>
 
       {open && mode.type === 'sampling' && (
-        <div className="grid grid-cols-3 gap-2 border-t border-white/[0.06] p-2">
+        <div className="grid grid-cols-3 gap-2 border-t hairline p-2">
           {MODE_SAMPLERS.map((sampler) => (
             <label key={sampler} className="space-y-1">
               <span className="block font-mono text-[10px] text-slate-500">{sampler}</span>
@@ -142,7 +142,7 @@ export function ModeRow({
       )}
 
       {open && mode.type === 'prompt' && (
-        <div className="space-y-2 border-t border-white/[0.06] p-2">
+        <div className="space-y-2 border-t hairline p-2">
           <Textarea
             rows={3}
             defaultValue={mode.text}

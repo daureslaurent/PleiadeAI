@@ -1,0 +1,153 @@
+/**
+ * Terminal — the fleet as a TTY. Near-black ground, one monospace family for UI and content alike,
+ * every radius at zero, hairline boxes instead of panels, phosphor green for actions and amber for
+ * cognition. No blur, no glow, no starfield.
+ */
+:root[data-theme='terminal'] {
+  --c-slate-50: 240 246 252;
+  --c-slate-100: 230 237 243;
+  --c-slate-200: 208 215 222;
+  --c-slate-300: 177 186 196;
+  --c-slate-400: 139 148 158;
+  --c-slate-500: 110 118 129;
+  --c-slate-600: 84 93 104;
+  --c-slate-700: 61 68 77;
+  --c-slate-800: 42 48 56;
+  --c-slate-900: 22 27 34;
+  --c-slate-950: 13 17 23;
+
+  --c-emerald-50: 236 253 245;
+  --c-emerald-100: 209 250 229;
+  --c-emerald-200: 167 243 208;
+  --c-emerald-300: 110 231 183;
+  --c-emerald-400: 52 211 153;
+  --c-emerald-500: 16 185 129;
+  --c-emerald-600: 5 150 105;
+  --c-emerald-700: 4 120 87;
+  --c-emerald-800: 6 95 70;
+  --c-emerald-900: 6 78 59;
+  --c-emerald-950: 2 44 34;
+  --c-amber-50: 255 251 235;
+  --c-amber-100: 254 243 199;
+  --c-amber-200: 253 230 138;
+  --c-amber-300: 252 211 77;
+  --c-amber-400: 251 191 36;
+  --c-amber-500: 245 158 11;
+  --c-amber-600: 217 119 6;
+  --c-amber-700: 180 83 9;
+  --c-amber-800: 146 64 14;
+  --c-amber-900: 120 53 15;
+  --c-amber-950: 69 26 3;
+  --c-red-50: 254 242 242;
+  --c-red-100: 254 226 226;
+  --c-red-200: 254 202 202;
+  --c-red-300: 252 165 165;
+  --c-red-400: 248 113 113;
+  --c-red-500: 239 68 68;
+  --c-red-600: 220 38 38;
+  --c-red-700: 185 28 28;
+  --c-red-800: 153 27 27;
+  --c-red-900: 127 29 29;
+  --c-red-950: 69 10 10;
+  --c-sky-50: 240 249 255;
+  --c-sky-100: 224 242 254;
+  --c-sky-200: 186 230 253;
+  --c-sky-300: 125 211 252;
+  --c-sky-400: 56 189 248;
+  --c-sky-500: 14 165 233;
+  --c-sky-600: 2 132 199;
+  --c-sky-700: 3 105 161;
+  --c-sky-800: 7 89 133;
+  --c-sky-900: 12 74 110;
+  --c-sky-950: 8 47 73;
+  --c-rose-50: 255 241 242;
+  --c-rose-100: 255 228 230;
+  --c-rose-200: 254 205 211;
+  --c-rose-300: 253 164 175;
+  --c-rose-400: 251 113 133;
+  --c-rose-500: 244 63 94;
+  --c-rose-600: 225 29 72;
+  --c-rose-700: 190 18 60;
+  --c-rose-800: 159 18 57;
+  --c-rose-900: 136 19 55;
+  --c-rose-950: 76 5 25;
+  --c-indigo-50: 240 253 250;
+  --c-indigo-100: 204 251 241;
+  --c-indigo-200: 153 246 228;
+  --c-indigo-300: 94 234 212;
+  --c-indigo-400: 45 212 191;
+  --c-indigo-500: 20 184 166;
+  --c-indigo-600: 13 148 136;
+  --c-indigo-700: 15 118 110;
+  --c-indigo-800: 17 94 89;
+  --c-indigo-900: 19 78 74;
+  --c-indigo-950: 4 47 46;
+
+  --c-raise: 201 209 217;
+  --c-well: 1 4 9;
+  --c-on-color: 1 4 9;
+  --c-scrim: 0 0 0;
+
+  --c-panel: 7 9 11;
+  --c-surface: 13 17 23;
+  --c-border: 28 33 40;
+  --c-accent: 126 231 135;
+  --c-reasoning: 210 153 34;
+
+  /* The whole point of the theme: nothing is rounded. */
+  --r-sm: 0px;
+  --r-md: 0px;
+  --r-lg: 0px;
+  --r-xl: 0px;
+  --r-2xl: 0px;
+  --r-3xl: 0px;
+
+  --font-sans: var(--font-mono);
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-serif: var(--font-mono);
+  --font-prose: var(--font-mono);
+  --prose-leading: 1.5;
+
+  --hairline: rgba(139, 148, 158, 0.22);
+  --hairline-strong: rgba(139, 148, 158, 0.42);
+  --raise-1: rgba(139, 148, 158, 0.05);
+  --raise-2: rgba(139, 148, 158, 0.1);
+  --raise-3: rgba(139, 148, 158, 0.16);
+  --well: rgba(1, 4, 9, 0.55);
+  --well-strong: rgba(1, 4, 9, 0.85);
+
+  --bg-gradient: linear-gradient(0deg, #07090b 0%, #07090b 100%);
+  --bg-nebula-a: none;
+  --bg-nebula-b: none;
+  --stars-opacity: 0;
+  --stars-a: none;
+  --stars-b: none;
+
+  --glass-bg: #0d1117;
+  --glass-blur: 0px;
+  --glass-border: rgba(139, 148, 158, 0.22);
+  --glass-card-bg: #0d1117;
+  --glass-card-blur: 0px;
+  --glass-card-border: rgba(139, 148, 158, 0.22);
+  --glass-card-shadow: none;
+  --popover-bg: #0d1117;
+  --popover-blur: 0px;
+  --popover-border: rgba(139, 148, 158, 0.42);
+  --popover-shadow: 0 0 0 1px rgba(139, 148, 158, 0.22);
+
+  --shimmer-sheen: rgba(126, 231, 135, 0.95);
+  --glow-strength: 0;
+  --scrollbar-thumb: rgba(139, 148, 158, 0.3);
+  --scrollbar-thumb-hover: rgba(126, 231, 135, 0.5);
+  --flow-chrome-bg: #0d1117;
+  --flow-chrome-border: rgba(139, 148, 158, 0.22);
+
+  --identity-accent-s: 60%;
+  --identity-accent-l: 70%;
+  --identity-border-s: 45%;
+  --identity-border-l: 45%;
+  --identity-border-a: 0.6;
+  --identity-soft-s: 55%;
+  --identity-soft-l: 50%;
+  --identity-soft-a: 0.08;
+}

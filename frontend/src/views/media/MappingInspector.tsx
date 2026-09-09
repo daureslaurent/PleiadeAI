@@ -185,7 +185,7 @@ function CustomParamForm({
       <div className="text-[10px] uppercase tracking-wide text-slate-500">
         {form.originalKey ? 'Edit custom input' : 'New custom input'}
       </div>
-      <div className="rounded-lg bg-black/25 p-2 font-mono text-[10px] text-slate-400 ring-1 ring-white/[0.06]">
+      <div className="rounded-lg well p-2 font-mono text-[10px] text-slate-400 ring-1 ring-hairline">
         → #{form.node_id} · {form.input}
       </div>
 
@@ -289,7 +289,7 @@ function NodeInspector({
             style={{ background: nodeRoleColor(node.class_type, isResult) }}
           />
           <span className="truncate text-sm text-slate-100">{node.title}</span>
-          <span className="ml-auto shrink-0 rounded bg-white/[0.06] px-1 font-mono text-[10px] text-slate-500">
+          <span className="ml-auto shrink-0 rounded raise-2 px-1 font-mono text-[10px] text-slate-500">
             #{node.id}
           </span>
         </div>
@@ -306,7 +306,7 @@ function NodeInspector({
           className={`flex w-full items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
             isResult
               ? 'bg-emerald-500/10 text-emerald-400'
-              : 'bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] active:scale-95'
+              : 'raise-2 text-slate-300 hover:raise-3 active:scale-95'
           }`}
         >
           <Target size={11} />
@@ -320,7 +320,7 @@ function NodeInspector({
           const bound = keyFor(input.name);
           const meta = catalog.find((m) => m.key === bound);
           return (
-            <div key={input.name} className="rounded-lg bg-black/25 p-2 ring-1 ring-white/[0.06]">
+            <div key={input.name} className="rounded-lg well p-2 ring-1 ring-hairline">
               <div className="flex items-center gap-1.5">
                 <span className="truncate font-mono text-[11px] text-slate-300">{input.name}</span>
                 <span className="ml-auto shrink-0 text-[9px] text-slate-600">{specLabel(input)}</span>
@@ -359,7 +359,7 @@ function NodeInspector({
                     <button
                       onClick={() => onEditCustom(bound)}
                       title={`Edit ${customName(bound)}`}
-                      className="shrink-0 rounded p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-accent"
+                      className="shrink-0 rounded p-1 text-slate-500 transition-colors hover:raise-2 hover:text-accent"
                     >
                       <Pencil size={12} />
                     </button>
@@ -381,7 +381,7 @@ function NodeInspector({
               )}
 
               {meta && (
-                <div className="mt-1.5 border-t border-white/[0.06] pt-1.5 text-[9px] leading-tight text-slate-500">
+                <div className="mt-1.5 border-t hairline pt-1.5 text-[9px] leading-tight text-slate-500">
                   <span style={{ color: bindingPortColor(meta.port) }}>{meta.label}</span> — {meta.source}
                   {input.is_link && (
                     <span className="text-amber-400">
@@ -426,7 +426,7 @@ function MappingSummary({
           const node = binding ? nodes.find((n) => n.id === binding.node_id) : undefined;
           const color = bindingPortColor(meta.port);
           return (
-            <div key={meta.key} className="rounded-lg bg-black/25 p-2 ring-1 ring-white/[0.06]">
+            <div key={meta.key} className="rounded-lg well p-2 ring-1 ring-hairline">
               <div className="flex items-center gap-1.5">
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
                 <span className="truncate text-[11px] text-slate-200">{meta.label}</span>

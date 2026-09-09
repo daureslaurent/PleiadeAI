@@ -67,7 +67,7 @@ export function FinetuneServersManager() {
                 'shrink-0 rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wide transition-colors',
                 s.enabled
                   ? 'border-emerald-500/30 text-emerald-400'
-                  : 'border-white/[0.12] text-slate-500 hover:text-slate-300',
+                  : 'hairline-strong text-slate-500 hover:text-slate-300',
               ].join(' ')}
             >
               {s.enabled ? 'enabled' : 'disabled'}
@@ -109,7 +109,7 @@ export function FinetuneServersManager() {
       {error && <Callout tone="error">{error}</Callout>}
 
       {adding ? (
-        <div className="space-y-2 rounded-xl border border-dashed border-white/[0.12] bg-black/25 p-3">
+        <div className="space-y-2 rounded-xl border border-dashed hairline-strong well p-3">
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. rig-01)" />
           <Input
             value={url}
@@ -133,7 +133,7 @@ export function FinetuneServersManager() {
       ) : (
         <button
           onClick={() => setAdding(true)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2 text-xs text-slate-400 transition-colors hover:border-white/25 hover:text-slate-200"
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed hairline-strong py-2 text-xs text-slate-400 transition-colors hover:hairline-strong hover:text-slate-200"
         >
           <Plus size={14} /> Add fine-tune server
         </button>

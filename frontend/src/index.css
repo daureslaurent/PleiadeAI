@@ -1,6 +1,18 @@
+@import './theme/themes/pleiades.css';
+@import './theme/themes/codex.css';
+@import './theme/themes/terminal.css';
+@import './theme/themes/paper.css';
+@import './theme/themes/nebula.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+ * Structure only. Not one colour literal lives in this file — every value below
+ * reads a custom property that `src/theme/themes/*.css` defines per theme
+ * (THEME_SYSTEM_PLAN.md §1.2). Adding a theme therefore never touches this file.
+ * ------------------------------------------------------------------------- */
 
 html,
 body,
@@ -10,24 +22,70 @@ body,
 
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  background: rgb(var(--c-panel));
+  color: rgb(var(--c-slate-200));
 }
 
 /* ---------------------------------------------------------------------------
- * Deep-space workspace theme.
- * `.space-bg` paints the Pleiades backdrop: a deep gradient with two faint
- * nebula glows (accent blue / reasoning purple) and two CSS-only star layers
- * (radial-gradient specks; no images, no canvas). Panels above it use the
- * `.glass*` utilities: translucent fills + backdrop blur + hairline borders.
+ * On-surface idioms.
+ *
+ * These four are the app's structural vocabulary — a hairline, a raised fill, an
+ * inset well — and they are utilities rather than `border-white/[0.06]` style
+ * alphas because the *alpha itself* has to change per theme: 6% white reads as a
+ * hairline on the deep-space ground and is simply invisible on cream. Declared in
+ * `@layer utilities` so `hover:`/`focus:` variants generate normally.
+ * ------------------------------------------------------------------------- */
+
+@layer utilities {
+  .hairline {
+    border-color: var(--hairline);
+  }
+  .hairline-strong {
+    border-color: var(--hairline-strong);
+  }
+  .divide-hairline > :not([hidden]) ~ :not([hidden]) {
+    border-color: var(--hairline);
+  }
+  .ring-hairline {
+    --tw-ring-color: var(--hairline);
+  }
+  .ring-hairline-strong {
+    --tw-ring-color: var(--hairline-strong);
+  }
+
+  /* Raised fills: 1 = a card lifted off the ground, 2 = a hover/selected state,
+     3 = a pressed chip or a meter track. */
+  .raise-1 {
+    background-color: var(--raise-1);
+  }
+  .raise-2 {
+    background-color: var(--raise-2);
+  }
+  .raise-3 {
+    background-color: var(--raise-3);
+  }
+
+  /* Inset wells: inputs, quotes, terminal panes. `well-strong` is the focused
+     input and the bash pane. */
+  .well {
+    background-color: var(--well);
+  }
+  .well-strong {
+    background-color: var(--well-strong);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * The backdrop. `.space-bg` paints the ground: a gradient plus (optionally) two
+ * nebula glows and two CSS-only star layers. A theme with no starfield sets
+ * `--stars-opacity: 0` and the layers cost nothing.
  * ------------------------------------------------------------------------- */
 
 .space-bg {
   position: relative;
   isolation: isolate; /* keep the fixed star layers behind this stacking context only */
-  background:
-    radial-gradient(ellipse 80% 55% at 22% -10%, rgba(59, 130, 246, 0.13), transparent 60%),
-    radial-gradient(ellipse 65% 45% at 85% 110%, rgba(168, 85, 247, 0.1), transparent 60%),
-    linear-gradient(165deg, #0b0f16 0%, #0a0d13 45%, #0d0f1a 100%);
+  background: var(--bg-nebula-a), var(--bg-nebula-b), var(--bg-gradient);
 }
 
 /* Two star layers, offset and sized differently, counter-phased twinkle. */
@@ -39,66 +97,51 @@ body {
   z-index: -1;
   pointer-events: none;
   background-repeat: repeat;
+  opacity: var(--stars-opacity, 1);
 }
 .space-bg::before {
-  background-image:
-    radial-gradient(1px 1px at 22px 34px, rgba(255, 255, 255, 0.55), transparent),
-    radial-gradient(1px 1px at 120px 90px, rgba(219, 234, 254, 0.4), transparent),
-    radial-gradient(1.5px 1.5px at 210px 150px, rgba(255, 255, 255, 0.5), transparent),
-    radial-gradient(1px 1px at 300px 60px, rgba(191, 219, 254, 0.35), transparent);
+  background-image: var(--stars-a);
   background-size: 340px 220px;
   animation: twinkle 5s ease-in-out infinite;
 }
 .space-bg::after {
-  background-image:
-    radial-gradient(1px 1px at 60px 170px, rgba(255, 255, 255, 0.4), transparent),
-    radial-gradient(1.5px 1.5px at 180px 40px, rgba(224, 231, 255, 0.45), transparent),
-    radial-gradient(1px 1px at 260px 200px, rgba(255, 255, 255, 0.3), transparent);
+  background-image: var(--stars-b);
   background-size: 420px 260px;
   animation: twinkle 7s ease-in-out infinite;
   animation-delay: -2.5s;
 }
 
-/* Frosted panels. `glass` for chrome (header/sidebars), `glass-card` for
-   floating elements (composer, prompts) with a deeper shadow. */
+/* ---------------------------------------------------------------------------
+ * Panels. `glass` for chrome (header/sidebars), `glass-card` for floating
+ * elements (composer, prompts), `glass-popover` for things that float *over*
+ * content and must stay legible. A flat theme sets its blur to 0 and its
+ * background opaque; every `className` in the app stays exactly as written.
+ * ------------------------------------------------------------------------- */
+
 .glass {
-  background: rgba(22, 27, 34, 0.55);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border-color: rgba(255, 255, 255, 0.07);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate, 100%));
+  border-color: var(--glass-border);
 }
 .glass-card {
-  background: rgba(17, 22, 30, 0.6);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border-color: rgba(255, 255, 255, 0.09);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background: var(--glass-card-bg);
+  backdrop-filter: blur(var(--glass-card-blur)) saturate(var(--glass-saturate, 100%));
+  -webkit-backdrop-filter: blur(var(--glass-card-blur)) saturate(var(--glass-saturate, 100%));
+  border-color: var(--glass-card-border);
+  box-shadow: var(--glass-card-shadow);
 }
-
-/* Popovers float *over* content rather than over the page background, so the
-   frost of `glass-card` would leave the text underneath legible through them.
-   Near-opaque, with a deeper shadow to lift it off what it covers. */
 .glass-popover {
-  background: rgba(13, 17, 24, 0.97);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.6),
-    0 2px 8px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: var(--popover-bg);
+  backdrop-filter: blur(var(--popover-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--popover-blur)) saturate(140%);
+  border-color: var(--popover-border);
+  box-shadow: var(--popover-shadow);
 }
 
 /* Shimmering "live" text (thinking labels): a sheen sweeping across the glyphs. */
 .text-shimmer {
-  background: linear-gradient(
-    90deg,
-    currentColor 40%,
-    rgba(255, 255, 255, 0.95) 50%,
-    currentColor 60%
-  );
+  background: linear-gradient(90deg, currentColor 40%, var(--shimmer-sheen) 50%, currentColor 60%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -112,7 +155,7 @@ body {
 .stream-caret:empty::after {
   content: '▍';
   margin-left: 1px;
-  color: theme('colors.accent');
+  color: rgb(var(--c-accent));
   animation: blink 1s step-end infinite;
 }
 
@@ -129,10 +172,10 @@ body {
 }
 
 /* Themed scrollbars (spec §1): slim, subtle thumb that brightens on hover so
-   the affordance recedes behind the glass panels instead of striping them. */
+   the affordance recedes behind the panels instead of striping them. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -145,20 +188,20 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.25);
+  background: var(--scrollbar-thumb);
   border-radius: 9999px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.45);
+  background: var(--scrollbar-thumb-hover);
 }
 
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-/* React Flow, re-skinned onto the app's glass idiom (FLOWS_PLAN.md §8). The library ships an
-   opaque light-grey chrome that would sit on the starfield like a pasted screenshot, so its
+/* React Flow, re-skinned onto the app's own idiom (FLOWS_PLAN.md §8). The library ships an
+   opaque light-grey chrome that would sit on the ground like a pasted screenshot, so its
    surfaces are overridden here rather than in the component — these are the library's own class
    names, and keeping them in one block makes the override obvious to the next reader. */
 .flow-canvas {
@@ -189,16 +232,16 @@ body {
   transform: translateY(-50%) scale(1.45);
 }
 
-/* Refusing an invalid drop needs to read instantly — red on the target handle beats a silent
-   no-op that looks like a broken canvas. */
+/* Refusing an invalid drop needs to read instantly — a coloured ring on the target handle beats
+   a silent no-op that looks like a broken canvas. */
 .flow-canvas .react-flow__handle-valid {
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.35) !important;
+  box-shadow: 0 0 0 3px rgb(var(--c-emerald-400) / 0.35) !important;
 }
 
 .flow-controls,
 .flow-minimap {
-  background: rgba(13, 20, 36, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--flow-chrome-bg);
+  border: 1px solid var(--flow-chrome-border);
   border-radius: 0.6rem;
   overflow: hidden;
   backdrop-filter: blur(8px);
@@ -206,13 +249,13 @@ body {
 
 .flow-controls button {
   background: transparent;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  color: rgb(148, 163, 184);
+  border-bottom: 1px solid var(--flow-chrome-border);
+  color: rgb(var(--c-slate-400));
 }
 
 .flow-controls button:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgb(226, 232, 240);
+  background: var(--raise-2);
+  color: rgb(var(--c-slate-200));
 }
 
 .flow-controls button svg {
@@ -225,10 +268,10 @@ body {
 @keyframes node-pulse-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+    box-shadow: 0 0 0 0 rgb(var(--c-accent) / 0);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(96, 165, 250, 0.45);
+    box-shadow: 0 0 0 6px rgb(var(--c-accent) / 0.45);
   }
 }
 

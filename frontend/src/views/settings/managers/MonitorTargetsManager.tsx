@@ -182,7 +182,7 @@ export function MonitorTargetsManager() {
       {error && <Callout tone="error">{error}</Callout>}
 
       {adding ? (
-        <div className="space-y-2 rounded-xl border border-dashed border-white/[0.12] bg-black/25 p-3">
+        <div className="space-y-2 rounded-xl border border-dashed hairline-strong well p-3">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. ai-rig)" autoFocus />
           <div className="flex gap-2">
             <Input
@@ -232,7 +232,7 @@ export function MonitorTargetsManager() {
       ) : (
         <button
           onClick={() => setAdding(true)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2 text-xs text-slate-400 transition-colors hover:border-white/25 hover:text-slate-200"
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed hairline-strong py-2 text-xs text-slate-400 transition-colors hover:hairline-strong hover:text-slate-200"
         >
           <Plus size={14} /> Add machine
         </button>

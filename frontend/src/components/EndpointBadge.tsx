@@ -34,9 +34,9 @@ function fmtElapsed(ms: number): string {
 type FleetState = 'ok' | 'degraded' | 'down' | 'unknown';
 
 const DOT: Record<FleetState, string> = {
-  ok: 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.45)]',
-  degraded: 'bg-amber-400 shadow-[0_0_6px_2px_rgba(245,158,11,0.45)]',
-  down: 'bg-red-500 shadow-[0_0_6px_2px_rgba(239,68,68,0.45)]',
+  ok: 'bg-emerald-400 shadow-[0_0_6px_2px_rgb(var(--c-emerald-400)/0.45)]',
+  degraded: 'bg-amber-400 shadow-[0_0_6px_2px_rgb(var(--c-amber-500)/0.45)]',
+  down: 'bg-red-500 shadow-[0_0_6px_2px_rgb(var(--c-red-500)/0.45)]',
   unknown: 'bg-slate-600',
 };
 
@@ -100,7 +100,7 @@ function CallLine({ call, position, agents }: { call: EndpointCall; position?: n
         {call.agent ?? <span className="text-slate-400">{call.source}</span>}
       </span>
       {call.agent && (
-        <span className="rounded bg-white/[0.06] px-1 py-px font-mono text-[9px] uppercase tracking-wide text-slate-500">
+        <span className="rounded raise-2 px-1 py-px font-mono text-[9px] uppercase tracking-wide text-slate-500">
           {call.source}
         </span>
       )}
@@ -116,7 +116,7 @@ function CallLine({ call, position, agents }: { call: EndpointCall; position?: n
 
 function EndpointRow({ ep }: { ep: EndpointHealth }) {
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2">
+    <div className="rounded-xl border hairline raise-1 p-2">
       <div className="flex items-center gap-2">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${ep.up ? DOT.ok : DOT.down}`} />
         <span className="truncate text-xs font-medium text-slate-200">{ep.name}</span>
@@ -127,7 +127,7 @@ function EndpointRow({ ep }: { ep: EndpointHealth }) {
         )}
         {ep.fallback_order > 0 && (
           <span
-            className="rounded bg-white/[0.06] px-1 py-px text-[9px] font-mono uppercase tracking-wide text-slate-500"
+            className="rounded raise-2 px-1 py-px text-[9px] font-mono uppercase tracking-wide text-slate-500"
             title="Position in the failover chain"
           >
             fb {ep.fallback_order}
@@ -252,8 +252,8 @@ export function EndpointBadge() {
         className={[
           'flex h-7 items-center gap-2 rounded-full border px-2.5 text-xs transition-colors',
           open
-            ? 'border-white/[0.12] bg-white/[0.06]'
-            : 'border-white/[0.07] bg-white/[0.03] hover:border-white/[0.12] hover:bg-white/[0.05]',
+            ? 'hairline-strong raise-2'
+            : 'hairline raise-1 hover:hairline-strong hover:raise-2',
         ].join(' ')}
       >
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[s.state]}`} />

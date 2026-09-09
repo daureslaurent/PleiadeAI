@@ -329,7 +329,7 @@ export function AgentsView() {
             {draft.builtin ? (
               <span
                 title="Built-in agent — cannot be deleted or renamed, but is otherwise fully editable"
-                className="flex items-center gap-1 rounded-md border border-white/[0.09] px-3 py-2 text-xs text-slate-400"
+                className="flex items-center gap-1 rounded-md border hairline px-3 py-2 text-xs text-slate-400"
               >
                 <Lock size={13} /> Built-in
               </span>
@@ -345,7 +345,7 @@ export function AgentsView() {
             )}
             <button
               onClick={save}
-              className="flex items-center gap-1 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white"
+              className="flex items-center gap-1 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-oncolor"
             >
               <Save size={15} /> Save
             </button>
@@ -383,7 +383,7 @@ export function AgentsView() {
                     type="button"
                     onClick={() => setDraft({ ...draft, color: hue })}
                     className={`h-6 w-6 rounded-full transition-transform hover:scale-110 ${
-                      active ? 'ring-2 ring-white/80 ring-offset-2 ring-offset-panel' : ''
+                      active ? 'ring-2 ring-oncolor/80 ring-offset-2 ring-offset-panel' : ''
                     }`}
                     style={{ background: `hsl(${hue} 72% 66%)` }}
                     title={`Hue ${hue}`}

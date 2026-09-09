@@ -49,7 +49,7 @@ export function AndroidScreen({ mirror }: { mirror: Mirror }) {
         ref={stageRef}
         tabIndex={-1}
         onKeyDown={handlers.onKeyDown}
-        className="relative min-h-0 flex-1 bg-[#0b0f19] outline-none"
+        className="relative min-h-0 flex-1 bg-panel outline-none"
       >
         <canvas
           ref={canvasRef}
@@ -78,7 +78,7 @@ export function AndroidScreen({ mirror }: { mirror: Mirror }) {
             </p>
             <button
               onClick={reconnect}
-              className="flex items-center gap-1.5 rounded-md bg-slate-800 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-700"
+              className="flex items-center gap-1.5 rounded-md bg-panel px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface"
             >
               <RefreshCw size={14} /> Reconnect
             </button>
@@ -88,7 +88,7 @@ export function AndroidScreen({ mirror }: { mirror: Mirror }) {
 
       {/* Android's own navigation bar. An emulator often runs without one, and even when it has one
           the gesture equivalents are awkward with a mouse — so these are always offered. */}
-      <div className="flex items-center justify-center gap-6 border-t border-slate-800 bg-panel py-2">
+      <div className="flex items-center justify-center gap-6 border-t border-border bg-panel py-2">
         <NavButton
           label="Back"
           disabled={!takeover || status !== 'streaming'}
@@ -114,7 +114,7 @@ export function AndroidScreen({ mirror }: { mirror: Mirror }) {
         {/* Rotation. Separated from the navigation keys because it changes the device's state rather
             than navigating it, and gated on takeover for the same reason android_act is: turning the
             screen under a working agent would invalidate every coordinate it just read. */}
-        <span className="mx-1 h-4 w-px bg-slate-700" aria-hidden />
+        <span className="mx-1 h-4 w-px bg-surface" aria-hidden />
         <NavButton
           label="Rotate left"
           disabled={!takeover || status !== 'streaming'}
@@ -164,7 +164,7 @@ export function MirrorControls({ mirror }: { mirror: Mirror }) {
           'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors disabled:opacity-40',
           takeover
             ? 'bg-emerald-500/15 text-emerald-400'
-            : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+            : 'text-slate-400 hover:bg-panel hover:text-slate-200',
         ].join(' ')}
       >
         {takeover ? <Hand size={14} /> : <Eye size={14} />}
@@ -186,7 +186,7 @@ export function MirrorControls({ mirror }: { mirror: Mirror }) {
             'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors disabled:opacity-40',
             audio.playing
               ? 'bg-emerald-500/15 text-emerald-400'
-              : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+              : 'text-slate-400 hover:bg-panel hover:text-slate-200',
           ].join(' ')}
         >
           {audio.playing ? <Volume2 size={14} /> : <VolumeX size={14} />}
@@ -197,7 +197,7 @@ export function MirrorControls({ mirror }: { mirror: Mirror }) {
         onClick={paste}
         disabled={!live || !takeover}
         title="Type the clipboard's contents into the focused field"
-        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
+        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200 disabled:opacity-40"
       >
         <ClipboardPaste size={14} /> Paste
       </button>
@@ -224,12 +224,12 @@ export function AndroidPanel({ agentId, agentName, onClose }: Props) {
   const { status, takeover, info } = mirror;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 p-4" onClick={onClose}>
       <div
-        className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-lg border border-slate-700 bg-panel shadow-2xl"
+        className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-slate-700 px-3 py-2">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <Smartphone size={15} className="text-reasoning" />
           <span className="truncate text-sm font-medium text-slate-200">{agentName} · Phone</span>
           <StatusPill status={status} />
@@ -242,14 +242,14 @@ export function AndroidPanel({ agentId, agentName, onClose }: Props) {
                 onClose();
               }}
               title="Open the phone in a separate window"
-              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-panel hover:text-slate-200"
             >
               <ExternalLink size={15} />
             </button>
             <button
               onClick={onClose}
               title="Close mirror"
-              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-panel hover:text-slate-200"
             >
               <X size={16} />
             </button>
@@ -260,7 +260,7 @@ export function AndroidPanel({ agentId, agentName, onClose }: Props) {
           <AndroidScreen mirror={mirror} />
         </div>
 
-        <div className="border-t border-slate-700 px-3 py-1.5 text-[11px] text-slate-500">
+        <div className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
           {takeover
             ? 'You are driving. Taps and keystrokes go to the device — the agent’s android_act stands down until you release.'
             : info
@@ -300,7 +300,7 @@ function NavButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="rounded-md p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30 disabled:hover:bg-transparent"
+      className="rounded-md p-2 text-slate-400 transition-colors hover:bg-panel hover:text-slate-200 disabled:opacity-30 disabled:hover:bg-transparent"
     >
       {children}
     </button>
@@ -309,7 +309,7 @@ function NavButton({
 
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0b0f19]/80 backdrop-blur-sm">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel/80 backdrop-blur-sm">
       {children}
     </div>
   );

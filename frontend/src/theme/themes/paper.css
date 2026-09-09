@@ -1,0 +1,153 @@
+/**
+ * Paper — the transcript as a printed page. Warm cream ground, ink-dark text, thin rules instead
+ * of borders, sienna for actions. Agent prose is set in a serif (`--font-prose`) because the one
+ * thing this theme optimises for is reading a long answer without fatigue.
+ */
+:root[data-theme='paper'] {
+  --c-slate-50: 20 18 16;
+  --c-slate-100: 41 37 36;
+  --c-slate-200: 61 55 51;
+  --c-slate-300: 87 80 74;
+  --c-slate-400: 120 113 108;
+  --c-slate-500: 148 138 128;
+  --c-slate-600: 168 160 148;
+  --c-slate-700: 214 207 196;
+  --c-slate-800: 233 226 214;
+  --c-slate-900: 244 239 230;
+  --c-slate-950: 250 247 242;
+
+  --c-emerald-50: 2 44 34;
+  --c-emerald-100: 6 78 59;
+  --c-emerald-200: 6 95 70;
+  --c-emerald-300: 4 120 87;
+  --c-emerald-400: 5 150 105;
+  --c-emerald-500: 16 185 129;
+  --c-emerald-600: 52 211 153;
+  --c-emerald-700: 110 231 183;
+  --c-emerald-800: 167 243 208;
+  --c-emerald-900: 209 250 229;
+  --c-emerald-950: 236 253 245;
+  --c-amber-50: 69 26 3;
+  --c-amber-100: 120 53 15;
+  --c-amber-200: 146 64 14;
+  --c-amber-300: 180 83 9;
+  --c-amber-400: 217 119 6;
+  --c-amber-500: 245 158 11;
+  --c-amber-600: 251 191 36;
+  --c-amber-700: 252 211 77;
+  --c-amber-800: 253 230 138;
+  --c-amber-900: 254 243 199;
+  --c-amber-950: 255 251 235;
+  --c-red-50: 69 10 10;
+  --c-red-100: 127 29 29;
+  --c-red-200: 153 27 27;
+  --c-red-300: 185 28 28;
+  --c-red-400: 220 38 38;
+  --c-red-500: 239 68 68;
+  --c-red-600: 248 113 113;
+  --c-red-700: 252 165 165;
+  --c-red-800: 254 202 202;
+  --c-red-900: 254 226 226;
+  --c-red-950: 254 242 242;
+  --c-sky-50: 8 47 73;
+  --c-sky-100: 12 74 110;
+  --c-sky-200: 7 89 133;
+  --c-sky-300: 3 105 161;
+  --c-sky-400: 2 132 199;
+  --c-sky-500: 14 165 233;
+  --c-sky-600: 56 189 248;
+  --c-sky-700: 125 211 252;
+  --c-sky-800: 186 230 253;
+  --c-sky-900: 224 242 254;
+  --c-sky-950: 240 249 255;
+  --c-rose-50: 76 5 25;
+  --c-rose-100: 136 19 55;
+  --c-rose-200: 159 18 57;
+  --c-rose-300: 190 18 60;
+  --c-rose-400: 225 29 72;
+  --c-rose-500: 244 63 94;
+  --c-rose-600: 251 113 133;
+  --c-rose-700: 253 164 175;
+  --c-rose-800: 254 205 211;
+  --c-rose-900: 255 228 230;
+  --c-rose-950: 255 241 242;
+  --c-indigo-50: 59 7 100;
+  --c-indigo-100: 88 28 135;
+  --c-indigo-200: 107 33 168;
+  --c-indigo-300: 126 34 206;
+  --c-indigo-400: 147 51 234;
+  --c-indigo-500: 168 85 247;
+  --c-indigo-600: 192 132 252;
+  --c-indigo-700: 216 180 254;
+  --c-indigo-800: 233 213 255;
+  --c-indigo-900: 243 232 255;
+  --c-indigo-950: 250 245 255;
+
+  --c-raise: 41 37 36;
+  --c-well: 120 113 108;
+  --c-on-color: 255 253 249;
+  --c-scrim: 28 25 23;
+
+  --c-panel: 250 247 242;
+  --c-surface: 255 253 249;
+  --c-border: 228 220 208;
+  --c-accent: 138 90 43;
+  --c-reasoning: 107 79 138;
+
+  --r-sm: 0.125rem;
+  --r-md: 0.25rem;
+  --r-lg: 0.25rem;
+  --r-xl: 0.25rem;
+  --r-2xl: 0.375rem;
+  --r-3xl: 0.5rem;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-serif: ui-serif, Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
+  /* The reason the theme exists. */
+  --font-prose: var(--font-serif);
+  --prose-leading: 1.7;
+
+  --hairline: rgba(87, 80, 74, 0.16);
+  --hairline-strong: rgba(87, 80, 74, 0.3);
+  --raise-1: rgba(120, 113, 108, 0.04);
+  --raise-2: rgba(120, 113, 108, 0.08);
+  --raise-3: rgba(120, 113, 108, 0.13);
+  --well: rgba(120, 113, 108, 0.07);
+  --well-strong: rgba(120, 113, 108, 0.12);
+
+  --bg-gradient: linear-gradient(0deg, #faf7f2 0%, #faf7f2 100%);
+  --bg-nebula-a: none;
+  --bg-nebula-b: none;
+  --stars-opacity: 0;
+  --stars-a: none;
+  --stars-b: none;
+
+  --glass-bg: #fffdf9;
+  --glass-blur: 0px;
+  --glass-border: rgba(87, 80, 74, 0.16);
+  --glass-card-bg: #fffdf9;
+  --glass-card-blur: 0px;
+  --glass-card-border: rgba(87, 80, 74, 0.16);
+  --glass-card-shadow: 0 1px 2px rgba(87, 80, 74, 0.08);
+  --popover-bg: #fffdf9;
+  --popover-blur: 0px;
+  --popover-border: rgba(87, 80, 74, 0.26);
+  --popover-shadow: 0 12px 30px rgba(60, 52, 44, 0.16), 0 2px 6px rgba(60, 52, 44, 0.08);
+
+  --shimmer-sheen: rgba(138, 90, 43, 0.55);
+  --glow-strength: 0;
+  --scrollbar-thumb: rgba(87, 80, 74, 0.22);
+  --scrollbar-thumb-hover: rgba(87, 80, 74, 0.38);
+  --flow-chrome-bg: #fffdf9;
+  --flow-chrome-border: rgba(87, 80, 74, 0.16);
+
+  --identity-accent-s: 52%;
+  --identity-accent-l: 34%;
+  --identity-border-s: 40%;
+  --identity-border-l: 52%;
+  --identity-border-a: 0.5;
+  --identity-soft-s: 55%;
+  --identity-soft-l: 50%;
+  --identity-soft-a: 0.09;
+}

@@ -6,7 +6,7 @@ import type { FinetuneJobStatus } from '../../lib/api';
  * Live phases breathe (`animate-glow-pulse`); terminal ones are still — motion marks liveness.
  */
 const STYLE: Record<FinetuneJobStatus, { pill: string; dot: string; live: boolean }> = {
-  queued: { pill: 'border-white/[0.1] bg-white/[0.04] text-slate-400', dot: 'bg-slate-500', live: false },
+  queued: { pill: 'hairline-strong raise-1 text-slate-400', dot: 'bg-slate-500', live: false },
   preparing: { pill: 'border-amber-500/25 bg-amber-500/10 text-amber-300', dot: 'bg-amber-400', live: true },
   training: { pill: 'border-accent/25 bg-accent/10 text-accent', dot: 'bg-accent', live: true },
   exporting: { pill: 'border-amber-500/25 bg-amber-500/10 text-amber-300', dot: 'bg-amber-400', live: true },

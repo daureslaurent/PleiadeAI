@@ -86,7 +86,7 @@ function SavePill() {
   if (save === 'idle') return null;
 
   const styles: Record<Exclude<SaveState, 'idle'>, string> = {
-    saving: 'border-white/[0.07] bg-black/25 text-slate-400',
+    saving: 'hairline well text-slate-400',
     saved: 'border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-400',
     error: 'border-red-500/25 bg-red-500/[0.07] text-red-400',
   };

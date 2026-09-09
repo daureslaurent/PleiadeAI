@@ -103,7 +103,7 @@ function CategoryCard({
       to={category.slug}
       // Staggered entrance so the grid resolves as one gesture rather than six (DIRECT_ART §6).
       style={{ animationDelay: `${index * 40}ms` }}
-      className="glass-card group flex animate-fade-up flex-col rounded-2xl border border-white/[0.06] p-4 transition-colors hover:border-white/[0.12]"
+      className="glass-card group flex animate-fade-up flex-col rounded-2xl border hairline p-4 transition-colors hover:hairline-strong"
     >
       <div className="flex items-start gap-3">
         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ${tile}`}>
@@ -125,7 +125,7 @@ function CategoryCard({
         {category.contains.map((section) => (
           <span
             key={section}
-            className="rounded-md bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-slate-400"
+            className="rounded-md raise-2 px-1.5 py-0.5 text-[10px] text-slate-400"
           >
             {section}
           </span>
@@ -134,7 +134,7 @@ function CategoryCard({
 
       {/* `mt-auto` pins the status line to the card's bottom edge, so the row reads as one baseline
           however many lines the blurb and chips above it happen to take. */}
-      <div className="mt-auto truncate border-t border-white/[0.06] pt-2 font-mono text-[10px] text-slate-500">
+      <div className="mt-auto truncate border-t hairline pt-2 font-mono text-[10px] text-slate-500">
         {status}
       </div>
     </Link>

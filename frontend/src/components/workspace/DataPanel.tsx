@@ -82,7 +82,7 @@ export function DataPanel() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-1.5">
+      <div className="flex items-center gap-2 border-b hairline px-3 py-1.5">
         <Database size={13} className="text-slate-400" />
         <span className="text-xs font-medium text-slate-300">
           {resources.length} resource{resources.length > 1 ? 's' : ''}
@@ -90,7 +90,7 @@ export function DataPanel() {
         <button
           onClick={load}
           title="Refresh"
-          className="ml-auto rounded p-1 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
+          className="ml-auto rounded p-1 text-slate-500 hover:raise-2 hover:text-slate-200"
         >
           <RotateCw size={13} />
         </button>
@@ -123,7 +123,7 @@ function ResourceCard({ sessionId, resource }: { sessionId: string; resource: Se
   const playable = kind === 'video' || kind === 'audio';
 
   return (
-    <div className="animate-fade-up space-y-2 rounded-xl bg-black/25 p-2.5 backdrop-blur-sm ring-1 ring-white/[0.06]">
+    <div className="animate-fade-up space-y-2 rounded-xl well p-2.5 backdrop-blur-sm ring-1 ring-hairline">
       <div className="flex gap-3">
         {kind === 'image' ? (
           <ResourceThumb sessionId={sessionId} handle={resource.handle} />
@@ -132,8 +132,8 @@ function ResourceCard({ sessionId, resource }: { sessionId: string; resource: Se
             onClick={() => playable && setPlaying((p) => !p)}
             disabled={!playable}
             title={playable ? 'Play' : undefined}
-            className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] ${
-              playable ? 'text-accent hover:bg-white/[0.08]' : 'text-slate-500'
+            className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-lg raise-1 ${
+              playable ? 'text-accent hover:raise-3' : 'text-slate-500'
             }`}
           >
             {playable ? <Play size={20} /> : <FileBox size={22} />}
@@ -154,7 +154,7 @@ function ResourceCard({ sessionId, resource }: { sessionId: string; resource: Se
           </div>
           <button
             onClick={() => resourcesApi.download(sessionId, resource.handle, resource.filename)}
-            className="mt-0.5 flex w-fit items-center gap-1 rounded-md bg-white/[0.05] px-2 py-0.5 text-[10px] text-slate-300 hover:bg-white/[0.09] hover:text-slate-100"
+            className="mt-0.5 flex w-fit items-center gap-1 rounded-md raise-2 px-2 py-0.5 text-[10px] text-slate-300 hover:raise-3 hover:text-slate-100"
           >
             <Download size={11} /> Download
           </button>
@@ -211,7 +211,7 @@ function ResourceThumb({ sessionId, handle }: { sessionId: string; handle: strin
       href={url ?? undefined}
       target="_blank"
       rel="noreferrer"
-      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/[0.04]"
+      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg raise-1"
     >
       {url ? (
         <img src={url} alt={handle} className="h-full w-full object-cover" />

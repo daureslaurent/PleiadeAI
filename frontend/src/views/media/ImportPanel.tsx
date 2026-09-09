@@ -32,7 +32,7 @@ export function ImportPanel({
   return (
     <div className="animate-fade-up glass-card m-3 rounded-2xl p-3">
       <div className="mb-3 flex items-center gap-2">
-        <div className="flex gap-1 rounded-lg bg-black/25 p-0.5">
+        <div className="flex gap-1 rounded-lg well p-0.5">
           <button
             onClick={() => setMode('discover')}
             className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-colors ${
@@ -130,7 +130,7 @@ function DiscoverTab({
         {candidates?.map((c) => (
           <div
             key={c.prompt_id}
-            className="space-y-1.5 rounded-xl bg-black/25 p-2.5 ring-1 ring-white/[0.06] transition-shadow hover:ring-white/[0.12]"
+            className="space-y-1.5 rounded-xl well p-2.5 ring-1 ring-hairline transition-shadow hover:ring-hairline-strong"
           >
             <Input
               value={names[c.prompt_id] ?? c.suggested_name}
@@ -259,7 +259,7 @@ function PasteTab({ onImported }: { onImported: (id: string) => Promise<void> })
           if (file) void take(file);
         }}
         className={`rounded-xl border border-dashed p-2 transition-colors ${
-          dragging ? 'border-accent/60 bg-accent/[0.06]' : 'border-white/[0.12]'
+          dragging ? 'border-accent/60 bg-accent/[0.06]' : 'hairline-strong'
         }`}
       >
         <Textarea

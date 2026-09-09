@@ -3,7 +3,7 @@ import {
   Brain,
   Cable,
   KeyRound,
-  MonitorCog,
+  Palette,
   MonitorDot,
   RefreshCcwDot,
   Server,
@@ -75,10 +75,10 @@ export const CATEGORIES: SettingsCategory[] = [
   },
   {
     slug: 'interface',
-    title: 'Interface',
-    blurb: 'Display preferences, saved on this device.',
-    contains: ['Debugger & chat display'],
-    icon: MonitorCog,
+    title: 'Appearance & Interface',
+    blurb: 'How the app looks, and how the chat page is laid out.',
+    contains: ['Theme', 'Chat layout', 'Debugger & chat display'],
+    icon: Palette,
   },
   {
     slug: 'system',

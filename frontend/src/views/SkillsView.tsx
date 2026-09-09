@@ -4,7 +4,7 @@ import { AlertTriangle, Save, Trash2, Wrench, Zap } from 'lucide-react';
 import { skillsApi, type Skill } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
 import { Button, Dot, EmptyState, Input, Select, useConfirm } from '../components/ui';
-import { MONACO_OPTIONS, PLEIADES_THEME, registerPleiadesTheme } from '../lib/monacoTheme';
+import { MONACO_OPTIONS, registerThemes, useMonacoTheme } from '../lib/monacoTheme';
 
 interface Draft {
   _id?: string;
@@ -46,6 +46,7 @@ function toDraft(s: Skill): Draft {
 
 /** Skills CRUD page (master-detail): Monaco source editor + raw JSON-Schema editor. */
 export function SkillsView() {
+  const monacoTheme = useMonacoTheme();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -170,7 +171,7 @@ export function SkillsView() {
             </div>
           </div>
 
-          <div className="border-b border-white/[0.06] px-4 py-2.5">
+          <div className="border-b hairline px-4 py-2.5">
             <Input
               value={draft.description}
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
@@ -180,15 +181,15 @@ export function SkillsView() {
 
           {/* Source + schema split — both editors sit in inset wells so the glass reads through. */}
           <div className="flex min-h-0 flex-1">
-            <div className="flex min-w-0 flex-1 flex-col bg-black/25">
+            <div className="flex min-w-0 flex-1 flex-col well">
               <div className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-slate-500">
                 Source
               </div>
               <div className="min-h-0 flex-1">
                 <Editor
                   height="100%"
-                  theme={PLEIADES_THEME}
-                  beforeMount={registerPleiadesTheme}
+                  theme={monacoTheme}
+                  beforeMount={registerThemes}
                   language={draft.language === 'py' ? 'python' : 'typescript'}
                   value={draft.source}
                   onChange={(v) => setDraft({ ...draft, source: v ?? '' })}
@@ -196,15 +197,15 @@ export function SkillsView() {
                 />
               </div>
             </div>
-            <div className="flex w-96 shrink-0 flex-col border-l border-white/[0.06] bg-black/25">
+            <div className="flex w-96 shrink-0 flex-col border-l hairline well">
               <div className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-slate-500">
                 Parameters schema (JSON)
               </div>
               <div className="min-h-0 flex-1">
                 <Editor
                   height="100%"
-                  theme={PLEIADES_THEME}
-                  beforeMount={registerPleiadesTheme}
+                  theme={monacoTheme}
+                  beforeMount={registerThemes}
                   language="json"
                   value={draft.schemaText}
                   onChange={(v) => setDraft({ ...draft, schemaText: v ?? '' })}

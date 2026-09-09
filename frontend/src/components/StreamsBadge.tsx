@@ -63,10 +63,10 @@ export function StreamsBadge() {
       <button
         onClick={() => setOpen((o) => !o)}
         title={`${streams.length} live stream${streams.length === 1 ? '' : 's'}`}
-        className="animate-glow-pulse flex items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.05] px-2.5 py-1 transition-colors hover:bg-white/[0.09]"
+        className="animate-glow-pulse flex items-center gap-1.5 rounded-full border hairline raise-2 px-2.5 py-1 transition-colors hover:raise-3"
         style={EMERALD_GLOW}
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.45)]" />
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_2px_rgb(var(--c-emerald-400)/0.45)]" />
         <Radio size={12} className="text-emerald-300" />
         <span className="font-mono text-[11px] text-slate-300">{streams.length}</span>
       </button>
@@ -83,7 +83,7 @@ export function StreamsBadge() {
               <button
                 key={stream.flowId}
                 onClick={() => openPlayer(stream)}
-                className="group flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-white/[0.05]"
+                className="group flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:raise-2"
               >
                 <span
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"

@@ -175,7 +175,7 @@ function ScheduleCard({
       className={`group cursor-pointer rounded-xl border p-3 text-xs backdrop-blur-sm transition-colors ${
         active
           ? 'border-accent/50 bg-accent/10'
-          : 'border-white/[0.06] bg-white/[0.03] hover:border-white/[0.12]'
+          : 'hairline raise-1 hover:hairline-strong'
       } ${job.running ? 'animate-glow-pulse' : ''} ${spent ? 'opacity-60' : ''}`}
     >
       <div className="flex items-center gap-2">
@@ -196,7 +196,7 @@ function ScheduleCard({
               onRun();
             }}
             title="Run now"
-            className="rounded p-1 text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-accent"
+            className="rounded p-1 text-slate-400 transition-colors hover:raise-3 hover:text-accent"
           >
             <Play size={12} />
           </button>
@@ -206,7 +206,7 @@ function ScheduleCard({
               onEdit();
             }}
             title="Edit"
-            className="rounded p-1 text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-slate-100"
+            className="rounded p-1 text-slate-400 transition-colors hover:raise-3 hover:text-slate-100"
           >
             <Pencil size={12} />
           </button>

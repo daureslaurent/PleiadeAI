@@ -92,7 +92,7 @@ export function FlowMediaPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+      <div className="flex items-center gap-2 border-b hairline px-3 py-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Media</span>
         <span className="text-[10px] text-slate-600">{ordered.length}</span>
         {inFlight.length > 0 && (
@@ -120,7 +120,7 @@ export function FlowMediaPanel({
                   {n.state.percent == null ? '…' : `${n.state.percent}%`}
                 </span>
               </div>
-              <div className="mt-1 h-0.5 overflow-hidden rounded-full bg-white/[0.08]">
+              <div className="mt-1 h-0.5 overflow-hidden rounded-full raise-3">
                 <div
                   className={`h-full bg-accent transition-[width] duration-300 ${
                     n.state.percent == null ? 'w-1/3 animate-pulse' : ''
@@ -181,9 +181,9 @@ function Tile({
   return (
     <button
       onClick={onOpen}
-      className="group overflow-hidden rounded-lg border border-white/[0.06] bg-black/25 text-left transition-colors hover:border-accent/40"
+      className="group overflow-hidden rounded-lg border hairline well text-left transition-colors hover:border-accent/40"
     >
-      <div className="relative flex h-24 items-center justify-center bg-black/30">
+      <div className="relative flex h-24 items-center justify-center well-strong">
         {kind === 'image' && <Thumb sessionId={sessionId} handle={artifact.handle} />}
         {/* A real first frame, not a film icon — on a pipeline whose output *is* video, a grid of
             identical icons tells you nothing about what was made. `preload="metadata"` fetches only
@@ -202,13 +202,13 @@ function Tile({
         )}
         {kind === 'video' && (
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="rounded-full bg-black/60 p-1.5">
-              <Clapperboard size={12} className="text-white/80" />
+            <span className="rounded-full bg-scrim/60 p-1.5">
+              <Clapperboard size={12} className="text-oncolor/80" />
             </span>
           </span>
         )}
         {artifact.iteration != null && (
-          <span className="absolute left-1 top-1 rounded bg-black/70 px-1 text-[9px] text-slate-300">
+          <span className="absolute left-1 top-1 rounded bg-scrim/70 px-1 text-[9px] text-slate-300">
             #{artifact.iteration + 1}
           </span>
         )}
@@ -242,7 +242,7 @@ function Thumb({ sessionId, handle }: { sessionId: string; handle: string }) {
     };
   }, [sessionId, handle]);
 
-  if (!url) return <div className="h-full w-full animate-pulse bg-white/[0.04]" />;
+  if (!url) return <div className="h-full w-full animate-pulse raise-1" />;
   return <img src={url} alt={handle} className="h-full w-full object-cover" />;
 }
 
@@ -295,7 +295,7 @@ function Lightbox({
   // 320px column — the exact opposite of what a full view is for.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-black/85 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex flex-col bg-scrim/85 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
     >
@@ -326,7 +326,7 @@ function Lightbox({
         <button
           onClick={onPrev}
           disabled={index === 0}
-          className="shrink-0 rounded-full p-2 text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-20"
+          className="shrink-0 rounded-full p-2 text-slate-400 transition-colors hover:raise-3 hover:text-slate-100 disabled:opacity-20"
         >
           <ChevronLeft size={22} />
         </button>
@@ -347,7 +347,7 @@ function Lightbox({
             />
           )}
           {kind === 'audio' && (
-            <div className="w-full max-w-lg rounded-xl bg-white/[0.04] p-6">
+            <div className="w-full max-w-lg rounded-xl raise-1 p-6">
               <AudioLines size={28} className="mx-auto mb-4 text-slate-500" />
               <audio src={resourcesApi.streamUrl(sessionId, artifact.handle)} controls autoPlay className="w-full" />
             </div>
@@ -363,7 +363,7 @@ function Lightbox({
         <button
           onClick={onNext}
           disabled={index >= total - 1}
-          className="shrink-0 rounded-full p-2 text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-20"
+          className="shrink-0 rounded-full p-2 text-slate-400 transition-colors hover:raise-3 hover:text-slate-100 disabled:opacity-20"
         >
           <ChevronRight size={22} />
         </button>

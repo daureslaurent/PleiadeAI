@@ -165,7 +165,7 @@ export function ThreadRefChip({ id }: { id: string }) {
   // written. A hex blob that silently became a chip and then a dead link would be worse than the id.
   if (!thread) {
     return (
-      <code className="rounded bg-white/[0.06] px-1 py-[1px] font-mono text-[0.85em] text-slate-300">
+      <code className="rounded raise-2 px-1 py-[1px] font-mono text-[0.85em] text-slate-300">
         {id}
       </code>
     );
@@ -205,7 +205,7 @@ export function ThreadRefChip({ id }: { id: string }) {
         createPortal(
           <>
             <div
-              className="glass-card fixed z-50 rounded-xl border border-white/[0.08] p-3 shadow-2xl"
+              className="glass-card fixed z-50 rounded-xl border hairline p-3 shadow-2xl"
               onMouseEnter={cancel}
               onMouseLeave={scheduleClose}
               style={{
@@ -252,7 +252,7 @@ export function ThreadRefChip({ id }: { id: string }) {
               </p>
 
               {thread.excerpt && (
-                <p className="mt-2 border-t border-white/[0.06] pt-2 text-[11px] leading-relaxed text-slate-400">
+                <p className="mt-2 border-t hairline pt-2 text-[11px] leading-relaxed text-slate-400">
                   {thread.excerpt}
                 </p>
               )}

@@ -262,7 +262,7 @@ function BoardHeader({
   }, []);
 
   return (
-    <div className="glass-card space-y-3 rounded-2xl border border-white/[0.06] p-4">
+    <div className="glass-card space-y-3 rounded-2xl border hairline p-4">
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-medium text-slate-100">Forum</h1>
 
@@ -276,7 +276,7 @@ function BoardHeader({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
             placeholder="Search the board…"
-            className="w-full rounded-lg border border-white/[0.07] bg-black/25 py-1.5 pl-8 pr-8 text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors focus:border-accent/60 focus:bg-black/30"
+            className="w-full rounded-lg border hairline well py-1.5 pl-8 pr-8 text-xs text-slate-100 placeholder:text-slate-600 outline-none transition-colors focus:border-accent/60 focus:well-strong"
           />
           {query ? (
             <button
@@ -287,7 +287,7 @@ function BoardHeader({
               <X size={12} />
             </button>
           ) : (
-            <kbd className="pointer-events-none absolute right-2.5 rounded border border-white/[0.08] px-1 font-mono text-[9px] text-slate-600">
+            <kbd className="pointer-events-none absolute right-2.5 rounded border hairline px-1 font-mono text-[9px] text-slate-600">
               /
             </kbd>
           )}
@@ -307,7 +307,7 @@ function BoardHeader({
         className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
           pendingMentions
             ? 'border-amber-500/25 bg-amber-500/[0.06] hover:bg-amber-500/[0.11]'
-            : 'border-white/[0.06] bg-black/20 hover:bg-white/[0.04]'
+            : 'hairline well hover:raise-1'
         }`}
       >
         <AtSign size={13} className={pendingMentions ? 'text-amber-400' : 'text-slate-500'} />
@@ -362,7 +362,7 @@ function ModePicker({
         title={MODE_HINT[mode]}
         className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[10px] uppercase tracking-wider ring-1 transition-colors ${
           mode === 'both'
-            ? 'text-slate-400 ring-white/[0.1] hover:bg-white/[0.06]'
+            ? 'text-slate-400 ring-hairline-strong hover:raise-2'
             : 'bg-accent/15 text-accent ring-accent/30'
         } ${busy ? 'animate-pulse' : ''}`}
       >
@@ -372,7 +372,7 @@ function ModePicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1.5 w-60 overflow-hidden rounded-xl border border-white/[0.1] bg-panel/95 shadow-xl backdrop-blur-md">
+        <div className="absolute right-0 top-full z-20 mt-1.5 w-60 overflow-hidden rounded-xl border hairline-strong bg-panel/95 shadow-xl backdrop-blur-md">
           {MODES.map((m) => (
             <button
               key={m}
@@ -380,8 +380,8 @@ function ModePicker({
                 setMode(m);
                 setOpen(false);
               }}
-              className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-white/[0.06] ${
-                mode === m ? 'bg-white/[0.04]' : ''
+              className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:raise-2 ${
+                mode === m ? 'raise-1' : ''
               }`}
             >
               <span className={`mt-0.5 ${mode === m ? 'text-accent' : 'text-slate-500'}`}>
@@ -408,7 +408,7 @@ function CategoryRow({ category, onClick }: { category: ForumCategory; onClick: 
         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
           category.enabled
             ? 'bg-accent/10 text-accent group-hover:bg-accent/[0.16]'
-            : 'bg-white/[0.04] text-slate-600'
+            : 'raise-1 text-slate-600'
         }`}
       >
         <MessageSquareText size={17} />
@@ -436,7 +436,7 @@ function CategoryRow({ category, onClick }: { category: ForumCategory; onClick: 
         </span>
       </span>
 
-      <span className="hidden w-40 shrink-0 border-l border-white/[0.06] pl-3 text-[11px] text-slate-500 sm:block">
+      <span className="hidden w-40 shrink-0 border-l hairline pl-3 text-[11px] text-slate-500 sm:block">
         {category.lastThread ? (
           <>
             <span className="block truncate text-slate-300">{category.lastThread.title}</span>
@@ -481,7 +481,7 @@ function ActivityStrip({
               key={n}
               onClick={() => onCount(n)}
               className={`rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors ${
-                count === n ? 'bg-accent/15 text-accent' : 'text-slate-600 hover:bg-white/[0.05]'
+                count === n ? 'bg-accent/15 text-accent' : 'text-slate-600 hover:raise-2'
               }`}
             >
               {n}
@@ -527,7 +527,7 @@ function ActivityRow({
     <button
       onClick={onClick}
       title={`${thread.title} — last post by ${thread.lastPostAuthor || thread.author.display_name}`}
-      className="group flex w-full items-center gap-2 rounded-md px-2 py-[5px] text-left transition-colors hover:bg-white/[0.05]"
+      className="group flex w-full items-center gap-2 rounded-md px-2 py-[5px] text-left transition-colors hover:raise-2"
     >
       {/* The author's hue, at one pixel of budget — the same colour their avatar carries elsewhere. */}
       <span
@@ -583,7 +583,7 @@ function SearchResults({
       right={
         <button
           onClick={onClear}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-500 transition-colors hover:raise-2 hover:text-slate-300"
         >
           <X size={10} /> back to board
         </button>
@@ -647,7 +647,7 @@ function NewCategoryForm({ onDone, onCancel }: { onDone: () => void; onCancel: (
   }
 
   return (
-    <div className="mb-3 space-y-3 rounded-xl border border-white/[0.07] bg-black/25 p-3">
+    <div className="mb-3 space-y-3 rounded-xl border hairline well p-3">
       <Field label="Name">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Incident Reports" autoFocus />
       </Field>

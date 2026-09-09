@@ -83,13 +83,13 @@ export function FlowDebugPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="space-y-1.5 border-b border-white/[0.06] p-2">
+      <div className="space-y-1.5 border-b hairline p-2">
         <div className="flex items-center gap-1.5">
           <Filter size={11} className="shrink-0 text-slate-600" />
           <select
             value={filterNode ?? ''}
             onChange={(e) => setFilterNode(e.target.value || null)}
-            className="min-w-0 flex-1 rounded border border-white/[0.1] bg-black/30 px-1.5 py-1 text-[11px] text-slate-300 outline-none focus:border-accent/50"
+            className="min-w-0 flex-1 rounded border hairline-strong well-strong px-1.5 py-1 text-[11px] text-slate-300 outline-none focus:border-accent/50"
           >
             <option value="">All nodes</option>
             {nodes.map((n) => (
@@ -101,14 +101,14 @@ export function FlowDebugPanel({
           <button
             onClick={copyAll}
             title="Copy visible lines"
-            className="shrink-0 rounded p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+            className="shrink-0 rounded p-1 text-slate-500 transition-colors hover:raise-2 hover:text-slate-200"
           >
             <Copy size={11} />
           </button>
           <button
             onClick={() => setPinned((p) => !p)}
             title={pinned ? 'Following the tail' : 'Scroll-lock released'}
-            className={`shrink-0 rounded p-1 transition-colors hover:bg-white/[0.06] ${
+            className={`shrink-0 rounded p-1 transition-colors hover:raise-2 ${
               pinned ? 'text-accent' : 'text-slate-600'
             }`}
           >
@@ -123,8 +123,8 @@ export function FlowDebugPanel({
               onClick={() => toggleSource(source)}
               className={`rounded px-1.5 py-0.5 text-[9px] transition-colors ${
                 muted.has(source)
-                  ? 'bg-white/[0.03] text-slate-700 line-through'
-                  : `bg-white/[0.06] ${SOURCE_COLOR[source]}`
+                  ? 'raise-1 text-slate-700 line-through'
+                  : `raise-2 ${SOURCE_COLOR[source]}`
               }`}
             >
               {SOURCE_LABEL[source]}
@@ -151,7 +151,7 @@ export function FlowDebugPanel({
           </EmptyState>
         ) : (
           shown.map((l) => (
-            <div key={l.id} className="flex gap-1.5 border-b border-white/[0.03] py-0.5 last:border-0">
+            <div key={l.id} className="flex gap-1.5 border-b hairline py-0.5 last:border-0">
               <span className="shrink-0 text-slate-700">{time(l.at)}</span>
               {!filterNode && (
                 <span className="w-16 shrink-0 truncate text-slate-600" title={labels.get(l.nodeId) ?? l.nodeId}>
@@ -168,7 +168,7 @@ export function FlowDebugPanel({
       {filterNode && (
         <button
           onClick={() => setFilterNode(null)}
-          className="flex items-center justify-center gap-1 border-t border-white/[0.06] py-1.5 text-[10px] text-slate-500 transition-colors hover:text-accent"
+          className="flex items-center justify-center gap-1 border-t hairline py-1.5 text-[10px] text-slate-500 transition-colors hover:text-accent"
         >
           <Trash2 size={10} /> Clear filter ({logs.length - shown.length} hidden)
         </button>

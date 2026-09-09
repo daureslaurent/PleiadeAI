@@ -28,7 +28,7 @@ export function ArtifactPreview({
 
   if (kind === 'image') {
     return (
-      <figure className="overflow-hidden rounded-lg border border-white/[0.06] bg-black/25">
+      <figure className="overflow-hidden rounded-lg border hairline well">
         <ImageBytes sessionId={sessionId} handle={handle} />
         <figcaption className="flex items-center gap-1 px-2 py-1 font-mono text-[9px] text-slate-600">
           {handle}
@@ -47,7 +47,7 @@ export function ArtifactPreview({
   const Icon = kind === 'video' ? Clapperboard : kind === 'audio' ? AudioLines : FileBox;
 
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-black/25 p-2">
+    <div className="rounded-lg border hairline well p-2">
       <div className="flex items-center gap-1.5">
         <Icon size={13} className="shrink-0 text-slate-500" />
         <span className="truncate font-mono text-[10px] text-slate-400">{filename || handle}</span>
@@ -100,7 +100,7 @@ function ImageBytes({ sessionId, handle }: { sessionId: string; handle: string }
     };
   }, [sessionId, handle]);
 
-  if (!url) return <div className="h-24 animate-pulse bg-white/[0.04]" />;
+  if (!url) return <div className="h-24 animate-pulse raise-1" />;
   return <img src={url} alt={handle} className="max-h-48 w-full object-contain" />;
 }
 

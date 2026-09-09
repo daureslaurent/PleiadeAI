@@ -146,7 +146,7 @@ export function WorkspaceNav({
         <button
           onClick={onToggleCollapse}
           title="Show workspace"
-          className="rounded-md p-1.5 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
+          className="rounded-md p-1.5 text-slate-500 hover:raise-2 hover:text-slate-200"
         >
           <PanelLeftOpen size={16} />
         </button>
@@ -174,7 +174,7 @@ export function WorkspaceNav({
           onClick={() => onSelectSession(agent, sn)}
           className={[
             'group flex cursor-pointer items-start gap-1.5 rounded-md px-2 py-1.5 transition-colors',
-            active ? 'bg-accent/15 shadow-[inset_2px_0_0_0_rgba(59,130,246,0.7)]' : 'hover:bg-white/[0.05]',
+            active ? 'bg-accent/15 shadow-[inset_2px_0_0_0_rgb(var(--c-accent)/0.7)]' : 'hover:raise-2',
           ].join(' ')}
         >
           <span
@@ -268,7 +268,7 @@ export function WorkspaceNav({
         {/* Agent row */}
         <button
           onClick={() => onToggleAgent(agent)}
-          className="group flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left hover:bg-white/[0.05]"
+          className="group flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left hover:raise-2"
         >
           {open ? (
             <ChevronDown size={14} className="shrink-0 text-slate-500" />
@@ -283,7 +283,7 @@ export function WorkspaceNav({
                 className={[
                   'flex h-6 w-6 shrink-0 items-center justify-center text-[10px] font-semibold text-slate-950',
                   // Subagents read as "derived": circular avatar + a faint ring; orchestrators stay square.
-                  isSub ? 'rounded-full opacity-90 ring-1 ring-inset ring-white/10' : 'rounded-md',
+                  isSub ? 'rounded-full opacity-90 ring-1 ring-inset ring-hairline-strong' : 'rounded-md',
                 ].join(' ')}
                 style={{ background: c.accent }}
               >
@@ -332,7 +332,7 @@ export function WorkspaceNav({
               <button
                 onClick={() => onLoadMoreSessions(agent)}
                 disabled={loadingMore}
-                className="mt-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-400 hover:bg-white/[0.05] hover:text-slate-200 disabled:opacity-60"
+                className="mt-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-400 hover:raise-2 hover:text-slate-200 disabled:opacity-60"
               >
                 {loadingMore ? (
                   <Loader2 size={12} className="shrink-0 animate-spin" />
@@ -346,7 +346,7 @@ export function WorkspaceNav({
             {sessions.length > pageSize && (
               <button
                 onClick={() => onShowFewerSessions(agent)}
-                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-500 hover:bg-white/[0.05] hover:text-slate-300"
+                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] text-slate-500 hover:raise-2 hover:text-slate-300"
               >
                 <ChevronsUp size={12} className="shrink-0" />
                 Show fewer
@@ -374,7 +374,7 @@ export function WorkspaceNav({
     <div className="mb-1">
       <button
         onClick={onToggleSection}
-        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-white/[0.05]/50"
+        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:raise-2"
       >
         {sectionOpen ? (
           <ChevronDown size={13} className="shrink-0 text-slate-600" />
@@ -394,7 +394,7 @@ export function WorkspaceNav({
   return (
     <aside className="glass flex w-64 shrink-0 flex-col border-r">
       {/* Group header */}
-      <div className="flex items-center pr-1.5 hover:bg-white/[0.05]/50">
+      <div className="flex items-center pr-1.5 hover:raise-2">
         <button
           onClick={onToggleGroup}
           className="flex flex-1 items-center gap-2 px-3 py-3 text-left"
@@ -413,7 +413,7 @@ export function WorkspaceNav({
         <button
           onClick={onToggleCollapse}
           title="Hide workspace"
-          className="rounded-md p-1.5 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
+          className="rounded-md p-1.5 text-slate-500 hover:raise-2 hover:text-slate-200"
         >
           <PanelLeftClose size={16} />
         </button>

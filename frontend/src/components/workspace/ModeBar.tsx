@@ -72,7 +72,7 @@ export function ModeBar({ agentId, sessionId }: { agentId: string; sessionId: st
           'flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
           activeModes.length > 0 || open
             ? 'border-accent/40 bg-accent/10 text-accent'
-            : 'border-transparent text-slate-500 hover:bg-white/[0.06] hover:text-slate-300',
+            : 'border-transparent text-slate-500 hover:raise-2 hover:text-slate-300',
         ].join(' ')}
       >
         <SlidersHorizontal size={11} />
@@ -127,13 +127,13 @@ export function ModeBar({ agentId, sessionId }: { agentId: string; sessionId: st
                   }
                   className={[
                     'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
-                    on ? 'text-slate-100' : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
+                    on ? 'text-slate-100' : 'text-slate-400 hover:raise-2 hover:text-slate-200',
                   ].join(' ')}
                 >
                   <span
                     className={[
                       'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
-                      on ? 'border-accent bg-accent/20 text-accent' : 'border-white/15 text-transparent',
+                      on ? 'border-accent bg-accent/20 text-accent' : 'hairline-strong text-transparent',
                     ].join(' ')}
                   >
                     <Check size={11} />

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
+import { ThemeSwitcher } from './ThemeSwitcher';
 import { useAuth } from '../store/auth';
 import { useForum } from '../store/forum';
 import { usePersistentState } from '../hooks/usePersistentState';
@@ -143,7 +144,7 @@ export function Sidebar() {
           collapsed ? 'justify-center px-2' : 'gap-3 px-3',
           isActive
             ? 'bg-accent/15 font-medium text-accent'
-            : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-100',
+            : 'text-slate-400 hover:raise-2 hover:text-slate-100',
         ].join(' ')
       }
     >
@@ -165,13 +166,13 @@ export function Sidebar() {
                 className={`transition-transform duration-150 ${isActive ? '' : 'group-hover:scale-110'}`}
               />
               {showPin && collapsed && (
-                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#161b22]" />
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-surface" />
               )}
               {showInbox && collapsed && (
-                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-[#161b22]" />
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent ring-2 ring-surface" />
               )}
               {showMentions && collapsed && (
-                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-[#161b22]" />
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-surface" />
               )}
             </span>
             {!collapsed && <span className="truncate">{label}</span>}
@@ -214,7 +215,7 @@ export function Sidebar() {
       {/* Brand + collapse toggle */}
       <div className={`flex items-center py-4 ${collapsed ? 'justify-center px-2' : 'gap-2.5 px-4'}`}>
         {/* Brand mark: the cluster itself. The tile is a scrap of night sky, not an accent chip. */}
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#0d1424] to-[#0a0d13] ring-1 ring-inset ring-accent/25">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-surface to-panel ring-1 ring-inset ring-accent/25">
           <PleiadesMark size={20} />
         </div>
         {!collapsed && (
@@ -230,7 +231,7 @@ export function Sidebar() {
           <button
             onClick={() => setCollapsed(true)}
             title="Collapse sidebar"
-            className="ml-auto rounded-md p-1.5 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+            className="ml-auto rounded-md p-1.5 text-slate-500 transition-colors hover:raise-2 hover:text-slate-200"
           >
             <PanelLeftClose size={16} />
           </button>
@@ -241,7 +242,7 @@ export function Sidebar() {
         <button
           onClick={() => setCollapsed(false)}
           title="Expand sidebar"
-          className="mx-auto mb-1 rounded-md p-1.5 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+          className="mx-auto mb-1 rounded-md p-1.5 text-slate-500 transition-colors hover:raise-2 hover:text-slate-200"
         >
           <PanelLeftOpen size={16} />
         </button>
@@ -252,7 +253,7 @@ export function Sidebar() {
         {NAV_GROUPS.map((group, i) =>
           collapsed ? (
             <div key={group.label}>
-              {i > 0 && <div className="mx-2 my-2 border-t border-white/[0.06]" />}
+              {i > 0 && <div className="mx-2 my-2 border-t hairline" />}
               <div className="space-y-0.5">{group.items.map(renderItem)}</div>
             </div>
           ) : (
@@ -267,13 +268,13 @@ export function Sidebar() {
       </nav>
 
       {/* Pinned Settings — separated from the scrollable groups. */}
-      <div className="border-t border-white/[0.06] px-2 py-2">{renderItem(SETTINGS_ITEM)}</div>
+      <div className="border-t hairline px-2 py-2">{renderItem(SETTINGS_ITEM)}</div>
 
       {/* Account footer */}
-      <div className="border-t border-white/[0.06] p-3">
+      <div className="border-t hairline p-3">
         {!collapsed && (
           <div className="mb-2 flex items-center gap-2 px-1">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.06] text-xs font-semibold text-slate-300">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full raise-2 text-xs font-semibold text-slate-300">
               A
             </div>
             <div className="min-w-0 text-xs">
@@ -284,10 +285,11 @@ export function Sidebar() {
             </div>
           </div>
         )}
+        <ThemeSwitcher collapsed={collapsed} />
         <button
           onClick={logout}
           title={collapsed ? 'Sign out' : undefined}
-          className={`flex w-full items-center rounded-lg py-2 text-xs text-slate-400 transition-colors hover:bg-white/[0.05] hover:text-slate-100 ${
+          className={`flex w-full items-center rounded-lg py-2 text-xs text-slate-400 transition-colors hover:raise-2 hover:text-slate-100 ${
             collapsed ? 'justify-center px-2' : 'gap-2 px-3'
           }`}
         >

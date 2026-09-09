@@ -39,7 +39,7 @@ export function StreamWindow() {
             <p className="text-sm text-slate-300">This stream is off the air.</p>
             <button
               onClick={() => window.close()}
-              className="rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+              className="rounded-lg px-3 py-1.5 text-xs text-slate-400 transition-colors hover:raise-2 hover:text-slate-200"
             >
               Close window
             </button>

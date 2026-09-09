@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './store/auth';
+import { usePrefs } from './store/prefs';
+import { settingsApi } from './lib/api';
 import { Sidebar, NAV_ITEMS } from './components/Sidebar';
 import { EndpointBadge } from './components/EndpointBadge';
 import { StreamsBadge } from './components/StreamsBadge';
@@ -75,8 +78,34 @@ function MainLayout() {
   );
 }
 
+/**
+ * Adopt the appearance stored on the settings doc, once per authenticated session.
+ *
+ * `index.html` has already painted from localStorage, so this is not what makes the theme appear —
+ * it is what makes a choice made in *another* browser arrive here. The server is the source of
+ * truth the moment we can reach it; before that, the local cache is all there is.
+ */
+function useServerAppearance(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void settingsApi
+      .get()
+      .then((s) => {
+        if (!cancelled) usePrefs.getState().adoptServerAppearance(s.ui_theme, s.ui_chat_layout);
+      })
+      .catch(() => {
+        /* unreachable backend — the cached appearance stands */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+}
+
 export default function App() {
   const token = useAuth((s) => s.token);
+  useServerAppearance(Boolean(token));
   if (!token) return <AuthGuard />;
 
   return (

@@ -12,7 +12,7 @@ const TONES: Record<Tone, string> = {
   ok: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
   busy: 'border-amber-500/30 bg-amber-500/10 text-amber-400',
   error: 'border-red-500/30 bg-red-500/10 text-red-400',
-  idle: 'border-white/[0.08] bg-white/[0.04] text-slate-500',
+  idle: 'hairline raise-1 text-slate-500',
   accent: 'border-accent/30 bg-accent/10 text-accent',
 };
 
@@ -73,7 +73,7 @@ export function Dot({ tone, title, pulse }: { tone: Tone; title?: string; pulse?
 export function Chip({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-400 ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-md raise-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-400 ${className}`}
     >
       {children}
     </span>
@@ -87,7 +87,7 @@ export function Pill({ label, value, tone }: { label: string; value: string; ton
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] ${
         tone === 'accent'
           ? 'border-accent/25 bg-accent/10 text-accent'
-          : 'border-white/[0.07] bg-white/[0.03] text-slate-400'
+          : 'hairline raise-1 text-slate-400'
       }`}
     >
       <span className="uppercase tracking-wider opacity-70">{label}</span>

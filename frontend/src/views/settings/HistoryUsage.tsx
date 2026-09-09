@@ -45,7 +45,7 @@ export function HistoryUsage() {
   const hours = span / 3_600_000;
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
+    <div className="rounded-xl border hairline well p-3">
       <div className="mb-2 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500">
         <Database size={11} /> History in backend RAM
       </div>

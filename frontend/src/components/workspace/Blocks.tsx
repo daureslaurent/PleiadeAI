@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { ChevronRight, CornerDownRight, Loader2, Check, X, Brain, Gauge } from 'lucide-react';
 import { ToolCall } from '../ToolCall';
 import { Markdown } from '../Markdown';
-import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
+import { agentColor, agentGlow, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
 import { usePrefs } from '../../store/prefs';
 import { ScoreBadge } from '../ScoreBadge';
 import { MemoriesBadge } from '../MemoriesBadge';
 import { TodoList } from './TodoPanel';
+import { useChatLayout } from './ChatLayoutContext';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
 import type { Block } from '../../store/stream';
 
@@ -32,6 +33,7 @@ export function Blocks({
   isSub?: boolean;
 }) {
   const showSubThinking = usePrefs((s) => s.showSubagentThinking);
+  const { thinkingStyle } = useChatLayout();
   return (
     <>
       {blocks.map((b, i) => {
@@ -45,11 +47,16 @@ export function Blocks({
           );
         }
         if (b.kind === 'reasoning') {
-          if (!b.text.trim() || (isSub && !showSubThinking)) return null;
+          // `none`: the Workbench moved thinking into its trace column, so leaving it here too
+          // would print the same reasoning twice.
+          if (!b.text.trim() || (isSub && !showSubThinking) || thinkingStyle === 'none') return null;
           // Auto-expanded only while it's the frame's live trailing block (i.e. actively thinking);
           // collapses as soon as output follows it or the turn ends.
-          return (
-            <ThinkingBlock key={i} text={b.text} active={live && i === blocks.length - 1} />
+          const active = live && i === blocks.length - 1;
+          return thinkingStyle === 'block' ? (
+            <ThinkingBlock key={i} text={b.text} active={active} />
+          ) : (
+            <ThinkingLine key={i} text={b.text} active={active} />
           );
         }
         if (b.kind === 'tool') return <ToolCall key={b.callId} block={b} />;
@@ -73,7 +80,7 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
     <div
       className={[
         'my-1.5 overflow-hidden rounded-xl border border-reasoning/20 bg-reasoning/[0.06] backdrop-blur-sm transition-shadow',
-        active ? 'shadow-[0_0_16px_rgba(168,85,247,0.15)]' : '',
+        active ? 'shadow-[0_0_16px_rgb(var(--c-reasoning)/0.15)]' : '',
       ].join(' ')}
     >
       <button
@@ -99,6 +106,40 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
         >
           {text}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The quiet form of a thinking block: one line that says how much was thought, opening onto the
+ * raw text. What the compact layouts want — the fact that it reasoned is worth a line, the
+ * reasoning itself is worth a click.
+ */
+function ThinkingLine({ text, active }: { text: string; active: boolean }) {
+  const [override, setOverride] = useState<boolean | null>(null);
+  const open = override ?? false;
+  // Characters, not tokens: an honest measure of "how much" that needs no tokenizer.
+  const size = text.length > 1200 ? `${(text.length / 1000).toFixed(1)}k chars` : `${text.length} chars`;
+  return (
+    <div className="my-1">
+      <button
+        onClick={() => setOverride(!open)}
+        className="flex items-center gap-1.5 rounded-md py-0.5 pr-2 text-[11px] text-reasoning/70 transition-colors hover:text-reasoning"
+      >
+        <ChevronRight
+          size={11}
+          className={`shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+        />
+        <Brain size={11} className="shrink-0" />
+        <span className={active ? 'text-shimmer' : ''}>
+          {active ? 'Thinking…' : `Thought · ${size}`}
+        </span>
+      </button>
+      {open && (
+        <pre className="mt-1 max-h-72 overflow-y-auto whitespace-pre-wrap border-l-2 border-reasoning/25 py-0.5 pl-2.5 font-mono text-[11px] leading-relaxed text-slate-500">
+          {text}
+        </pre>
       )}
     </div>
   );
@@ -182,12 +223,12 @@ function SubAgentBubble({ block }: { block: AgentBlock }) {
       style={{
         borderColor: color.border,
         background: color.soft,
-        ['--glow' as string]: `${color.accent}2e`,
+        ['--glow' as string]: agentGlow(block.agent, 0.18),
       }}
     >
       <button
         onClick={() => setOverride(!open)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/[0.03]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:raise-1"
       >
         <ChevronRight
           size={13}
@@ -266,7 +307,7 @@ function SubAgentBubble({ block }: { block: AgentBlock }) {
             </div>
           )}
           {/* The delegated question, spelled out above the sub-agent's work. */}
-          <div className="mb-2 rounded-md bg-black/20 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-400">
+          <div className="mb-2 rounded-md well px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-400">
             <span className="mr-1 select-none text-slate-600">Q:</span>
             {block.query}
           </div>

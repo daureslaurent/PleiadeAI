@@ -1592,6 +1592,13 @@ export const telegramApi = {
 
 export interface InferenceSettings {
   /**
+   * Appearance (THEME_SYSTEM_PLAN.md §2.3). A display preference rather than an inference one, but
+   * stored here so it follows the operator to another browser; `store/prefs` keeps the local cache
+   * that lets the first paint be correct.
+   */
+  ui_theme: string;
+  ui_chat_layout: string;
+  /**
    * Fleet-wide prompt modes: the app's own built-ins (marked, read-only) followed by the operator's
    * own. Offered in every conversation on top of the per-model endpoint modes.
    */

@@ -27,7 +27,7 @@ export const TONE_RING: Record<Tone, string> = {
   ok: 'border-emerald-500/25',
   warn: 'border-amber-500/30',
   critical: 'border-red-500/35',
-  idle: 'border-white/[0.06]',
+  idle: 'hairline',
 };
 
 /**

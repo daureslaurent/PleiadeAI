@@ -9,7 +9,7 @@
  * here as the source of truth, falling back to the name-hash color when an agent has no override.
  */
 export interface AgentColor {
-  /** Vivid accent (avatar, name, left rail) — good contrast on the dark surface. */
+  /** Vivid accent (avatar, name, left rail). */
   accent: string;
   /** Panel border in the agent's hue. */
   border: string;
@@ -45,11 +45,28 @@ export function agentIcon(name: string): string {
 export function agentColor(name: string, hue?: number | null): AgentColor {
   const chosen = hue ?? identityRegistry.get(name)?.hue ?? null;
   const h = chosen ?? hueFor(name || 'agent');
+  // Only the *hue* belongs to the agent. Saturation, lightness and alpha come from the active theme
+  // (`--identity-*`, see src/theme/themes/*.css): an identity tuned to read on the deep-space ground
+  // is invisible ink on Paper's cream. The variables resolve at paint, so these stay valid inline
+  // `style` values and re-resolve by themselves when the theme changes.
   return {
-    accent: `hsl(${h} 72% 66%)`,
-    border: `hsl(${h} 55% 52% / 0.45)`,
-    soft: `hsl(${h} 70% 60% / 0.10)`,
+    accent: `hsl(${h} var(--identity-accent-s) var(--identity-accent-l))`,
+    border: `hsl(${h} var(--identity-border-s) var(--identity-border-l) / var(--identity-border-a))`,
+    soft: `hsl(${h} var(--identity-soft-s) var(--identity-soft-l) / var(--identity-soft-a))`,
   };
+}
+
+/**
+ * The agent's hue at an arbitrary alpha, for the `--glow` variable behind `animate-glow-pulse`.
+ *
+ * Call sites used to build this by concatenating a two-digit hex alpha onto `accent` — which was
+ * never valid CSS for an `hsl()` string, so those glows silently fell back to the keyframe's
+ * default blue. Ask for the alpha instead.
+ */
+export function agentGlow(name: string, alpha = 0.2, hue?: number | null): string {
+  const chosen = hue ?? identityRegistry.get(name)?.hue ?? null;
+  const h = chosen ?? hueFor(name || 'agent');
+  return `hsl(${h} var(--identity-accent-s) var(--identity-accent-l) / ${alpha})`;
 }
 
 /** First letter for a compact avatar chip. */

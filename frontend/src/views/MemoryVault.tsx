@@ -294,9 +294,9 @@ function MemoryCard({ point, onDelete }: { point: Point; onDelete: () => void })
   return (
     <div
       className={[
-        'animate-fade-up rounded-xl border bg-black/25 backdrop-blur-sm transition-colors hover:border-white/[0.12]',
+        'animate-fade-up rounded-xl border well backdrop-blur-sm transition-colors hover:hairline-strong',
         // A superseded memory is dead weight the agent will never recall again — show it as such.
-        retired ? 'border-white/[0.04] opacity-50' : 'border-white/[0.06]',
+        retired ? 'hairline opacity-50' : 'hairline',
       ].join(' ')}
     >
       <div className="flex flex-wrap items-center gap-2 px-3 pt-2.5">
@@ -354,7 +354,7 @@ function MemoryCard({ point, onDelete }: { point: Point; onDelete: () => void })
         raw payload
       </button>
       {raw && (
-        <pre className="mx-3 mb-3 overflow-x-auto rounded-lg bg-black/40 p-2.5 font-mono text-[10px] leading-relaxed text-slate-400">
+        <pre className="mx-3 mb-3 overflow-x-auto rounded-lg well-strong p-2.5 font-mono text-[10px] leading-relaxed text-slate-400">
           {JSON.stringify(point.payload, null, 2)}
         </pre>
       )}

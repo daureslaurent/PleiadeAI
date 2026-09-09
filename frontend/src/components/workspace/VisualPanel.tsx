@@ -45,13 +45,13 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 p-4" onClick={onClose}>
       <div
-        className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-slate-700 bg-panel shadow-2xl"
+        className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-border bg-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 border-b border-slate-700 px-3 py-2">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <Monitor size={15} className="text-reasoning" />
           <span className="text-sm font-medium text-slate-200">{agentName} · Desktop</span>
           <StatusPill status={status} />
@@ -63,7 +63,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
               title={takeover ? 'Release control (view only)' : 'Take control (mouse & keyboard)'}
               className={[
                 'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors disabled:opacity-40',
-                takeover ? 'bg-emerald-500/15 text-emerald-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+                takeover ? 'bg-emerald-500/15 text-emerald-400' : 'text-slate-400 hover:bg-panel hover:text-slate-200',
               ].join(' ')}
             >
               {takeover ? <Hand size={14} /> : <Eye size={14} />}
@@ -73,7 +73,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
               onClick={sendCtrlAltDel}
               disabled={status !== 'connected' || !takeover}
               title="Send Ctrl+Alt+Del"
-              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200 disabled:opacity-40"
             >
               <Keyboard size={14} /> Ctrl+Alt+Del
             </button>
@@ -81,7 +81,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
               onClick={runCalibration}
               disabled={status !== 'connected' || calibrating}
               title="Measure this desktop's click calibration (corrects where clicks land). Takes ~1 min."
-              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200 disabled:opacity-40"
             >
               {calibrating ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
               {calibrating ? 'Calibrating…' : 'Calibrate'}
@@ -92,14 +92,14 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
                 onClose();
               }}
               title="Open the desktop in a separate window"
-              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200"
             >
               <ExternalLink size={14} /> Open in window
             </button>
             <button
               onClick={onClose}
               title="Close desktop"
-              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-panel hover:text-slate-200"
             >
               <X size={16} />
             </button>
@@ -107,7 +107,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
         </div>
 
         {/* Screen — RFB mounts its canvas here. Always present so it can attach. */}
-        <div ref={frameRef} className="relative min-h-[60vh] flex-1 bg-[#0b0f19]">
+        <div ref={frameRef} className="relative min-h-[60vh] flex-1 bg-panel">
           <div ref={screenRef} className="absolute inset-0" />
           <LiveActPulse agentId={agentId} frameRef={frameRef} screenRef={screenRef} />
 
@@ -125,7 +125,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
               </p>
               <button
                 onClick={reconnect}
-                className="flex items-center gap-1.5 rounded-md bg-slate-800 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-700"
+                className="flex items-center gap-1.5 rounded-md bg-panel px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface"
               >
                 <RefreshCw size={14} /> Reconnect
               </button>
@@ -134,7 +134,7 @@ export function VisualPanel({ agentId, agentName, onClose }: Props) {
         </div>
 
         {/* Footer hint */}
-        <div className="border-t border-slate-700 px-3 py-1.5 text-[11px] text-slate-500">
+        <div className="border-t border-border px-3 py-1.5 text-[11px] text-slate-500">
           {calibrating ? (
             <span className="text-slate-400">
               Calibrating clicks — rendering targets and measuring the vision model’s offset (several vision
@@ -206,7 +206,7 @@ function LiveActPulse({
       style={{ left: pulse.left, top: pulse.top }}
     >
       <span className="absolute inset-0 -m-3 animate-ping rounded-full border-2 border-rose-500" />
-      <span className="block h-3 w-3 rounded-full bg-rose-500 shadow-[0_0_8px_2px_rgba(244,63,94,0.7)]" />
+      <span className="block h-3 w-3 rounded-full bg-rose-500 shadow-[0_0_8px_2px_rgb(var(--c-rose-500)/0.7)]" />
     </span>
   );
 }
@@ -224,7 +224,7 @@ function StatusPill({ status }: { status: VisualStatus }) {
 
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0b0f19]/80 backdrop-blur-sm">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel/80 backdrop-blur-sm">
       {children}
     </div>
   );

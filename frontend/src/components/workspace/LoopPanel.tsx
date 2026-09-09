@@ -165,7 +165,7 @@ export function LoopPanel({ agent, sessionId, onEnsureSession, onClose }: Props)
 
       {/* Live state, once a loop exists. Rendered from the server's last word, not the form. */}
       {autoLoop && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-white/[0.06] bg-black/20 px-2.5 py-1.5 text-[11px]">
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border hairline well px-2.5 py-1.5 text-[11px]">
           {autoLoop.status === 'running' && (
             <span className="flex items-center gap-1.5 text-accent">
               <Loader2 size={12} className="animate-spin" /> running
@@ -208,7 +208,7 @@ export function LoopPanel({ agent, sessionId, onEnsureSession, onClose }: Props)
             disabled={live}
             rows={2}
             placeholder="What it should be working toward, and how you'll know it's done."
-            className="mt-1 w-full resize-none rounded-md border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
+            className="mt-1 w-full resize-none rounded-md border hairline-strong well px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
           />
         </label>
 
@@ -220,7 +220,7 @@ export function LoopPanel({ agent, sessionId, onEnsureSession, onClose }: Props)
             disabled={live}
             rows={2}
             placeholder="Where to start. Leave blank to open with the goal itself."
-            className="mt-1 w-full resize-none rounded-md border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
+            className="mt-1 w-full resize-none rounded-md border hairline-strong well px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
           />
         </label>
 
@@ -232,7 +232,7 @@ export function LoopPanel({ agent, sessionId, onEnsureSession, onClose }: Props)
             disabled={live}
             rows={2}
             placeholder={DEFAULT_CONTINUE}
-            className="mt-1 w-full resize-none rounded-md border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
+            className="mt-1 w-full resize-none rounded-md border hairline-strong well px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
           />
         </label>
 
@@ -246,7 +246,7 @@ export function LoopPanel({ agent, sessionId, onEnsureSession, onClose }: Props)
               value={intervalSec}
               onChange={(e) => setIntervalSec(Math.max(10, Number(e.target.value) || 10))}
               disabled={live}
-              className="w-20 rounded-md border border-white/10 bg-black/20 px-2 py-1 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
+              className="w-20 rounded-md border hairline-strong well px-2 py-1 text-xs text-slate-200 outline-none focus:border-accent/60 disabled:opacity-50"
             />
             seconds between turns
           </label>

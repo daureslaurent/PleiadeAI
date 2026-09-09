@@ -84,7 +84,7 @@ export function TelegramPanel() {
         <button
           onClick={() => (editing ? setEditing(false) : void openEditor())}
           title="Configure"
-          className={`rounded-md p-1 transition-colors hover:bg-white/[0.06] ${
+          className={`rounded-md p-1 transition-colors hover:raise-2 ${
             editing ? 'text-accent' : 'text-slate-500 hover:text-slate-200'
           }`}
         >
@@ -108,7 +108,7 @@ export function TelegramPanel() {
       </div>
 
       {editing && (
-        <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
+        <div className="mt-3 space-y-3 border-t hairline pt-3">
           <Field
             label="Bot token"
             hint={<>Create a bot with <span className="font-mono">@BotFather</span> and paste its token.</>}

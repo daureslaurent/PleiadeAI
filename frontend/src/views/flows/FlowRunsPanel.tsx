@@ -54,7 +54,7 @@ export function FlowRunsPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+      <div className="flex items-center gap-2 border-b hairline px-3 py-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Runs</span>
         <Button variant="ghost" icon={<RefreshCw size={12} />} onClick={reload} className="ml-auto !px-2 !py-1">
           {''}
@@ -73,7 +73,7 @@ export function FlowRunsPanel({
                 key={run.id}
                 onClick={() => onSelect(run.id)}
                 className={`mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors ${
-                  active ? 'bg-accent/15 shadow-[inset_2px_0_0_0_rgba(59,130,246,0.7)]' : 'hover:bg-white/[0.05]'
+                  active ? 'bg-accent/15 shadow-[inset_2px_0_0_0_rgb(var(--c-accent)/0.7)]' : 'hover:raise-2'
                 }`}
               >
                 <Icon size={12} className="shrink-0 text-slate-600" />

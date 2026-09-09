@@ -2,11 +2,13 @@ import { memo, useState, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Check, Copy } from 'lucide-react';
 import { MermaidBlock } from './Mermaid';
 import { MENTION_SCHEME, MentionChip, mentionName } from './Mention';
 import { linkifyThreadIds, THREAD_SCHEME, ThreadRefChip, threadRefId } from './ThreadRef';
+import { usePrefs } from '../store/prefs';
+import { themeById } from '../theme/themes';
 
 /**
  * Keep our own link schemes intact.
@@ -34,6 +36,10 @@ function childrenToText(children: ReactNode): string {
 
 function CodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false);
+  // Prism ships its palette as a JS object, not CSS, so the code block picks a stylesheet from the
+  // theme's mode rather than reading a variable. The background is overridden to transparent below
+  // either way, so only the token colours actually come from here.
+  const prismStyle = themeById(usePrefs((s) => s.theme)).mode === 'light' ? oneLight : oneDark;
 
   function copy() {
     void navigator.clipboard.writeText(code).then(() => {
@@ -43,7 +49,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   }
 
   return (
-    <div className="group relative my-2 min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-[#0d1117]">
+    <div className="group relative my-2 min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-panel">
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-wide text-slate-500">
           {language || 'text'}
@@ -58,7 +64,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
       </div>
       <SyntaxHighlighter
         language={language || 'text'}
-        style={oneDark}
+        style={prismStyle}
         customStyle={{
           margin: 0,
           background: 'transparent',
@@ -153,7 +159,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
   // site: they need the roster of known names, which only the board has.
   const source = linkifyThreadIds(children);
   return (
-    <div className="min-w-0 max-w-full break-words text-sm [overflow-wrap:anywhere]">
+    <div className="min-w-0 max-w-full break-words font-prose text-sm leading-[var(--prose-leading)] [overflow-wrap:anywhere]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
         {source}
       </ReactMarkdown>

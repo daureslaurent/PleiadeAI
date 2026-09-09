@@ -90,7 +90,7 @@ export function MailAccountsManager() {
       <button
         onClick={() => void connect()}
         disabled={connecting}
-        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2 text-xs text-slate-400 transition-colors hover:border-white/25 hover:text-slate-200 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed hairline-strong py-2 text-xs text-slate-400 transition-colors hover:hairline-strong hover:text-slate-200 disabled:opacity-50"
       >
         <Plus size={14} /> {connecting ? 'Opening Google consent…' : 'Connect a Google account'}
       </button>

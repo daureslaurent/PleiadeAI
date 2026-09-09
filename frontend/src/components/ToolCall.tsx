@@ -5,11 +5,31 @@ import { useStream } from '../store/stream';
 import { resourcesApi } from '../lib/api';
 import { describeTool, visualActDetail } from '../lib/toolSummary';
 import { useStickyScroll } from '../hooks/useStickyScroll';
+import { useChatLayout } from './workspace/ChatLayoutContext';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
 
-/** Renders one tool invocation inline. bash → terminal; visual_screenshot → vision card; else card. */
+/**
+ * Renders one tool invocation inline.
+ *
+ * The *card* is the full treatment: bash → terminal pane, `visual_act` → marked screenshot,
+ * `generate_image` → media player, everything else → a summary card. The chat layout decides how
+ * much of that reaches the reading flow (THEME_SYSTEM_PLAN.md §3): a compact layout shows a row or
+ * a chip that expands into the very same card, and the Workbench moves tools out of the flow
+ * entirely because its trace column already carries them. Every variant below is written once and
+ * reused by all five.
+ */
 export function ToolCall({ block }: { block: ToolBlock }) {
+  const { toolStyle } = useChatLayout();
+  // The trace column owns them — leaving the card here as well would print each call twice.
+  if (toolStyle === 'none') return null;
+  if (toolStyle === 'row') return <ToolRow block={block} />;
+  if (toolStyle === 'chip') return <ToolChip block={block} />;
+  return <ToolCard block={block} />;
+}
+
+/** The full inline card, whichever variant this tool calls for. */
+function ToolCard({ block }: { block: ToolBlock }) {
   // Still being written by the model — no arguments to shape a real card from yet.
   if (block.status === 'drafting') return <DraftingBlock block={block} />;
   if (block.tool === 'bash') return <BashBlock block={block} />;
@@ -19,6 +39,77 @@ export function ToolCall({ block }: { block: ToolBlock }) {
     return <VisionBlock block={block} />;
   if (MEDIA_TOOLS.has(block.tool) || block.mediaGen) return <MediaGenBlock block={block} />;
   return <GenericToolBlock block={block} />;
+}
+
+/**
+ * One line per call: a rail, the tool's name, `describeTool`'s at-a-glance value, a status glyph.
+ * Clicking it drops the full card in underneath — the summary is a *lead*, never a replacement, so
+ * nothing the card would have shown becomes unreachable.
+ */
+function ToolRow({ block }: { block: ToolBlock }) {
+  const [open, setOpen] = useState(false);
+  const { Icon, value, title, hint } = describeTool(block.tool, block.args ?? {}, block.result, block.status);
+  const running = block.status === 'running' || block.status === 'drafting';
+  return (
+    <div className="my-0.5">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="group flex w-full items-center gap-2 rounded-md py-0.5 pl-1 pr-2 text-left text-xs transition-colors hover:raise-1"
+      >
+        <ChevronRight
+          size={12}
+          className={`shrink-0 text-slate-600 transition-transform ${open ? 'rotate-90' : ''}`}
+        />
+        <Icon size={12} className="shrink-0 text-accent" />
+        <span className="shrink-0 font-mono text-[11px] text-slate-300">{block.tool}</span>
+        {value && (
+          <span title={title ?? value} className="min-w-0 truncate font-mono text-[11px] text-slate-500">
+            {value}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {hint && <span className="text-[10px] text-slate-600">{hint}</span>}
+          {running ? (
+            <Loader2 size={11} className="animate-spin text-slate-500" />
+          ) : block.status === 'error' ? (
+            <X size={11} className="text-red-400" />
+          ) : (
+            <Check size={11} className="text-emerald-400/70" />
+          )}
+        </span>
+      </button>
+      {open && <ToolCard block={block} />}
+    </div>
+  );
+}
+
+/** An inline pill for the densest layouts. Same contract as the row: it opens into the full card. */
+function ToolChip({ block }: { block: ToolBlock }) {
+  const [open, setOpen] = useState(false);
+  const { Icon, value, title } = describeTool(block.tool, block.args ?? {}, block.result, block.status);
+  const running = block.status === 'running' || block.status === 'drafting';
+  return (
+    <>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title={title ?? block.tool}
+        className={`my-0.5 mr-1 inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 align-middle text-[10px] transition-colors ${
+          block.status === 'error'
+            ? 'border-red-500/30 bg-red-500/10 text-red-300'
+            : 'hairline raise-1 text-slate-400 hover:hairline-strong'
+        }`}
+      >
+        {running ? (
+          <Loader2 size={10} className="shrink-0 animate-spin" />
+        ) : (
+          <Icon size={10} className="shrink-0 text-accent" />
+        )}
+        <span className="font-mono">{block.tool}</span>
+        {value && <span className="min-w-0 truncate text-slate-500">{value}</span>}
+      </button>
+      {open && <ToolCard block={block} />}
+    </>
+  );
 }
 
 /**
@@ -45,7 +136,7 @@ function DraftingBlock({ block }: { block: ToolBlock }) {
         <pre
           ref={scrollRef}
           onScroll={onScroll}
-          className="max-h-40 overflow-auto whitespace-pre-wrap break-all border-t border-white/[0.06] px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-400"
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-all border-t hairline px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-400"
         >
           {args}
         </pre>
@@ -68,11 +159,11 @@ function VisualActBlock({ block }: { block: ToolBlock }) {
   const isDrag = v?.x2 != null && v?.y2 != null;
 
   return (
-    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border hairline raise-1 text-xs backdrop-blur-sm transition-shadow hover:hairline-strong">
       <div className="flex items-center gap-2 px-3 py-1.5">
         <MousePointerClick size={13} className="shrink-0 text-accent" />
         <span className="font-medium text-slate-200">{block.tool}</span>
-        <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+        <span className="rounded well px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
           {action}
         </span>
         {detail && (
@@ -86,7 +177,7 @@ function VisualActBlock({ block }: { block: ToolBlock }) {
         </span>
       </div>
 
-      <div className="space-y-2 border-t border-white/[0.06] p-3">
+      <div className="space-y-2 border-t hairline p-3">
         {v?.image ? (
           <button onClick={() => setZoom((z) => !z)} className="block" title="Click to zoom">
             <span className="relative inline-block">
@@ -146,7 +237,7 @@ function ActMarker({ cx, cy, r, color = '#f43f5e' }: { cx: number; cy: number; r
 function OcrChip({ snap }: { snap: { text: string; x: number; y: number } }) {
   return (
     <span
-      className="flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+      className="flex items-center gap-1 rounded well px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
       title={`Snapped to OCR text "${snap.text}" at (${snap.x}, ${snap.y})`}
     >
       <Magnet size={10} className="text-accent" />
@@ -172,10 +263,10 @@ function BashBlock({ block }: { block: ToolBlock }) {
       : undefined;
 
   return (
-    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-black/40 font-mono text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border hairline well-strong font-mono text-xs backdrop-blur-sm transition-shadow hover:hairline-strong">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/5"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:raise-2"
       >
         <ChevronRight
           size={13}
@@ -193,7 +284,7 @@ function BashBlock({ block }: { block: ToolBlock }) {
         </span>
       </button>
       {(open || block.status === 'running') && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-white/[0.06] px-3 py-2 text-slate-300">
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t hairline px-3 py-2 text-slate-300">
           {block.output || (block.status === 'running' ? '…' : '(no output)')}
         </pre>
       )}
@@ -218,12 +309,12 @@ function VisionBlock({ block }: { block: ToolBlock }) {
   const image = v?.image ?? block.images?.[0]?.dataUrl;
 
   return (
-    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border hairline raise-1 text-xs backdrop-blur-sm transition-shadow hover:hairline-strong">
       <div className="flex items-center gap-2 px-3 py-1.5">
         <Eye size={13} className="shrink-0 text-accent" />
         <span className="font-medium text-slate-200">{block.tool}</span>
         {v?.model && (
-          <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+          <span className="rounded well px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
             {v.model}
           </span>
         )}
@@ -233,7 +324,7 @@ function VisionBlock({ block }: { block: ToolBlock }) {
         </span>
       </div>
 
-      <div className="space-y-2 border-t border-white/[0.06] p-3">
+      <div className="space-y-2 border-t hairline p-3">
         {question && (
           <div className="text-slate-300">
             <span className="text-slate-500">Q: </span>
@@ -318,7 +409,7 @@ function ProgressBar({ progress }: { progress: NonNullable<ToolBlock['progress']
           className="block max-h-52 rounded border border-border object-contain"
         />
       )}
-      <div className="h-1.5 overflow-hidden rounded-full bg-black/30">
+      <div className="h-1.5 overflow-hidden rounded-full well-strong">
         <div
           className="h-full rounded-full bg-accent transition-[width] duration-500 ease-out"
           style={{ width: `${percent}%` }}
@@ -432,12 +523,12 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
   ].filter(Boolean) as string[];
 
   return (
-    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border hairline raise-1 text-xs backdrop-blur-sm transition-shadow hover:hairline-strong">
       <div className="flex items-center gap-2 px-3 py-1.5">
         <Icon size={13} className="shrink-0 text-accent" />
         <span className="font-medium text-slate-200">{block.tool}</span>
         {workflow && (
-          <span className="truncate rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+          <span className="truncate rounded well px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
             {workflow}
           </span>
         )}
@@ -457,7 +548,7 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
         </span>
       </div>
 
-      <div className="space-y-2 border-t border-white/[0.06] p-3">
+      <div className="space-y-2 border-t hairline p-3">
         {(models.length > 0 || vram) && (
           <div className="flex flex-wrap items-center gap-1">
             {models.slice(0, 3).map((m) => (
@@ -472,7 +563,7 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
             {/* Free VRAM at submit is the number that predicts an out-of-memory failure on a box
                 whose GPU is shared with the inference server. */}
             {vram && (
-              <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
+              <span className="rounded well px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
                 {vram}
               </span>
             )}
@@ -493,7 +584,7 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
         {meta.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {meta.map((m) => (
-              <span key={m} className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+              <span key={m} className="rounded well px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
                 {m}
               </span>
             ))}
@@ -518,7 +609,7 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
                     className={`block rounded border border-border object-contain ${zoom === i ? 'w-full' : 'max-h-52'}`}
                   />
                   {img.id && (
-                    <span className="absolute bottom-0 left-0 right-0 rounded-b bg-black/60 px-1 py-px text-center text-[9px] font-mono text-slate-200">
+                    <span className="absolute bottom-0 left-0 right-0 rounded-b bg-scrim/60 px-1 py-px text-center text-[9px] font-mono text-slate-200">
                       {img.id}
                     </span>
                   )}
@@ -569,10 +660,10 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
         : 'Response truncated to fit the token budget'
       : null;
   return (
-    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.03] text-xs backdrop-blur-sm transition-shadow hover:border-white/[0.12]">
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border hairline raise-1 text-xs backdrop-blur-sm transition-shadow hover:hairline-strong">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/5"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:raise-2"
       >
         <ChevronRight
           size={13}
@@ -583,7 +674,7 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
         {value && (
           <span
             title={title ?? value}
-            className="min-w-0 truncate rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+            className="min-w-0 truncate rounded well px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
           >
             {value}
           </span>
@@ -599,7 +690,7 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
         </span>
       </button>
       {block.images && block.images.length > 0 && (
-        <div className="flex flex-wrap gap-2 border-t border-white/[0.06] px-3 py-2">
+        <div className="flex flex-wrap gap-2 border-t hairline px-3 py-2">
           {block.images.map((img, i) => (
             <a
               key={img.id ?? i}
@@ -615,7 +706,7 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
                 className="h-16 w-16 rounded border border-border object-cover"
               />
               {img.id && (
-                <span className="absolute bottom-0 left-0 right-0 rounded-b bg-black/60 px-1 py-px text-center text-[9px] font-mono text-slate-200">
+                <span className="absolute bottom-0 left-0 right-0 rounded-b bg-scrim/60 px-1 py-px text-center text-[9px] font-mono text-slate-200">
                   {img.id}
                 </span>
               )}
@@ -624,7 +715,7 @@ function GenericToolBlock({ block }: { block: ToolBlock }) {
         </div>
       )}
       {open && (
-        <div className="space-y-2 border-t border-white/[0.06] px-3 py-2 font-mono">
+        <div className="space-y-2 border-t hairline px-3 py-2 font-mono">
           <div>
             <div className="mb-0.5 text-[10px] uppercase text-slate-500">args</div>
             <pre className="whitespace-pre-wrap text-slate-300">

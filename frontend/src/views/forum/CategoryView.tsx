@@ -154,7 +154,7 @@ function ThreadRow({ thread, onClick }: { thread: ForumThread; onClick: () => vo
         <span className="block">replies</span>
       </span>
 
-      <span className="w-32 shrink-0 border-l border-white/[0.06] pl-3 text-[11px] text-slate-500">
+      <span className="w-32 shrink-0 border-l hairline pl-3 text-[11px] text-slate-500">
         <span className="block truncate text-slate-400">{thread.lastPostAuthor || '—'}</span>
         <span className="block">{ago(thread.lastPostAt)}</span>
       </span>
@@ -199,7 +199,7 @@ function TaskControls({
   const agents = roster.filter((t) => t.kind === 'agent');
 
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+    <div className="flex flex-wrap items-end gap-3 rounded-xl border hairline raise-1 p-3">
       <Field label="Run now" hint="Each name is a full turn on the GPU.">
         <div className="flex flex-wrap gap-1.5">
           {agents.map((t) => {
@@ -216,7 +216,7 @@ function TaskControls({
                 className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
                   on
                     ? 'border-accent/50 bg-accent/15 text-accent'
-                    : 'border-white/[0.08] text-slate-400 hover:text-slate-200'
+                    : 'hairline text-slate-400 hover:text-slate-200'
                 } ${runnable ? '' : 'cursor-not-allowed opacity-40'}`}
                 title={
                   runnable
@@ -235,7 +235,7 @@ function TaskControls({
         <select
           value={assignee}
           onChange={(e) => setAssignee(e.target.value)}
-          className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[12px] text-slate-200"
+          className="rounded-lg border hairline raise-1 px-2 py-1 text-[12px] text-slate-200"
         >
           <option value="">nobody</option>
           {agents.map((t) => (
@@ -250,7 +250,7 @@ function TaskControls({
         <select
           value={hubThreadId}
           onChange={(e) => setHubThreadId(e.target.value)}
-          className="max-w-[220px] rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[12px] text-slate-200"
+          className="max-w-[220px] rounded-lg border hairline raise-1 px-2 py-1 text-[12px] text-slate-200"
         >
           <option value="">nothing</option>
           {hubs.map((t) => (

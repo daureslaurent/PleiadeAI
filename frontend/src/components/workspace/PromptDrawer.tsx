@@ -21,7 +21,7 @@ const ROLE_TINT: Record<string, { text: string; ring: string; bar: string }> = {
   assistant: { text: 'text-emerald-300', ring: 'ring-emerald-500/20', bar: 'bg-emerald-300' },
   tool: { text: 'text-reasoning', ring: 'ring-purple-500/20', bar: 'bg-reasoning' },
 };
-const DEFAULT_TINT = { text: 'text-slate-300', ring: 'ring-white/10', bar: 'bg-slate-400' };
+const DEFAULT_TINT = { text: 'text-slate-300', ring: 'ring-hairline-strong', bar: 'bg-slate-400' };
 
 /** Flatten a captured message's content to displayable text (image parts arrive as placeholders). */
 function contentText(msg: CapturedMessage): string {
@@ -53,7 +53,7 @@ function MessageCard({
   const calls = msg.tool_calls ?? [];
 
   return (
-    <div className={`rounded-xl bg-black/25 ring-1 backdrop-blur-sm ${tint.ring}`}>
+    <div className={`rounded-xl well ring-1 backdrop-blur-sm ${tint.ring}`}>
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
@@ -73,14 +73,14 @@ function MessageCard({
               (calls.length ? calls.map((c) => `${c.function.name}()`).join(' ') : '—')}
           </span>
         )}
-        <span className="ml-auto shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+        <span className="ml-auto shrink-0 rounded raise-2 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
           {tokens === null ? `#${index}` : `${tokens.toLocaleString()} tok`}
         </span>
       </button>
 
       {/* Share-of-context bar: the whole point of the view — which message is eating the window. */}
       {tokens !== null && share > 0 && (
-        <div className="mx-3 h-0.5 overflow-hidden rounded-full bg-white/[0.06]">
+        <div className="mx-3 h-0.5 overflow-hidden rounded-full raise-2">
           <div
             className={`h-full ${tint.bar}`}
             style={{ width: `${Math.min(100, share * 100)}%` }}
@@ -99,7 +99,7 @@ function MessageCard({
             </pre>
           )}
           {calls.map((c) => (
-            <div key={c.id} className="mt-1.5 rounded-lg bg-white/[0.03] px-2 py-1.5">
+            <div key={c.id} className="mt-1.5 rounded-lg raise-1 px-2 py-1.5">
               <div className="font-mono text-[11px] text-emerald-300">{c.function.name}</div>
               <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-slate-500">
                 {c.function.arguments}
@@ -210,14 +210,14 @@ export function PromptDrawer({ onClose, sessionId, agent }: Props) {
 
   return (
     <aside className="glass flex w-[26rem] shrink-0 flex-col border-l">
-      <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+      <div className="flex items-center gap-2 border-b hairline px-3 py-2">
         <ScrollText size={14} className="text-accent" />
         <span className="text-xs font-medium text-slate-200">Prompt</span>
         <span className="text-[10px] text-slate-500">as sent to the model</span>
         <button
           onClick={() => void load()}
           title="Refresh"
-          className="ml-auto rounded p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+          className="ml-auto rounded p-1 text-slate-500 transition-colors hover:raise-2 hover:text-slate-300"
         >
           <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -225,14 +225,14 @@ export function PromptDrawer({ onClose, sessionId, agent }: Props) {
           onClick={() => setRaw((r) => !r)}
           title="Raw request JSON"
           className={`rounded p-1 transition-colors ${
-            raw ? 'bg-accent/15 text-accent' : 'text-slate-500 hover:bg-white/[0.06] hover:text-slate-300'
+            raw ? 'bg-accent/15 text-accent' : 'text-slate-500 hover:raise-2 hover:text-slate-300'
           }`}
         >
           <FileJson size={13} />
         </button>
         <button
           onClick={onClose}
-          className="rounded p-1 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+          className="rounded p-1 text-slate-500 transition-colors hover:raise-2 hover:text-slate-300"
         >
           <X size={13} />
         </button>
@@ -240,7 +240,7 @@ export function PromptDrawer({ onClose, sessionId, agent }: Props) {
 
       {/* Pass picker — every inference call of the session, oldest first. */}
       {calls.length > 0 && (
-        <div className="flex gap-1 overflow-x-auto border-b border-white/[0.06] px-2 py-1.5">
+        <div className="flex gap-1 overflow-x-auto border-b hairline px-2 py-1.5">
           {calls.map((c, i) => (
             <button
               key={c.id}
@@ -249,7 +249,7 @@ export function PromptDrawer({ onClose, sessionId, agent }: Props) {
               className={`shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] transition-colors ${
                 c.id === selected
                   ? 'bg-accent/15 text-accent'
-                  : 'text-slate-500 hover:bg-white/[0.06] hover:text-slate-300'
+                  : 'text-slate-500 hover:raise-2 hover:text-slate-300'
               }`}
             >
               t{labels[i]?.turn}·p{labels[i]?.pass}
@@ -271,7 +271,7 @@ export function PromptDrawer({ onClose, sessionId, agent }: Props) {
       ) : (
         <>
           {/* Call summary: model, message count, and the context bill. */}
-          <div className="border-b border-white/[0.06] px-3 py-2">
+          <div className="border-b hairline px-3 py-2">
             <div className="flex items-center gap-2 font-mono text-[10px] text-slate-500">
               <span className="truncate text-slate-400">{call.model}</span>
               <span>·</span>
@@ -291,7 +291,7 @@ export function PromptDrawer({ onClose, sessionId, agent }: Props) {
               </span>
             </div>
             {window > 0 && total !== null && (
-              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full raise-2">
                 <div
                   className={`h-full ${total / window > 0.8 ? 'bg-red-400' : total / window > 0.5 ? 'bg-amber-400' : 'bg-accent'}`}
                   style={{ width: `${Math.min(100, (total / window) * 100)}%` }}

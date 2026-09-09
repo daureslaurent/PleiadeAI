@@ -82,7 +82,7 @@ export function ResourceInput({
         className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-3 text-xs transition-colors ${
           dragging
             ? 'border-accent/60 bg-accent/[0.08] text-accent'
-            : 'border-white/[0.12] text-slate-500 hover:border-accent/50 hover:text-accent'
+            : 'hairline-strong text-slate-500 hover:border-accent/50 hover:text-accent'
         }`}
       >
         {busy ? (
@@ -146,7 +146,7 @@ export function ResourceInput({
                 key={f.handle}
                 onClick={() => onChange(f.handle)}
                 className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left transition-colors ${
-                  f.handle === value ? 'bg-accent/15 text-accent' : 'hover:bg-white/[0.05] hover:text-slate-300'
+                  f.handle === value ? 'bg-accent/15 text-accent' : 'hover:raise-2 hover:text-slate-300'
                 }`}
               >
                 <span className="font-mono">{f.handle}</span>

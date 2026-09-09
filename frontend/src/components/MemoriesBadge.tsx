@@ -61,7 +61,7 @@ function MemoryItem({ memory }: { memory: RecalledMemory }) {
   return (
     <button
       onClick={() => setOpen((o) => !o)}
-      className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] p-2 text-left transition-colors hover:border-white/[0.12] hover:bg-white/[0.05]"
+      className="w-full rounded-xl border hairline raise-1 p-2 text-left transition-colors hover:hairline-strong hover:raise-2"
     >
       <div className="mb-1 flex items-center gap-2 text-[10px]">
         {kind && (
@@ -73,7 +73,7 @@ function MemoryItem({ memory }: { memory: RecalledMemory }) {
           </span>
         )}
         <span
-          className="rounded bg-white/[0.06] px-1 py-px font-mono uppercase tracking-wide text-slate-500"
+          className="rounded raise-2 px-1 py-px font-mono uppercase tracking-wide text-slate-500"
           title={`How this memory was written (${memory.source ?? 'unknown'})`}
         >
           {sourceLabel(memory.source)}
@@ -84,7 +84,7 @@ function MemoryItem({ memory }: { memory: RecalledMemory }) {
             memory.importance ? ` · importance ${memory.importance}/5` : ''
           }`}
         >
-          <span className="h-1 w-10 overflow-hidden rounded-full bg-white/[0.06]">
+          <span className="h-1 w-10 overflow-hidden rounded-full raise-2">
             <span
               className={`block h-full rounded-full ${weak ? 'bg-slate-600' : 'bg-reasoning'}`}
               style={{ width: `${pct}%` }}

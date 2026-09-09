@@ -38,7 +38,7 @@ export function Meter({
         </div>
       )}
       <div
-        className={`w-full overflow-hidden rounded-full bg-black/40 ${thin ? 'h-1' : 'h-1.5'}`}
+        className={`w-full overflow-hidden rounded-full well-strong ${thin ? 'h-1' : 'h-1.5'}`}
         role="meter"
         aria-valuenow={value ?? undefined}
         aria-valuemin={0}
@@ -80,17 +80,17 @@ export function Sparkline({
 }) {
   const gradientId = useId();
   const stroke = {
-    ok: '#34d399',
-    warn: '#f59e0b',
-    critical: '#ef4444',
-    idle: '#64748b',
+    ok: 'rgb(var(--c-emerald-400))',
+    warn: 'rgb(var(--c-amber-500))',
+    critical: 'rgb(var(--c-red-500))',
+    idle: 'rgb(var(--c-slate-500))',
   }[tone];
 
   if (points.length < 2) {
     return (
       <div
         style={{ height }}
-        className="flex items-center justify-center rounded-lg bg-black/20 text-[10px] text-slate-600"
+        className="flex items-center justify-center rounded-lg well text-[10px] text-slate-600"
       >
         collecting…
       </div>
@@ -122,7 +122,7 @@ export function Sparkline({
     <svg
       viewBox={`0 0 100 ${height}`}
       preserveAspectRatio="none"
-      className="w-full overflow-visible rounded-lg bg-black/20"
+      className="w-full overflow-visible rounded-lg well"
       style={{ height }}
       aria-hidden
     >

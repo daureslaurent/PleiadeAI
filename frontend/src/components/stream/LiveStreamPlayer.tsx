@@ -15,7 +15,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { API_BASE, streamsApi, type StreamSession } from '../../lib/api';
-import { agentColor } from '../../lib/agentColor';
+import { agentColor, agentGlow } from '../../lib/agentColor';
 import { useLiveStream } from './useLiveStream';
 import { StreamVisualizer } from './StreamVisualizer';
 
@@ -50,7 +50,7 @@ export function LiveStreamPlayer({ flowId, onStopped }: Props) {
 
   const kind = session?.kind ?? 'audio';
   const identity = useMemo(() => agentColor(session?.flowName ?? 'stream'), [session?.flowName]);
-  const glow = { '--glow': `${identity.accent}44` } as CSSProperties;
+  const glow = { '--glow': agentGlow(session?.flowName ?? 'stream', 0.27) } as CSSProperties;
 
   // The URL already carries its signed token (a media fetch can't send headers), so it is used
   // verbatim; only the API origin is prepended.
@@ -142,14 +142,14 @@ export function LiveStreamPlayer({ flowId, onStopped }: Props) {
     <div ref={shellRef} className="animate-fade-up flex h-full min-h-0 flex-col gap-3 p-4">
       {/* ---------------------------------------------------------------- surface */}
       <div
-        className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/[0.07] bg-black/40"
+        className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border hairline well-strong"
         style={glow}
       >
         {kind === 'video' ? (
           <video
             ref={setMedia}
             playsInline
-            className="h-full w-full bg-black object-contain"
+            className="h-full w-full bg-scrim object-contain"
           />
         ) : (
           <>
@@ -173,10 +173,10 @@ export function LiveStreamPlayer({ flowId, onStopped }: Props) {
         {!tunedIn && (
           <button
             onClick={tuneIn}
-            className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-sm transition-colors hover:bg-black/30"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-3 well-strong backdrop-blur-sm transition-colors hover:well-strong"
           >
             <span
-              className="animate-glow-pulse flex h-16 w-16 items-center justify-center rounded-full border border-white/20 bg-white/[0.06]"
+              className="animate-glow-pulse flex h-16 w-16 items-center justify-center rounded-full border hairline-strong raise-2"
               style={glow}
             >
               <Play size={26} className="ml-1 text-slate-100" />
@@ -186,8 +186,8 @@ export function LiveStreamPlayer({ flowId, onStopped }: Props) {
         )}
 
         {connecting && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-            <div className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-xs text-slate-300 backdrop-blur-sm">
+          <div className="absolute inset-0 flex items-center justify-center well-strong">
+            <div className="flex items-center gap-2 rounded-full bg-scrim/50 px-4 py-2 text-xs text-slate-300 backdrop-blur-sm">
               <Loader2 size={13} className="animate-spin" />
               <span className="text-shimmer">Connecting to the flux…</span>
             </div>
@@ -234,7 +234,7 @@ export function LiveStreamPlayer({ flowId, onStopped }: Props) {
               value={volume}
               onChange={(e) => setVolume(Number(e.target.value))}
               aria-label="Volume"
-              className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/10 accent-slate-300"
+              className="h-1 w-20 cursor-pointer appearance-none rounded-full raise-3 accent-slate-300"
             />
             <IconButton label={copied ? 'Copied' : 'Copy stream URL'} onClick={() => void copyUrl()}>
               {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
@@ -269,13 +269,13 @@ export function LiveStreamPlayer({ flowId, onStopped }: Props) {
         )}
 
         {session.recent.length > 0 && (
-          <div className="mt-3 border-t border-white/[0.06] pt-2">
+          <div className="mt-3 border-t hairline pt-2">
             <div className="mb-1.5 text-[10px] uppercase tracking-[0.16em] text-slate-500">Recently aired</div>
             <div className="flex gap-2 overflow-x-auto pb-1">
               {session.recent.map((clip) => (
                 <div
                   key={`${clip.id}-${clip.airedAt ?? ''}`}
-                  className="shrink-0 rounded-xl border border-white/[0.06] bg-black/25 px-3 py-1.5"
+                  className="shrink-0 rounded-xl border hairline well px-3 py-1.5"
                   title={clip.replays > 0 ? `re-aired ${clip.replays}×` : undefined}
                 >
                   <div className="max-w-[16rem] truncate text-[11px] text-slate-300">{clip.title}</div>
@@ -308,7 +308,7 @@ function LivePill({ starved, behind, playing }: { starved: boolean; behind: bool
         : { dot: 'bg-emerald-400', text: 'text-emerald-300', label: 'LIVE', glow: 'rgba(52,211,153,0.45)' };
   return (
     <span
-      className={`pointer-events-none flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 backdrop-blur-sm ${playing ? 'animate-glow-pulse' : ''}`}
+      className={`pointer-events-none flex items-center gap-1.5 rounded-full bg-scrim/50 px-2.5 py-1 backdrop-blur-sm ${playing ? 'animate-glow-pulse' : ''}`}
       style={{ '--glow': tone.glow } as CSSProperties}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
@@ -336,7 +336,7 @@ function BufferMeter({
   const fill = Math.min(100, (bufferedSec / 60) * 100);
   return (
     <div className="flex items-center gap-2" title={`${aheadSec.toFixed(0)}s decoded ahead of the playhead`}>
-      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-white/10">
+      <div className="h-1.5 w-24 overflow-hidden rounded-full raise-3">
         <div
           className="h-full rounded-full transition-[width] duration-500"
           style={{ width: `${fill}%`, background: accent }}
@@ -367,7 +367,7 @@ function IconButton({
         ? 'text-amber-400 hover:bg-amber-500/15'
         : tone === 'emerald'
           ? 'text-emerald-400 hover:bg-emerald-500/15'
-          : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200';
+          : 'text-slate-400 hover:raise-2 hover:text-slate-200';
   return (
     <button
       onClick={onClick}

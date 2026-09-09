@@ -21,8 +21,8 @@ export function VisualDesktopWindow() {
   }, [agentName]);
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-[#0b0f19]">
-      <div className="flex items-center gap-2 border-b border-slate-800 bg-panel px-3 py-2">
+    <div className="flex h-screen w-screen flex-col bg-panel">
+      <div className="flex items-center gap-2 border-b border-border bg-panel px-3 py-2">
         <Monitor size={15} className="text-reasoning" />
         <span className="text-sm font-medium text-slate-200">{agentName} · Desktop</span>
         <StatusPill status={status} />
@@ -34,7 +34,7 @@ export function VisualDesktopWindow() {
             title={takeover ? 'Release control (view only)' : 'Take control (mouse & keyboard)'}
             className={[
               'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors disabled:opacity-40',
-              takeover ? 'bg-emerald-500/15 text-emerald-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
+              takeover ? 'bg-emerald-500/15 text-emerald-400' : 'text-slate-400 hover:bg-panel hover:text-slate-200',
             ].join(' ')}
           >
             {takeover ? <Hand size={14} /> : <Eye size={14} />}
@@ -44,7 +44,7 @@ export function VisualDesktopWindow() {
             onClick={sendCtrlAltDel}
             disabled={status !== 'connected' || !takeover}
             title="Send Ctrl+Alt+Del"
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-panel hover:text-slate-200 disabled:opacity-40"
           >
             <Keyboard size={14} /> Ctrl+Alt+Del
           </button>
@@ -68,7 +68,7 @@ export function VisualDesktopWindow() {
             </p>
             <button
               onClick={reconnect}
-              className="flex items-center gap-1.5 rounded-md bg-slate-800 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-slate-700"
+              className="flex items-center gap-1.5 rounded-md bg-panel px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface"
             >
               <RefreshCw size={14} /> Reconnect
             </button>
@@ -76,7 +76,7 @@ export function VisualDesktopWindow() {
         )}
       </div>
 
-      <div className="border-t border-slate-800 bg-panel px-3 py-1.5 text-[11px] text-slate-500">
+      <div className="border-t border-border bg-panel px-3 py-1.5 text-[11px] text-slate-500">
         {takeover
           ? 'You are driving. Clicks and keystrokes go to the agent’s desktop — release to let the agent work.'
           : 'View only — watching the agent. Take control to intervene.'}
@@ -98,7 +98,7 @@ function StatusPill({ status }: { status: VisualStatus }) {
 
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#0b0f19]/80 backdrop-blur-sm">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel/80 backdrop-blur-sm">
       {children}
     </div>
   );

@@ -380,7 +380,7 @@ export function MappingCanvas({
       {nodes.length > visible.length || showAll ? (
         <button
           onClick={() => setShowAll((v) => !v)}
-          className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg bg-black/40 px-2 py-1 text-[10px] text-slate-300 ring-1 ring-white/[0.08] backdrop-blur-sm transition-colors hover:bg-white/[0.08]"
+          className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-lg well-strong px-2 py-1 text-[10px] text-slate-300 ring-1 ring-hairline backdrop-blur-sm transition-colors hover:raise-3"
         >
           {showAll ? <EyeOff size={11} /> : <Eye size={11} />}
           {showAll ? 'Hide plumbing' : `Show all ${nodes.length} nodes`}

@@ -139,7 +139,7 @@ export function MonitorView() {
           <Link
             to="/settings/monitor"
             title="Configure monitored machines"
-            className="rounded-lg border border-white/[0.06] p-1.5 text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+            className="rounded-lg border hairline p-1.5 text-slate-400 transition-colors hover:raise-2 hover:text-slate-200"
           >
             <Settings2 size={14} />
           </Link>

@@ -76,10 +76,10 @@ function ConfirmDialog({ opts, onSettle }: { opts: ConfirmOptions; onSettle: (ok
       role="dialog"
       aria-modal="true"
       aria-label={opts.title}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/50 p-4 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && onSettle(false)}
     >
-      <div className="glass-card w-full max-w-md animate-fade-up rounded-2xl border border-white/[0.09] p-5">
+      <div className="glass-card w-full max-w-md animate-fade-up rounded-2xl border hairline p-5">
         <div className="flex items-start gap-3">
           {opts.danger && (
             <span className="mt-0.5 shrink-0 text-red-400">

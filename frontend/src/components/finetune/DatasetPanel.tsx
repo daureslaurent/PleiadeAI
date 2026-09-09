@@ -35,7 +35,7 @@ export function DatasetPanel({
 }) {
   if (error) {
     return (
-      <section className="glass-card animate-fade-up rounded-2xl border border-white/[0.06] p-5">
+      <section className="glass-card animate-fade-up rounded-2xl border hairline p-5">
         <div className="flex items-center gap-2 text-sm text-red-300">
           <AlertTriangle size={15} /> Failed to load dataset statistics.
         </div>
@@ -45,7 +45,7 @@ export function DatasetPanel({
 
   if (!stats) {
     return (
-      <section className="glass-card animate-fade-up flex items-center gap-2 rounded-2xl border border-white/[0.06] p-5 text-sm text-slate-500">
+      <section className="glass-card animate-fade-up flex items-center gap-2 rounded-2xl border hairline p-5 text-sm text-slate-500">
         <Loader2 size={14} className="animate-spin" /> Loading dataset…
       </section>
     );
@@ -55,7 +55,7 @@ export function DatasetPanel({
   const unscored = Math.max(0, stats.total_examples - scoredTotal);
 
   return (
-    <section className="glass-card animate-fade-up rounded-2xl border border-white/[0.06] p-5">
+    <section className="glass-card animate-fade-up rounded-2xl border hairline p-5">
       <header className="mb-4 flex items-center gap-3">
         <Database size={16} className="text-accent" />
         <div>
@@ -77,12 +77,12 @@ export function DatasetPanel({
         {/* Quality distribution */}
         <div>
           {scoredTotal === 0 ? (
-            <div className="rounded-xl border border-white/[0.06] bg-black/20 px-4 py-6 text-center text-xs text-slate-500">
+            <div className="rounded-xl border hairline well px-4 py-6 text-center text-xs text-slate-500">
               No runs scored yet — score some conversations to see the quality distribution.
             </div>
           ) : (
             <>
-              <div className="flex h-3 overflow-hidden rounded-full border border-white/[0.06] bg-black/30">
+              <div className="flex h-3 overflow-hidden rounded-full border hairline well-strong">
                 {TAGS.map((tag) => {
                   const n = stats.scored.byTag[tag] ?? 0;
                   if (!n) return null;
@@ -121,7 +121,7 @@ export function DatasetPanel({
       </div>
 
       {/* Filter = the training-set selector */}
-      <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-white/[0.06] pt-4">
+      <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3 border-t hairline pt-4">
         <label className="flex items-center gap-2.5">
           <span className="text-[10px] uppercase tracking-wider text-slate-500">Min score</span>
           <input
@@ -131,7 +131,7 @@ export function DatasetPanel({
             step={5}
             value={minScore}
             onChange={(e) => onMinScore(Number(e.target.value))}
-            className="h-1 w-32 cursor-pointer appearance-none rounded-full bg-white/[0.1] accent-accent"
+            className="h-1 w-32 cursor-pointer appearance-none rounded-full raise-3 accent-accent"
           />
           <span className="w-8 font-mono text-xs text-slate-200">{minScore}</span>
         </label>
@@ -146,8 +146,8 @@ export function DatasetPanel({
                 onClick={() => onToggleTag(tag)}
                 className={`rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
                   on
-                    ? `border-white/[0.12] bg-white/[0.06] ${TAG_COLOR[tag].text}`
-                    : 'border-white/[0.06] text-slate-500 hover:bg-white/[0.05]'
+                    ? `hairline-strong raise-2 ${TAG_COLOR[tag].text}`
+                    : 'hairline text-slate-500 hover:raise-2'
                 }`}
               >
                 {tag}

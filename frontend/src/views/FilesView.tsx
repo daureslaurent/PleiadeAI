@@ -94,7 +94,7 @@ export function FilesView() {
           </Hint>
           <div
             className={`rounded-2xl border border-dashed p-6 text-center transition-colors ${
-              dragging ? 'border-accent/60 bg-accent/[0.06]' : 'border-white/[0.12]'
+              dragging ? 'border-accent/60 bg-accent/[0.06]' : 'hairline-strong'
             }`}
             onDragOver={(e) => {
               e.preventDefault();
@@ -165,12 +165,12 @@ export function FilesView() {
         ) : files.length === 0 ? (
           <EmptyState>Nothing on the board yet. Drop a file above, or let an agent attach one.</EmptyState>
         ) : (
-          <div className="glass-card overflow-hidden rounded-2xl border border-white/[0.06]">
+          <div className="glass-card overflow-hidden rounded-2xl border hairline">
             {files.map((f) => (
               <div
                 key={f.id}
-                className={`flex cursor-pointer items-center gap-3 border-b border-white/[0.04] px-4 py-2.5 text-sm transition-colors last:border-b-0 hover:bg-white/[0.03] ${
-                  selected?.id === f.id ? 'bg-white/[0.04]' : ''
+                className={`flex cursor-pointer items-center gap-3 border-b hairline px-4 py-2.5 text-sm transition-colors last:border-b-0 hover:raise-1 ${
+                  selected?.id === f.id ? 'raise-1' : ''
                 }`}
                 onClick={() => setSelected(selected?.id === f.id ? null : f)}
               >
@@ -187,13 +187,13 @@ export function FilesView() {
                   href={forumApi.fileUrl(f.id, true)}
                   title="Download"
                   onClick={(e) => e.stopPropagation()}
-                  className="rounded-md p-1 text-slate-600 hover:bg-white/[0.06] hover:text-slate-300"
+                  className="rounded-md p-1 text-slate-600 hover:raise-2 hover:text-slate-300"
                 >
                   <Download size={13} />
                 </a>
                 <button
                   title="Delete from the registry"
-                  className="rounded-md p-1 text-slate-600 hover:bg-white/[0.06] hover:text-rose-400"
+                  className="rounded-md p-1 text-slate-600 hover:raise-2 hover:text-rose-400"
                   onClick={async (e) => {
                     e.stopPropagation();
                     const ok = await confirm({
@@ -235,7 +235,7 @@ export function FilesView() {
                   <Link
                     key={u.postId}
                     to={`/forum/t/${u.threadId}`}
-                    className="flex items-center gap-2 rounded-lg border border-white/[0.06] px-3 py-1.5 text-[11px] text-slate-400 transition-colors hover:border-white/[0.16] hover:text-slate-200"
+                    className="flex items-center gap-2 rounded-lg border hairline px-3 py-1.5 text-[11px] text-slate-400 transition-colors hover:hairline-strong hover:text-slate-200"
                   >
                     <ExternalLink size={11} />
                     <span className="min-w-0 flex-1 truncate">{u.threadTitle}</span>

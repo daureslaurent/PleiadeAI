@@ -51,7 +51,7 @@ export function useVisualDesktop(agentId: string) {
         rfb = new RFB(screenRef.current, visualApi.wsUrl(ws_path), { credentials: { password } });
         rfb.viewOnly = !takeover;
         rfb.scaleViewport = true;
-        rfb.background = '#0b0f19';
+        rfb.background = 'rgb(var(--c-panel))';
         rfb.addEventListener('connect', () => {
           if (!disposed) setStatus('connected');
         });

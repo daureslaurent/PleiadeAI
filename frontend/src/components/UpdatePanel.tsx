@@ -132,7 +132,7 @@ export function UpdatePanel({ enabled }: { enabled: boolean }) {
                 ? 'No update available'
                 : 'Pull latest and rebuild the stack'
           }
-          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-oncolor disabled:opacity-50"
         >
           <Download size={15} /> Update app
         </button>
@@ -273,11 +273,11 @@ function UpdateOverlay({ onClose }: { onClose: () => void }) {
       role="dialog"
       aria-modal="true"
       aria-label="Updating PleiadesAI"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 p-4 backdrop-blur-sm"
     >
-      <div className="glass-card flex max-h-[80vh] w-full max-w-2xl animate-fade-up flex-col rounded-2xl border border-white/[0.09]">
+      <div className="glass-card flex max-h-[80vh] w-full max-w-2xl animate-fade-up flex-col rounded-2xl border hairline">
         {/* Header: a live status dot that breathes in the phase's colour, per DIRECT_ART §6. */}
-        <header className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5">
+        <header className="flex items-center gap-3 border-b hairline px-5 py-3.5">
           <StatusDot phase={phase} />
           <h2 className={`text-sm font-semibold text-slate-100 ${live ? 'text-shimmer' : ''}`}>
             {HEADLINE[phase]}
@@ -301,13 +301,13 @@ function UpdateOverlay({ onClose }: { onClose: () => void }) {
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               No output for {Math.round(STALL_MS / 60_000)} minutes and the stack is still serving the
               old build — the host update likely failed. Check{' '}
-              <code className="rounded bg-black/30 px-1 font-mono">journalctl -u pleiades-update</code>.
+              <code className="rounded well-strong px-1 font-mono">journalctl -u pleiades-update</code>.
             </p>
           )}
           {/* Machine output → inset terminal well (DIRECT_ART §2, §7). */}
           <pre
             ref={preRef}
-            className="h-64 overflow-auto whitespace-pre-wrap rounded-xl border border-white/[0.06] bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-slate-300"
+            className="h-64 overflow-auto whitespace-pre-wrap rounded-xl border hairline well-strong p-3 font-mono text-[11px] leading-relaxed text-slate-300"
           >
             {logText || 'Starting…'}
           </pre>
@@ -319,7 +319,7 @@ function UpdateOverlay({ onClose }: { onClose: () => void }) {
         </div>
 
         {dismissable && (
-          <footer className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">
+          <footer className="flex justify-end gap-2 border-t hairline px-5 py-3">
             <Button variant="ghost" onClick={onClose}>
               Close
             </Button>
@@ -359,7 +359,7 @@ function StatusDot({ phase }: { phase: Phase }) {
   if (phase === 'error') return <AlertTriangle size={16} className="shrink-0 text-red-400" />;
   if (phase === 'stalled') return <AlertTriangle size={16} className="shrink-0 text-amber-400" />;
   if (phase === 'done') return <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />;
-  const color = phase === 'waiting' ? '#f59e0b' : '#3b82f6';
+  const color = phase === 'waiting' ? 'rgb(var(--c-amber-500))' : 'rgb(var(--c-accent))';
   return (
     <span
       className="h-2 w-2 shrink-0 animate-glow-pulse rounded-full"
@@ -374,7 +374,7 @@ function Step({ label, state }: { label: string; state: 'done' | 'active' | 'tod
       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400/90'
       : state === 'active'
         ? 'border-accent/40 bg-accent/15 text-accent'
-        : 'border-white/[0.06] bg-white/[0.03] text-slate-600';
+        : 'hairline raise-1 text-slate-600';
   return (
     <span
       className={`flex-1 rounded-full border px-2 py-1 text-center text-[10px] font-medium uppercase tracking-wide transition-colors ${style}`}

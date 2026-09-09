@@ -61,7 +61,7 @@ export function WorkflowRail({
     <aside className="glass flex w-72 shrink-0 flex-col border-r">
       <button
         onClick={onAdd}
-        className="m-2 flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/[0.12] py-2 text-sm text-slate-400 transition-colors hover:border-accent/50 hover:bg-accent/[0.06] hover:text-accent active:scale-95"
+        className="m-2 flex items-center justify-center gap-1.5 rounded-lg border border-dashed hairline-strong py-2 text-sm text-slate-400 transition-colors hover:border-accent/50 hover:bg-accent/[0.06] hover:text-accent active:scale-95"
       >
         <Plus size={15} /> Add workflow
       </button>
@@ -82,7 +82,7 @@ export function WorkflowRail({
               key={f}
               onClick={() => setFilter(f)}
               className={`rounded-full px-2 py-0.5 text-[10px] transition-colors ${
-                filter === f ? 'bg-accent/15 text-accent' : 'text-slate-500 hover:bg-white/[0.05]'
+                filter === f ? 'bg-accent/15 text-accent' : 'text-slate-500 hover:raise-2'
               }`}
             >
               {f === 'all' ? 'all' : f}
@@ -130,8 +130,8 @@ function WorkflowCard({
     <div
       className={`rounded-xl px-2.5 py-2 transition-colors ${
         active
-          ? 'bg-accent/15 shadow-[inset_2px_0_0_0_rgba(59,130,246,0.7)]'
-          : 'bg-black/20 hover:bg-white/[0.05]'
+          ? 'bg-accent/15 shadow-[inset_2px_0_0_0_rgb(var(--c-accent)/0.7)]'
+          : 'well hover:raise-2'
       } ${workflow.enabled ? '' : 'opacity-55'}`}
     >
       <div className="flex items-center gap-2">
@@ -161,7 +161,7 @@ function WorkflowCard({
       <div className="mt-1.5 flex items-center gap-1.5" title={
         workflow.unbound.length > 0 ? `Unbound: ${workflow.unbound.join(', ')}` : 'Every expected parameter is bound'
       }>
-        <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/[0.08]">
+        <div className="h-1 flex-1 overflow-hidden rounded-full raise-3">
           <div
             className={`h-full transition-[width] ${ratio === 1 ? 'bg-emerald-500/70' : 'bg-amber-500/70'}`}
             style={{ width: `${Math.round(ratio * 100)}%` }}

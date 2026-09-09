@@ -133,7 +133,7 @@ export function FlowRunPanel({
         {error && <Callout tone="error">{error}</Callout>}
       </div>
 
-      <div className="border-t border-white/[0.06] p-3">
+      <div className="border-t hairline p-3">
         {running ? (
           <Button variant="danger" icon={<CircleStop size={13} />} onClick={stop} className="w-full">
             Stop run
@@ -208,7 +208,7 @@ function RunResult({ live, sessionId }: { live: LiveRun; sessionId: string }) {
       )}
 
       {output && (
-        <div className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/25 px-2.5 py-2 text-xs leading-relaxed text-slate-300">
+        <div className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg well px-2.5 py-2 text-xs leading-relaxed text-slate-300">
           {output}
         </div>
       )}

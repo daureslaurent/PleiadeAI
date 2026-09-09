@@ -125,7 +125,7 @@ function ComfyProbe() {
       <button
         onClick={probe}
         disabled={busy}
-        className="flex items-center gap-1.5 rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs text-slate-200 hover:bg-white/[0.09] disabled:opacity-50"
+        className="flex items-center gap-1.5 rounded-lg raise-2 px-3 py-1.5 text-xs text-slate-200 hover:raise-3 disabled:opacity-50"
       >
         {busy ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
         Test connection
@@ -139,7 +139,7 @@ function ComfyProbe() {
       )}
 
       {status?.ok && (
-        <div className="space-y-1 rounded-lg bg-black/25 px-3 py-2 text-[11px] text-slate-400">
+        <div className="space-y-1 rounded-lg well px-3 py-2 text-[11px] text-slate-400">
           <div>
             <span className="text-emerald-400">Connected</span> — ComfyUI{' '}
             <span className="font-mono text-slate-300">{status.version}</span>, queue{' '}
@@ -169,7 +169,7 @@ function RedirectUri() {
       <div className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">
         Authorized redirect URI — register this on the OAuth client
       </div>
-      <div className="flex items-center gap-2 rounded-lg border border-white/[0.07] bg-black/25 px-3 py-2">
+      <div className="flex items-center gap-2 rounded-lg border hairline well px-3 py-2">
         <code className="min-w-0 flex-1 truncate font-mono text-xs text-slate-300">{uri}</code>
         <button
           onClick={() => {

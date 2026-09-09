@@ -30,11 +30,11 @@ export interface FlowNodeData extends Record<string, unknown> {
 }
 
 const STATUS_RING: Record<FlowNodeStatus, string> = {
-  pending: 'ring-white/[0.08]',
+  pending: 'ring-hairline',
   running: 'ring-accent/70',
   success: 'ring-emerald-500/50',
   error: 'ring-red-500/60',
-  skipped: 'ring-white/[0.06]',
+  skipped: 'ring-hairline',
 };
 
 function StatusIcon({ status }: { status: FlowNodeStatus }) {
@@ -57,11 +57,11 @@ export const FlowNodeCard = memo(function FlowNodeCard({ data, selected }: NodeP
   const d = data as FlowNodeData;
   const accent = GROUP_COLORS[d.nodeType?.group ?? 'io'] ?? GROUP_COLORS.io;
   const run = d.run;
-  const ring = run ? STATUS_RING[run.status] : selected ? 'ring-accent/60' : 'ring-white/[0.08]';
+  const ring = run ? STATUS_RING[run.status] : selected ? 'ring-accent/60' : 'ring-hairline';
 
   return (
     <div
-      className={`min-w-[190px] max-w-[240px] rounded-xl bg-[#0d1424]/95 shadow-lg ring-1 backdrop-blur-sm transition-shadow ${ring} ${
+      className={`min-w-[190px] max-w-[240px] rounded-xl bg-surface/95 shadow-lg ring-1 backdrop-blur-sm transition-shadow ${ring} ${
         run?.status === 'skipped' ? 'opacity-45' : ''
       } ${d.pulse ? 'node-pulse' : ''}`}
       style={{ borderTop: `2px solid ${accent}` }}
@@ -70,7 +70,7 @@ export const FlowNodeCard = memo(function FlowNodeCard({ data, selected }: NodeP
         {run && <StatusIcon status={run.status} />}
         <span className="truncate text-xs font-medium text-slate-100">{d.label}</span>
         {run?.iteration !== undefined && (
-          <span className="ml-auto shrink-0 rounded bg-white/[0.08] px-1 text-[9px] text-slate-400">
+          <span className="ml-auto shrink-0 rounded raise-3 px-1 text-[9px] text-slate-400">
             #{run.iteration + 1}
           </span>
         )}
@@ -96,7 +96,7 @@ export const FlowNodeCard = memo(function FlowNodeCard({ data, selected }: NodeP
 
       {run?.status === 'running' && (
         <div className="px-2.5 pb-1.5">
-          <div className="h-1 overflow-hidden rounded-full bg-white/[0.08]">
+          <div className="h-1 overflow-hidden rounded-full raise-3">
             <div
               className={`h-full bg-accent transition-[width] duration-300 ${
                 run.percent == null ? 'animate-pulse w-1/3' : ''
@@ -113,7 +113,7 @@ export const FlowNodeCard = memo(function FlowNodeCard({ data, selected }: NodeP
       {/* What the node actually produced. Without this a finished card goes blank and you have to
           open a panel to learn whether the step did anything at all. */}
       {run?.status === 'success' && run.summary && (
-        <div className="mx-2.5 mb-1.5 line-clamp-3 rounded bg-white/[0.04] px-1.5 py-1 text-[9px] leading-tight text-slate-400">
+        <div className="mx-2.5 mb-1.5 line-clamp-3 rounded raise-1 px-1.5 py-1 text-[9px] leading-tight text-slate-400">
           {run.summary}
         </div>
       )}
@@ -124,7 +124,7 @@ export const FlowNodeCard = memo(function FlowNodeCard({ data, selected }: NodeP
         </div>
       )}
 
-      <div className="flex justify-between gap-3 border-t border-white/[0.06] px-1 pb-1.5 pt-1.5">
+      <div className="flex justify-between gap-3 border-t hairline px-1 pb-1.5 pt-1.5">
         <div className="flex flex-col gap-1">
           {d.inputs.map((port, i) => (
             <PortRow key={port.name} port={port} side="target" index={i} />

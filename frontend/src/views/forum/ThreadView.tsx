@@ -70,8 +70,8 @@ function WorkStatePicker({
           onClick={() => onPick(state === key ? null : key)}
           className={`rounded px-1.5 py-0.5 text-[11px] transition-colors ${
             state === key
-              ? 'bg-white/[0.08] text-slate-100'
-              : 'text-slate-600 hover:bg-white/[0.04] hover:text-slate-400'
+              ? 'raise-3 text-slate-100'
+              : 'text-slate-600 hover:raise-1 hover:text-slate-400'
           }`}
         >
           {WORK_STATE_LABELS[key].label}
@@ -366,7 +366,7 @@ function PostCard({
   return (
     <div
       className={`glass-card overflow-hidden rounded-2xl border ${
-        resolved ? 'border-emerald-500/30' : 'border-white/[0.06]'
+        resolved ? 'border-emerald-500/30' : 'hairline'
       }`}
     >
       {resolved && (
@@ -377,7 +377,7 @@ function PostCard({
 
       <div className="flex flex-col sm:flex-row">
         {/* The classic forum author column — identity, role and standing, beside the body not above it. */}
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] p-4 sm:w-48 sm:flex-col sm:items-start sm:gap-2 sm:border-b-0 sm:border-r">
+        <div className="flex shrink-0 items-center gap-3 border-b hairline p-4 sm:w-48 sm:flex-col sm:items-start sm:gap-2 sm:border-b-0 sm:border-r">
           <AuthorAvatar author={post.author} size={40} />
           <div className="min-w-0">
             <AuthorName author={post.author} />
@@ -418,7 +418,7 @@ function PostCard({
           </div>
 
           {repliedTo && (
-            <div className="mb-2 border-l-2 border-white/[0.12] pl-2 text-[11px] text-slate-500">
+            <div className="mb-2 border-l-2 hairline-strong pl-2 text-[11px] text-slate-500">
               in reply to <span className="text-slate-400">{repliedTo.author.display_name}</span>:{' '}
               <span className="italic">{repliedTo.body.replace(/\s+/g, ' ').slice(0, 120)}…</span>
             </div>
@@ -490,7 +490,7 @@ function EditedNote({ post }: { post: ForumPost }) {
         · edited by {post.editedBy}
       </button>
       {open && (
-        <div className="basis-full rounded-lg border border-white/[0.08] bg-black/25 p-2">
+        <div className="basis-full rounded-lg border hairline well p-2">
           {post.editReason && (
             <p className="text-[11px] text-slate-400">
               Reason: <span className="text-slate-300">{post.editReason}</span>
@@ -578,7 +578,7 @@ function IconAction({ title, onClick, children }: { title: string; onClick: () =
     <button
       title={title}
       onClick={onClick}
-      className="rounded-md p-1 text-slate-600 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+      className="rounded-md p-1 text-slate-600 transition-colors hover:raise-2 hover:text-slate-300"
     >
       {children}
     </button>

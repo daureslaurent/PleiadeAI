@@ -73,14 +73,14 @@ export function Collapsible({
           className={[
             'mt-1 flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
             tone === 'bubble'
-              ? 'border-white/20 text-white/80 hover:bg-white/10 hover:text-white'
-              : 'border-white/10 text-slate-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-slate-200',
+              ? 'hairline-strong text-oncolor/80 hover:raise-3 hover:text-slate-100'
+              : 'hairline-strong text-slate-400 hover:hairline-strong hover:raise-2 hover:text-slate-200',
           ].join(' ')}
         >
           {clamped ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
           {clamped ? 'Show more' : 'Show less'}
           {clamped && (
-            <span className={tone === 'bubble' ? 'text-white/50' : 'text-slate-600'}>
+            <span className={tone === 'bubble' ? 'text-oncolor/50' : 'text-slate-600'}>
               · {Math.round((full - maxHeight) / 22)} more lines
             </span>
           )}

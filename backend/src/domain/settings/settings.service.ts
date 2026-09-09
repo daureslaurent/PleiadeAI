@@ -7,8 +7,22 @@ import { BUILTIN_GLOBAL_MODES } from './builtin-modes';
 export const SCREEN_CONTROL_MODES = ['auto', 'modal', 'legacy'] as const;
 export type ScreenControlMode = (typeof SCREEN_CONTROL_MODES)[number];
 
+/**
+ * Operator appearance (`THEME_SYSTEM_PLAN.md`). The backend never renders anything — it stores
+ * these so the choice follows the operator to another browser, and validates them so a stale id
+ * can't leave the UI with a `data-theme` nothing styles. The lists are duplicated from
+ * `frontend/src/theme/{themes,layouts}.ts`; adding one means adding it in both places.
+ */
+export const UI_THEMES = ['pleiades', 'codex', 'terminal', 'paper', 'nebula'] as const;
+export type UiTheme = (typeof UI_THEMES)[number];
+export const UI_CHAT_LAYOUTS = ['hybrid', 'transcript', 'workbench', 'timeline', 'bubbles'] as const;
+export type UiChatLayout = (typeof UI_CHAT_LAYOUTS)[number];
+
 /** Effective inference settings the rest of the app reads. */
 export interface EffectiveSettings {
+  /** Appearance the operator picked, echoed back to whichever browser asks. */
+  ui_theme: UiTheme;
+  ui_chat_layout: UiChatLayout;
   llama_url: string;
   llama_model: string;
   llama_api_key: string;
@@ -178,6 +192,10 @@ export const settingsService = {
       screen_control_mode: SCREEN_CONTROL_MODES.includes(doc?.screen_control_mode as ScreenControlMode)
         ? (doc!.screen_control_mode as ScreenControlMode)
         : 'auto',
+      ui_theme: UI_THEMES.includes(doc?.ui_theme as UiTheme) ? (doc!.ui_theme as UiTheme) : 'pleiades',
+      ui_chat_layout: UI_CHAT_LAYOUTS.includes(doc?.ui_chat_layout as UiChatLayout)
+        ? (doc!.ui_chat_layout as UiChatLayout)
+        : 'hybrid',
       // `null` is meaningful here (= disabled), so only fall back to the default when the field is
       // truly absent (old doc / never set). `??` would wrongly turn an explicit null back into a value.
       vision_temperature: doc?.vision_temperature === undefined ? 0.2 : doc.vision_temperature,

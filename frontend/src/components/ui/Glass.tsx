@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
  * optional right-hand slot for a badge or action.
  *
  * In-flow repeated rows must NOT use these (heavy backdrop-blur × N tanks paint time) — use
- * `Row` instead: a `bg-black/25` well with a hairline that brightens on hover.
+ * `Row` instead: a `.well` fill with a hairline that brightens on hover.
  */
 export function GlassCard({
   children,
@@ -16,7 +16,7 @@ export function GlassCard({
   className?: string;
 }) {
   return (
-    <div className={`glass-card rounded-2xl border border-white/[0.06] ${className}`}>{children}</div>
+    <div className={`glass-card rounded-2xl border hairline ${className}`}>{children}</div>
   );
 }
 
@@ -56,7 +56,7 @@ export function Row({
   onClick?: () => void;
 }) {
   const base =
-    'rounded-xl border border-white/[0.06] bg-black/25 backdrop-blur-sm transition-colors hover:border-white/[0.12]';
+    'rounded-xl border hairline well backdrop-blur-sm transition-colors hover:hairline-strong';
   return onClick ? (
     <button onClick={onClick} className={`${base} w-full text-left ${className}`}>
       {children}
@@ -69,7 +69,7 @@ export function Row({
 /** A quiet stack of rows with hairline dividers, wrapped in one well. */
 export function RowGroup({ children }: { children: ReactNode }) {
   return (
-    <div className="divide-y divide-white/[0.06] overflow-hidden rounded-xl border border-white/[0.06] bg-black/25">
+    <div className="divide-y divide-hairline overflow-hidden rounded-xl border hairline well">
       {children}
     </div>
   );

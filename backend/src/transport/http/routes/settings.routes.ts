@@ -2,8 +2,12 @@ import { Router } from 'express';
 import {
   settingsService,
   SCREEN_CONTROL_MODES,
+  UI_THEMES,
+  UI_CHAT_LAYOUTS,
   type EffectiveSettings,
   type ScreenControlMode,
+  type UiTheme,
+  type UiChatLayout,
 } from '../../../domain/settings/settings.service';
 import { inferenceRuntime } from '../../../inference/runtime-config';
 import { endpointHealth } from '../../../inference/endpoint-health';
@@ -77,6 +81,12 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.title_model === 'string') patch.title_model = b.title_model;
   if (typeof b.vision_endpoint_id === 'string') patch.vision_endpoint_id = b.vision_endpoint_id;
   if (typeof b.vision_model === 'string') patch.vision_model = b.vision_model;
+  // Operator appearance (`THEME_SYSTEM_PLAN.md`). Same rule as the screen-control mode: an id this
+  // build doesn't know is ignored rather than stored, so an older client can't leave the UI with a
+  // `data-theme` that nothing styles. Whitelisted here or the field silently never persists.
+  if (UI_THEMES.includes(b.ui_theme as UiTheme)) patch.ui_theme = b.ui_theme as UiTheme;
+  if (UI_CHAT_LAYOUTS.includes(b.ui_chat_layout as UiChatLayout))
+    patch.ui_chat_layout = b.ui_chat_layout as UiChatLayout;
   // Who reads a screen for the GUI-control tools (auto / modal / legacy). An unknown value is
   // ignored rather than stored, so a typo can't leave the fleet in an undefined mode.
   if (SCREEN_CONTROL_MODES.includes(b.screen_control_mode as ScreenControlMode))

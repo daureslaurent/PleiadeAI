@@ -1,11 +1,15 @@
 import { useState } from 'react';
-import { MonitorCog, PanelLeft } from 'lucide-react';
+import { LayoutTemplate, MonitorCog, Palette, PanelLeft } from 'lucide-react';
 import { Field, Input, Section, Toggle } from '../../../components/ui';
 import { SESSIONS_PER_AGENT_MAX, SESSIONS_PER_AGENT_MIN, usePrefs } from '../../../store/prefs';
+import { ChatLayoutPicker, ThemePicker } from './AppearanceControls';
 
 /**
- * `/settings/interface` — client-side display preferences. These live in localStorage (`store/prefs`),
- * not the settings doc: they apply instantly on this device and are never sent to the backend.
+ * `/settings/interface` — how the app looks and what it shows.
+ *
+ * Two kinds of preference share the page. **Appearance** (theme, chat layout) is stored both in
+ * localStorage and on the settings doc, so it applies instantly *and* follows the operator to
+ * another browser. The **Display** toggles below it stay local: they are about this screen.
  */
 export function InterfacePanel() {
   const showSubagentThinking = usePrefs((s) => s.showSubagentThinking);
@@ -18,6 +22,23 @@ export function InterfacePanel() {
 
   return (
     <div className="animate-fade-up space-y-5">
+      <Section title="Theme" icon={<Palette size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          The palette, surfaces and type of the whole app. Applies immediately and follows you to
+          another browser.
+        </p>
+        <ThemePicker />
+      </Section>
+
+      <Section title="Chat layout" icon={<LayoutTemplate size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          How a turn is structured on the workspace page — where you and the agent speak, and
+          whether tool calls, thinking and delegation sit in the reading flow or in a column of
+          their own. Independent of the theme.
+        </p>
+        <ChatLayoutPicker />
+      </Section>
+
       <Section title="Display" icon={<MonitorCog size={13} />}>
         <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
           Saved on this device only — they don't affect agents or other browsers.

@@ -69,7 +69,7 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
   const anyLive = (usage?.gpus ?? []).some((g) => g.util_pct > 5);
 
   return (
-    <div className="glass-card animate-fade-up rounded-2xl border border-white/[0.06] p-4">
+    <div className="glass-card animate-fade-up rounded-2xl border hairline p-4">
       <header className="mb-3 flex items-center gap-2.5">
         <Server size={15} className="text-accent" />
         <div className="min-w-0 flex-1">
@@ -78,7 +78,7 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
             {version && (
               <span
                 title="fine-tune server build version"
-                className="shrink-0 rounded-full bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
+                className="shrink-0 rounded-full raise-2 px-1.5 py-0.5 font-mono text-[10px] text-slate-400"
               >
                 v{version}
               </span>
@@ -93,7 +93,7 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
           onClick={() => void loadHardware()}
           disabled={refreshing}
           title="Refresh capability"
-          className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200 disabled:opacity-50"
+          className="rounded-md p-1.5 text-slate-400 transition-colors hover:raise-2 hover:text-slate-200 disabled:opacity-50"
         >
           {refreshing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
         </button>
@@ -109,17 +109,17 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
       {/* --- Live usage --- */}
       <div className="mb-3 space-y-2">
         {usageError && !usage ? (
-          <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-[11px] text-slate-500">
+          <div className="rounded-xl border hairline well px-3 py-2 text-[11px] text-slate-500">
             Telemetry unavailable
           </div>
         ) : !usage ? (
-          <div className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-[11px] text-slate-500">
+          <div className="flex items-center gap-2 rounded-xl border hairline well px-3 py-2 text-[11px] text-slate-500">
             <Loader2 size={12} className="animate-spin" /> Reading utilization…
           </div>
         ) : (
           <>
             {usage.gpus.length === 0 ? (
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2 text-[11px] text-slate-500">
+              <div className="rounded-xl border hairline well px-3 py-2 text-[11px] text-slate-500">
                 {usage.note ?? 'GPU telemetry unavailable'}
               </div>
             ) : (
@@ -127,7 +127,7 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
                 const tone = loadTone(g.util_pct);
                 const vramPct = g.vram_total_mb ? (g.vram_used_mb / g.vram_total_mb) * 100 : 0;
                 return (
-                  <div key={g.index} className="rounded-xl border border-white/[0.06] bg-black/20 p-2.5">
+                  <div key={g.index} className="rounded-xl border hairline well p-2.5">
                     <div className="mb-1.5 flex items-center gap-2 text-[11px]">
                       <Zap size={11} className={tone.text} />
                       <span className="truncate text-slate-300">
@@ -156,7 +156,7 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
             )}
 
             {/* CPU + RAM */}
-            <div className="rounded-xl border border-white/[0.06] bg-black/20 p-2.5">
+            <div className="rounded-xl border hairline well p-2.5">
               <div className="mb-1.5 flex items-center gap-2 text-[11px]">
                 <Cpu size={11} className={loadTone(usage.cpu.load_pct).text} />
                 <span className="text-slate-300">CPU · {usage.cpu.cores} cores</span>
@@ -185,10 +185,10 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
 
       {/* --- Static capability --- */}
       {hardware && (
-        <div className="overflow-x-auto rounded-xl border border-white/[0.06] bg-white/[0.03]">
+        <div className="overflow-x-auto rounded-xl border hairline raise-1">
           <table className="w-full text-left text-[11px]">
             <thead>
-              <tr className="border-b border-white/[0.06] text-[10px] uppercase tracking-wider text-slate-500">
+              <tr className="border-b hairline text-[10px] uppercase tracking-wider text-slate-500">
                 <th className="px-3 py-1.5 font-normal">Size</th>
                 <th className="px-3 py-1.5 font-normal">Fit</th>
                 <th className="px-3 py-1.5 font-normal">Strategy</th>
@@ -197,7 +197,7 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
             </thead>
             <tbody>
               {hardware.sizes.map((s) => (
-                <tr key={s.size_b} className="border-b border-white/[0.06] last:border-0" title={s.note}>
+                <tr key={s.size_b} className="border-b hairline last:border-0" title={s.note}>
                   <td className="px-3 py-1.5 font-mono text-slate-200">{s.size_b}B</td>
                   <td className={`px-3 py-1.5 font-medium ${FEASIBILITY_STYLE[s.feasibility]}`}>
                     {s.feasibility}
@@ -221,7 +221,7 @@ export function ServerCard({ server }: { server: FinetuneServer }) {
 /** Thin utilization bar. Purely presentational; width is the only animated property. */
 function Meter({ pct, barClass, thin }: { pct: number; barClass: string; thin?: boolean }) {
   return (
-    <div className={`overflow-hidden rounded-full bg-black/40 ${thin ? 'h-0.5' : 'h-1'}`}>
+    <div className={`overflow-hidden rounded-full well-strong ${thin ? 'h-0.5' : 'h-1'}`}>
       <div
         className={`h-full rounded-full transition-all duration-500 ${barClass}`}
         style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}

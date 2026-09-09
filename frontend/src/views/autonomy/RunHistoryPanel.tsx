@@ -93,9 +93,9 @@ export function RunHistoryPanel({
       }
     >
       {/* Schedule identity header */}
-      <div className="mb-3 flex items-center gap-2.5 border-b border-white/[0.06] pb-3">
+      <div className="mb-3 flex items-center gap-2.5 border-b hairline pb-3">
         <span
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white/90"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-oncolor/90"
           style={{ backgroundColor: color.soft, boxShadow: `inset 0 0 0 1px ${color.border}` }}
         >
           <span style={{ color: color.accent }}>{agentInitial(job.data.agentName)}</span>
@@ -122,9 +122,9 @@ export function RunHistoryPanel({
           results.map((r) => (
             <article
               key={r.id}
-              className="animate-fade-up rounded-xl border border-white/[0.06] bg-white/[0.03] backdrop-blur-sm"
+              className="animate-fade-up rounded-xl border hairline raise-1 backdrop-blur-sm"
             >
-              <header className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] px-3 py-2">
+              <header className="flex flex-wrap items-center gap-2 border-b hairline px-3 py-2">
                 <StatusBadge tone={r.status === 'success' ? 'ok' : 'error'}>{r.status}</StatusBadge>
                 <span className="text-[11px] text-slate-500" title={fmtDateTime(r.finishedAt)}>
                   {relativeTime(r.finishedAt)}
@@ -135,7 +135,7 @@ export function RunHistoryPanel({
               </header>
               {/* The prompt the run was fired with — relevant when the schedule was edited since. */}
               {r.prompt && r.prompt !== job.data.prompt && (
-                <div className="border-b border-white/[0.06] px-3 py-1.5 text-[11px] text-slate-500">
+                <div className="border-b hairline px-3 py-1.5 text-[11px] text-slate-500">
                   <span className="uppercase tracking-wider text-slate-600">prompt </span>
                   {r.prompt}
                 </div>

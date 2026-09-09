@@ -504,7 +504,7 @@ export function IsolationsView() {
                 </Select>
                 <Link
                   to="/images"
-                  className="shrink-0 rounded-lg px-3 py-2 text-xs text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06]"
+                  className="shrink-0 rounded-lg px-3 py-2 text-xs text-slate-300 ring-1 ring-hairline-strong transition hover:raise-2"
                 >
                   Manage images
                 </Link>
@@ -626,14 +626,14 @@ export function IsolationsView() {
                   <button
                     onClick={scanHostKey}
                     disabled={!draft._id || !draft.ssh_remote_host.trim() || sshBusy}
-                    className="rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06] disabled:opacity-40"
+                    className="rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-hairline-strong transition hover:raise-2 disabled:opacity-40"
                   >
                     {sshBusy ? 'Working…' : 'Scan host key'}
                   </button>
                   <button
                     onClick={testSsh}
                     disabled={!draft._id || !draft.ssh_remote_host.trim() || !draft.ssh_remote_user.trim() || sshBusy}
-                    className="rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06] disabled:opacity-40"
+                    className="rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-hairline-strong transition hover:raise-2 disabled:opacity-40"
                   >
                     Test connection
                   </button>
@@ -689,7 +689,7 @@ export function IsolationsView() {
                   and never shown again after saving.
                 </Hint>
                 <div className="flex items-center gap-2">
-                  <label className="cursor-pointer rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-white/[0.1] transition hover:bg-white/[0.06]">
+                  <label className="cursor-pointer rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 ring-1 ring-hairline-strong transition hover:raise-2">
                     Upload .conf
                     <input
                       type="file"
@@ -748,7 +748,7 @@ export function IsolationsView() {
               </Hint>
 
               {/* Generate a keypair server-side (private key stays hidden; public key is shown to copy). */}
-              <div className="rounded-lg bg-white/[0.03] p-3 ring-1 ring-white/[0.06]">
+              <div className="rounded-lg raise-1 p-3 ring-1 ring-hairline">
                 <div className="flex flex-wrap items-end gap-2">
                   <Field label="Generate a new keypair">
                     <Select
@@ -787,13 +787,13 @@ export function IsolationsView() {
                       </span>
                       <button
                         onClick={copyPublicKey}
-                        className="flex items-center gap-1 text-[11px] text-slate-300 hover:text-white"
+                        className="flex items-center gap-1 text-[11px] text-slate-300 hover:text-slate-100"
                       >
                         {pubKeyCopied ? <Check size={12} /> : <Copy size={12} />}
                         {pubKeyCopied ? 'Copied' : 'Copy'}
                       </button>
                     </div>
-                    <code className="block max-h-24 overflow-auto break-all rounded-md bg-black/30 p-2 text-[11px] text-slate-300">
+                    <code className="block max-h-24 overflow-auto break-all rounded-md well-strong p-2 text-[11px] text-slate-300">
                       {draft.ssh_public_key}
                     </code>
                   </div>

@@ -276,7 +276,7 @@ export function FlowsView() {
       ) : (
         <div className="flex h-full flex-col">
           {/* Toolbar */}
-          <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2">
+          <div className="flex items-center gap-2 border-b hairline px-4 py-2">
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-slate-100">{flow.name}</div>
               {flow.description && (
@@ -284,7 +284,7 @@ export function FlowsView() {
               )}
             </div>
 
-            <div className="ml-4 flex rounded-lg bg-black/25 p-0.5">
+            <div className="ml-4 flex rounded-lg well p-0.5">
               {(['design', 'runs'] as Tab[]).map((t) => (
                 <button
                   key={t}
@@ -382,7 +382,7 @@ export function FlowsView() {
                 They are peers now, so watching a run and inspecting a node no longer exclude each
                 other. */}
             <aside className="glass flex w-80 shrink-0 flex-col border-l">
-              <div className="flex shrink-0 gap-0.5 border-b border-white/[0.06] p-1.5">
+              <div className="flex shrink-0 gap-0.5 border-b hairline p-1.5">
                 {RAIL_TABS.map(({ key, label, icon: Icon }) => (
                   <button
                     key={key}

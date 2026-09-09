@@ -1,0 +1,158 @@
+/**
+ * Nebula — the deep-space idea saturated. A violet ground, a denser starfield, cyan and magenta
+ * where Pleiades uses blue and purple, and a glow vocabulary turned up rather than down.
+ */
+:root[data-theme='nebula'] {
+  --c-slate-50: 248 250 252;
+  --c-slate-100: 241 245 249;
+  --c-slate-200: 226 232 240;
+  --c-slate-300: 203 213 225;
+  --c-slate-400: 148 163 184;
+  --c-slate-500: 100 116 139;
+  --c-slate-600: 71 85 105;
+  --c-slate-700: 51 65 85;
+  --c-slate-800: 30 41 59;
+  --c-slate-900: 15 23 42;
+  --c-slate-950: 2 6 23;
+
+  --c-emerald-50: 236 253 245;
+  --c-emerald-100: 209 250 229;
+  --c-emerald-200: 167 243 208;
+  --c-emerald-300: 110 231 183;
+  --c-emerald-400: 52 211 153;
+  --c-emerald-500: 16 185 129;
+  --c-emerald-600: 5 150 105;
+  --c-emerald-700: 4 120 87;
+  --c-emerald-800: 6 95 70;
+  --c-emerald-900: 6 78 59;
+  --c-emerald-950: 2 44 34;
+  --c-amber-50: 255 251 235;
+  --c-amber-100: 254 243 199;
+  --c-amber-200: 253 230 138;
+  --c-amber-300: 252 211 77;
+  --c-amber-400: 251 191 36;
+  --c-amber-500: 245 158 11;
+  --c-amber-600: 217 119 6;
+  --c-amber-700: 180 83 9;
+  --c-amber-800: 146 64 14;
+  --c-amber-900: 120 53 15;
+  --c-amber-950: 69 26 3;
+  --c-red-50: 254 242 242;
+  --c-red-100: 254 226 226;
+  --c-red-200: 254 202 202;
+  --c-red-300: 252 165 165;
+  --c-red-400: 248 113 113;
+  --c-red-500: 239 68 68;
+  --c-red-600: 220 38 38;
+  --c-red-700: 185 28 28;
+  --c-red-800: 153 27 27;
+  --c-red-900: 127 29 29;
+  --c-red-950: 69 10 10;
+  --c-sky-50: 240 249 255;
+  --c-sky-100: 224 242 254;
+  --c-sky-200: 186 230 253;
+  --c-sky-300: 125 211 252;
+  --c-sky-400: 56 189 248;
+  --c-sky-500: 14 165 233;
+  --c-sky-600: 2 132 199;
+  --c-sky-700: 3 105 161;
+  --c-sky-800: 7 89 133;
+  --c-sky-900: 12 74 110;
+  --c-sky-950: 8 47 73;
+  --c-rose-50: 255 241 242;
+  --c-rose-100: 255 228 230;
+  --c-rose-200: 254 205 211;
+  --c-rose-300: 253 164 175;
+  --c-rose-400: 251 113 133;
+  --c-rose-500: 244 63 94;
+  --c-rose-600: 225 29 72;
+  --c-rose-700: 190 18 60;
+  --c-rose-800: 159 18 57;
+  --c-rose-900: 136 19 55;
+  --c-rose-950: 76 5 25;
+  --c-indigo-50: 253 244 255;
+  --c-indigo-100: 250 232 255;
+  --c-indigo-200: 245 208 254;
+  --c-indigo-300: 240 171 252;
+  --c-indigo-400: 232 121 249;
+  --c-indigo-500: 217 70 239;
+  --c-indigo-600: 192 38 211;
+  --c-indigo-700: 162 28 175;
+  --c-indigo-800: 134 25 143;
+  --c-indigo-900: 112 26 117;
+  --c-indigo-950: 74 4 78;
+
+  --c-raise: 236 233 255;
+  --c-well: 8 3 20;
+  --c-on-color: 255 255 255;
+  --c-scrim: 0 0 0;
+
+  --c-panel: 14 10 28;
+  --c-surface: 24 18 45;
+  --c-border: 56 44 92;
+  --c-accent: 34 211 238;
+  --c-reasoning: 232 121 249;
+
+  --r-sm: 0.125rem;
+  --r-md: 0.375rem;
+  --r-lg: 0.5rem;
+  --r-xl: 0.75rem;
+  --r-2xl: 1rem;
+  --r-3xl: 1.5rem;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-serif: ui-serif, Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
+  --font-prose: var(--font-sans);
+  --prose-leading: 1.5;
+
+  --hairline: rgba(196, 181, 253, 0.1);
+  --hairline-strong: rgba(196, 181, 253, 0.2);
+  --raise-1: rgba(196, 181, 253, 0.05);
+  --raise-2: rgba(196, 181, 253, 0.08);
+  --raise-3: rgba(196, 181, 253, 0.13);
+  --well: rgba(8, 3, 20, 0.4);
+  --well-strong: rgba(8, 3, 20, 0.6);
+
+  --bg-gradient: linear-gradient(165deg, #0d0722 0%, #120a2e 45%, #0a0620 100%);
+  --bg-nebula-a: radial-gradient(ellipse 85% 60% at 18% -12%, rgba(34, 211, 238, 0.2), transparent 62%);
+  --bg-nebula-b: radial-gradient(ellipse 70% 50% at 88% 112%, rgba(232, 121, 249, 0.18), transparent 62%);
+  --stars-opacity: 1.4;
+  --stars-a: radial-gradient(1px 1px at 22px 34px, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(1px 1px at 120px 90px, rgba(165, 243, 252, 0.55), transparent),
+    radial-gradient(1.5px 1.5px at 210px 150px, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(1px 1px at 300px 60px, rgba(240, 171, 252, 0.5), transparent);
+  --stars-b: radial-gradient(1px 1px at 60px 170px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1.5px 1.5px at 180px 40px, rgba(216, 180, 254, 0.6), transparent),
+    radial-gradient(1px 1px at 260px 200px, rgba(165, 243, 252, 0.45), transparent);
+
+  --glass-bg: rgba(26, 18, 50, 0.55);
+  --glass-blur: 16px;
+  --glass-saturate: 130%;
+  --glass-border: rgba(196, 181, 253, 0.12);
+  --glass-card-bg: rgba(21, 14, 42, 0.62);
+  --glass-card-blur: 20px;
+  --glass-card-border: rgba(196, 181, 253, 0.16);
+  --glass-card-shadow: 0 8px 34px rgba(5, 2, 16, 0.5), inset 0 1px 0 rgba(232, 121, 249, 0.1);
+  --popover-bg: rgba(16, 10, 34, 0.97);
+  --popover-blur: 24px;
+  --popover-border: rgba(196, 181, 253, 0.2);
+  --popover-shadow: 0 16px 48px rgba(3, 1, 12, 0.7), 0 0 24px rgba(34, 211, 238, 0.08),
+    inset 0 1px 0 rgba(232, 121, 249, 0.12);
+
+  --shimmer-sheen: rgba(224, 255, 255, 0.98);
+  --glow-strength: 1.6;
+  --scrollbar-thumb: rgba(196, 181, 253, 0.3);
+  --scrollbar-thumb-hover: rgba(232, 121, 249, 0.5);
+  --flow-chrome-bg: rgba(21, 14, 42, 0.88);
+  --flow-chrome-border: rgba(196, 181, 253, 0.12);
+
+  --identity-accent-s: 88%;
+  --identity-accent-l: 70%;
+  --identity-border-s: 75%;
+  --identity-border-l: 58%;
+  --identity-border-a: 0.5;
+  --identity-soft-s: 85%;
+  --identity-soft-l: 62%;
+  --identity-soft-a: 0.13;
+}

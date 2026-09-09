@@ -291,7 +291,7 @@ export function WorkflowDetail({
         <Consumers detail={detail} />
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1 rounded-lg bg-black/25 p-0.5">
+          <div className="flex gap-1 rounded-lg well p-0.5">
             {(['mapping', 'run'] as const).map((t) => (
               <button
                 key={t}
@@ -453,7 +453,7 @@ function RunPanel({
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <div className="animate-fade-up mx-auto max-w-2xl space-y-4 p-4">
-        <div className="space-y-2 rounded-xl bg-black/25 p-3 ring-1 ring-white/[0.06]">
+        <div className="space-y-2 rounded-xl well p-3 ring-1 ring-hairline">
           <div className="text-[10px] uppercase tracking-wide text-slate-500">Test run</div>
           {dirty && (
             <Callout tone="warn" icon={<AlertTriangle size={13} />}>
@@ -479,21 +479,21 @@ function RunPanel({
           {preview && (
             <div className="pt-1">
               {preview.kind === 'video' ? (
-                <video src={preview.url} controls className="max-h-96 rounded-lg ring-1 ring-white/[0.08]" />
+                <video src={preview.url} controls className="max-h-96 rounded-lg ring-1 ring-hairline" />
               ) : preview.kind === 'audio' ? (
                 <audio src={preview.url} controls className="w-full" />
               ) : (
                 <img
                   src={preview.url}
                   alt="test render"
-                  className="max-h-96 rounded-lg ring-1 ring-white/[0.08]"
+                  className="max-h-96 rounded-lg ring-1 ring-hairline"
                 />
               )}
             </div>
           )}
         </div>
 
-        <div className="space-y-2 rounded-xl bg-black/25 p-3 ring-1 ring-white/[0.06]">
+        <div className="space-y-2 rounded-xl well p-3 ring-1 ring-hairline">
           <div className="text-[10px] uppercase tracking-wide text-slate-500">Notes</div>
           <Textarea
             rows={4}

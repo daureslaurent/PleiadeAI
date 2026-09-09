@@ -1,13 +1,37 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#0f1419" />
     <title>PleiadesAI — Command Center</title>
+    <script>
+      // Stamp the stored theme before the bundle loads, or the first paint is Pleiades and the
+      // real theme arrives as a flash. Duplicates src/theme/apply.ts on purpose: this has to run
+      // without a module, and it also themes the login screen, which renders before any API call.
+      // Kept deliberately tiny — the id and the two facts the first paint needs, nothing more.
+      (function () {
+        var MODES = { pleiades: 'dark', codex: 'light', terminal: 'dark', paper: 'light', nebula: 'dark' };
+        var CHROME = { pleiades: '#0f1419', codex: '#ffffff', terminal: '#07090b', paper: '#faf7f2', nebula: '#0e0a1c' };
+        var id = 'pleiades';
+        try {
+          var raw = localStorage.getItem('pleiades.prefs.v1');
+          var stored = raw && JSON.parse(raw).theme;
+          if (stored && MODES[stored]) id = stored;
+        } catch (e) {
+          /* private mode / storage disabled — the default is already correct */
+        }
+        var root = document.documentElement;
+        root.setAttribute('data-theme', id);
+        root.classList.toggle('dark', MODES[id] === 'dark');
+        root.style.colorScheme = MODES[id];
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', CHROME[id]);
+      })();
+    </script>
   </head>
-  <body class="bg-panel text-slate-200">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

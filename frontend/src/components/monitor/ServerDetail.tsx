@@ -50,7 +50,7 @@ export function ServerDetail({
       <header className="flex items-center gap-3">
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+          className="flex items-center gap-1.5 rounded-lg border hairline px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:raise-2 hover:text-slate-200"
         >
           <ArrowLeft size={13} /> Fleet
         </button>
@@ -354,8 +354,8 @@ export function ServerDetail({
 /** In-flow glass panel — lightweight per DIRECT_ART §3 (no heavy blur stacked across many cards). */
 function Panel({ children, tone }: { children: React.ReactNode; tone?: Tone }) {
   const border =
-    tone === 'critical' ? 'border-red-500/25' : tone === 'warn' ? 'border-amber-500/25' : 'border-white/[0.06]';
-  return <section className={`rounded-2xl border ${border} bg-white/[0.03] p-4 backdrop-blur-sm`}>{children}</section>;
+    tone === 'critical' ? 'border-red-500/25' : tone === 'warn' ? 'border-amber-500/25' : 'hairline';
+  return <section className={`rounded-2xl border ${border} raise-1 p-4 backdrop-blur-sm`}>{children}</section>;
 }
 
 function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
@@ -369,7 +369,7 @@ function SectionLabel({ children, icon }: { children: React.ReactNode; icon?: Re
 
 function Stat({ label, value, tone }: { label: string; value: string; tone: Tone }) {
   return (
-    <div className="rounded-lg bg-black/20 px-2 py-1.5">
+    <div className="rounded-lg well px-2 py-1.5">
       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
       <div className={`font-mono text-xs ${TONE_TEXT[tone]}`}>{value}</div>
     </div>

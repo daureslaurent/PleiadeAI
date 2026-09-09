@@ -298,7 +298,7 @@ export function ConversationsView() {
                 </Field>
               </div>
 
-              <div className="mt-4 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-black/25 px-3 py-2.5">
+              <div className="mt-4 flex items-center gap-3 rounded-xl border hairline well px-3 py-2.5">
                 <Toggle
                   checked={draft.enabled}
                   onChange={(enabled) => setDraft({ ...draft, enabled })}
@@ -399,7 +399,7 @@ function TranscriptOverlay({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-8 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/60 p-8 backdrop-blur-sm"
       onClick={onClose}
     >
       {/* Clicks inside the card must not dismiss it. */}
@@ -408,7 +408,7 @@ function TranscriptOverlay({
         onClick={(e) => e.stopPropagation()}
       >
         <GlassCard className="flex min-h-0 w-full flex-col">
-          <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3">
+          <div className="flex items-center gap-2 border-b hairline px-4 py-3">
             <Mic size={14} className="shrink-0 text-slate-500" />
             <h2 className="min-w-0 flex-1 truncate text-sm text-slate-200">{session.title}</h2>
             <span className="shrink-0 font-mono text-[10px] text-slate-500">{session.agent_name}</span>
@@ -421,7 +421,7 @@ function TranscriptOverlay({
                 className={`rounded-xl border px-3 py-2 ${
                   m.role === 'user'
                     ? 'border-fuchsia-400/20 bg-fuchsia-400/[0.06]'
-                    : 'border-white/[0.06] bg-black/25'
+                    : 'hairline well'
                 }`}
               >
                 <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-500">

@@ -113,7 +113,7 @@ export function ClearDataPanel() {
           role="dialog"
           aria-modal="true"
           aria-label="Clear all data"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/50 p-4 backdrop-blur-sm"
           onMouseDown={(e) => e.target === e.currentTarget && close()}
         >
           <div className="glass-card w-full max-w-md animate-fade-up space-y-4 rounded-2xl border border-red-500/25 p-5">
@@ -126,7 +126,7 @@ export function ClearDataPanel() {
               This permanently deletes the following. Agents, isolations, images and memory are kept.
             </p>
 
-            <div className="max-h-52 divide-y divide-white/[0.06] overflow-auto rounded-xl border border-white/[0.06] bg-black/25">
+            <div className="max-h-52 divide-y divide-hairline overflow-auto rounded-xl border hairline well">
               {rows.length === 0 ? (
                 <div className="px-3 py-2 text-[11px] text-slate-500">Nothing to clear.</div>
               ) : (

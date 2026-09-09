@@ -104,7 +104,7 @@ export function LLMDebugView() {
             ))}
 
             {shownRecords.length === 0 && liveCalls.length === 0 && (
-              <div className="glass-card rounded-2xl border border-white/[0.06] p-8 text-center text-sm text-slate-500">
+              <div className="glass-card rounded-2xl border hairline p-8 text-center text-sm text-slate-500">
                 {tagFilter
                   ? `No ${tagFilter} turns in the current records.`
                   : "No calls captured yet. Send a message in the Workspace and they'll appear here."}
@@ -151,7 +151,7 @@ function Toolbar({
   };
 
   return (
-    <div className="glass-card flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-white/[0.06] px-4 py-3">
+    <div className="glass-card flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border hairline px-4 py-3">
       {/* Count control */}
       <div className="flex items-center gap-1.5">
         <span className="mr-1 text-[11px] uppercase tracking-wider text-slate-500">Show</span>
@@ -165,7 +165,7 @@ function Toolbar({
             className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
               !customOpen && limit === n
                 ? 'bg-accent/20 text-accent ring-1 ring-accent/40'
-                : 'text-slate-400 hover:bg-white/[0.05]'
+                : 'text-slate-400 hover:raise-2'
             }`}
           >
             {n}
@@ -174,7 +174,7 @@ function Toolbar({
         <button
           onClick={() => setCustomOpen(true)}
           className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-            customOpen ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-slate-400 hover:bg-white/[0.05]'
+            customOpen ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-slate-400 hover:raise-2'
           }`}
         >
           Custom
@@ -188,7 +188,7 @@ function Toolbar({
             onChange={(e) => setCustomVal(e.target.value)}
             onBlur={applyCustom}
             onKeyDown={(e) => e.key === 'Enter' && applyCustom()}
-            className="w-16 rounded-lg border border-white/[0.08] bg-black/30 px-2 py-1 text-xs text-slate-100 focus:border-accent/50 focus:outline-none"
+            className="w-16 rounded-lg border hairline well-strong px-2 py-1 text-xs text-slate-100 focus:border-accent/50 focus:outline-none"
             title=">50 pages the durable archive"
           />
         )}
@@ -209,7 +209,7 @@ function Toolbar({
       </div>
 
       {/* DB size readout */}
-      <div className="flex w-full flex-wrap items-center gap-2 border-t border-white/[0.06] pt-3">
+      <div className="flex w-full flex-wrap items-center gap-2 border-t hairline pt-3">
         <Database size={13} className="text-slate-500" />
         <SizePill label="Archive" bytes={stats?.archive.bytes} count={stats?.archive.count} tone="accent" />
         <SizePill label="Debug (capped)" bytes={stats?.debug.bytes} count={stats?.debug.count} />
@@ -240,7 +240,7 @@ function SizePill({
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] ${
-        tone === 'accent' ? 'border-accent/25 bg-accent/10 text-accent' : 'border-white/[0.07] bg-white/[0.03] text-slate-400'
+        tone === 'accent' ? 'border-accent/25 bg-accent/10 text-accent' : 'hairline raise-1 text-slate-400'
       }`}
     >
       <span className="uppercase tracking-wider opacity-70">{label}</span>
@@ -269,7 +269,7 @@ function LiveCard({ call }: { call: LiveCall }) {
         </span>
         <span className="truncate font-mono text-[11px] text-slate-500">{call.model}</span>
       </div>
-      <div className="rounded-xl bg-black/30 p-3 backdrop-blur-sm">
+      <div className="rounded-xl well-strong p-3 backdrop-blur-sm">
         <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Response (live)</div>
         <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-xs text-slate-300">
           {call.text || <span className="text-slate-600">waiting for first token…</span>}
@@ -308,8 +308,8 @@ function RecordCard({ rec, score }: { rec: LlamaCallRecord; score?: DebugScore }
 
   return (
     <div
-      className={`rounded-xl border bg-black/25 backdrop-blur-sm transition ${
-        err ? 'border-red-500/25 ring-1 ring-red-500/10' : 'border-white/[0.06]'
+      className={`rounded-xl border well backdrop-blur-sm transition ${
+        err ? 'border-red-500/25 ring-1 ring-red-500/10' : 'hairline'
       }`}
     >
       <button
@@ -345,7 +345,7 @@ function RecordCard({ rec, score }: { rec: LlamaCallRecord; score?: DebugScore }
       </button>
 
       {open && (
-        <div className="space-y-3 border-t border-white/[0.06] px-3 py-3">
+        <div className="space-y-3 border-t hairline px-3 py-3">
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
             <Meta k="endpoint" v={rec.endpoint} />
             {rec.sessionId && <Meta k="session" v={rec.sessionId} />}
@@ -365,7 +365,7 @@ function RecordCard({ rec, score }: { rec: LlamaCallRecord; score?: DebugScore }
           <div>
             <button
               onClick={loadRaw}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:bg-white/[0.05]"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 transition hover:raise-2"
             >
               {loadingRaw ? <Loader2 size={12} className="animate-spin" /> : <ChevronRight size={12} className={rawChunks ? 'rotate-90' : ''} />}
               {rawChunks ? 'Hide raw chunks' : 'Show raw chunks'}
@@ -413,10 +413,10 @@ function CopyBlock({ text, sub }: { text: string; sub?: string }) {
     });
   };
   return (
-    <div className="group relative rounded-lg border border-white/[0.06] bg-black/30">
+    <div className="group relative rounded-lg border hairline well-strong">
       <button
         onClick={copy}
-        className="absolute right-1.5 top-1.5 z-10 inline-flex items-center gap-1 rounded-md bg-white/[0.06] px-1.5 py-1 text-[10px] text-slate-400 opacity-0 transition hover:bg-white/[0.12] hover:text-slate-200 group-hover:opacity-100"
+        className="absolute right-1.5 top-1.5 z-10 inline-flex items-center gap-1 rounded-md raise-2 px-1.5 py-1 text-[10px] text-slate-400 opacity-0 transition hover:raise-3 hover:text-slate-200 group-hover:opacity-100"
       >
         {copied ? <Check size={11} /> : <Copy size={11} />}
         {sub}
@@ -434,7 +434,7 @@ function CopyBlock({ text, sub }: { text: string; sub?: string }) {
 
 const SOURCE_STYLE: Record<string, string> = {
   'chat-turn': 'border-accent/25 bg-accent/10 text-accent',
-  'title-gen': 'border-white/[0.08] bg-white/[0.04] text-slate-400',
+  'title-gen': 'hairline raise-1 text-slate-400',
   identity: 'border-reasoning/25 bg-reasoning/10 text-reasoning',
   vision: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-400',
   judge: 'border-amber-400/25 bg-amber-400/10 text-amber-400',
@@ -447,7 +447,7 @@ function TagChip({ active, onClick, children }: { active: boolean; onClick: () =
     <button
       onClick={onClick}
       className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-        active ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-slate-400 hover:bg-white/[0.05]'
+        active ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-slate-400 hover:raise-2'
       }`}
     >
       {children}
@@ -459,7 +459,7 @@ function SourceTag({ source }: { source: string }) {
   return (
     <span
       className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
-        SOURCE_STYLE[source] ?? 'border-white/[0.08] bg-white/[0.04] text-slate-400'
+        SOURCE_STYLE[source] ?? 'hairline raise-1 text-slate-400'
       }`}
     >
       {source}

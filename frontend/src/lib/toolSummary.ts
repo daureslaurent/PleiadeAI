@@ -111,6 +111,18 @@ export function describeTool(
   };
 
   switch (tool) {
+    // The full card renders bash as a terminal pane of its own, but the compact layouts show every
+    // tool through this summary — without a case here the most-called tool of all reads as blank.
+    case 'bash': {
+      const cmd = str(args.command);
+      const exit = n(r.exit_code);
+      return {
+        Icon: Terminal,
+        value: truncate(cmd, 44),
+        title: cmd,
+        hint: done && exit != null && exit !== 0 ? `exit ${exit}` : undefined,
+      };
+    }
     case 'read': {
       const path = str(args.filePath ?? args.path);
       const lines = n(r.total_lines);

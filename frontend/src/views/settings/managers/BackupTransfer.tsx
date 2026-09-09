@@ -129,24 +129,24 @@ export function BackupTransfer() {
             {allSelected ? 'Deselect all' : 'Select all'}
           </button>
         </div>
-        <div className="max-h-44 overflow-auto rounded-xl border border-white/[0.06] bg-black/25 p-1">
+        <div className="max-h-44 overflow-auto rounded-xl border hairline well p-1">
           {agents.length === 0 ? (
             <div className="px-2 py-3 text-[11px] text-slate-500">No agents.</div>
           ) : (
             agents.map((a) => (
               <label
                 key={a._id}
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-300 transition-colors hover:bg-white/[0.05]"
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-300 transition-colors hover:raise-2"
               >
                 <input
                   type="checkbox"
                   checked={selected.has(a._id)}
                   onChange={() => toggle(a._id)}
-                  className="h-3.5 w-3.5 cursor-pointer rounded border-white/20 bg-black/30 accent-accent"
+                  className="h-3.5 w-3.5 cursor-pointer rounded hairline-strong well-strong accent-accent"
                 />
                 <span className="truncate">{a.name}</span>
                 {a.isolation_id && (
-                  <span className="ml-auto shrink-0 rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-slate-500">
+                  <span className="ml-auto shrink-0 rounded raise-2 px-1.5 py-0.5 text-[10px] text-slate-500">
                     isolated
                   </span>
                 )}
@@ -169,7 +169,7 @@ export function BackupTransfer() {
         </Button>
       </div>
 
-      <div className="border-t border-white/[0.06] pt-4">
+      <div className="border-t hairline pt-4">
         <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">Import config</div>
         <input ref={fileRef} type="file" accept="application/json,.json" onChange={onImportFile} className="hidden" />
         <Button
@@ -190,7 +190,7 @@ export function BackupTransfer() {
         <p className={`text-[11px] ${note.kind === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>{note.text}</p>
       )}
       {summary && (
-        <div className="rounded-xl border border-white/[0.06] bg-black/25 p-3 text-[11px] text-slate-400">
+        <div className="rounded-xl border hairline well p-3 text-[11px] text-slate-400">
           <div>
             Isolations: {summary.isolations.created} created, {summary.isolations.overwritten} overwritten
           </div>

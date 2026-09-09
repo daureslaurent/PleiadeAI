@@ -113,6 +113,18 @@ Key seams:
   Keys can't open a websocket: the WS handshake calls `verifyToken` directly. `tools/pleiades-mcp/`
   consumes this surface (MCP server + `scripts/prod.mjs` CLI).
 
+- **Theming (`frontend/src/theme/`, spec `THEME_SYSTEM_PLAN.md`, art direction `DIRECT_ART.md`).** The
+  operator picks a **theme** (whole-app palette/surfaces/type) and a **chat layout** (how a turn is
+  structured) independently, at `/settings/interface`; both persist on the settings singleton
+  (`ui_theme`, `ui_chat_layout`) with a localStorage cache so `index.html` paints the right theme
+  before the bundle loads. Every colour, radius and font in `tailwind.config.ts` resolves to a CSS
+  variable, so components name ordinary Tailwind classes and `theme/themes/<id>.css` answers — never
+  hard-code a hex, an `rgba()`, or a `white`/`black` alpha (use `.hairline`, `.raise-*`, `.well*`).
+  The neutral `slate-*` ramp is a **foreground** ramp (100 strongest → 600 faintest), so light
+  themes invert its ends. A chat layout is a descriptor plus one `ConversationView`
+  (`components/workspace/conversation/`); the shared `Blocks`/`ToolCall` renderers read the
+  descriptor from `ChatLayoutContext`, which is why five layouts need no forks of the chat page.
+
 Layout: `domain/<entity>/` holds each entity's Mongoose model + repository/service; HTTP routes are
 in `transport/http/routes/` (all behind `requireAuth` except `/api/auth`); the socket layer is in
 `transport/ws/`. Frontend: `views/` are top-level routed pages (one per Sidebar nav item),

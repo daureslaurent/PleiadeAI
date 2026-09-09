@@ -49,7 +49,7 @@ export function NodeInspector({
 
   return (
     <aside className="glass flex w-80 shrink-0 flex-col border-l">
-      <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3">
+      <div className="flex items-center gap-2 border-b hairline px-4 py-3">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: accent }} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-slate-100">{nodeType?.label ?? node.type}</div>
@@ -113,7 +113,7 @@ export function NodeInspector({
       </div>
 
       {!readOnly && (
-        <div className="border-t border-white/[0.06] p-3">
+        <div className="border-t hairline p-3">
           <Button variant="danger" icon={<Trash2 size={13} />} onClick={onDelete} className="w-full">
             Delete node
           </Button>
@@ -171,7 +171,7 @@ function WorkflowParams({
   };
 
   return (
-    <div className="space-y-3 border-t border-white/[0.06] pt-3">
+    <div className="space-y-3 border-t hairline pt-3">
       <div className="text-[10px] uppercase tracking-wider text-slate-500">Workflow parameters</div>
       {catalog.map((meta) => {
         const name = meta.key.replace(/^custom:/, '');
@@ -270,7 +270,7 @@ function ConfigField({
           <select
             value=""
             onChange={(e) => e.target.value && onChange(`{{${e.target.value}}}`)}
-            className="w-full rounded border border-white/[0.1] bg-black/30 px-1.5 py-1 text-[10px] text-slate-400 outline-none focus:border-accent/50"
+            className="w-full rounded border hairline-strong well-strong px-1.5 py-1 text-[10px] text-slate-400 outline-none focus:border-accent/50"
           >
             <option value="">Insert a reference…</option>
             {others.map((n) => (

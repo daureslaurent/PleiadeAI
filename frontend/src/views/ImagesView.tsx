@@ -45,7 +45,7 @@ import {
   toneOf,
   useConfirm,
 } from '../components/ui';
-import { MONACO_OPTIONS, PLEIADES_THEME, registerPleiadesTheme } from '../lib/monacoTheme';
+import { MONACO_OPTIONS, registerThemes, useMonacoTheme } from '../lib/monacoTheme';
 
 interface Draft {
   _id?: string;
@@ -190,6 +190,7 @@ const toDraft = (i: Image): Draft => ({
  * (Isolation page) reference an image; agents pick a profile.
  */
 export function ImagesView() {
+  const monacoTheme = useMonacoTheme();
   const [items, setItems] = useState<Image[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<ImageStatusDetail | null>(null);
@@ -490,12 +491,12 @@ export function ImagesView() {
           </Section>
 
           <Section title="Dockerfile" icon={<Layers size={13} />}>
-            <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-black/25 py-1">
+            <div className="overflow-hidden rounded-xl border hairline well py-1">
               <Editor
                 height="300px"
                 defaultLanguage="dockerfile"
-                theme={PLEIADES_THEME}
-                beforeMount={registerPleiadesTheme}
+                theme={monacoTheme}
+                beforeMount={registerThemes}
                 value={draft.dockerfile}
                 onChange={(v) => setDraft({ ...draft, dockerfile: v ?? '' })}
                 options={MONACO_OPTIONS}
@@ -557,7 +558,7 @@ export function ImagesView() {
           <Section title="Build console" icon={<Terminal size={13} />}>
             <pre
               ref={logRef}
-              className="h-72 overflow-auto rounded-xl border border-white/[0.06] bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-slate-300"
+              className="h-72 overflow-auto rounded-xl border hairline well-strong p-3 font-mono text-[11px] leading-relaxed text-slate-300"
             >
               {logs || (
                 <span className="text-slate-600">No build output yet. Click “Build image”.</span>
@@ -662,7 +663,7 @@ function CalibrationRow({
     }
   };
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-white/[0.06] bg-black/25 p-3 text-xs">
+    <div className="flex items-start gap-2.5 rounded-xl border hairline well p-3 text-xs">
       <Crosshair size={14} className="mt-0.5 shrink-0 text-accent" />
       {calibration ? (
         <div className="min-w-0 flex-1">
@@ -701,7 +702,7 @@ function VisualToggle({ visual, onToggle }: { visual: boolean; onToggle: (on: bo
   return (
     <div
       className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
-        visual ? 'border-accent/40 bg-accent/[0.07]' : 'border-white/[0.06] bg-black/25'
+        visual ? 'border-accent/40 bg-accent/[0.07]' : 'hairline well'
       }`}
     >
       <Monitor size={16} className={`mt-0.5 shrink-0 ${visual ? 'text-accent' : 'text-slate-500'}`} />
@@ -731,7 +732,7 @@ function AndroidToggle({ android, onToggle }: { android: boolean; onToggle: (on:
   return (
     <div
       className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
-        android ? 'border-accent/40 bg-accent/[0.07]' : 'border-white/[0.06] bg-black/25'
+        android ? 'border-accent/40 bg-accent/[0.07]' : 'hairline well'
       }`}
     >
       <Smartphone size={16} className={`mt-0.5 shrink-0 ${android ? 'text-accent' : 'text-slate-500'}`} />
@@ -793,7 +794,7 @@ function BuildOptions({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) 
           onClick={() =>
             setDraft({ ...draft, build_args: [...draft.build_args, { key: '', value: '' }] })
           }
-          className="flex items-center gap-1 rounded-lg border border-dashed border-white/[0.12] px-2.5 py-1.5 text-[11px] text-slate-400 transition-colors hover:border-accent/50 hover:text-accent"
+          className="flex items-center gap-1 rounded-lg border border-dashed hairline-strong px-2.5 py-1.5 text-[11px] text-slate-400 transition-colors hover:border-accent/50 hover:text-accent"
         >
           <Plus size={12} /> Add build arg
         </button>

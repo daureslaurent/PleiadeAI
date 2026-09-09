@@ -137,7 +137,7 @@ export function MentionChip({ name }: { name: string }) {
           <>
             <div className="fixed inset-0 z-40" onClick={() => setCard(null)} />
             <div
-              className="glass-card fixed z-50 w-72 rounded-xl border border-white/[0.08] p-3 shadow-2xl"
+              className="glass-card fixed z-50 w-72 rounded-xl border hairline p-3 shadow-2xl"
               style={{ left: Math.min(card.x, window.innerWidth - 300), top: card.y }}
             >
               <div className="flex items-center gap-2">
@@ -201,7 +201,7 @@ export function MentionChip({ name }: { name: string }) {
                       <button
                         disabled={busy}
                         onClick={() => void act(ctx?.onDismiss)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-slate-400 transition-colors hover:bg-white/[0.06] disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 rounded-lg border hairline px-2 py-1 text-[11px] text-slate-400 transition-colors hover:raise-2 disabled:opacity-50"
                       >
                         <CornerUpLeft size={11} /> Dismiss
                       </button>
@@ -212,7 +212,7 @@ export function MentionChip({ name }: { name: string }) {
                           ctx?.onOpenSession?.(mention);
                           setCard(null);
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-slate-400 transition-colors hover:bg-white/[0.06]"
+                        className="inline-flex items-center gap-1.5 rounded-lg border hairline px-2 py-1 text-[11px] text-slate-400 transition-colors hover:raise-2"
                       >
                         <MessageSquare size={11} /> Open conversation
                       </button>

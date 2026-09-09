@@ -90,7 +90,7 @@ export function AndroidDevicesManager() {
                 'shrink-0 rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wide transition-colors',
                 d.enabled
                   ? 'border-emerald-500/30 text-emerald-400'
-                  : 'border-white/[0.12] text-slate-500 hover:text-slate-300',
+                  : 'hairline-strong text-slate-500 hover:text-slate-300',
               ].join(' ')}
             >
               {d.enabled ? 'enabled' : 'disabled'}
@@ -171,7 +171,7 @@ export function AndroidDevicesManager() {
                   onChange={(ev) =>
                     void patch(d._id, { mirror_audio_codec: ev.target.value as AndroidAudioCodec })
                   }
-                  className="rounded-md border border-white/[0.12] bg-black/25 px-2 py-1 text-[11px] text-slate-300 outline-none focus:border-accent"
+                  className="rounded-md border hairline-strong well px-2 py-1 text-[11px] text-slate-300 outline-none focus:border-accent"
                 >
                   {ANDROID_AUDIO_CODECS.map((c) => (
                     <option key={c} value={c}>
@@ -213,7 +213,7 @@ export function AndroidDevicesManager() {
       {error && <Callout tone="error">{error}</Callout>}
 
       {adding ? (
-        <div className="space-y-2 rounded-xl border border-dashed border-white/[0.12] bg-black/25 p-3">
+        <div className="space-y-2 rounded-xl border border-dashed hairline-strong well p-3">
           <Input
             autoFocus
             value={name}

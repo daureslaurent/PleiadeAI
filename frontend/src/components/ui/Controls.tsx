@@ -9,12 +9,12 @@ import type {
 import { Loader2 } from 'lucide-react';
 
 /**
- * Form controls on glass (DIRECT_ART §2): inputs are inset *wells* (`bg-black/25`) with white-alpha
+ * Form controls (DIRECT_ART §2): inputs are inset *wells* (the `.well` utility) with a hairline
  * hairlines that resolve to accent on focus — never the legacy `border`/`panel` greys, which read as
  * opaque patches on a translucent panel.
  */
 const WELL =
-  'w-full rounded-lg border border-white/[0.07] bg-black/25 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition-colors focus:border-accent/60 focus:bg-black/30';
+  'w-full rounded-lg border hairline well px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition-colors focus:border-accent/60 focus:well-strong';
 
 export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${WELL} ${className}`} />;
@@ -79,11 +79,11 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-40 ${
-        checked ? 'bg-accent' : 'bg-white/[0.06] ring-1 ring-inset ring-white/[0.12]'
+        checked ? 'bg-accent' : 'raise-2 ring-1 ring-inset ring-hairline-strong'
       }`}
     >
       <span
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-oncolor shadow-sm transition-transform ${
           checked ? 'translate-x-4' : 'translate-x-0'
         }`}
       />
@@ -107,7 +107,7 @@ export function Checkbox({
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-3.5 w-3.5 cursor-pointer rounded border-white/20 bg-black/30 accent-accent"
+        className="h-3.5 w-3.5 cursor-pointer rounded hairline-strong well-strong accent-accent"
       />
       {children}
     </label>
@@ -118,9 +118,9 @@ type Variant = 'primary' | 'ghost' | 'danger' | 'accentSoft';
 
 const VARIANTS: Record<Variant, string> = {
   // The one loud element per surface: solid accent.
-  primary: 'bg-accent text-white hover:bg-accent/90 active:scale-95',
+  primary: 'bg-accent text-oncolor hover:bg-accent/90 active:scale-95',
   // Quiet default: white-alpha ring, fills on hover.
-  ghost: 'text-slate-300 ring-1 ring-white/[0.1] hover:bg-white/[0.06] active:scale-95',
+  ghost: 'text-slate-300 ring-1 ring-hairline-strong hover:raise-2 active:scale-95',
   // Destructive: red alpha, never a solid red block.
   danger: 'text-red-400 ring-1 ring-red-500/30 hover:bg-red-500/10 active:scale-95',
   // Secondary action that still belongs to the accent (e.g. Build, Score now).

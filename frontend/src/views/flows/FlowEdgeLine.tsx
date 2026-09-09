@@ -40,7 +40,7 @@ export const FlowEdgeLine = memo(function FlowEdgeLine({
   });
 
   const edgeData = data as FlowEdgeData | undefined;
-  const color = edgeData?.color ?? '#64748b';
+  const color = edgeData?.color ?? 'rgb(var(--c-slate-500))';
   const active = Boolean(selected) || hovered;
 
   return (
@@ -74,7 +74,7 @@ export const FlowEdgeLine = memo(function FlowEdgeLine({
               aria-label="Delete link"
               className={`flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none transition-all ${
                 active
-                  ? 'scale-100 border-red-400/60 bg-[#0d1424] text-red-400 opacity-100 hover:bg-red-500/20'
+                  ? 'scale-100 border-red-400/60 bg-surface text-red-400 opacity-100 hover:bg-red-500/20'
                   : 'scale-75 border-transparent bg-transparent text-transparent opacity-0'
               }`}
             >

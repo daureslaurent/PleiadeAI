@@ -205,7 +205,7 @@ export function EndpointsManager() {
       {error && <Callout tone="error">{error}</Callout>}
 
       {adding ? (
-        <div className="space-y-2 rounded-xl border border-dashed border-white/[0.12] bg-black/25 p-3">
+        <div className="space-y-2 rounded-xl border border-dashed hairline-strong well p-3">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. workstation)" autoFocus />
           <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://192.168.1.20:8080" />
           <Input
@@ -224,7 +224,7 @@ export function EndpointsManager() {
       ) : (
         <button
           onClick={() => setAdding(true)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2 text-xs text-slate-400 transition-colors hover:border-white/25 hover:text-slate-200"
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed hairline-strong py-2 text-xs text-slate-400 transition-colors hover:hairline-strong hover:text-slate-200"
         >
           <Plus size={14} /> Add endpoint
         </button>
@@ -366,7 +366,7 @@ function ModesEditor({ endpoint: e, onPatch }: { endpoint: Endpoint; onPatch: (p
   }
 
   return (
-    <div className="space-y-2 border-t border-white/[0.06] pt-2">
+    <div className="space-y-2 border-t hairline pt-2">
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Modes</span>
         <span className="text-[11px] text-slate-600">

@@ -95,10 +95,10 @@ export function ScheduleForm({
       role="dialog"
       aria-modal="true"
       aria-label={initial ? 'Edit schedule' : 'New schedule'}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/50 p-4 backdrop-blur-sm"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="glass-card w-full max-w-lg animate-fade-up rounded-2xl border border-white/[0.09] p-5">
+      <div className="glass-card w-full max-w-lg animate-fade-up rounded-2xl border hairline p-5">
         <div className="mb-4 flex items-center gap-2">
           <CalendarClock size={16} className="text-slate-500" />
           <h2 className="text-sm font-semibold text-slate-100">
@@ -107,7 +107,7 @@ export function ScheduleForm({
           <button
             onClick={onClose}
             title="Close"
-            className="ml-auto rounded-md p-1.5 text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+            className="ml-auto rounded-md p-1.5 text-slate-500 transition-colors hover:raise-2 hover:text-slate-200"
           >
             <X size={15} />
           </button>
@@ -173,7 +173,7 @@ export function ScheduleForm({
                 className={`rounded-md px-2 py-1 text-[10px] uppercase tracking-wider transition-colors ${
                   cron.trim() === p.expr
                     ? 'bg-accent/20 text-accent ring-1 ring-accent/40'
-                    : 'bg-white/[0.06] text-slate-400 hover:bg-white/[0.1] hover:text-slate-200'
+                    : 'raise-2 text-slate-400 hover:raise-3 hover:text-slate-200'
                 }`}
               >
                 {p.label}
@@ -186,7 +186,7 @@ export function ScheduleForm({
             <p className="text-[11px] leading-relaxed text-red-400">{preview.error}</p>
           )}
           {preview?.valid && (
-            <div className="rounded-xl border border-white/[0.06] bg-black/25 px-3 py-2 text-[11px] leading-relaxed">
+            <div className="rounded-xl border hairline well px-3 py-2 text-[11px] leading-relaxed">
               <span className="text-slate-500">
                 {once ? 'Runs once at' : 'Next runs'} ({preview.timezone}):
               </span>

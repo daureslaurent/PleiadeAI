@@ -20,7 +20,7 @@ function downloadBlob(blob: Blob, filename: string) {
 export function JobsPanel({ jobs, onChanged }: { jobs: FinetuneJob[]; onChanged: () => void }) {
   if (jobs.length === 0) {
     return (
-      <section className="glass-card animate-fade-up rounded-2xl border border-white/[0.06] p-5 text-sm text-slate-500">
+      <section className="glass-card animate-fade-up rounded-2xl border hairline p-5 text-sm text-slate-500">
         No training runs yet.
       </section>
     );
@@ -58,7 +58,7 @@ function JobRow({ job, onChanged }: { job: FinetuneJob; onChanged: () => void })
   };
 
   return (
-    <section className="glass-card animate-fade-up rounded-2xl border border-white/[0.06] p-4">
+    <section className="glass-card animate-fade-up rounded-2xl border hairline p-4">
       <header className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <FinetuneStatusBadge status={job.status} />
         <span className="text-sm font-semibold text-slate-100">{job.run_name}</span>
@@ -77,7 +77,7 @@ function JobRow({ job, onChanged }: { job: FinetuneJob; onChanged: () => void })
             <button
               onClick={() => setShowLogs((v) => !v)}
               title="Toggle logs"
-              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+              className="rounded-md p-1.5 text-slate-400 transition-colors hover:raise-2 hover:text-slate-200"
             >
               <Terminal size={13} />
             </button>
@@ -109,7 +109,7 @@ function JobRow({ job, onChanged }: { job: FinetuneJob; onChanged: () => void })
             <span className="text-shimmer">{job.status}</span>
             <span className="font-mono">{Math.round(job.progress * 100)}%</span>
           </div>
-          <div className="h-1 overflow-hidden rounded-full bg-black/40">
+          <div className="h-1 overflow-hidden rounded-full well-strong">
             <div
               className="h-full rounded-full bg-accent transition-all duration-700"
               style={{ width: `${Math.min(100, job.progress * 100)}%` }}
@@ -131,7 +131,7 @@ function JobRow({ job, onChanged }: { job: FinetuneJob; onChanged: () => void })
       )}
 
       {showLogs && job.log_tail?.length > 0 && (
-        <pre className="mt-3 max-h-56 overflow-auto rounded-xl border border-white/[0.06] bg-black/40 p-3 font-mono text-[10px] leading-relaxed text-slate-400">
+        <pre className="mt-3 max-h-56 overflow-auto rounded-xl border hairline well-strong p-3 font-mono text-[10px] leading-relaxed text-slate-400">
           {job.log_tail.join('\n')}
         </pre>
       )}

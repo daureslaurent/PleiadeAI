@@ -24,6 +24,15 @@ const GlobalModeSchema = new Schema(
 const SettingsSchema = new Schema(
   {
     key: { type: String, required: true, unique: true, default: 'global' },
+    /**
+     * Operator appearance (`THEME_SYSTEM_PLAN.md`): which theme the app wears and how the chat
+     * page is structured. Nothing on the backend reads them — they live here rather than in the
+     * browser so the choice follows the operator to another device. Validated on the way in and
+     * on the way out (`settings.service`), never enum-constrained here, so a build that drops a
+     * theme degrades to the default instead of failing every write to the document.
+     */
+    ui_theme: { type: String, default: 'pleiades' },
+    ui_chat_layout: { type: String, default: 'hybrid' },
     llama_url: { type: String, required: true },
     llama_model: { type: String, required: true },
     llama_api_key: { type: String, default: 'sk-no-key-required' },

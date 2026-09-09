@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Bug } from 'lucide-react';
 import { agentsApi, sessionsApi, type Agent, type Session } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { registerAgentIdentities } from '../lib/agentColor';
@@ -9,6 +10,8 @@ import { usePrefs } from '../store/prefs';
 import { WorkspaceNav } from '../components/workspace/WorkspaceNav';
 import { ChatPanel } from '../components/workspace/ChatPanel';
 import { DebuggerDrawer } from '../components/workspace/DebuggerDrawer';
+import { TraceColumn } from '../components/workspace/TraceColumn';
+import { useActiveChatLayout } from '../components/workspace/ChatLayoutContext';
 import { PromptDrawer } from '../components/workspace/PromptDrawer';
 
 // Lazy: the noVNC client is only pulled in when an operator actually opens a desktop.
@@ -61,7 +64,7 @@ export function AgentWorkspace() {
   // conversation buttons land the operator in the turn they just started.
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const { wire, hydrate, clearActive, send, workingSessions, workingAgents } = useStream();
+  const { wire, hydrate, clearActive, send, workingSessions, workingAgents, streaming } = useStream();
 
   const pageSize = usePrefs((s) => s.sessionsPerAgent);
   // Read through a ref inside callbacks so changing the preference doesn't re-create them (and with
@@ -336,6 +339,11 @@ export function AgentWorkspace() {
   // speaker is the interviewer agent — never the operator.
   const generatedSession = activeSession?.origin === 'synthetic';
 
+  // The chat layout can claim a column of its own beside the conversation (THEME_SYSTEM_PLAN.md
+  // §3.2). Only the Workbench does today, and when it is on, the drawer drops its Trace tab —
+  // the same trace rendered twice, side by side, would just be a bug that happened to line up.
+  const tracePinned = useActiveChatLayout().rightColumn === 'trace';
+
   return (
     <div className="flex h-full min-h-0">
       <WorkspaceNav
@@ -380,7 +388,20 @@ export function AgentWorkspace() {
         onSend={handleSend}
         onEnsureSession={ensureSession}
       />
-      {drawer && <DebuggerDrawer onClose={() => setDrawer(false)} agent={activeAgent} />}
+      {/* The Workbench layout's second half: the trace is the page, not a drawer you open. It sits
+          left of the drawer so opening Isolation or Data widens the row rather than replacing it. */}
+      {tracePinned && (
+        <aside className="glass flex w-[22rem] shrink-0 flex-col border-l">
+          <div className="flex items-center gap-1.5 border-b hairline px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            <Bug size={12} className="text-reasoning" /> Trace
+            {streaming && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />}
+          </div>
+          <TraceColumn />
+        </aside>
+      )}
+      {drawer && (
+        <DebuggerDrawer onClose={() => setDrawer(false)} agent={activeAgent} hideTrace={tracePinned} />
+      )}
       {promptOpen && (
         <PromptDrawer
           onClose={() => setPromptOpen(false)}

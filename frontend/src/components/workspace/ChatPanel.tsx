@@ -1,98 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AtSign, RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, Mic, ScrollText, ChevronDown, ChevronUp, ArrowDown } from 'lucide-react';
-import { Blocks, ThinkingRow, activityLabel } from './Blocks';
-import { Collapsible } from './Collapsible';
+import { AtSign, RefreshCw, SendHorizontal, Bug, MessagesSquare, Gauge, MessageCircleQuestion, Square, Monitor, Smartphone, ImagePlus, X, Play, Repeat, Pencil, ScrollText, ArrowDown } from 'lucide-react';
 import { ContainerBanner } from './ContainerBanner';
 import { TodoPanel } from './TodoPanel';
 import { LoopPanel } from './LoopPanel';
 import { ModeBar } from './ModeBar';
-import { useStream, buildBlocks, type ContextUsage, type RecalledMemory, type Turn, type TurnScore } from '../../store/stream';
-import { agentColor, agentIcon, agentInitial } from '../../lib/agentColor';
-import { iconFor } from '../../lib/agentIcons';
-import { ScoreBadge } from '../ScoreBadge';
-import { MemoriesBadge } from '../MemoriesBadge';
+import { useStream, buildBlocks, type ContextUsage } from '../../store/stream';
+import { agentColor, agentGlow } from '../../lib/agentColor';
+import { ChatLayoutProvider, useActiveChatLayout } from './ChatLayoutContext';
+import { CONVERSATION_VIEWS, type ConversationProps } from './conversation';
 import { useStickyScroll } from '../../hooks/useStickyScroll';
 import type { Agent } from '../../lib/api';
 
 /**
- * Hybrid message layout: the user speaks in a compact right-aligned gradient bubble; the agent
- * answers full-width, document-style (avatar + name header, then an open content column) so
- * tool cards, sub-agent bubbles, and code get the whole line to breathe.
+ * The conversation itself, rendered by whichever chat layout the operator picked.
  *
- * In a *generated* conversation the right-hand speaker isn't the operator but the Conversation
- * Generator's interviewer, so the bubble is named and re-tinted — the layout is the same chat, but it
- * must never read as something the operator said.
+ * Everything around it — header, banners, todo panel, ask-user prompt, composer — is the same in
+ * all five, so only this swaps (THEME_SYSTEM_PLAN.md §3). The provider is what lets the shared
+ * `Blocks` / `ToolCall` renderers adapt at any nesting depth without the layout passing anything
+ * down.
  */
-function MessageRow({
-  role,
-  agentName,
-  score,
-  memories,
-  generated,
-  collapsible = false,
-  children,
-}: {
-  role: Turn['role'];
-  agentName: string;
-  /** Conversation Quality score for an assistant turn (renders a tiny badge next to the name). */
-  score?: TurnScore;
-  /** Memories auto-recalled into this turn's prompt — an inspectable pill next to the name. */
-  memories?: RecalledMemory[];
-  /** This session was produced by the Conversation Generator → the "user" turns are the interviewer. */
-  generated?: boolean;
-  /** Clamp an over-long turn behind a "Show more" pill. Off for the live turn and the newest one. */
-  collapsible?: boolean;
-  children: React.ReactNode;
-}) {
-  if (role === 'user') {
-    return (
-      <div className="flex animate-fade-up flex-col items-end pl-10">
-        {generated && (
-          <div className="mb-1 flex items-center gap-1 pr-1 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-300/80">
-            <Mic size={11} /> Interviewer
-          </div>
-        )}
-        <div
-          className={`min-w-0 max-w-[78%] overflow-hidden break-words rounded-2xl rounded-br-md px-4 py-2.5 text-sm text-white ${
-            generated
-              ? 'bg-gradient-to-br from-fuchsia-500/80 via-fuchsia-500/65 to-purple-500/70 shadow-[0_4px_20px_rgba(217,70,239,0.22)]'
-              : 'bg-gradient-to-br from-accent/90 via-accent/75 to-indigo-500/80 shadow-[0_4px_20px_rgba(59,130,246,0.25)]'
-          }`}
-        >
-          {collapsible ? (
-            <Collapsible maxHeight={200} tone="bubble">
-              {children}
-            </Collapsible>
-          ) : (
-            children
-          )}
-        </div>
-      </div>
-    );
-  }
-  // Agent: full-width document flow, its identity color threading avatar → name → glow.
-  const color = agentColor(agentName);
-  const Icon = iconFor(agentIcon(agentName));
+function Conversation(props: ConversationProps) {
+  const layout = useActiveChatLayout();
+  const View = CONVERSATION_VIEWS[layout.id];
   return (
-    <div className="animate-fade-up">
-      <div className="mb-1.5 flex items-center gap-2">
-        <span
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-slate-950 shadow-[0_0_12px_var(--glow)]"
-          style={{ background: color.accent, ['--glow' as string]: `${color.accent}55` }}
-        >
-          {Icon ? <Icon size={15} /> : agentInitial(agentName)}
-        </span>
-        <span className="text-xs font-semibold tracking-wide" style={{ color: color.accent }}>
-          {agentName}
-        </span>
-        {score && <ScoreBadge score={score} size="xs" />}
-        {memories && memories.length > 0 && <MemoriesBadge memories={memories} />}
-      </div>
-      <div className="min-w-0 overflow-hidden break-words pl-9 text-sm text-slate-100">
-        {collapsible ? <Collapsible maxHeight={380}>{children}</Collapsible> : children}
-      </div>
-    </div>
+    <ChatLayoutProvider layout={layout}>
+      <View {...props} />
+    </ChatLayoutProvider>
   );
 }
 
@@ -191,7 +125,7 @@ function ContextMeter({ total, live }: { total: ContextUsage | null; live: Conte
       }${liveActive ? ` — live this turn (last total ${totalTokens.toLocaleString()})` : ''}`}
     >
       <Gauge size={13} className={`shrink-0 ${liveActive ? 'text-amber-400' : 'text-slate-500'}`} />
-      <div className="relative hidden h-1.5 w-16 overflow-hidden rounded-full bg-white/[0.06] sm:block">
+      <div className="relative hidden h-1.5 w-16 overflow-hidden rounded-full raise-2 sm:block">
         <div className={`h-full rounded-full transition-all ${tone}`} style={{ width: `${shownPct}%` }} />
         {/* Ghost tick at the settled total, shown only while a live reading is overlaying it. */}
         {liveActive && contextWindow > 0 && (
@@ -231,13 +165,13 @@ function AskUserPrompt({
     <div className="px-4 pt-3">
       <div
         className="glass-card mx-auto max-w-3xl animate-fade-up rounded-2xl border p-3 animate-glow-pulse"
-        style={{ ['--glow' as string]: `${agentColor(agent).accent}30` }}
+        style={{ ['--glow' as string]: agentGlow(agent, 0.19) }}
       >
         <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-medium" style={{ color: agentColor(agent).accent }}>
           <MessageCircleQuestion size={13} /> {agent} is asking you
         </div>
         <p className="mb-2 whitespace-pre-wrap px-1 text-sm text-slate-100">{question}</p>
-        <div className="flex items-end gap-2 rounded-xl border border-accent/40 bg-black/20 px-3 py-2 transition-colors focus-within:border-accent">
+        <div className="flex items-end gap-2 rounded-xl border border-accent/40 well px-3 py-2 transition-colors focus-within:border-accent">
           <textarea
             ref={ref}
             rows={1}
@@ -255,7 +189,7 @@ function AskUserPrompt({
           <button
             onClick={submit}
             disabled={!reply.trim()}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-white transition-all hover:bg-accent/90 hover:shadow-[0_0_14px_rgba(59,130,246,0.5)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent text-oncolor transition-all hover:bg-accent/90 hover:shadow-[0_0_14px_rgb(var(--c-accent)/0.5)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <SendHorizontal size={16} />
           </button>
@@ -392,7 +326,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
           {streaming ? (
             <div className="flex items-center gap-1.5 text-[11px]">
               <span
-                className={`h-1.5 w-1.5 animate-pulse rounded-full ${activeAgent ? '' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'}`}
+                className={`h-1.5 w-1.5 animate-pulse rounded-full ${activeAgent ? '' : 'bg-emerald-400 shadow-[0_0_8px_rgb(var(--c-emerald-400)/0.8)]'}`}
                 style={
                   activeAgent
                     ? {
@@ -426,7 +360,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
             onClick={onOpenVisual}
             title="Open the agent's live desktop (Visual)"
             className={[
-              'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200',
+              'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:raise-2 hover:text-slate-200',
               !(hasSession && (contextUsage || liveContext)) ? 'ml-auto' : '',
             ].join(' ')}
           >
@@ -438,7 +372,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
             onClick={onOpenAndroid}
             title="Open the agent's live Android device"
             className={[
-              'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200',
+              'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs text-slate-400 transition-colors hover:raise-2 hover:text-slate-200',
               !(hasSession && (contextUsage || liveContext)) && !agent?.visual ? 'ml-auto' : '',
             ].join(' ')}
           >
@@ -454,8 +388,8 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               ? 'ml-auto'
               : '',
             promptOpen
-              ? 'bg-accent/15 text-accent shadow-[0_0_12px_rgba(56,189,248,0.2)]'
-              : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
+              ? 'bg-accent/15 text-accent shadow-[0_0_12px_rgb(var(--c-sky-400)/0.2)]'
+              : 'text-slate-400 hover:raise-2 hover:text-slate-200',
           ].join(' ')}
         >
           <ScrollText size={14} /> Prompt
@@ -465,8 +399,8 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
           className={[
             'flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs transition-colors',
             debuggerOpen
-              ? 'bg-reasoning/15 text-reasoning shadow-[0_0_12px_rgba(168,85,247,0.2)]'
-              : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
+              ? 'bg-reasoning/15 text-reasoning shadow-[0_0_12px_rgb(var(--c-reasoning)/0.2)]'
+              : 'text-slate-400 hover:raise-2 hover:text-slate-200',
           ].join(' ')}
         >
           <Bug size={14} /> Debugger
@@ -499,79 +433,20 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
             <p className="text-sm">Pick a session or start a new one to begin chatting.</p>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-6">
-            {hiddenTurns > 0 && (
-              <div className="flex items-center gap-3">
-                <div className="h-px flex-1 bg-white/[0.07]" />
-                <button
-                  onClick={() => setShowAllTurns(true)}
-                  className="glass flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium text-slate-400 transition-colors hover:text-slate-100"
-                >
-                  <ChevronUp size={12} />
-                  Show {hiddenTurns} earlier {hiddenTurns === 1 ? 'message' : 'messages'}
-                </button>
-                <div className="h-px flex-1 bg-white/[0.07]" />
-              </div>
-            )}
-            {showAllTurns && turns.length > RECENT_TURNS && (
-              <div className="flex justify-center">
-                <button
-                  onClick={() => setShowAllTurns(false)}
-                  className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] text-slate-500 transition-colors hover:text-slate-300"
-                >
-                  <ChevronDown size={12} /> Fold history back
-                </button>
-              </div>
-            )}
-            {shownTurns.map((t, i) => (
-              <MessageRow
-                key={hiddenTurns + i}
-                role={t.role}
-                agentName={agentName}
-                generated={generatedSession}
-                /* The tail of the conversation reads in full; everything above it clamps. */
-                collapsible={streaming || hiddenTurns + i < turns.length - 1}
-                score={t.role === 'assistant' ? t.score : undefined}
-                memories={t.role === 'assistant' ? t.memories : undefined}
-              >
-                {t.role === 'user' ? (
-                  <div className="space-y-1.5">
-                    {t.images && t.images.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {t.images.map((src, j) => (
-                          <a key={j} href={src} target="_blank" rel="noreferrer">
-                            <img
-                              src={src}
-                              alt={`attachment ${j + 1}`}
-                              className="max-h-40 rounded-md border border-border object-contain"
-                            />
-                          </a>
-                        ))}
-                      </div>
-                    )}
-                    {t.blocks[0].text && (
-                      <span className="whitespace-pre-wrap break-words leading-relaxed">{t.blocks[0].text}</span>
-                    )}
-                  </div>
-                ) : (
-                  <Blocks blocks={t.blocks} />
-                )}
-              </MessageRow>
-            ))}
-            {streaming && (
-              <MessageRow role="assistant" agentName={agentName} memories={liveFrames.root?.memories}>
-                <Blocks blocks={liveBlocks} live />
-                {/* Root spinner: shows the top-level agent's live activity, but stays silent while a
-                    delegated sub-agent owns the floor (its own bubble spins instead). */}
-                {activityLabel(liveBlocks) && (
-                  <ThinkingRow
-                    label={activityLabel(liveBlocks)!}
-                    color={agentColor(agentName).accent}
-                  />
-                )}
-              </MessageRow>
-            )}
-          </div>
+          <Conversation
+            turns={turns}
+            shownTurns={shownTurns}
+            hiddenTurns={hiddenTurns}
+            showAllTurns={showAllTurns}
+            onShowAll={() => setShowAllTurns(true)}
+            onFoldBack={() => setShowAllTurns(false)}
+            recentTurns={RECENT_TURNS}
+            agentName={agentName}
+            generatedSession={generatedSession}
+            streaming={streaming}
+            liveBlocks={liveBlocks}
+            liveMemories={liveFrames.root?.memories}
+          />
         )}
       </div>
 
@@ -580,7 +455,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
         <div className="relative h-0">
           <button
             onClick={jumpToLatest}
-            className="glass-card absolute bottom-1 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-colors hover:text-white"
+            className="glass-card absolute bottom-1 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-colors hover:text-slate-100"
           >
             <ArrowDown size={12} /> Latest
           </button>
@@ -601,8 +476,8 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
           className={[
             'glass-card mx-auto max-w-3xl rounded-2xl border px-3 py-2 transition-all duration-300',
             dragOver
-              ? 'border-accent shadow-[0_0_24px_rgba(59,130,246,0.35)]'
-              : 'focus-within:border-accent/50 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.18)]',
+              ? 'border-accent shadow-[0_0_24px_rgb(var(--c-accent)/0.35)]'
+              : 'focus-within:border-accent/50 focus-within:shadow-[0_0_20px_rgb(var(--c-accent)/0.18)]',
           ].join(' ')}
           onDragOver={(e) => {
             if (!hasSession) return;
@@ -626,7 +501,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
                   <button
                     onClick={() => setAttachments((a) => a.filter((_, j) => j !== i))}
                     title="Remove"
-                    className="absolute right-0.5 top-0.5 rounded bg-black/60 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    className="absolute right-0.5 top-0.5 rounded bg-scrim/60 p-0.5 text-oncolor opacity-0 transition-opacity group-hover:opacity-100"
                   >
                     <X size={12} />
                   </button>
@@ -658,7 +533,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               onClick={() => fileInputRef.current?.click()}
               disabled={!hasSession}
               title="Attach image"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:raise-2 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ImagePlus size={17} />
             </button>
@@ -708,7 +583,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
                   'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors',
                   loopOpen || autoLoop
                     ? 'bg-accent/15 text-accent hover:bg-accent/25'
-                    : 'text-slate-600 hover:bg-white/[0.06] hover:text-slate-300',
+                    : 'text-slate-600 hover:raise-2 hover:text-slate-300',
                 ].join(' ')}
               >
                 <RefreshCw
@@ -721,7 +596,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               <button
                 onClick={stop}
                 title="Stop"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500 text-white transition-all animate-glow-pulse hover:bg-red-500/90"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500 text-oncolor transition-all animate-glow-pulse hover:bg-red-500/90"
                 style={{ ['--glow' as string]: 'rgba(239,68,68,0.4)' }}
               >
                 <Square size={14} className="fill-current" />
@@ -730,7 +605,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               <button
                 onClick={submit}
                 disabled={!hasSession || (!input.trim() && attachments.length === 0)}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-accent via-indigo-500 to-reasoning bg-[length:200%_200%] text-white transition-all animate-gradient-x hover:shadow-[0_0_16px_rgba(99,102,241,0.5)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-accent via-indigo-500 to-reasoning bg-[length:200%_200%] text-oncolor transition-all animate-gradient-x hover:shadow-[0_0_16px_rgb(var(--c-indigo-500)/0.5)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none"
               >
                 <SendHorizontal size={16} />
               </button>
@@ -740,7 +615,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
           {/* Continue controls: nudge a stalled agent onward. Manual button + auto-continue toggle;
               the pencil edits the (persisted) message. Only shown when idle with history. */}
           {canContinue && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-white/[0.06] pt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t hairline pt-2">
               <button
                 onClick={continueNow}
                 title="Send the continue message to resume the agent"
@@ -748,7 +623,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
                   'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
                   lastTurnTruncated
                     ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
-                    : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
+                    : 'text-slate-400 hover:raise-2 hover:text-slate-200',
                 ].join(' ')}
               >
                 <Play size={13} /> Continue
@@ -761,7 +636,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
                   'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
                   autoContinue
                     ? 'bg-accent/15 text-accent hover:bg-accent/25'
-                    : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200',
+                    : 'text-slate-400 hover:raise-2 hover:text-slate-200',
                 ].join(' ')}
               >
                 <Repeat size={13} /> Auto{autoContinue ? ' on' : ''}
@@ -769,7 +644,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               <button
                 onClick={() => setEditingContinue((o) => !o)}
                 title="Edit the continue message"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:raise-2 hover:text-slate-200"
               >
                 <Pencil size={13} />
               </button>
@@ -787,7 +662,7 @@ export function ChatPanel({ agent, hasSession, generatedSession, forumThreadId, 
               onChange={(e) => setContinuePhrase(e.target.value)}
               rows={2}
               placeholder={DEFAULT_CONTINUE}
-              className="mt-2 w-full resize-none rounded-md border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200 outline-none focus:border-accent/60"
+              className="mt-2 w-full resize-none rounded-md border hairline-strong well px-3 py-2 text-xs text-slate-200 outline-none focus:border-accent/60"
             />
           )}
         </div>
