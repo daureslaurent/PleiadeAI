@@ -38,6 +38,30 @@ export interface AgentHopDoneEvent {
   status: 'success' | 'error';
 }
 
+/**
+ * A tool call while the model is still writing it (`agent:tool_call_stream`). `delta` fragments
+ * carry the name and successive slices of the raw JSON arguments; `reset` marks a new inference
+ * pass, dropping drafts that never became real calls. The authoritative call still arrives on
+ * `tool_start`, which adopts the draft by `callId`.
+ */
+export type ToolCallStreamEvent = {
+  type: 'tool_call_stream';
+  /** Conversation (or flow run) this belongs to — route on it. */
+  sessionId: string;
+  agent: string;
+} & (
+  | {
+      phase: 'delta';
+      /** Per-pass index shared by every fragment of one call. */
+      index: number;
+      /** Present once the server issues it; matches the later `tool_start` `callId`. */
+      callId?: string;
+      tool?: string;
+      argsDelta?: string;
+    }
+  | { phase: 'reset' }
+);
+
 export interface ToolStartEvent {
   type: 'tool_start';
   /** Conversation (or flow run) this belongs to — route on it. */
@@ -527,6 +551,7 @@ export type WsEvent =
   | StreamChunkEvent
   | AgentHopEvent
   | AgentHopDoneEvent
+  | ToolCallStreamEvent
   | ToolStartEvent
   | ToolOutputEvent
   | ToolEndEvent

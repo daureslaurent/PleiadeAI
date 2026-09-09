@@ -11,6 +11,7 @@ import type {
   SystemAlertEvent,
   ToolEndEvent,
   ToolOutputEvent,
+  ToolCallStreamEvent,
   ToolStartEvent,
   TruncatedEvent,
   AutoLoopEvent,
@@ -117,7 +118,14 @@ export type Block =
       tool: string;
       args: Record<string, unknown>;
       output: string;
-      status: 'running' | 'success' | 'error';
+      /**
+       * `drafting` — the model is still writing the call (its arguments stream into {@link argsText});
+       * every later state is the executing/executed call. A draft is live-only: it never reaches a
+       * persisted turn (see the `chat:done` fold).
+       */
+      status: 'drafting' | 'running' | 'success' | 'error';
+      /** Raw JSON arguments as streamed so far. Only meaningful while `status === 'drafting'`. */
+      argsText?: string;
       result?: unknown;
       /** Images the tool read/acquired into the turn (e.g. a picture read via `read`), keyed by handle. */
       images?: { id?: string; dataUrl: string }[];
@@ -174,7 +182,11 @@ type LiveItem =
       tool: string;
       args: Record<string, unknown>;
       output: string;
-      status: 'running' | 'success' | 'error';
+      status: 'drafting' | 'running' | 'success' | 'error';
+      /** Raw JSON arguments streamed so far, while the model is still writing the call. */
+      argsText?: string;
+      /** Index the server tagged the streamed fragments with, until a `callId` arrives to key on. */
+      streamIndex?: number;
       result?: unknown;
       images?: { id?: string; dataUrl: string }[];
       vision?: VisionInfo;
@@ -248,6 +260,7 @@ export function buildBlocks(
         args: it.args,
         output: it.output,
         status: it.status,
+        ...(it.argsText !== undefined ? { argsText: it.argsText } : {}),
         result: it.result,
         images: it.images,
         vision: it.vision,
@@ -532,24 +545,95 @@ export const useStream = create<StreamState>((set, get) => ({
       });
     });
 
+    // The call as the model writes it. A fragment either opens a draft tool block or appends to the
+    // one it belongs to; `tool_start` later settles that same block into the running call, so the
+    // operator sees one block go from "writing arguments" to "running" rather than a dead spinner
+    // followed by a fully-formed card.
+    socket.on('tool_call_stream', (e: ToolCallStreamEvent) => {
+      if (!onScreen(e.sessionId)) return;
+      set((s) => {
+        const top = s.frameStack[s.frameStack.length - 1] ?? 'root';
+        if (e.phase === 'reset') {
+          const items = s.liveItems.filter((it) => !(it.kind === 'tool' && it.status === 'drafting'));
+          return items.length === s.liveItems.length ? {} : { liveItems: items };
+        }
+        // Key on the server's call id once it exists; until then the fragment index is all we have to
+        // tell two calls streamed side by side apart. Both are scoped to the streaming frame.
+        const at = s.liveItems.findIndex(
+          (it) =>
+            it.kind === 'tool' &&
+            it.status === 'drafting' &&
+            it.frameId === top &&
+            (e.callId && it.callId ? it.callId === e.callId : it.streamIndex === e.index),
+        );
+        const items = [...s.liveItems];
+        const prev = at >= 0 ? items[at] : undefined;
+        if (prev && prev.kind === 'tool') {
+          items[at] = {
+            ...prev,
+            callId: e.callId ?? prev.callId,
+            tool: e.tool ?? prev.tool,
+            argsText: (prev.argsText ?? '') + (e.argsDelta ?? ''),
+          };
+        } else {
+          items.push({
+            kind: 'tool',
+            id: nextId(),
+            frameId: top,
+            callId: e.callId ?? '',
+            tool: e.tool ?? '',
+            args: {},
+            output: '',
+            status: 'drafting',
+            argsText: e.argsDelta ?? '',
+            streamIndex: e.index,
+          });
+        }
+        return { liveItems: items };
+      });
+    });
+
     socket.on('tool_start', (e: ToolStartEvent) => {
       if (!onScreen(e.sessionId)) return;
       set((s) => {
         const top = s.frameStack[s.frameStack.length - 1] ?? 'root';
+        // Settle the draft this call was streamed as, so the block keeps its place in the turn (and
+        // the reader keeps their scroll position). Match on the call id when the server issued one,
+        // else on the tool name — calls are drafted and executed in the same order.
+        const at = s.liveItems.findIndex(
+          (it) =>
+            it.kind === 'tool' &&
+            it.status === 'drafting' &&
+            it.frameId === top &&
+            (e.callId && it.callId ? it.callId === e.callId : it.tool === e.tool),
+        );
+        // The draft's streamed argument text is dropped here: from now on the parsed `args` are
+        // authoritative, and a settled block must not carry half-written JSON into the saved turn.
+        const settled = {
+          callId: e.callId,
+          tool: e.tool,
+          args: e.args,
+          status: 'running' as const,
+          argsText: undefined,
+          streamIndex: undefined,
+        };
+        const draft = at >= 0 ? s.liveItems[at] : undefined;
         return {
-          liveItems: [
-            ...s.liveItems,
-            {
-              kind: 'tool',
-              id: nextId(),
-              frameId: top,
-              callId: e.callId,
-              tool: e.tool,
-              args: e.args,
-              output: '',
-              status: 'running',
-            },
-          ],
+          liveItems: draft
+            ? s.liveItems.map((it, i) => (i === at ? { ...it, ...settled } : it))
+            : [
+                ...s.liveItems,
+                {
+                  kind: 'tool',
+                  id: nextId(),
+                  frameId: top,
+                  callId: e.callId,
+                  tool: e.tool,
+                  args: e.args,
+                  output: '',
+                  status: 'running',
+                },
+              ],
           trace: [
             ...s.trace,
             { kind: 'tool_start', label: `▶ ${e.tool}`, detail: JSON.stringify(e.args) },
@@ -941,7 +1025,13 @@ export const useStream = create<StreamState>((set, get) => ({
         // When the server persisted this turn (client was gone mid-run), render the rich blocks it
         // reconstructed — tools + sub-agent hops included — falling back to plain text. The local
         // live buffer is at best partial in that case. Otherwise fold the live buffer as usual.
-        const built = buildBlocks('root', s.liveItems, s.liveFrames);
+        // A call the model was still writing when the turn ended never ran: drop the draft rather
+        // than persist a block stuck at "writing arguments".
+        const built = buildBlocks(
+          'root',
+          s.liveItems.filter((it) => !(it.kind === 'tool' && it.status === 'drafting')),
+          s.liveFrames,
+        );
         const blocks: Block[] = persisted
           ? serverBlocks && serverBlocks.length
             ? serverBlocks

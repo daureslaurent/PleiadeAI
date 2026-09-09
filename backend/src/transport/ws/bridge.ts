@@ -90,6 +90,25 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  // The tool call while the model is still writing it. Deliberately narrow: the client only needs
+  // enough to draw (and later match) a draft block — the authoritative call arrives on `tool_start`.
+  eventBus.on('agent:tool_call_stream', (payload) => {
+    io.to(payload.ctx.sessionId).emit('tool_call_stream', {
+      type: 'tool_call_stream',
+      sessionId: payload.ctx.sessionId,
+      agent: payload.ctx.agentName,
+      ...(payload.phase === 'reset'
+        ? { phase: 'reset' as const }
+        : {
+            phase: 'delta' as const,
+            index: payload.index,
+            callId: payload.callId,
+            tool: payload.tool,
+            argsDelta: payload.argsDelta,
+          }),
+    });
+  });
+
   eventBus.on('agent:tool_invoke', ({ ctx, callId, tool, args }) => {
     io.to(ctx.sessionId).emit('tool_start', {
       type: 'tool_start',

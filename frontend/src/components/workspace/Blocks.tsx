@@ -124,6 +124,8 @@ export function activityLabel(blocks: Block[]): string | null {
   if (last?.kind === 'agent' && last.status === 'running') return null;
   // The thinking block shows its own live spinner/header, so no separate activity row is needed.
   if (last?.kind === 'reasoning') return null;
+  // A call still being written shows its own live header, same as the thinking block.
+  if (last?.kind === 'tool' && last.status === 'drafting') return null;
   if (last?.kind === 'tool' && last.status === 'running') return `running ${last.tool}…`;
   return 'thinking…';
 }

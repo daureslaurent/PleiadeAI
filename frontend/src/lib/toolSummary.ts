@@ -101,10 +101,10 @@ export function describeTool(
   tool: string,
   args: Args,
   result: unknown,
-  status: 'running' | 'success' | 'error',
+  status: 'drafting' | 'running' | 'success' | 'error',
 ): ToolSummary {
   const r = asRecord(result);
-  const done = status !== 'running';
+  const done = status === 'success' || status === 'error';
   const n = (v: unknown): number | undefined => {
     const x = Number(v);
     return Number.isFinite(x) ? x : undefined;

@@ -79,6 +79,23 @@ export interface StreamCallbacks {
    * inline in `content` and reach `onToken` instead — hence both paths exist.
    */
   onReasoning?: (delta: string) => void;
+  /**
+   * Fires for each *tool-call* fragment, as the model writes it. Tool calls stream just like text —
+   * indexed fragments carrying a name and then successive slices of the JSON arguments — but the
+   * assembled call is only returned once the stream ends, which leaves a long `write`/`edit` payload
+   * looking like a stall. Callers that only want the finished call may omit this; the fragments are
+   * still accumulated and returned in {@link StreamResult.toolCalls} either way.
+   */
+  onToolCall?: (frag: {
+    /** Server-assigned index; fragments of the same call share it. */
+    index: number;
+    /** Call id, present on the fragment that opens a call. */
+    id?: string;
+    /** Tool name, present once the model has emitted it. */
+    name?: string;
+    /** Slice of the raw JSON arguments string. */
+    argsDelta?: string;
+  }) => void;
 }
 
 /** Token accounting for one inference pass, as reported by the server's `usage` object. */
@@ -542,6 +559,12 @@ export class LlamaClient {
           emitted = true;
           callbacks.onReasoning?.(delta);
         },
+        // A tool-call fragment has the same effect: the UI has already drawn the call being written,
+        // so restarting on another endpoint would draw it twice.
+        onToolCall: (frag) => {
+          emitted = true;
+          callbacks.onToolCall?.(frag);
+        },
       };
       try {
         const result = await this.attemptStream(cand, payload, tools, guarded, overrides, signal);
@@ -720,6 +743,15 @@ export class LlamaClient {
           if (tc.function?.name) slot.name = tc.function.name;
           if (tc.function?.arguments) slot.args += tc.function.arguments;
           partials.set(tc.index, slot);
+          // Relay the fragment as it lands so the caller can render the call being written. The id is
+          // echoed on every fragment (not just the opening one) because a server may only issue it
+          // later, and the consumer keys its draft on it.
+          callbacks.onToolCall?.({
+            index: tc.index,
+            id: slot.id || undefined,
+            name: slot.name || undefined,
+            argsDelta: tc.function?.arguments,
+          });
         }
       }
 

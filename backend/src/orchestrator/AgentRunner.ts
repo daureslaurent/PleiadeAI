@@ -564,6 +564,9 @@ export class AgentRunner {
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       if (signal?.aborted) throw new RunAbortedError();
+      // Clear any draft tool call the previous pass streamed but never executed (the duplicate-call
+      // short-circuit below is the usual cause) so it doesn't sit half-written in the UI forever.
+      eventBus.emit('agent:tool_call_stream', { ctx, phase: 'reset' });
       const { text, toolCalls: nativeCalls, usage } = await this.streamTurn(
         messages,
         toolSchemas,
@@ -889,6 +892,19 @@ export class AgentRunner {
             // tagged as reasoning by the server, so it bypasses the `<think>`-tag parser entirely.
             onReasoning: (delta) => {
               eventBus.emit('agent:stream_chunk', { ctx, content: delta, isReasoning: true });
+            },
+            // The tool call as it is being written. The UI draws a draft block from these and settles
+            // it on the matching `agent:tool_invoke` below, so a long argument payload streams
+            // instead of holding the turn on a bare spinner.
+            onToolCall: (frag) => {
+              eventBus.emit('agent:tool_call_stream', {
+                ctx,
+                phase: 'delta',
+                index: frag.index,
+                callId: frag.id,
+                tool: frag.name,
+                argsDelta: frag.argsDelta,
+              });
             },
           },
           signal,

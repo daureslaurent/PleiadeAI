@@ -81,6 +81,34 @@ export interface ToolInvokePayload {
   args: Record<string, unknown>;
 }
 
+/**
+ * A tool call *as the model is still writing it*.
+ *
+ * llama.cpp streams `tool_calls` fragmented exactly like prose (a name in one chunk, the JSON
+ * arguments dribbling out over the next dozen), but the runner only ever surfaced the *assembled*
+ * call — so a turn that spent twenty seconds emitting a long `write` payload looked frozen. These
+ * deltas let the UI render the call as it is typed; the assembled `agent:tool_invoke` carrying the
+ * same `callId` then settles that draft into the real tool block.
+ */
+export type ToolCallStreamPayload =
+  | {
+      ctx: EventContext;
+      phase: 'delta';
+      /** Index the server tags the fragment with — every fragment of one call shares it. */
+      index: number;
+      /** Server-issued call id, once it appears. Matches the later `agent:tool_invoke` `callId`. */
+      callId?: string;
+      /** Tool name, once the model has emitted it (normally in the first fragment). */
+      tool?: string;
+      /** Incremental raw JSON argument text, to be concatenated in arrival order. */
+      argsDelta?: string;
+    }
+  /**
+   * A new inference pass is starting. Drafts that never became a real call (the duplicate-call
+   * short-circuit, a turn that died mid-stream) are dropped here rather than lingering on screen.
+   */
+  | { ctx: EventContext; phase: 'reset' };
+
 export type ToolStatus = 'success' | 'error';
 
 export interface ToolCompletePayload {
@@ -716,6 +744,7 @@ export interface EventMap {
   'conversation:turn_complete': ConversationTurnCompletePayload;
   'autoloop:state': AutoLoopStatePayload;
   'agent:stream_chunk': StreamChunkPayload;
+  'agent:tool_call_stream': ToolCallStreamPayload;
   'agent:tool_invoke': ToolInvokePayload;
   'tool:output_chunk': ToolOutputChunkPayload;
   'tool:vision': VisionAnalysisPayload;

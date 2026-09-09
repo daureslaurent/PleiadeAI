@@ -1,20 +1,56 @@
 import { useState } from 'react';
-import { AlertTriangle, AudioLines, ChevronRight, Clapperboard, ExternalLink, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, X } from 'lucide-react';
+import { AlertTriangle, AudioLines, ChevronRight, Clapperboard, ExternalLink, Eye, ImagePlus, Loader2, Magnet, MousePointerClick, TerminalSquare, Check, Wrench, X } from 'lucide-react';
 import type { Block } from '../store/stream';
 import { useStream } from '../store/stream';
 import { resourcesApi } from '../lib/api';
 import { describeTool, visualActDetail } from '../lib/toolSummary';
+import { useStickyScroll } from '../hooks/useStickyScroll';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
 
 /** Renders one tool invocation inline. bash → terminal; visual_screenshot → vision card; else card. */
 export function ToolCall({ block }: { block: ToolBlock }) {
+  // Still being written by the model — no arguments to shape a real card from yet.
+  if (block.status === 'drafting') return <DraftingBlock block={block} />;
   if (block.tool === 'bash') return <BashBlock block={block} />;
   if (block.tool === 'visual_act' || block.visualAct) return <VisualActBlock block={block} />;
   if (block.tool === 'visual_screenshot' || block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
   if (MEDIA_TOOLS.has(block.tool) || block.mediaGen) return <MediaGenBlock block={block} />;
   return <GenericToolBlock block={block} />;
+}
+
+/**
+ * A tool call the model is *typing*: name first, then the JSON arguments streaming in.
+ *
+ * Tool calls arrive fragmented like any other tokens, and a long payload (a `write` body, a big
+ * `edit`) can take tens of seconds — which used to read as the turn hanging. This renders those
+ * fragments live, then disappears on `tool_start`: the same block settles into the real tool card,
+ * whose arguments are already collapsed. So it collapses itself the way a thinking block does,
+ * without ever showing the arguments twice.
+ */
+function DraftingBlock({ block }: { block: ToolBlock }) {
+  const args = block.argsText ?? '';
+  const { ref: scrollRef, onScroll } = useStickyScroll<HTMLPreElement>([args]);
+  return (
+    <div className="my-2 animate-fade-up overflow-hidden rounded-xl border border-accent/20 bg-accent/[0.05] text-xs backdrop-blur-sm">
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <Wrench size={13} className="shrink-0 text-accent" />
+        <span className="font-medium text-slate-200">{block.tool || 'tool call'}</span>
+        <span className="text-shimmer text-[10px] text-slate-400">writing arguments…</span>
+        <Loader2 size={12} className="ml-auto shrink-0 animate-spin text-slate-400" />
+      </div>
+      {args && (
+        <pre
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-all border-t border-white/[0.06] px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-400"
+        >
+          {args}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 const MEDIA_TOOLS = new Set(['generate_image', 'generate_video', 'generate_sound', 'edit_image']);
@@ -119,7 +155,8 @@ function OcrChip({ snap }: { snap: { text: string; x: number; y: number } }) {
 }
 
 function StatusIcon({ status }: { status: ToolBlock['status'] }) {
-  if (status === 'running') return <Loader2 size={13} className="animate-spin text-slate-400" />;
+  if (status === 'running' || status === 'drafting')
+    return <Loader2 size={13} className="animate-spin text-slate-400" />;
   if (status === 'error') return <X size={13} className="text-red-400" />;
   return <Check size={13} className="text-emerald-400" />;
 }
