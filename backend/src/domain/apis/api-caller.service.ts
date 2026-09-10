@@ -129,9 +129,11 @@ function buildUrl(
   const unresolved = /\{([^}]+)\}/.exec(path);
   if (unresolved) throw new ApiCallError(`path placeholder "{${unresolved[1]}}" has no parameter bound to it`);
 
+  // An operation may pin its own host (see `operations.base_url`); the origin check then pins to it.
+  const baseSpec = operation.base_url || source.base_url;
   let base: URL;
   try {
-    base = new URL(source.base_url);
+    base = new URL(baseSpec);
   } catch {
     throw new ApiCallError(`"${source.name}" has an invalid base URL — fix it in Settings → APIs`);
   }
@@ -151,6 +153,71 @@ function buildUrl(
   return url;
 }
 
+
+/**
+ * Access tokens obtained by the client-credentials grant, keyed by API id.
+ *
+ * Reddit is the reason this exists: it refuses anonymous API traffic outright, so the only way for
+ * an agent to read it is a token the backend fetches and renews on its own. The operator supplies
+ * long-lived client credentials once; nothing here ever reaches the agent. Cached in memory rather
+ * than in Mongo — a token is worth minutes, and a restart re-fetching one costs a single request.
+ */
+const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+
+/** Fetched a minute early, so a token can't expire between the check and the call it authorises. */
+const TOKEN_EARLY_REFRESH_MS = 60_000;
+
+async function oauthToken(source: ApiSourceDoc, clientSecret: string, timeoutMs: number): Promise<string> {
+  const key = String(source._id);
+  const cached = tokenCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.token;
+
+  if (!source.token_url) throw new ApiCallError(`"${source.name}" is set to OAuth2 but has no token URL`);
+  if (!source.auth_username) {
+    throw new ApiCallError(`"${source.name}" is set to OAuth2 but has no client id — put it in the Username field`);
+  }
+
+  const body = new URLSearchParams({ grant_type: 'client_credentials' });
+  if (source.auth_scope) body.set('scope', source.auth_scope);
+
+  const res = await fetch(source.token_url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${source.auth_username}:${clientSecret}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+      // Reddit rejects the default Node agent string outright, so reuse the API's own if it set one.
+      ...Object.fromEntries(source.headers.filter((h) => h.key.toLowerCase() === 'user-agent').map((h) => [h.key, h.value])),
+    },
+    body,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    throw new ApiCallError(`could not get an access token for "${source.name}": HTTP ${res.status} — ${text.slice(0, 300)}`);
+  }
+  let parsed: { access_token?: string; expires_in?: number };
+  try {
+    parsed = JSON.parse(text) as typeof parsed;
+  } catch {
+    throw new ApiCallError(`the token endpoint for "${source.name}" did not return JSON`);
+  }
+  if (!parsed.access_token) {
+    throw new ApiCallError(`the token endpoint for "${source.name}" returned no access_token`);
+  }
+
+  const ttl = Math.max(30_000, (parsed.expires_in ?? 3600) * 1000 - TOKEN_EARLY_REFRESH_MS);
+  tokenCache.set(key, { token: parsed.access_token, expiresAt: Date.now() + ttl });
+  log.info({ api: source.name, expires_in: parsed.expires_in }, 'oauth2 token obtained');
+  return parsed.access_token;
+}
+
+/** Drop a cached token — called when the API answers 401, so the next call re-authenticates. */
+function invalidateToken(source: ApiSourceDoc): void {
+  tokenCache.delete(String(source._id));
+}
+
 /** Headers: the operator's static pairs, the agent's `in: 'header'` params, then auth. */
 function buildHeaders(
   source: ApiSourceDoc,
@@ -167,7 +234,7 @@ function buildHeaders(
 
   if (secret) {
     if (source.auth_type === 'header') headers[source.auth_header || 'X-API-Key'] = secret;
-    else if (source.auth_type === 'bearer') headers.Authorization = `Bearer ${secret}`;
+    else if (source.auth_type === 'bearer' || source.auth_type === 'oauth2') headers.Authorization = `Bearer ${secret}`;
     else if (source.auth_type === 'basic') {
       headers.Authorization = `Basic ${Buffer.from(`${source.auth_username}:${secret}`).toString('base64')}`;
     }
@@ -294,17 +361,24 @@ export async function callOperation(
     );
   }
 
-  const secret = source.secret_enc ? decryptSecret(source.secret_enc) : null;
-  if (source.auth_type !== 'none' && !secret) {
-    throw new ApiCallError(`"${source.name}" needs a credential — add it in Settings → APIs`);
+  const stored = source.secret_enc ? decryptSecret(source.secret_enc) : null;
+  if (source.auth_type !== 'none' && !stored && !source.auth_optional) {
+    throw new ApiCallError(
+      `"${source.name}" needs a credential — add it in Settings → APIs${source.secret_hint ? `. ${source.secret_hint}` : ''}`,
+    );
   }
+
+  const timeout = opts.timeoutMs ?? source.timeout_ms ?? 30_000;
+
+  // OAuth2 spends the operator's client credentials on a short-lived token; every other scheme sends
+  // the stored secret as-is. An `auth_optional` API with nothing stored is called anonymously.
+  const secret =
+    source.auth_type === 'oauth2' && stored ? await oauthToken(source, stored, timeout) : stored;
 
   const bound = bindParams(operation, params ?? {});
   const url = buildUrl(source, operation, bound, secret);
   const body = method === 'GET' || method === 'HEAD' ? undefined : buildBody(operation, bound);
   const headers = buildHeaders(source, bound, secret, body !== undefined);
-
-  const timeout = opts.timeoutMs ?? source.timeout_ms ?? 30_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   const onAbort = () => controller.abort();
@@ -330,6 +404,9 @@ export async function callOperation(
     }
 
     if (!res.ok) {
+      // A rejected token is stale by definition: drop it so the next call re-authenticates rather
+      // than replaying the same dead credential until it expires on its own.
+      if (res.status === 401 && source.auth_type === 'oauth2') invalidateToken(source);
       // The service's own JSON error is far more useful to the agent than the status alone.
       const detail = JSON.stringify(parsed).slice(0, 600);
       throw new ApiCallError(`${source.name}.${operation.id} failed: HTTP ${res.status} — ${detail}`, res.status);

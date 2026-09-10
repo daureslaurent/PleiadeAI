@@ -12,7 +12,7 @@ import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mong
  * the `_enc` suffix keeps it inside `redact.ts`'s secret pattern as a second line of defence.
  */
 
-export const AUTH_TYPES = ['none', 'header', 'query', 'bearer', 'basic'] as const;
+export const AUTH_TYPES = ['none', 'header', 'query', 'bearer', 'basic', 'oauth2'] as const;
 export type AuthType = (typeof AUTH_TYPES)[number];
 
 export const HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -70,6 +70,13 @@ const OperationSchema = new Schema(
      */
     body_template: { type: String, default: '' },
     params: { type: [ParamSchema], default: [] },
+    /**
+     * Overrides the API's base URL for this operation alone. Some services split one logical API
+     * across hosts (Open-Meteo's geocoder is not on the forecast host); without this they would have
+     * to be configured as two unrelated APIs, and the model would have to know that. The origin
+     * check pins to *this* base when it is set, so the guarantee is unchanged.
+     */
+    base_url: { type: String, default: '' },
     /** Unticked operations stay configured but are hidden from `api_man` and refused by `api`. */
     enabled: { type: Boolean, default: true },
   },
@@ -89,8 +96,20 @@ const ApiSourceSchema = new Schema(
     auth_header: { type: String, default: 'X-API-Key' },
     /** Query parameter carrying the credential when `auth_type` is `query` (e.g. `api_key`). */
     auth_query: { type: String, default: 'api_key' },
-    /** Username for `basic`; the password is the secret. */
+    /** Username for `basic`, or the client id for `oauth2`; the secret is the password/client secret. */
     auth_username: { type: String, default: '' },
+    /** `oauth2` only: where to POST the client-credentials grant for an access token. */
+    token_url: { type: String, default: '' },
+    /** `oauth2` only: scopes to request, space-separated. Blank asks for the client's default. */
+    auth_scope: { type: String, default: '' },
+    /**
+     * The API answers without a credential, and one only raises limits or unlocks extras (GitHub's
+     * 60 vs 5000 requests an hour). Such an API ships working; with this false, a missing credential
+     * is refused before any request is made.
+     */
+    auth_optional: { type: Boolean, default: false },
+    /** Shown under the credential field in Settings → APIs: what a key buys, and where to get one. */
+    secret_hint: { type: String, default: '' },
     /** AES-256-GCM encrypted credential (key, token, or basic password). Never sent to a client. */
     secret_enc: { type: String, default: null, select: false },
     /** Non-secret headers sent on every request (User-Agent, Accept, a tenant id…). */
@@ -101,6 +120,8 @@ const ApiSourceSchema = new Schema(
     operations: { type: [OperationSchema], default: [] },
     /** Free text appended to `api_man({api})` — quirks, rate limits, which operation to prefer. */
     notes: { type: String, default: '' },
+    /** Installed from the shipped catalogue (`builtin-catalogue.ts`) rather than hand-added. */
+    builtin: { type: Boolean, default: false },
     /** Last failure seen by the caller service, surfaced on the settings page. */
     last_error: { type: String, default: '' },
     last_used_at: { type: Date, default: null },

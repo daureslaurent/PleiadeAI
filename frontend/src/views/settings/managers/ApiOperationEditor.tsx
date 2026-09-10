@@ -137,6 +137,18 @@ export function ApiOperationEditor({
             />
           </Field>
 
+          <Field
+            label="Host override (optional)"
+            hint="Only when this one endpoint lives on a different domain than the rest of the API."
+          >
+            <Input
+              value={op.base_url}
+              onChange={(e) => set({ base_url: e.target.value })}
+              placeholder="https://geocoding-api.open-meteo.com"
+              className="py-1.5 font-mono text-xs"
+            />
+          </Field>
+
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Parameters</span>

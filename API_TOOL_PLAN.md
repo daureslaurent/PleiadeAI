@@ -71,14 +71,29 @@ a 404 from a third party is information, not a crash.
   operation whose method is not allowed is refused at call time as well as hidden from `api_man`, so
   turning writes off later is immediate rather than advisory.
 
-## 5. Storage
+## 5. Credentials
+
+Five schemes, and one distinction that matters more than the five: whether the credential is
+**required**.
+
+- `none`, key in a header, key in a query parameter, `bearer`, `basic` — the stored secret is sent
+  as-is.
+- `oauth2` — the operator stores long-lived *client credentials* and the backend spends them on a
+  short-lived access token, caches it in memory, renews it a minute before it expires, and drops it
+  the moment the API answers 401. Reddit is why this exists: it refuses anonymous API traffic
+  outright, so without a token fetched on the agent's behalf it simply cannot be read.
+- `auth_optional` marks an API that answers anonymously and answers *better* with a key — GitHub's
+  60 requests an hour against 5000. Those ship working, and the settings page says what a key buys
+  (`secret_hint`) rather than blocking the operator until they get one.
+
+## 6. Storage
 
 `api_sources` (new collection, new migration). The credential is a single `secret_enc` field —
 AES-256-GCM at rest via `isolation/ssh.service`'s `encryptSecret`, `select: false`, and the `_enc`
 suffix keeps it inside `redact.ts`'s pattern as second-line defence. Reads report `has_secret`, never
 the value; a write with an empty secret leaves the stored one alone (the `monitor_targets` idiom).
 
-## 6. Surfaces
+## 7. Surfaces
 
 - `domain/apis/` — model, repository, and `api-caller.service.ts` (the request builder + executor,
   shared by the tool and the Test button so they cannot drift).
@@ -89,7 +104,37 @@ the value; a write with an empty secret leaves the stored one alone (the `monito
   `managers/ApiSourcesManager.tsx`. Each API is a row that expands into its editor, with its
   operations as a nested list and a Test button that runs one against the live service.
 
-## 7. Order of work
+## 8. The shipped catalogue
+
+`domain/apis/builtin-catalogue.ts` holds the APIs this instance comes with — Wikipedia, Wikidata,
+OpenAlex, Open Library, Hacker News, Lobsters, 4chan, Reddit, Stack Exchange, GitHub, npm, PyPI,
+crates.io, Hugging Face, OSV, Open-Meteo (forecast + air quality), Nominatim, ECB currency rates,
+CoinGecko, USGS earthquakes, public holidays, world time, IP lookup, the Wayback Machine and
+Datamuse. Twenty-six APIs, eighty-odd operations, all free and all but one usable with no account.
+
+Three things about it are deliberate:
+
+- **Every entry was called before it was written down.** Several obvious candidates did not survive
+  that: `worldtimeapi.org` and `dictionaryapi.dev` no longer resolve, and RestCountries v3 answers a
+  country lookup with a deprecation notice — v5 wants an account. A catalogue of APIs that *used to*
+  work is worse than no catalogue, because the agent pays a turn to discover each corpse. Each
+  operation carries a `sample` call, which is what makes the catalogue testable as a whole rather
+  than one entry at a time.
+- **Presets are starting points, not bindings.** They install into `api_sources` as ordinary
+  documents; the operator can edit, disable or delete any of them and nothing re-reads the catalogue
+  at call time. Installing is additive only — an API whose name already exists is skipped, never
+  reset, or an edited base URL would silently revert on the next deploy.
+- **Install is remembered, not inferred.** Boot installs what this instance has *never been offered*
+  (tracked on the settings singleton), rather than what is currently missing. Otherwise a preset the
+  operator deleted would return on every restart. Settings → APIs can force-install anything missing,
+  which is how a deleted one comes back and how a release's new presets can be pulled in early.
+
+Reddit is the one entry that ships **disabled**: it needs the operator's own free app credentials
+(client id + secret, two minutes at reddit.com/prefs/apps), after which the OAuth2 grant in §5 keeps
+it authenticated. 4chan ships enabled but carries a note in its own description saying what it is —
+unmoderated, ephemeral, and never a source.
+
+## 9. Order of work
 
 1. Model + repository + migration.
 2. `api-caller.service.ts` — resolve, validate, build, fetch, parse.

@@ -33,6 +33,7 @@ import { reconcileScoringIndexes } from './domain/scoring/conversation-score.rep
 import { finetuneServersRouter } from './transport/http/routes/finetune-servers.routes';
 import { androidDevicesRouter } from './transport/http/routes/android-devices.routes';
 import { apiSourcesRouter } from './transport/http/routes/api-sources.routes';
+import { installBuiltins } from './domain/apis/builtin-installer';
 import { finetuneJobsRouter } from './transport/http/routes/finetune-jobs.routes';
 import { startFinetunePoller } from './finetune/poller';
 import { monitorRouter } from './transport/http/routes/monitor.routes';
@@ -104,6 +105,10 @@ async function main(): Promise<void> {
   // Poll monitored machines (`monitor-client`) for the Monitor dashboard's live meters, in-memory
   // history and threshold alerts. Idle when no targets are configured.
   monitorPoller.start();
+
+  // Install any shipped API presets this instance has never been offered (API_TOOL_PLAN.md §8).
+  // Additive and remembered, so an operator's deletions stick while a new release's presets arrive.
+  void installBuiltins().catch((err) => rootLogger.warn({ err }, 'built-in API install failed'));
 
   const app = express();
   // Don't advertise Express in the `X-Powered-By` header (Caddy also strips it at the edge). Removes a

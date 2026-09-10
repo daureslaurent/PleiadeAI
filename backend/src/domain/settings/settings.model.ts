@@ -191,6 +191,12 @@ const SettingsSchema = new Schema(
      */
     forum_board_enabled: { type: Boolean, default: false },
     /**
+     * Names of the shipped API presets (`domain/apis/builtin-catalogue.ts`) that have already been
+     * offered to this instance. Boot installs only what is *not* in this list, so deleting a preset
+     * makes it stay deleted while a preset added in a later release still arrives on its own.
+     */
+    api_builtins_installed: { type: [String], default: [] },
+    /**
      * Minutes between scheduler ticks. A tick reaps finished dispatches, computes the ready set and
      * dispatches at most `forum_max_parallel` turns, so this is the board's real clock rate. Short
      * is safe here in a way it never was for the sweeper: a tick with nothing ready does no

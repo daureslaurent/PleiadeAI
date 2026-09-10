@@ -3134,7 +3134,7 @@ export const boardApi = {
 // and the named operations that may be called on it. The credential is write-only across this
 // surface — reads report `has_secret`, never the value.
 
-export const API_AUTH_TYPES = ['none', 'header', 'query', 'bearer', 'basic'] as const;
+export const API_AUTH_TYPES = ['none', 'header', 'query', 'bearer', 'basic', 'oauth2'] as const;
 export type ApiAuthType = (typeof API_AUTH_TYPES)[number];
 
 export const API_HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -3166,6 +3166,8 @@ export interface ApiOperationSpec {
   description: string;
   method: ApiHttpMethod;
   path: string;
+  /** Host override for this operation alone; blank means the API's own base URL. */
+  base_url: string;
   query: ApiPair[];
   body_template: string;
   params: ApiParamSpec[];
@@ -3181,12 +3183,22 @@ export interface ApiSource {
   auth_type: ApiAuthType;
   auth_header: string;
   auth_query: string;
+  /** Username for `basic`, or the client id for `oauth2`. */
   auth_username: string;
+  /** `oauth2`: where the client-credentials grant is POSTed. */
+  token_url: string;
+  auth_scope: string;
+  /** The API answers anonymously; a credential only raises limits or unlocks extras. */
+  auth_optional: boolean;
+  /** What a key buys and where to get one — shown under the credential field. */
+  secret_hint: string;
   headers: ApiPair[];
   methods_allowed: ApiHttpMethod[];
   timeout_ms: number;
   operations: ApiOperationSpec[];
   notes: string;
+  /** Installed from the shipped catalogue rather than hand-added. */
+  builtin: boolean;
   last_error: string;
   last_used_at: string | null;
   has_secret: boolean;
@@ -3201,6 +3213,10 @@ export interface ApiSourcePatch {
   auth_header?: string;
   auth_query?: string;
   auth_username?: string;
+  token_url?: string;
+  auth_scope?: string;
+  auth_optional?: boolean;
+  secret_hint?: string;
   /** Omit to keep the stored credential; `''` clears it. */
   secret?: string;
   headers?: ApiPair[];
@@ -3221,6 +3237,16 @@ export interface ApiTestResult {
   error?: string;
 }
 
+/** One entry of the shipped catalogue, as offered on the settings page. */
+export interface BuiltinApiInfo {
+  name: string;
+  description: string;
+  operations: number;
+  /** Needs a credential before its first call can work (Reddit's app id/secret). */
+  needs_setup: boolean;
+  installed: boolean;
+}
+
 export const apiSourcesApi = {
   list: () => api.get<ApiSource[]>('/api-sources').then((r) => r.data),
   create: (body: ApiSourcePatch & { name: string; base_url: string }) =>
@@ -3231,4 +3257,9 @@ export const apiSourcesApi = {
   /** Run one operation live; `operation` may be the bare id or the full `<api>.<id>`. */
   test: (id: string, operation: string, params: Record<string, unknown>) =>
     api.post<ApiTestResult>(`/api-sources/${id}/test`, { operation, params }).then((r) => r.data),
+
+  /** The shipped catalogue and which of its presets are currently configured. */
+  builtins: () => api.get<BuiltinApiInfo[]>('/api-sources/builtins').then((r) => r.data),
+  /** Add every preset not currently configured. */
+  installBuiltins: () => api.post<{ installed: string[] }>('/api-sources/builtins/install').then((r) => r.data),
 };

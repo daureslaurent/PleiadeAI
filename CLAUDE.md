@@ -106,6 +106,12 @@ Key seams:
   `GET`/`HEAD` so writes are opt-in per API; a path parameter is percent-encoded and the resolved
   origin re-checked, so no argument can walk a call onto another host. `api-caller.service.ts` is the
   single request builder, shared by the tool and the settings page's Test button so they cannot drift.
+  Twenty-six presets ship in `builtin-catalogue.ts` (Wikipedia, GitHub, Hacker News, 4chan, OSV,
+  Open-Meteo…), installed at boot into ordinary editable documents; the settings singleton remembers
+  what has been *offered* rather than what is present, so a deleted preset stays deleted while a new
+  release's presets still arrive. `oauth2` (client-credentials, token cached and renewed in the
+  backend) is what makes Reddit reachable at all, and `auth_optional` is for APIs that answer
+  anonymously but answer better with a key.
 
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.

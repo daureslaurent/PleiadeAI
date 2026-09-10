@@ -8,6 +8,8 @@ import {
   type ApiSourceDoc,
 } from '../../../domain/apis/api-source.model';
 import { ApiCallError, callOperation } from '../../../domain/apis/api-caller.service';
+import { BUILTIN_APIS } from '../../../domain/apis/builtin-catalogue';
+import { installBuiltins, missingBuiltins } from '../../../domain/apis/builtin-installer';
 import { encryptSecret } from '../../../isolation/ssh.service';
 
 const log = createLogger('api-sources-routes');
@@ -41,9 +43,13 @@ function sanitize(body: Record<string, unknown>): Record<string, unknown> {
   str('auth_header');
   str('auth_query');
   str('auth_username');
+  str('token_url');
+  str('auth_scope');
+  str('secret_hint');
   str('notes');
   if (typeof patch.name === 'string') patch.name = (patch.name as string).toLowerCase();
   if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+  if (typeof body.auth_optional === 'boolean') patch.auth_optional = body.auth_optional;
   if (typeof body.auth_type === 'string' && (AUTH_TYPES as readonly string[]).includes(body.auth_type)) {
     patch.auth_type = body.auth_type;
   }
@@ -153,4 +159,29 @@ apiSourcesRouter.post('/:id/test', async (req, res) => {
     }
     throw err;
   }
+});
+
+/**
+ * The shipped catalogue (`builtin-catalogue.ts`) and which of its presets are not currently
+ * configured — so the settings page can offer to add back one the operator deleted, or the presets a
+ * newer release introduced.
+ */
+apiSourcesRouter.get('/builtins', async (_req, res) => {
+  const missing = new Set(await missingBuiltins());
+  res.json(
+    BUILTIN_APIS.map((preset) => ({
+      name: preset.name,
+      description: preset.description,
+      operations: preset.operations.length,
+      needs_setup: Boolean(preset.auth_type && preset.auth_type !== 'none' && !preset.auth_optional),
+      installed: !missing.has(preset.name),
+    })),
+  );
+});
+
+/** Install every preset not currently configured, ignoring the "already offered" marker. */
+apiSourcesRouter.post('/builtins/install', async (_req, res) => {
+  const installed = await installBuiltins(true);
+  log.info({ installed }, 'built-in APIs installed from settings');
+  res.json({ installed });
 });

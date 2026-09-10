@@ -12,6 +12,7 @@ import {
   type ApiSource,
 } from '../../../lib/api';
 import { ApiOperationEditor } from './ApiOperationEditor';
+import { BuiltinApisPicker } from './BuiltinApisPicker';
 
 /**
  * Configured HTTP APIs (Settings → APIs; `API_TOOL_PLAN.md`).
@@ -37,6 +38,10 @@ function editable(s: ApiSource) {
     auth_header: s.auth_header,
     auth_query: s.auth_query,
     auth_username: s.auth_username,
+    token_url: s.token_url,
+    auth_scope: s.auth_scope,
+    auth_optional: s.auth_optional,
+    secret_hint: s.secret_hint,
     headers: s.headers,
     methods_allowed: s.methods_allowed,
     timeout_ms: s.timeout_ms,
@@ -164,6 +169,19 @@ export function ApiSourcesManager() {
                 <ChevronRight size={14} className="shrink-0 text-slate-500" />
               )}
               <span className="shrink-0 font-mono text-sm font-medium text-slate-200">{s.name}</span>
+              {s.builtin && (
+                <span
+                  className="shrink-0 rounded px-1 py-px text-[9px] uppercase tracking-wide text-slate-500 hairline"
+                  title="Installed from the shipped catalogue. Yours to edit or delete."
+                >
+                  built-in
+                </span>
+              )}
+              {s.auth_type !== 'none' && !s.auth_optional && !s.has_secret && (
+                <span className="shrink-0 text-[10px] text-amber-400" title="This API needs a credential before it can answer.">
+                  needs a key
+                </span>
+              )}
               <span className="truncate text-[11px] text-slate-500">{s.description || s.base_url}</span>
               <span className="shrink-0 text-[10px] text-slate-500">
                 {s.operations.filter((o) => o.enabled).length} op
@@ -262,6 +280,7 @@ export function ApiSourcesManager() {
                             description: '',
                             method: 'GET',
                             path: '/',
+                            base_url: '',
                             query: [],
                             body_template: '',
                             params: [],
@@ -355,10 +374,11 @@ export function ApiSourcesManager() {
         </button>
       )}
 
+      <BuiltinApisPicker onInstalled={() => void reload()} />
+
       {!sources.length && !adding && (
         <p className="flex items-center gap-1.5 text-[11px] text-slate-500">
-          <Webhook size={12} /> Nothing configured — <code className="font-mono">api_man</code> reports an empty
-          catalogue until you add one.
+          <Webhook size={12} /> Nothing configured — add the shipped catalogue above, or your own API.
         </p>
       )}
     </div>
@@ -420,8 +440,8 @@ function AuthEditor({
             />
           </Field>
         )}
-        {source.auth_type === 'basic' && (
-          <Field label="Username">
+        {(source.auth_type === 'basic' || source.auth_type === 'oauth2') && (
+          <Field label={source.auth_type === 'oauth2' ? 'Client id' : 'Username'}>
             <Input
               value={source.auth_username}
               onChange={(e) => onEdit({ auth_username: e.target.value })}
@@ -431,10 +451,42 @@ function AuthEditor({
         )}
       </div>
 
+      {source.auth_type === 'oauth2' && (
+        <div className="grid grid-cols-[1fr_10rem] gap-2">
+          <Field label="Token URL" hint="The backend POSTs a client-credentials grant here and renews the token on its own.">
+            <Input
+              value={source.token_url}
+              onChange={(e) => onEdit({ token_url: e.target.value })}
+              placeholder="https://www.reddit.com/api/v1/access_token"
+              className="py-1.5 font-mono text-xs"
+            />
+          </Field>
+          <Field label="Scope" hint="Optional.">
+            <Input
+              value={source.auth_scope}
+              onChange={(e) => onEdit({ auth_scope: e.target.value })}
+              placeholder="read"
+              className="py-1.5 font-mono text-xs"
+            />
+          </Field>
+        </div>
+      )}
+
       {source.auth_type !== 'none' && (
         <Field
-          label={source.auth_type === 'basic' ? 'Password' : 'Credential'}
-          hint="Encrypted at rest and never sent back to this page. Agents cannot read it."
+          label={
+            source.auth_type === 'basic'
+              ? 'Password'
+              : source.auth_type === 'oauth2'
+                ? 'Client secret'
+                : `API key${source.auth_optional ? ' (optional)' : ''}`
+          }
+          hint={
+            <>
+              {source.secret_hint && <span className="block text-slate-400">{source.secret_hint}</span>}
+              Encrypted at rest and never sent back to this page. Agents cannot read it.
+            </>
+          }
         >
           <Input
             type="password"
