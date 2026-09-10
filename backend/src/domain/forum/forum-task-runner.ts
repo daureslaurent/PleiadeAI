@@ -8,6 +8,7 @@ import { liveRuns } from '../../transport/ws/live-runs';
 import { TurnRecorder } from '../../transport/ws/TurnRecorder';
 import { agentRepository } from '../agents/agent.repository';
 import { sessionRepository } from '../sessions/session.repository';
+import { settingsService } from '../settings/settings.service';
 import { forumTaskRepository } from './forum-task.repository';
 import { forumPlanRepository } from './forum-plan.repository';
 import { forumTaskService } from './forum-task.service';
@@ -202,11 +203,13 @@ export const forumTaskRunner = {
       .catch((err) => log.error({ err: String(err), taskId }, 'task dispatch failed'))
       .finally(async () => {
         // Whatever happened, the claim goes. The state itself was moved by `submit` / `block` /
-        // `review` if the agent used them; if it did not, the task is left where it was and the next
-        // tick's reaper counts the wasted dispatch.
+        // `review` if the agent used them — in which case the claim is already gone and there is
+        // nothing here to release. If it did not, this dispatch was spent for nothing and counts
+        // against the leash, exactly as the reaper counts one it had to recover.
         const after = await forumTaskRepository.findById(taskId);
         if (after && String(after.dispatch?.session_id ?? '') === sessionId) {
-          await forumTaskRepository.releaseDispatch(taskId, after.state === 'doing' ? 'todo' : undefined);
+          const settings = await settingsService.get();
+          await forumTaskService.releaseEmptyDispatch(taskId, settings.forum_task_max_dispatches ?? 3);
         }
       });
 

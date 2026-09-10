@@ -3259,6 +3259,8 @@ export const boardApi = {
     api.post<BoardTask>(`/board/tasks/${id}/review`, { verdict, reasons }).then((r) => r.data),
   dispatch: (id: string, kind: 'work' | 'review' = 'work') =>
     api.post<{ sessionId: string }>(`/board/tasks/${id}/dispatch`, { kind }).then((r) => r.data),
+  /** Force an in-flight claim off, stopping its run — the way out of a `doing` with no turn behind it. */
+  release: (id: string) => api.post<BoardTask>(`/board/tasks/${id}/release`).then((r) => r.data),
   deleteTask: (id: string) => api.delete(`/board/tasks/${id}`).then(() => undefined),
 };
 

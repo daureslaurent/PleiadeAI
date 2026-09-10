@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { createLogger } from '../../config/logger';
+import { liveRuns } from '../../transport/ws/live-runs';
 import { settingsService } from '../settings/settings.service';
 import { ForumRuleError, forumService } from './forum.service';
 import { forumTaskRepository } from './forum-task.repository';
@@ -265,6 +266,56 @@ export const forumTaskService = {
     await forumThreadRepository.update(String(task.thread_id), { work_state: 'blocked' });
     log.info({ taskId: input.taskId, reason }, 'task blocked');
     return updated!;
+  },
+
+  /**
+   * Give back a claim whose run ended without the agent moving the task, and count it against the
+   * leash: past `forum_task_max_dispatches` the task is blocked for the manager instead of requeued.
+   *
+   * Shared by the runner's own `finally` and the scheduler's reaper, because the cap used to live
+   * only in the reaper — so the ordinary case, a dispatch that simply came back empty and was
+   * released in-process, was requeued for ever and the cap counted nothing. A review that came back
+   * empty stays a review: only work sent back to `todo` is work that has to be done again.
+   */
+  async releaseEmptyDispatch(taskId: string, maxDispatches: number): Promise<void> {
+    const task = await forumTaskRepository.findById(taskId);
+    if (!task) return;
+    const spent = task.dispatch?.count ?? 0;
+    if (spent >= Math.max(1, maxDispatches)) {
+      await forumTaskRepository.releaseDispatch(task._id, 'blocked');
+      await forumTaskRepository.update(task._id, {
+        blocked_on:
+          task.blocked_on ||
+          `dispatched ${spent}× and came back without a submission — it may not be doable as written`,
+      });
+      log.warn({ taskId, spent }, 'task blocked after repeated empty dispatches');
+      return;
+    }
+    await forumTaskRepository.releaseDispatch(task._id, task.state === 'doing' ? 'todo' : undefined);
+    log.info({ taskId, spent }, 'dispatch ended without a submission — requeued');
+  },
+
+  /**
+   * Force an in-flight claim off a task, stopping the run that holds it if one is still going.
+   *
+   * The reaper recovers a claim whose run died, but only on a tick and only after its grace window,
+   * and a task nobody can see a way to unstick is one the operator has to fix in the database. This
+   * is that escape hatch: it aborts the turn the way the chat's stop button does, then puts the task
+   * back where the dispatch found it — `doing` came from `todo`, and a review stays a review.
+   */
+  async release(taskId: string): Promise<ForumTaskDoc> {
+    const task = await forumTaskRepository.findById(taskId);
+    if (!task) throw new ForumRuleError(`no such task: "${taskId}"`, 404);
+    const sessionId = String(task.dispatch?.session_id ?? '');
+    if (!sessionId) throw new ForumRuleError('nothing is running on this task', 409);
+
+    liveRuns.get(sessionId)?.controller?.abort();
+    const released = await forumTaskRepository.releaseDispatch(
+      task._id,
+      task.state === 'doing' ? 'todo' : undefined,
+    );
+    log.info({ taskId, sessionId, state: released?.state }, 'in-flight claim released by operator');
+    return released!;
   },
 
   /** Operator-side edits: owner, reviewer, dependencies, state, acceptance. */

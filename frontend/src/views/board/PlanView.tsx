@@ -263,6 +263,18 @@ export function PlanView() {
                         Run now
                       </Button>
                     ) : null}
+                    {/* A claim outlives its run when the turn dies without saying so, and until it is
+                        released the task reads as running with nothing behind it. */}
+                    {task.inFlight ? (
+                      <Button
+                        icon={<Square size={13} />}
+                        loading={busy === `release${task.id}`}
+                        onClick={() => act(`release${task.id}`, () => boardApi.release(task.id))}
+                        title="Stop the run and put the task back — for one that says it is running but is not"
+                      >
+                        Force stop
+                      </Button>
+                    ) : null}
                     {task.state === 'blocked' ? (
                       <Button
                         loading={busy === `unblock${task.id}`}

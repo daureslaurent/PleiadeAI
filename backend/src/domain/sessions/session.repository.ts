@@ -159,6 +159,14 @@ export const sessionRepository = {
   },
 
   /**
+   * How many turns a session holds, without loading them. A message carries its blocks and its whole
+   * tool trace, so "has this session been answered yet" must never be asked by fetching them.
+   */
+  countMessages(sessionId: string | Types.ObjectId): Promise<number> {
+    return MessageModel.countDocuments({ session_id: sessionId }).exec();
+  },
+
+  /**
    * Append a turn. On the first user message of an untitled session, derive the title so the
    * session list reads meaningfully. Always bumps the session's `updated_at`.
    */

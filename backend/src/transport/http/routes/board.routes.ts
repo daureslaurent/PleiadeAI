@@ -206,6 +206,21 @@ boardRouter.post('/tasks/:id/review', async (req, res) => {
   }
 });
 
+/**
+ * "Stop holding this" — force an in-flight claim off, aborting the run if one is still going.
+ *
+ * The counterpart of Run now, and the only way out of a claim whose run ended without saying so: the
+ * reaper gets there on its own, but on a tick and after a grace window, and until it does the task
+ * reads as `doing` with no turn behind it and no button on it.
+ */
+boardRouter.post('/tasks/:id/release', async (req, res) => {
+  try {
+    res.json(serialiseTask(await forumTaskService.release(req.params.id)));
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
 /** "Run this one now" — the manual counterpart of a tick, for a task the operator does not want to wait on. */
 boardRouter.post('/tasks/:id/dispatch', async (req, res) => {
   try {

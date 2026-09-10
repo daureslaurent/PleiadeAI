@@ -1,9 +1,11 @@
 import { createLogger } from '../../config/logger';
+import { liveRuns } from '../../transport/ws/live-runs';
 import { settingsService } from '../settings/settings.service';
 import { sessionRepository } from '../sessions/session.repository';
 import { notificationRepository } from '../notifications/notification.repository';
 import { forumPlanRepository } from './forum-plan.repository';
 import { forumTaskRepository } from './forum-task.repository';
+import { forumTaskService } from './forum-task.service';
 import { forumTaskRunner } from './forum-task-runner';
 import { forumPlanService } from './forum-plan.service';
 import type { ForumTaskDoc } from './forum-task.model';
@@ -146,6 +148,14 @@ function describeStall(tasks: ForumTaskDoc[]): string {
 }
 
 /**
+ * How long a claim nothing is driving may sit before it is treated as abandoned. It only ever
+ * applies to a run this process is *not* running, so a legitimately slow turn is never cut short by
+ * it — the window exists to cover the moment between claiming a task and registering its run, and to
+ * let a turn killed mid-flight (a deploy, a crash) be recovered on a later tick.
+ */
+const ORPHAN_GRACE_MS = 5 * 60_000;
+
+/**
  * Reap dispatches whose session has finished.
  *
  * The in-flight marker lives on the task rather than in a process-local set precisely so this works
@@ -162,25 +172,24 @@ async function reap(maxDispatches: number): Promise<number> {
   for (const task of running) {
     const sessionId = String(task.dispatch?.session_id ?? '');
     if (!sessionId) continue;
+    // This process is driving that turn right now, however long it takes: the claim is doing its job.
+    if (liveRuns.has(sessionId)) continue;
+
     const session = await sessionRepository.findById(sessionId);
+    // Messages are a collection of their own — a session document has never carried them, so the
+    // count has to be asked for. Reading `session.messages` answered `undefined`, and so `0`, for
+    // every session that existed, which is how a claim came to outlive every run that held it.
+    const turns = session ? await sessionRepository.countMessages(sessionId) : 0;
     // The session is gone, or its turn is over and the agent moved the task itself (in which case
     // `submit`/`block`/`review` already cleared the claim and this loop never sees it).
-    const finished = !session || (Array.isArray(session.messages) ? session.messages.length : 0) >= 2;
-    if (!finished) continue;
+    const finished = !session || turns >= 2;
+    // A turn killed mid-run never writes its answer and is in no `liveRuns`, so nothing above will
+    // ever call it finished and the claim would be permanent. Nothing is driving it; once it is
+    // older than the grace window, nothing is going to.
+    const claimedAt = task.dispatch?.at ? new Date(task.dispatch.at).getTime() : 0;
+    if (!finished && Date.now() - claimedAt < ORPHAN_GRACE_MS) continue;
 
-    const spent = task.dispatch?.count ?? 0;
-    if (spent >= Math.max(1, maxDispatches)) {
-      await forumTaskRepository.releaseDispatch(String(task._id), 'blocked');
-      await forumTaskRepository.update(task._id, {
-        blocked_on:
-          task.blocked_on ||
-          `dispatched ${spent}× and came back without a submission — it may not be doable as written`,
-      });
-      log.warn({ taskId: String(task._id), spent }, 'task blocked after repeated empty dispatches');
-    } else {
-      await forumTaskRepository.releaseDispatch(String(task._id), 'todo');
-      log.info({ taskId: String(task._id), spent }, 'dispatch ended without a submission — requeued');
-    }
+    await forumTaskService.releaseEmptyDispatch(String(task._id), maxDispatches);
     reaped += 1;
   }
   return reaped;
