@@ -19,6 +19,27 @@ const GlobalModeSchema = new Schema(
 );
 
 /**
+ * One operator-authored prompt module (`MODULES_PLAN.md` §5). `minimize: false` for the same reason
+ * as the mode schema above: an empty object must survive the write.
+ */
+const CustomModuleSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    name: { type: String, required: true, trim: true },
+    description: { type: String, default: '' },
+    text: { type: String, default: '' },
+    placement: {
+      type: String,
+      enum: ['system_head', 'system_tail', 'system_suffix', 'user_suffix'],
+      default: 'system_tail',
+    },
+    order: { type: Number, default: 500 },
+    enabled: { type: Boolean, default: true },
+  },
+  { _id: false, minimize: false },
+);
+
+/**
  * Singleton runtime settings (one document, `key: 'global'`). Holds llama.cpp inference options
  * that operators can tune from the Settings page without redeploying. Env values act as the
  * initial defaults (see settings.service).
@@ -190,6 +211,30 @@ const SettingsSchema = new Schema(
      * plan running either.
      */
     forum_board_enabled: { type: Boolean, default: false },
+    /**
+     * The module system (`MODULES_PLAN.md` §5). A module is a slice of what this instance is made
+     * of — the prompt blocks it contributes, the core tools those blocks talk about, and the
+     * settings that tune it — and these three fields are all the state it has.
+     *
+     * Enablement is a list of *disabled* ids rather than a row per module, for the same reason
+     * `global_modes_disabled` is: the modules themselves are code-defined, so a release that adds
+     * one has it on by default instead of missing from a table nobody migrated. `mandatory` modules
+     * ignore the list entirely — the route refuses to write them into it.
+     */
+    modules_disabled: { type: [String], default: [] },
+    /**
+     * `{ [moduleId]: { [blockTitle]: text } }` — the operator's replacement wording for a block.
+     * Only blocks that are pure static text declare themselves `overridable`; a block that renders
+     * live data has nothing to override. `minimize: false` so clearing every override for a module
+     * leaves an empty object rather than dropping the key.
+     */
+    module_overrides: { type: Schema.Types.Mixed, default: {} },
+    /**
+     * Operator-authored modules: static text, no code, `custom:`-prefixed ids. The settings route
+     * refuses to persist a built-in id here, the same guard `builtin:` gives the mode list. A custom
+     * module is standing and structural, where a mode is picked per conversation.
+     */
+    modules_custom: { type: [CustomModuleSchema], default: [] },
     /**
      * Names of the shipped API presets (`domain/apis/builtin-catalogue.ts`) that have already been
      * offered to this instance. Boot installs only what is *not* in this list, so deleting a preset

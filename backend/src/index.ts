@@ -42,6 +42,7 @@ import { endpointService } from './domain/endpoints/endpoint.service';
 import { endpointHealth } from './inference/endpoint-health';
 import { inferenceRuntime } from './inference/runtime-config';
 import { toolsRouter } from './transport/http/routes/tools.routes';
+import { modulesRouter } from './transport/http/routes/modules.routes';
 import { isolationsRouter } from './transport/http/routes/isolations.routes';
 import { imagesRouter } from './transport/http/routes/images.routes';
 import { resourcesRouter } from './transport/http/routes/resources.routes';
@@ -143,6 +144,7 @@ async function main(): Promise<void> {
   app.use('/api/finetune-servers', requireAuth, finetuneServersRouter);
   app.use('/api/finetune-jobs', requireAuth, finetuneJobsRouter);
   app.use('/api/tools', requireAuth, toolsRouter);
+  app.use('/api/modules', requireAuth, modulesRouter);
   app.use('/api/isolations', requireAuth, isolationsRouter);
   app.use('/api/android-devices', requireAuth, androidDevicesRouter);
   app.use('/api/api-sources', requireAuth, apiSourcesRouter);

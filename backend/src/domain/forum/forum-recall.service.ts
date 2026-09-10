@@ -383,11 +383,40 @@ export interface ForumBlockInput {
   roster?: string[];
   /** Open work items assigned to this agent (spec §13). */
   assigned?: ForumPointer[];
-  /** Tasks this agent owns, and submitted tasks waiting on its verdict (`FORUM_WORKBOARD_PLAN.md` §8). */
-  tasks?: TaskPointer[];
-  reviews?: TaskPointer[];
   /** Whether the board runs mentions on its own (`settings.forum_auto_reply`, spec §11.6). */
   autoReply?: boolean;
+}
+
+/**
+ * The board half of the block: work this agent owns or must sign off on. Rendered by the `board`
+ * module (`MODULES_PLAN.md` §4) — split from the forum half because the two are separate switches:
+ * an agent may hold one without the other, and a task line telling it to `submit` with a tool it
+ * does not have is worse than no line.
+ */
+export function buildBoardBlock(input: { tasks?: TaskPointer[]; reviews?: TaskPointer[] }): string | null {
+  const { tasks = [], reviews = [] } = input;
+  if (!tasks.length && !reviews.length) return null;
+
+  const lines: string[] = ['## Board'];
+  // Work leads, and it is the only part of this block that is *addressed to* the agent rather than
+  // offered to it. Everything in the forum half is a pointer it may ignore; this is what it is on
+  // the hook for.
+  if (tasks.length) {
+    lines.push(
+      '',
+      'Your open tasks. The board dispatches each one to you when it is ready — you do not have to',
+      'start them, and you do not have to tell anybody you have:',
+      ...tasks.map((t) => `- \`${t.taskId}\` [${t.state}] ${t.goal}${t.blockedOn ? ` · blocked: ${t.blockedOn}` : ''}`),
+    );
+  }
+  if (reviews.length) {
+    lines.push(
+      '',
+      'Submitted work waiting on **your** verdict — `board` `review`, pass or fail with reasons:',
+      ...reviews.map((t) => `- \`${t.taskId}\` ${t.goal} (from ${t.owner ?? 'unknown'})`),
+    );
+  }
+  return lines.join('\n');
 }
 
 export function buildForumBlock(input: ForumBlockInput): string | null {
@@ -398,126 +427,98 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     mentions = [],
     assigned = [],
     roster = [],
-    tasks = [],
-    reviews = [],
     autoReply = false,
   } = input;
 
-  const lines: string[] = [];
-
-  // Work leads, and it is the only part of this block that is *addressed to* the agent rather than
-  // offered to it. Everything below is a pointer it may ignore; this is what it is on the hook for.
-  if (tasks.length || reviews.length) {
-    lines.push('## Board');
-    if (tasks.length) {
-      lines.push(
-        '',
-        'Your open tasks. The board dispatches each one to you when it is ready — you do not have to',
-        'start them, and you do not have to tell anybody you have:',
-        ...tasks.map((t) => `- \`${t.taskId}\` [${t.state}] ${t.goal}${t.blockedOn ? ` · blocked: ${t.blockedOn}` : ''}`),
-      );
-    }
-    if (reviews.length) {
-      lines.push(
-        '',
-        'Submitted work waiting on **your** verdict — `board` `review`, pass or fail with reasons:',
-        ...reviews.map((t) => `- \`${t.taskId}\` ${t.goal} (from ${t.owner ?? 'unknown'})`),
-      );
-    }
-  }
-
   const hasForum = mentions.length || assigned.length || related.length || replies.length || digest.length;
-  // The forum half is omitted entirely when there is nothing on it. The old block was unconditional
-  // and spent ~180 tokens a turn on doctrine about who to wake — doctrine for a mechanism that no
+  // The block is omitted entirely when there is nothing on it. The old one was unconditional and
+  // spent ~180 tokens a turn on doctrine about who to wake — doctrine for a mechanism that no
   // longer exists, on a turn that may have nothing to do with the board at all.
-  if (!hasForum && !lines.length) return null;
+  if (!hasForum) return null;
 
-  if (hasForum) {
-    lines.push('', '## Forum');
-
-    if (mentions.length) {
-      lines.push(
-        '',
-        'You were named on the forum. Answer if you have something to add; one line is a complete',
-        'answer, and silence is fine if the thread already says it:',
-        ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
-      );
-    }
-
-    if (assigned.length) {
-      lines.push(
-        '',
-        'Threads labelled as yours (these are labels, not dispatched work — real tasks are above):',
-        ...assigned.map((p) => `- \`${p.threadId}\` — ${p.title} [${p.workState}]${files(p)}`),
-      );
-    }
-
-    if (replies.length) {
-      lines.push(
-        '',
-        'Somebody replied to a thread you took part in:',
-        ...replies.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.lastPostAuthor})${files(p)}`),
-      );
-    }
-
-    if (related.length) {
-      lines.push(
-        '',
-        'Threads that look related to this task — pointers, not content; `forum` `read_thread` to read one:',
-        ...related.map((p) => `- \`${p.threadId}\` — ${p.title}${files(p)}`),
-      );
-    }
-
-    if (digest.length) {
-      lines.push(
-        '',
-        'New on the board since your last turn:',
-        ...digest.map(
-          (p) => `- \`${p.threadId}\` — ${p.title} (${p.opening ? 'new thread' : 'new reply'} by ${p.lastPostAuthor})`,
-        ),
-      );
-    }
-
-    if (roster.length) {
-      lines.push(
-        '',
-        `Agents you can name in a post (exact spelling): ${roster.map((r) => r.split(' — ')[0]).join(', ')}.`,
-      );
-      // The one piece of doctrine worth its tokens, because it is the only thing in the tool an
-      // agent cannot infer from the prose it is writing: `@name` and `wake` look the same on the
-      // page and do completely different things. Worded to the switch — told an agent it can wake
-      // somebody when the fleet cannot run mentions, it writes `wake` and waits for an answer that
-      // is not coming.
-      lines.push(
-        ...(autoReply
-          ? [
-              '`@name` in a post **tells** them — notified, and your post shows up in their next turn.',
-              'The `wake` argument of the same call is what **runs** them, now, one full turn per name.',
-              'Every post that names an agent must pass `wake`: the names that have to act, or `[]` if',
-              'you are only telling them. Wake somebody when you need something *from* them to carry on',
-              '(say what), or when you are handing finished work back — `state: "done"` and',
-              '`wake: ["whoever asked"]` in the one reply. Never wake somebody to acknowledge or agree.',
-            ]
-          : [
-              'Naming somebody tells them; it starts nothing. The fleet is not running mentions on its',
-              'own right now (Settings → Forum), so `wake` records the request and the operator runs it.',
-            ]),
-        'Work with a deliverable belongs on the `board` as a task with acceptance criteria and an',
-        'owner — that is dispatched on its own and costs no coordination turns.',
-      );
-    }
-
-    // What survives of the old doctrine: four lines about *what to write down*, and none about who
-    // to wake. Posting stays conditional for the reason it always was — an agent told it must post
-    // every turn files "task completed successfully" a hundred times.
+  const lines: string[] = ['## Forum'];
+  if (mentions.length) {
     lines.push(
       '',
-      'Post when you find something the fleet is wrong about or blocked by (say it immediately, not',
-      'when you finish), or something that would cost another agent an hour to rediscover. Search',
-      'before opening a thread. Every post declares a `kind` and each kind has a length limit — say',
-      'it once; a post that restates your own last one on the thread is refused.',
+      'You were named on the forum. Answer if you have something to add; one line is a complete',
+      'answer, and silence is fine if the thread already says it:',
+      ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
     );
   }
+
+  if (assigned.length) {
+    lines.push(
+      '',
+      'Threads labelled as yours (these are labels, not dispatched work — real tasks are above):',
+      ...assigned.map((p) => `- \`${p.threadId}\` — ${p.title} [${p.workState}]${files(p)}`),
+    );
+  }
+
+  if (replies.length) {
+    lines.push(
+      '',
+      'Somebody replied to a thread you took part in:',
+      ...replies.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.lastPostAuthor})${files(p)}`),
+    );
+  }
+
+  if (related.length) {
+    lines.push(
+      '',
+      'Threads that look related to this task — pointers, not content; `forum` `read_thread` to read one:',
+      ...related.map((p) => `- \`${p.threadId}\` — ${p.title}${files(p)}`),
+    );
+  }
+
+  if (digest.length) {
+    lines.push(
+      '',
+      'New on the board since your last turn:',
+      ...digest.map(
+        (p) => `- \`${p.threadId}\` — ${p.title} (${p.opening ? 'new thread' : 'new reply'} by ${p.lastPostAuthor})`,
+      ),
+    );
+  }
+
+  if (roster.length) {
+    lines.push(
+      '',
+      `Agents you can name in a post (exact spelling): ${roster.map((r) => r.split(' — ')[0]).join(', ')}.`,
+    );
+    // The one piece of doctrine worth its tokens, because it is the only thing in the tool an
+    // agent cannot infer from the prose it is writing: `@name` and `wake` look the same on the
+    // page and do completely different things. Worded to the switch — told an agent it can wake
+    // somebody when the fleet cannot run mentions, it writes `wake` and waits for an answer that
+    // is not coming.
+    lines.push(
+      ...(autoReply
+        ? [
+            '`@name` in a post **tells** them — notified, and your post shows up in their next turn.',
+            'The `wake` argument of the same call is what **runs** them, now, one full turn per name.',
+            'Every post that names an agent must pass `wake`: the names that have to act, or `[]` if',
+            'you are only telling them. Wake somebody when you need something *from* them to carry on',
+            '(say what), or when you are handing finished work back — `state: "done"` and',
+            '`wake: ["whoever asked"]` in the one reply. Never wake somebody to acknowledge or agree.',
+          ]
+        : [
+            'Naming somebody tells them; it starts nothing. The fleet is not running mentions on its',
+            'own right now (Settings → Forum), so `wake` records the request and the operator runs it.',
+          ]),
+      'Work with a deliverable belongs on the `board` as a task with acceptance criteria and an',
+      'owner — that is dispatched on its own and costs no coordination turns.',
+    );
+  }
+
+  // What survives of the old doctrine: four lines about *what to write down*, and none about who
+  // to wake. Posting stays conditional for the reason it always was — an agent told it must post
+  // every turn files "task completed successfully" a hundred times.
+  lines.push(
+    '',
+    'Post when you find something the fleet is wrong about or blocked by (say it immediately, not',
+    'when you finish), or something that would cost another agent an hour to rediscover. Search',
+    'before opening a thread. Every post declares a `kind` and each kind has a length limit — say',
+    'it once; a post that restates your own last one on the thread is refused.',
+  );
 
   return lines.join('\n');
 }

@@ -33,6 +33,7 @@ import { FineTuningView } from './views/FineTuningView';
 import { SettingsView, SettingsCategoryPage } from './views/settings/SettingsLayout';
 import { SettingsHome } from './views/settings/SettingsHome';
 import { ToolsSettings } from './views/settings/ToolsSettings';
+import { ModulesSettings } from './views/settings/ModulesSettings';
 import { VisualDesktopWindow } from './views/VisualDesktopWindow';
 import { AndroidPhoneWindow } from './views/AndroidPhoneWindow';
 import { StreamWindow } from './views/StreamWindow';
@@ -153,6 +154,7 @@ export default function App() {
             {/* Tools is the one category with its own layout (a searchable rail over ~40
                 tools), and it carries the selected tool in the URL. Declared before the
                 `:category` route so the static segment wins. */}
+            <Route path="modules" element={<ModulesSettings />} />
             <Route path="tools" element={<ToolsSettings />} />
             <Route path="tools/:tool" element={<ToolsSettings />} />
             <Route path=":category" element={<SettingsCategoryPage />} />

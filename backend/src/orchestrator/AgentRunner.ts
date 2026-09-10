@@ -3,18 +3,13 @@ import { createLogger } from '../config/logger';
 import { eventBus } from '../core/event-bus/EventBus';
 import type { EventContext, ImageBlock } from '../core/event-bus/events.types';
 import { agentRepository } from '../domain/agents/agent.repository';
-import {
-  buildSystemMessage,
-  buildMemoryMessage,
-  buildUserMessage,
-  renderActiveModesBlock,
-  renderModeUserSuffix,
-  type ChatMessage,
-  type AutoLoopPromptState,
-} from '../domain/agents/jit-builder';
+import { buildUserMessage, type ChatMessage } from '../domain/agents/jit-builder';
+import { assembleSystemMessage, assembleUserText } from '../modules/assemble';
+import { moduleStateFrom } from '../modules/state.service';
+import type { AutoLoopPromptState, PromptContext } from '../modules/types';
 import { agentMemory, embedRecallQuery } from '../domain/memory/agent-memory.service';
 import { memoryDistiller } from '../domain/memory/memory-distiller';
-import { forumRecall, buildForumBlock } from '../domain/forum/forum-recall.service';
+import { forumRecall } from '../domain/forum/forum-recall.service';
 import { settingsService } from '../domain/settings/settings.service';
 import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { scoringService } from '../domain/scoring/scoring.service';
@@ -346,49 +341,49 @@ export class AgentRunner {
       parameters: t.parameters,
     }));
 
-    // Auto-RAG: pull the most relevant memories for this query and inject them as a system block
-    // ahead of the conversation. Recall now applies a similarity floor and a composite rerank
-    // (see agent-memory.service), so an irrelevant turn legitimately retrieves *nothing* — the
-    // block is absent rather than padded with noise. Best-effort: an embeddings outage yields none.
-    // One embedding, two searches: memory and the forum index are both queried with this vector.
-    // Read per turn (not cached with the agent doc) so an edit on the Settings page binds every
-    // agent on its next turn without a restart. Needed here rather than at prompt-assembly time
-    // because the forum block below is worded differently depending on `forum_auto_reply`.
+    // Which modules are live (`MODULES_PLAN.md` §7). Read per turn, from the same settings document
+    // the rest of this block already needs, so a switch on Settings → Modules binds every agent on
+    // its next turn without a restart. Everything below is gated on it *before* the query runs: a
+    // module that is off costs no embedding, no Qdrant round-trip and no forum find, which is the
+    // saving that matters — the tokens are the smaller half.
     const settings = await settingsService.get();
+    const mods = moduleStateFrom(settings as unknown as Record<string, unknown>);
+
+    // Auto-RAG: pull the most relevant memories for this query and inject them as a block ahead of
+    // the conversation. Recall applies a similarity floor and a composite rerank (see
+    // agent-memory.service), so an irrelevant turn legitimately retrieves *nothing* — the block is
+    // absent rather than padded with noise. Best-effort: an embeddings outage yields none.
+    // One embedding, two searches: memory and the forum index are both queried with this vector, so
+    // it is computed when *either* module is on and skipped entirely when neither is.
+    const wantsMemory = mods.enabled('memory');
+    const hasForum = mods.enabled('forum') && tools.some((t) => t.name === forum.name);
+    // The board half is gated separately from the forum half: an agent may hold one without the
+    // other, and a task line telling it to `submit` with a tool it does not have is worse than no
+    // line. `FORUM_WORKBOARD_PLAN.md` §8.
+    const hasBoard = mods.enabled('board') && tools.some((t) => t.name === board.name);
 
     const recallQuery = buildRecallQuery(input);
-    const recallVector = await embedRecallQuery(recallQuery);
-    const recalled = await agentMemory.recall(agent.qdrant_namespace, recallQuery, undefined, recallVector);
-    const memoryMessage = buildMemoryMessage(recalled);
+    const recallVector = wantsMemory || hasForum ? await embedRecallQuery(recallQuery) : null;
+    const recalled = wantsMemory
+      ? await agentMemory.recall(agent.qdrant_namespace, recallQuery, undefined, recallVector ?? undefined)
+      : [];
 
     // Passive forum awareness (FORUM_PLAN.md §8), for agents that actually hold the `forum` tool —
     // never point an agent at a thread it has no way to open. Pointers only (thread id + title): the
     // agent still has to call `forum` to read one, which is what keeps the board from flooding the
+    // context.
     //
     // An auto-loop turn is the exception to the opt-in: it forces the reply pointers on and adds a
     // time-scoped digest of everything new since its last turn. A looping agent has no operator to
     // tick a box for it, and the whole reason it can follow a *shared* goal is that it notices what
     // the other agents posted while it was working.
-    const hasForum = tools.some((t) => t.name === forum.name);
-    // The board half is gated on the `board` tool, separately from the forum half: an agent may hold
-    // one without the other, and a task line telling it to `submit` with a tool it does not have is
-    // worse than no line. `FORUM_WORKBOARD_PLAN.md` §8.
-    const hasBoard = tools.some((t) => t.name === board.name);
     //
     // Mentions and unanswered replies ride *every* turn, and neither is behind the composer toggle.
     // Both are a question with a sender waiting on it — somebody named this agent, or answered a
-    // thread it is in — unlike a related thread, which is only ever a suggestion. Gating the reply
-    // pointers on an operator tick is what kept threads from ever reaching a third post: the
-    // conversation half of the board was invisible on an ordinary turn. Together they cost one
-    // indexed find plus one distinct (§11.2).
-    //
-    // The digest stays exclusive to an auto-loop turn: it is time-scoped rather than
-    // similarity-scoped ("what changed while I was working?"), which is a looping agent's question
-    // and nobody else's.
-    //
-    // Assignments ride every turn for a different reason than either: a mention stops being pending
-    // the moment it is answered, but a work item this agent owns is still its problem until it is
-    // marked done, and an assignment that scrolls out of view after one reply is one nobody tracks.
+    // thread it is in — unlike a related thread, which is only ever a suggestion. Together they cost
+    // one indexed find plus one distinct (§11.2). Assignments ride every turn for a different reason
+    // than either: a mention stops being pending the moment it is answered, but a work item this
+    // agent owns is still its problem until it is marked done.
     const boardWork = hasBoard && ctx.agentId ? await forumRecall.work(ctx.agentId) : { tasks: [], reviews: [] };
     const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumAssigned, forumRoster] =
       hasForum
@@ -403,26 +398,11 @@ export class AgentRunner {
             forumRecall.roster(agent.name),
           ])
         : [[], [], [], [], [], []];
-    const forumBlock = hasForum || boardWork.tasks.length || boardWork.reviews.length
-      ? buildForumBlock({
-          related: forumRelated,
-          replies: forumReplyPointers,
-          digest: forumDigest,
-          mentions: forumMentions,
-          assigned: forumAssigned,
-          roster: forumRoster,
-          tasks: boardWork.tasks,
-          reviews: boardWork.reviews,
-          // Which of the two mention paragraphs the block writes: telling an agent it can wake
-          // somebody while the fleet switch is off promises an answer that never arrives.
-          autoReply: settings.forum_auto_reply === true,
-        })
-      : null;
 
     // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
     // recall instead of guessing. Only fires when something was injected — the badge's presence in
     // the chat is itself the signal that this turn was shaped by memory.
-    if (memoryMessage && recalled.length) {
+    if (recalled.length) {
       eventBus.emit('agent:memory_recall', {
         ctx,
         runId,
@@ -439,125 +419,76 @@ export class AgentRunner {
       });
     }
 
-    // Fold recalled memories into the single leading system message rather than injecting a second
-    // `system` turn. Many chat templates (including the GGUFs we serve) enforce "System message must
-    // be at the beginning" and hard-fail on a second one — merging keeps retrieval visible as a
-    // labelled block without breaking the template or the runtime message ordering.
-    // Fleet-wide AGENTS.md house rules ride into the prompt as a read-only block, ahead of the
-    // agent's own charter (see `buildSystemMessage`). Read per turn so an edit on the Settings page
-    // binds every agent on its next turn without a restart.
-    const houseRules = settings.agents_md;
     // The agent's own checklist rides into the prompt too. Read per turn (not cached with the agent
     // doc) because `todowrite` mutates it mid-turn — and because an item left `in_progress` when the
-    // last turn ended is exactly what this block exists to put back in front of the model.
-    const todos = await todoRepository.get(ctx.sessionId, ctx.agentId);
-    const systemMessage = buildSystemMessage(agent, houseRules, todos, input.autoLoop ?? null);
-    if (
-      memoryMessage &&
-      typeof systemMessage.content === 'string' &&
-      typeof memoryMessage.content === 'string'
-    ) {
-      systemMessage.content = `${systemMessage.content}\n\n${memoryMessage.content}`;
-    }
-    if (forumBlock && typeof systemMessage.content === 'string') {
-      systemMessage.content = `${systemMessage.content}\n\n${forumBlock}`;
-    }
-    // A `prompt` mode set to `system_suffix` lands last of all, inside a stamped block: operator text
-    // chosen for this conversation outranks (and so follows) everything the JIT builder assembled.
-    if (inference.promptSuffixes.system.length && typeof systemMessage.content === 'string') {
-      systemMessage.content = `${systemMessage.content}\n\n${renderActiveModesBlock(inference.promptSuffixes.system)}`;
-    }
+    // last turn ended is exactly what that block exists to put back in front of the model.
+    const todos = mods.enabled('todo') ? await todoRepository.get(ctx.sessionId, ctx.agentId) : [];
 
-    // Tell the model, in the user turn, what images it can act on and how — otherwise it has no
-    // reliable signal an image exists and silently ignores it. What the note says depends on whether
-    // the agent can actually see:
-    //  - multimodal: every image in scope IS in its context (attachments and carried-over alike, see
-    //    userMessage below), so the note only says where they came from and how to forward them on;
-    //  - text-only: it gets no pixels at all, so the note is what makes an image reachable — by index,
-    //    through `analyze_image` (the Vision endpoint) or `ask_agent`.
-    const idxRange = (n: number) => (n > 1 ? `..${n - 1}` : '');
-    const plural = (n: number) => (n > 1 ? 'them' : 'it');
     /**
-     * `img_3` / `img_3 and img_4`. Naming the handles is what lets an agent *act* on an image:
-     * `analyze_image` takes an index, but `edit_image`, `write from_handle` and `data` all take a
-     * handle, and numbering continues across the session — so "the first image" is not `img_1`.
-     * Without this the model guesses, and prod transcripts show it guessing `0`, `img_0`, `img_1`
-     * in turn before falling back to `data list`.
+     * Everything the enabled modules render from. Modules render, they never fetch — which is why
+     * every query above could be skipped by its own switch before we got here.
      */
-    const handleList = (): string => {
-      const ids = pooledImages.map((i) => i.id).filter(Boolean);
-      if (ids.length === 0) return '';
-      return ids.length === 1
-        ? ` It is \`${ids[0]}\`.`
-        : ` They are ${ids.map((id) => `\`${id}\``).join(', ')}.`;
+    const promptCtx: PromptContext = {
+      agent,
+      // Fleet-wide AGENTS.md house rules, ahead of the agent's own charter.
+      houseRules: settings.agents_md,
+      todos,
+      autoLoop: input.autoLoop ?? null,
+      memories: recalled,
+      forum: hasForum
+        ? {
+            related: forumRelated,
+            replies: forumReplyPointers,
+            digest: forumDigest,
+            mentions: forumMentions,
+            assigned: forumAssigned,
+            roster: forumRoster,
+            // Which of the two mention paragraphs the block writes: telling an agent it can wake
+            // somebody while the fleet switch is off promises an answer that never arrives.
+            autoReply: settings.forum_auto_reply === true,
+          }
+        : null,
+      board: hasBoard ? boardWork : null,
+      images: {
+        supportsVision: inference.supportsVision,
+        current: currentImages,
+        session: sessionImages,
+        pooled: pooledImages,
+      },
+      modes: { system: inference.promptSuffixes.system, user: inference.promptSuffixes.user },
     };
-    const userText = (() => {
-      if (inference.supportsVision) {
-        // Carried-over images are re-fed to a multimodal agent, but they are NOT part of this message
-        // — say so, or the model reads a stale screenshot as the thing the user just sent.
-        if (currentImages.length === 0 && sessionImages.length) {
-          const n = sessionImages.length;
-          return `${input.userText}\n\n[The ${n} image${n > 1 ? 's' : ''} shown ${
-            n > 1 ? 'are' : 'is'
-          } from earlier in this conversation, not newly sent. You can see ${plural(
-            n,
-          )}.${handleList()} Use that handle to edit ${plural(n)} (\`edit_image\`), save ${plural(
-            n,
-          )} (\`write from_handle\`) or forward ${plural(
-            n,
-          )} to another agent with \`ask_agent\` (include_image: true).]`;
-        }
-        return input.userText;
-      }
-      if (currentImages.length) {
-        const n = currentImages.length;
-        return `${input.userText}\n\n[${n} image${n > 1 ? 's are' : ' is'} attached to this message. You cannot see ${plural(
-          n,
-        )} directly — call the \`analyze_image\` tool (index 0${idxRange(n)}) to read ${
-          n > 1 ? 'each one' : 'it'
-        } before answering.${handleList()} Use that handle for any tool that acts on the image — \`edit_image\`, \`write from_handle\`, \`data\`.]`;
-      }
-      if (sessionImages.length) {
-        const n = sessionImages.length;
-        return `${input.userText}\n\n[${n} image${n > 1 ? 's' : ''} from earlier in this conversation ${
-          n > 1 ? 'are' : 'is'
-        } available. You cannot see ${plural(n)} directly — call \`analyze_image\` (index 0${idxRange(
-          n,
-        )}) to read ${plural(n)}, or forward ${plural(
-          n,
-        )} to another agent with \`ask_agent\` (include_image: true).${handleList()} Use that handle for \`edit_image\`, \`write from_handle\` or \`data\`.]`;
-      }
-      return input.userText;
-    })();
+
+    const systemMessage = assembleSystemMessage(mods, promptCtx);
+
+    // The user turn: the operator's own words plus whatever the enabled modules append — the image
+    // note that makes an attachment reachable, and any mode whose placement is `user_suffix` (the
+    // only position llama.cpp chat templates honour a control token like `/no_think` in).
     // Raw images enter the model context only for a multimodal agent — a text-only endpoint would
-    // choke on them (it reaches an image via `analyze_image` instead). For a multimodal agent that is
-    // every image in scope: this turn's attachments, or, when the turn has none, the ones carried over
-    // from earlier in the session. Since such an agent is not granted `analyze_image`, feeding the
-    // carried-over set is the *only* thing that keeps an earlier image answerable — the note above
-    // marks them as old so they aren't mistaken for a fresh attachment. `attachedImages` is already
-    // "this turn's if any, else the session's", so old images are never re-fed alongside a new one.
-    // A `prompt` mode set to `user_suffix` is appended to the user turn — the only placement
-    // llama.cpp chat-template control tokens (`/no_think`) are honoured in.
-    const modedUserText = inference.promptSuffixes.user.length
-      ? [userText, renderModeUserSuffix(inference.promptSuffixes.user)].filter(Boolean).join('\n\n')
-      : userText;
+    // choke on them (it reaches an image via `analyze_image` instead).
+    const userTextWithNote = assembleUserText(
+      mods,
+      { ...promptCtx, modes: { system: promptCtx.modes.system, user: [] } },
+      input.userText,
+    );
+    const modedUserText = assembleUserText(mods, promptCtx, input.userText);
     const userMessage = buildUserMessage(
       modedUserText,
       inference.supportsVision ? attachedImages : undefined,
     );
-    const messages: ChatMessage[] = [systemMessage, ...(input.history ?? []), userMessage];
 
     // The clean conversational context to hand any sub-agent this run delegates to: everything up to
     // (and including) this turn's user message, but *not* the in-flight tool activity. Threaded down
     // so a sub-agent's `ask_parent` re-runs this agent with a well-formed, context-aware history.
-    // Built from the operator's own words, without this turn's mode suffix: a control token aimed at
-    // *this* model would read as gibberish quoted into another agent's conversation.
+    // Built without this turn's mode suffix: a control token aimed at *this* model would read as
+    // gibberish quoted into another agent's conversation.
     const callerHistory: ChatMessage[] = [
       ...(input.history ?? []),
       inference.promptSuffixes.user.length
-        ? buildUserMessage(userText, inference.supportsVision ? attachedImages : undefined)
+        ? buildUserMessage(userTextWithNote, inference.supportsVision ? attachedImages : undefined)
         : userMessage,
     ];
+
+    const messages: ChatMessage[] = [systemMessage, ...(input.history ?? []), userMessage];
 
     // Isolation: when the agent is assigned an isolation profile (resolved above), lazily bring up
     // its container on first tool use and reuse the executor for the rest of the turn (memoised so

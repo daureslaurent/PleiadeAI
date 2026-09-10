@@ -1028,6 +1028,8 @@ export interface ToolInfo {
   description: string;
   /** Family the tool belongs to, assigned server-side (`registry.ts`); `other` when unclassified. */
   category: ToolCategory;
+  /** The module that owns it (`MODULES_PLAN.md`); off there, the tool is unreachable regardless. */
+  module: string | null;
   configSchema: ToolConfigField[];
   config: Record<string, string | number | boolean>;
   enabled: boolean;
@@ -1039,6 +1041,81 @@ export const toolsApi = {
   list: () => api.get<ToolInfo[]>('/tools').then((r) => r.data),
   update: (name: string, patch: { enabled?: boolean; config?: Record<string, unknown>; locked?: string[] }) =>
     api.put<ToolInfo>(`/tools/${encodeURIComponent(name)}`, patch).then((r) => r.data),
+};
+
+// --- Modules (`MODULES_PLAN.md`) --------------------------------------------------------------
+
+/**
+ * A module is one slice of what this instance is made of: the prompt blocks it contributes, the
+ * core tools those blocks talk about, and the settings that tune it. Switching one off removes all
+ * three at once — which is why the row carries each of them.
+ */
+export type ModuleGroup = 'core' | 'operator' | 'self' | 'work' | 'capabilities';
+
+/** Where a block lands relative to the operator-authored system prompt. */
+export type BlockPlacement = 'system_head' | 'system_tail' | 'system_suffix' | 'user_suffix';
+
+export interface ModuleBlock {
+  title: string;
+  placement: BlockPlacement;
+  order: number;
+  /** Static-text blocks can be rewritten; one that renders live data has nothing to override. */
+  overridable: boolean;
+  /** The operator's replacement wording, or null when the code default is in force. */
+  override: string | null;
+}
+
+export interface ModuleTool {
+  name: string;
+  description: string;
+  /** The tool's *own* switch on the Tools page — both it and its module have to say yes. */
+  enabled: boolean;
+}
+
+export interface ModuleInfo {
+  id: string;
+  name: string;
+  description: string;
+  group: ModuleGroup;
+  /** Load-bearing: the route refuses to switch it off. */
+  mandatory: boolean;
+  /** Whether it ships on. Only the board ships off. */
+  defaultEnabled: boolean;
+  enabled: boolean;
+  tools: ModuleTool[];
+  /** Settings keys this module's detail view points at — they live on their own panels. */
+  settingsKeys: string[];
+  blocks: ModuleBlock[];
+}
+
+/** An operator-authored module: static text at a chosen placement, no code behind it. */
+export interface CustomModule {
+  id: string;
+  name: string;
+  description: string;
+  text: string;
+  placement: BlockPlacement;
+  order: number;
+  enabled: boolean;
+}
+
+export interface ModulePreview {
+  /** The assembled system message, fences and all. */
+  system: string;
+  /** What the enabled modules append to the operator's own words on the user turn. */
+  userSuffix: string;
+}
+
+export const modulesApi = {
+  list: () =>
+    api.get<{ modules: ModuleInfo[]; custom: CustomModule[] }>('/modules').then((r) => r.data),
+  update: (id: string, patch: { enabled?: boolean; overrides?: Record<string, string | null> }) =>
+    api.put<ModuleInfo>(`/modules/${encodeURIComponent(id)}`, patch).then((r) => r.data),
+  saveCustom: (m: Partial<CustomModule>) =>
+    api.post<CustomModule>('/modules/custom', m).then((r) => r.data),
+  removeCustom: (id: string) => api.delete(`/modules/custom/${encodeURIComponent(id)}`),
+  preview: (agentId: string) =>
+    api.post<ModulePreview>('/modules/preview', { agentId }).then((r) => r.data),
 };
 
 // --- Media generation (ComfyUI) -------------------------------------------------------------

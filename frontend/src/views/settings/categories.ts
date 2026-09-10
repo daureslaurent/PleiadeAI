@@ -4,6 +4,7 @@ import {
   Cable,
   KeyRound,
   Palette,
+  Puzzle,
   MonitorDot,
   Webhook,
   RefreshCcwDot,
@@ -52,6 +53,13 @@ export const CATEGORIES: SettingsCategory[] = [
     blurb: 'Standing rules and services every agent inherits.',
     contains: ['House rules (AGENTS.md)', 'Quality scorer', 'Fine-tune servers'],
     icon: Users,
+  },
+  {
+    slug: 'modules',
+    title: 'Modules',
+    blurb: 'What this instance is made of — each module owns its prompt blocks and its tools.',
+    contains: ['Prompt blocks', 'Owned tools', 'Your own modules', 'Prompt preview'],
+    icon: Puzzle,
   },
   {
     slug: 'tools',

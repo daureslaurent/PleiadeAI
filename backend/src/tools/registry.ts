@@ -1,6 +1,8 @@
 import { createLogger } from '../config/logger';
 import { skillRepository } from '../domain/skills/skill.repository';
 import { toolConfigService } from '../domain/tools/tool-config.service';
+import { resolveModuleState, toolsDisabledByModules } from '../modules/state.service';
+import { toolOwner } from '../modules/registry';
 import { skillRunner } from './sandbox/SkillRunner';
 import { setAgentParameter } from './core/setAgentParameter';
 import { updateNotebook } from './core/updateNotebook';
@@ -162,17 +164,26 @@ const CORE_TOOLS: Record<string, Tool> = {
  * wrapped so the LLM sees them as ordinary tools while execution routes through the sandbox
  * (with its timeout + circuit breaker). Disabled skills are silently omitted so a tripped
  * skill simply disappears from the agent's toolset until re-enabled.
+ *
+ * Two kill-switches apply to a core tool, and both have to say yes (`MODULES_PLAN.md` §6): the
+ * **module** that owns it must be enabled, and the tool itself must not be individually disabled on
+ * the Tools page. The module is the coarse switch — turning Visuals off takes the four media tools
+ * and the image note with it — and the per-tool flag stays as the fine one. A tool no module claims
+ * is governed by the per-tool flag alone.
  */
 export async function resolveTools(toolsAllowed: string[]): Promise<Tool[]> {
   const resolved: Tool[] = [];
   const skillNames: string[] = [];
-  const disabled = await toolConfigService.disabledNames();
+  const [disabled, byModule] = await Promise.all([
+    toolConfigService.disabledNames(),
+    resolveModuleState().then(toolsDisabledByModules),
+  ]);
 
   for (const name of toolsAllowed) {
     const core = CORE_TOOLS[name];
     if (core) {
-      // Honour the operator's global kill-switch from the Tools page.
-      if (!disabled.has(name)) {
+      // Honour the operator's global kill-switch from the Tools page, and its module's switch.
+      if (!disabled.has(name) && !byModule.has(name)) {
         // A dynamic tool (e.g. a media tool reflecting its configured ComfyUI workflow's bindings)
         // gets a shallow-copied schema each call — CORE_TOOLS entries are shared across every
         // concurrent agent turn and must never be mutated in place.
@@ -302,4 +313,15 @@ const CATEGORY_BY_TOOL: Record<string, ToolCategory> = {
 /** The family a core tool belongs to; `other` for anything not yet classified. */
 export function toolCategory(name: string): ToolCategory {
   return CATEGORY_BY_TOOL[name] ?? 'other';
+}
+
+/**
+ * The **module** that owns a core tool (`MODULES_PLAN.md` §4), or `undefined` when nothing claims
+ * it. Distinct from `toolCategory`, deliberately: a category groups tools by the verb they perform
+ * (the rail on the Tools page), a module groups them by the capability they belong to — which is
+ * the thing that gets switched off. `bash` is `shell` in both; `analyze_image` is `media` by verb
+ * and `visuals` by capability, together with the prompt note that makes an image reachable.
+ */
+export function toolModuleId(name: string): string | undefined {
+  return toolOwner(name)?.id;
 }

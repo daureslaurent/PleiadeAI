@@ -113,6 +113,23 @@ Key seams:
   backend) is what makes Reddit reachable at all, and `auth_optional` is for APIs that answer
   anonymously but answer better with a key.
 
+- **Modules (`modules/`, spec `MODULES_PLAN.md`).** The prompt is assembled from a **register** of
+  modules rather than a hard-coded list of renderers. A module owns three things at once: the prompt
+  blocks it contributes, the core tools those blocks talk about, and the settings that tune it — so
+  one switch on Settings → Modules removes all three. Blocks declare a `placement`
+  (`system_head` before the operator's authored `system_prompt`, `system_tail` after it,
+  `system_suffix` last, `user_suffix` on the user turn) and an `order`; that ordering *is* the
+  authority contract — operator-owned text before the authored prompt, the agent-writable notebook
+  after it, the conversation's modes last. **Modules render, they never fetch**: `AgentRunner`
+  prepares one `PromptContext` per turn and skips the query behind a disabled module, so Visuals off
+  costs no image note *and* Memory off costs no embedding. Enablement is a list of *disabled* ids on
+  the settings singleton (like `global_modes_disabled`), so a release that adds a module has it on by
+  default; `mandatory` ones (Environment, Tool use, Session) refuse to be switched off, and only the
+  board ships off — its switch writes `forum_board_enabled`, which the scheduler still reads.
+  `resolveTools()` gates a core tool on `moduleEnabled(owner) && toolConfig.enabled`, and
+  `prompt-usage.ts` derives its block titles from the registry, so the debugger's context breakdown
+  can't drift from what was actually sent.
+
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.
   Embeddings failures degrade gracefully (memory just skipped).

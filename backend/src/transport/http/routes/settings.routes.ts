@@ -18,6 +18,8 @@ import { syncForumTick } from '../../../autonomy/agenda.setup';
 import { Types } from 'mongoose';
 import type { GlobalMode } from '../../../domain/endpoints/endpoint.model';
 import { BUILTIN_GLOBAL_MODES, isBuiltinModeId } from '../../../domain/settings/builtin-modes';
+import { moduleById } from '../../../modules/registry';
+import { isCustomModuleId, type CustomModule } from '../../../modules/types';
 import { createLogger } from '../../../config/logger';
 
 const log = createLogger('settings-routes');
@@ -149,6 +151,38 @@ settingsRouter.put('/', async (req, res) => {
     const known = new Set(BUILTIN_GLOBAL_MODES.map((m) => m.id));
     patch.global_modes_default_on = (b.global_modes_default_on as unknown[]).filter(
       (id): id is string => typeof id === 'string' && known.has(id),
+    );
+  }
+  // The module system (`MODULES_PLAN.md` §5). Whitelisted here or the fields silently never persist
+  // — the one rule about this file. Narrowed on the way in the same way the mode lists are: only ids
+  // this build knows, never a `mandatory` one, and only `custom:`-prefixed entries in the custom
+  // list, so a request cannot smuggle a fake built-in into the document. The Modules page normally
+  // writes through `/api/modules`, which validates the same way; this is the bulk path.
+  if (Array.isArray(b.modules_disabled)) {
+    patch.modules_disabled = (b.modules_disabled as unknown[]).filter((id): id is string => {
+      if (typeof id !== 'string') return false;
+      const mod = moduleById(id);
+      return !!mod && mod.mandatory !== true;
+    });
+  }
+  if (b.module_overrides && typeof b.module_overrides === 'object' && !Array.isArray(b.module_overrides)) {
+    const clean: Record<string, Record<string, string>> = {};
+    for (const [moduleId, blocks] of Object.entries(b.module_overrides as Record<string, unknown>)) {
+      const mod = moduleById(moduleId);
+      if (!mod || !blocks || typeof blocks !== 'object') continue;
+      const mine: Record<string, string> = {};
+      for (const [title, text] of Object.entries(blocks as Record<string, unknown>)) {
+        const block = mod.blocks?.find((x) => x.title === title && x.overridable);
+        if (block && typeof text === 'string' && text.trim()) mine[title] = text;
+      }
+      if (Object.keys(mine).length) clean[moduleId] = mine;
+    }
+    patch.module_overrides = clean;
+  }
+  if (Array.isArray(b.modules_custom)) {
+    patch.modules_custom = (b.modules_custom as unknown[]).filter(
+      (m): m is CustomModule =>
+        !!m && typeof m === 'object' && isCustomModuleId(String((m as { id?: unknown }).id ?? '')),
     );
   }
   // Forum auto-reply: mentions run themselves, bounded by a per-thread budget. Floor of 1 — zero

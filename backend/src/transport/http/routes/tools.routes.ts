@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { coreTools, getCoreTool, toolCategory } from '../../../tools/registry';
+import { coreTools, getCoreTool, toolCategory, toolModuleId } from '../../../tools/registry';
 import { toolConfigService } from '../../../domain/tools/tool-config.service';
 import { resolveDynamicOptions } from '../../../tools/config-options';
 
@@ -20,6 +20,8 @@ toolsRouter.get('/', async (_req, res) => {
         name: tool.name,
         description: tool.description,
         category: toolCategory(tool.name),
+        // The module that owns it — off there, the tool is unreachable whatever this page says.
+        module: toolModuleId(tool.name) ?? null,
         // Fields whose choices live in the database (e.g. the ComfyUI workflow list) get filled in
         // here rather than being frozen into the tool module.
         configSchema: await resolveDynamicOptions(schema, config),
@@ -50,6 +52,7 @@ toolsRouter.put('/:name', async (req, res) => {
     name: tool.name,
     description: tool.description,
     category: toolCategory(tool.name),
+    module: toolModuleId(tool.name) ?? null,
     configSchema: await resolveDynamicOptions(schema, config),
     config,
     enabled,

@@ -2,6 +2,7 @@ import { env } from '../../config/env';
 import { SettingsModel } from './settings.model';
 import type { GlobalMode } from '../endpoints/endpoint.model';
 import { BUILTIN_GLOBAL_MODES } from './builtin-modes';
+import type { CustomModule } from '../../modules/types';
 
 /** How a screen is read for the GUI-control tools. See `VISUAL_MODAL_PLAN.md`. */
 export const SCREEN_CONTROL_MODES = ['auto', 'modal', 'legacy'] as const;
@@ -87,6 +88,14 @@ export interface EffectiveSettings {
   max_agent_hops: number;
   /** Fleet-wide AGENTS.md house rules, injected read-only into every agent's prompt ('' → omitted). */
   agents_md: string;
+  /**
+   * The module system (`MODULES_PLAN.md`). Ids of built-in modules the operator switched off, their
+   * per-block wording overrides, and any modules the operator wrote themselves. Read on every turn
+   * by `AgentRunner`, which is why they ride on the same document the turn already fetches.
+   */
+  modules_disabled: string[];
+  module_overrides: Record<string, Record<string, string>>;
+  modules_custom: CustomModule[];
   /**
    * Fleet-wide prompt modes, offered in every conversation on top of the per-model endpoint ones:
    * the app's own built-ins first (marked, read-only, switched off via `global_modes_disabled`),
@@ -230,6 +239,10 @@ export const settingsService = {
       max_tool_iterations: doc?.max_tool_iterations ?? 50,
       max_agent_hops: doc?.max_agent_hops ?? env.MAX_AGENT_HOPS,
       agents_md: doc?.agents_md ?? '',
+      modules_disabled: (doc?.modules_disabled as string[] | undefined) ?? [],
+      module_overrides:
+        (doc?.module_overrides as Record<string, Record<string, string>> | undefined) ?? {},
+      modules_custom: (doc?.modules_custom as CustomModule[] | undefined) ?? [],
       // Built-ins are composed in on every read rather than seeded once, so they improve with the
       // app instead of staying frozen at whatever a migration wrote. A disabled one is still
       // returned (the Settings page has to render its row) but marked so nothing offers it in chat.

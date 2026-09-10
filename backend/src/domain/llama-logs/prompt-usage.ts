@@ -1,4 +1,5 @@
 import type { ChatMessage, ContentPart } from '../agents/jit-builder';
+import { blockTitles } from '../../modules/registry';
 
 /**
  * Which slice of the window a row belongs to. Three groups is the whole story: what the *agent's
@@ -29,29 +30,25 @@ export interface PromptUsageBreakdown {
   /**
    * Ordered titles of the `## ` blocks found in the assembled system message — the prompt's *shape*
    * as it was actually sent. Placeholder surface for the prompt-module system: today these are the
-   * hard-coded `jit-builder` renderers, tomorrow they are the enabled modules.
+   * blocks the enabled modules rendered (`MODULES_PLAN.md`).
    */
   modules: string[];
 }
 
 /**
- * The blocks `buildSystemMessage` glues on *before* the operator's own prompt, and the ones it glues
- * on *after*. Knowing the two lists by name is what lets the authored prompt be found without
- * trusting the `---` separators — an `AGENTS.md` or a notebook is markdown, and markdown has
- * horizontal rules in it, so a separator search lands inside the operator's own text and swallows
- * every block after it.
+ * The blocks the assembler glues on *before* the operator's own prompt, and the ones it glues on
+ * *after*. Knowing the two lists by name is what lets the authored prompt be found without trusting
+ * the `---` separators — an `AGENTS.md` or a notebook is markdown, and markdown has horizontal rules
+ * in it, so a separator search lands inside the operator's own text and swallows every block after it.
+ *
+ * Derived from the module registry rather than restated here (`MODULES_PLAN.md` §1): a module added
+ * with a `system_head` block is recognised by this parser on the same commit that introduces it,
+ * which is exactly the drift the old hard-coded pair of sets kept producing.
  */
-const HEAD_BLOCKS = new Set([
-  'Environment',
-  'Local Parameters',
-  'House rules',
-  'AGENTS.md',
-  'Orchestration',
-  'Tool use',
-]);
-const TAIL_BLOCKS = new Set(['Notebook', 'Task list', 'Auto loop']);
+const HEAD_BLOCKS = new Set(blockTitles('system_head'));
+const TAIL_BLOCKS = new Set([...blockTitles('system_tail'), ...blockTitles('system_suffix')]);
 
-/** The fence `buildSystemMessage` puts on either side of the operator-authored `system_prompt`. */
+/** The fence the assembler puts on either side of the operator-authored `system_prompt`. */
 const AUTHORED_SEPARATOR = '\n\n---\n\n';
 
 function slug(title: string): string {
@@ -100,12 +97,12 @@ function splitBlocks(text: string): { title: string | null; body: string }[] {
 }
 
 /**
- * Take the *assembled* system message apart again into the blocks `buildSystemMessage` glued
- * together. Every JIT block announces itself with a `## Title`, so the message cuts cleanly on those
- * headers; the operator's own `system_prompt` is then simply what is left once the known leading and
- * trailing blocks are peeled off either end. Anything unrecognised in the middle — a `## ` heading
- * inside the authored prompt, a future prompt module — stays with the authored prompt rather than
- * being invented as a row.
+ * Take the *assembled* system message apart again into the blocks the module assembler glued
+ * together. Every module block announces itself with a `## Title`, so the message cuts cleanly on
+ * those headers; the operator's own `system_prompt` is then simply what is left once the known
+ * leading and trailing blocks are peeled off either end. Anything unrecognised in the middle — a
+ * `## ` heading inside the authored prompt, an operator-authored module — stays with the authored
+ * prompt rather than being invented as a row.
  */
 function splitSystemMessage(content: string, assembled = true): { title: string | null; body: string }[] {
   const parts = splitBlocks(content);
@@ -122,8 +119,10 @@ function splitSystemMessage(content: string, assembled = true): { title: string 
   // The authored prompt carries no header of its own, so `splitBlocks` leaves it attached to the
   // block above — all of it, when the prompt contains no `## ` heading of its own. Cut that block at
   // its *first* fence and hand back everything after. Reading the first one is safe here and only
-  // here: the boundary block is always the last JIT block (`Tool use`, or `Orchestration`), both
-  // hard-coded strings, never operator markdown that might carry a rule of its own.
+  // here: the boundary block is always the last `system_head` block (`Tool use`, or `Orchestration`).
+  // Both are module-owned wording rather than operator markdown — an override of one could in
+  // principle carry a rule of its own, and the cost of that is a mis-attributed row in the debugger,
+  // never a wrong prompt.
   const boundary = head > 0 ? parts[head - 1]! : null;
   let leaked = '';
   if (boundary) {
@@ -170,8 +169,9 @@ export function planUsagePieces(messages: unknown[], tools: unknown[] | undefine
     const text = messageText(m);
     if (m?.role === 'system') {
       const content = typeof m.content === 'string' ? m.content : text;
-      // Only the first system message is the JIT assembly; a later one is the injected memory
-      // recall, which `buildMemoryMessage` already gives a `## Memory` header.
+      // Only the first system message is the module assembly. A later one — nothing in the runner
+      // emits one today, since memory recall is a block rather than a second turn — keeps its own
+      // title rather than being peeled.
       for (const block of splitSystemMessage(content, !systemSeen)) {
         const title = block.title ?? (systemSeen ? 'Injected system' : 'System prompt');
         pieces.push({
