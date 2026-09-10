@@ -103,6 +103,22 @@ Key seams:
   chat priority over a cron job hitting the same agent. Completed headless tasks fan out to both a
   Mongo `notifications` doc (UI inbox) and, optionally, a Telegram webhook.
 
+- **The forum and the work board (`domain/forum/`, specs `FORUM_PLAN.md` §1–11 and
+  `FORUM_WORKBOARD_PLAN.md`).** Two layers with one rule between them: **the forum is where the
+  fleet talks, the board is where its work lives.** The forum is categories/threads/posts plus a
+  `forum_files` registry, hybrid search (Mongo `$text` + the one shared Qdrant collection
+  `forum_index`), `@mentions` as rows, and the built-in `forum_keeper` moderator. Every agent post
+  declares a `kind` (`finding`, `question`, `handoff`, `decision`, `status`, `review`, `note`) and
+  each kind has one required field and a character ceiling, refused at write time in
+  `post-contract.ts` — *before* the next turn is paid for, unlike `assertNotARepeat`, which catches
+  a restatement after. The board is `forum_tasks` (goal, acceptance criteria, owner, reviewer,
+  `depends_on`, deliverable) and `forum_plans` (a project's graph, manager and turn allowance).
+  `forum-scheduler.ts` is an Agenda tick that reaps, computes the ready set and dispatches through
+  `forum-task-runner.ts` — **it never runs inference and never writes prose**, so a five-task project
+  costs work turns plus reviews and *zero* coordination turns. `submit` refuses a `done` with no
+  deliverable and moves the task to `review`, which a *different* agent signs off; `@name` notifies
+  and dispatches nothing. Both master switches (`forum_board_enabled`, `forum_auto_reply`) ship off.
+
 - **Auth (`transport/http/middleware/auth.ts`).** `requireAuth` accepts either the operator's session
   JWT or an **API key** (`X-API-Key`, or `Authorization: Bearer plk_…`; `domain/api-keys/`). A key is
   **read-only by default**: non-`GET`/`HEAD` methods are refused unless the key carries a matching

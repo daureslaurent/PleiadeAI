@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Archive,
@@ -16,13 +16,16 @@ import {
   X,
 } from 'lucide-react';
 import {
+  boardApi,
   forumApi,
+  type BoardTask,
   type ForumFile,
   type ForumMention,
   type ForumPost,
   type ForumThreadDetail,
   type ForumWorkState,
 } from '../../lib/api';
+import { DeliverableChip, TaskStateBadge } from '../board/boardBits';
 import { useForum } from '../../store/forum';
 import { Markdown } from '../../components/Markdown';
 import { linkifyMentions, MentionProvider } from '../../components/Mention';
@@ -33,6 +36,8 @@ import {
   AttachmentList,
   AuthorAvatar,
   AuthorName,
+  PostKindChip,
+  PostKindLead,
   AutoRunNotice,
   Composer,
   isModerator,
@@ -96,6 +101,10 @@ export function ThreadView() {
   const [offset, setOffset] = useState(0);
   const [replyTo, setReplyTo] = useState<ForumPost | null>(null);
   const [editing, setEditing] = useState<ForumPost | null>(null);
+  // The task this thread tracks, if it is one. A task's thread reads as an ordinary thread
+  // otherwise, which is exactly the ambiguity `work_state` created — the discussion is visible and
+  // what it is *for* is not.
+  const [task, setTask] = useState<BoardTask | null>(null);
   const mounted = useRef(true);
 
   const last = useForum((s) => s.last);
@@ -114,6 +123,13 @@ export function ThreadView() {
       if (mounted.current) setError(true);
     }
   }, [threadId, offset]);
+
+  useEffect(() => {
+    boardApi
+      .taskByThread(threadId)
+      .then((t) => mounted.current && setTask(t))
+      .catch(() => undefined);
+  }, [threadId, lastEventAt]);
 
   useEffect(() => {
     mounted.current = true;
@@ -230,6 +246,8 @@ export function ThreadView() {
             onPick={(next) => void patch({ workState: next })}
           />
         </div>
+
+        {task ? <TaskBanner task={task} /> : null}
 
         <AutoRunNotice autoRun={detail.autoRun} />
 
@@ -388,6 +406,7 @@ function PostCard({
                 <Chip>{post.author.kind}</Chip>
               )}
               {opening && <Chip>OP</Chip>}
+              <PostKindChip kind={post.kind ?? 'note'} meta={post.meta ?? {}} />
             </div>
             <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-600">
               {postCount} post{postCount === 1 ? '' : 's'}
@@ -444,6 +463,7 @@ function PostCard({
                   onOpenSession,
                 }}
               >
+                <PostKindLead kind={post.kind ?? 'note'} meta={post.meta ?? {}} />
                 <Markdown>{linkifyMentions(post.body, mentionNames)}</Markdown>
               </MentionProvider>
               <AttachmentList files={post.attachments ?? []} onDetach={(f) => void onDetach(f)} />
@@ -582,5 +602,51 @@ function IconAction({ title, onClick, children }: { title: string; onClick: () =
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * What this thread is *for*, when it is a task.
+ *
+ * Deliberately read-only and small: the operator acts on a task from the project page, where the
+ * whole graph is visible and "accept this" is a decision made in context. Here it is orientation —
+ * you opened a thread and it tells you it is work, whose it is, what would finish it, and where the
+ * project it belongs to lives.
+ */
+function TaskBanner({ task }: { task: BoardTask }) {
+  return (
+    <div className="rounded-xl border hairline well p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <TaskStateBadge state={task.state} live={task.inFlight} />
+        <span className="text-[11px] text-slate-400">
+          {task.owner?.display_name ?? 'unowned'} → reviewed by {task.reviewer?.display_name ?? 'the operator'}
+        </span>
+        {task.planId ? (
+          <Link to={`/board/${task.planId}`} className="ml-auto text-[11px] text-accent hover:underline">
+            open project
+          </Link>
+        ) : null}
+      </div>
+      {task.acceptance.length ? (
+        <ul className="mt-2 space-y-0.5 text-[11px] text-slate-400">
+          {task.acceptance.map((a, i) => (
+            <li key={i} className="flex gap-1.5">
+              <span className="text-slate-600">·</span>
+              <span className="min-w-0">{a}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {task.deliverable ? (
+        <div className="mt-2">
+          <DeliverableChip
+            kind={task.deliverable.kind}
+            refValue={task.deliverable.ref}
+            note={task.deliverable.note}
+          />
+        </div>
+      ) : null}
+      {task.blockedOn ? <p className="mt-2 text-[11px] text-amber-400">{task.blockedOn}</p> : null}
+    </div>
   );
 }

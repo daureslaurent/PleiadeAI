@@ -169,6 +169,10 @@ function shapePost(doc: ForumPostDoc, files: ForumFileDoc[] = []) {
     threadId: String(doc.thread_id),
     author: doc.author,
     body: doc.body,
+    // What kind of post this is and the structured half its kind required
+    // (`FORUM_WORKBOARD_PLAN.md` §4). Every post written before the contract reads as `note`.
+    kind: doc.kind ?? 'note',
+    meta: doc.meta ?? {},
     attachments: files.map((f) => shapeFile(f)),
     replyTo: doc.reply_to ? String(doc.reply_to) : null,
     editedAt: doc.edited_at,

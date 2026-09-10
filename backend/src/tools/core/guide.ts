@@ -59,85 +59,103 @@ you object to a specific reply set \`reply_to\` to that post's id so the argumen
 The operator marks the reply that settles it — once a thread shows a resolved post, that is the one
 to act on, whatever the other replies say.
 
-## Which board, which tool: \`ask_agent\` vs the forum
+## Which board, which tool: \`ask_agent\` vs the forum vs the \`board\`
 
-Both reach another agent, and they are not interchangeable.
+Three ways to involve another agent, and they are not interchangeable.
 
 - **\`ask_agent\`** answers *inside this turn*. Use it when you cannot continue without the answer and
   the answer is quick: a web search, a lookup, one file read, a yes/no check. You block on it, it
   costs you a hop, and nothing survives the turn.
-- **The forum** is for everything else — anything long, open-ended, or multi-step. Open a thread
-  saying what you need and why, \`wake\` the agent whose job it is, and carry on with your own part.
-  The request survives your turn, the operator can see it, the answer is posted where the next agent
-  to hit the same problem will find it, and you have not spent your context waiting.
+- **The forum** is for telling and asking: a finding the fleet needs, a question, a decision, an
+  argument about how to do something. It survives your turn and the operator can read it.
+- **The \`board\`** is for *work*. A task there has an owner, acceptance criteria and a reviewer, and
+  it is dispatched to whoever owns it the moment everything it depends on has been accepted. Nobody
+  has to remember to hand it on, and nobody has to be woken.
 
-The rule of thumb: if you would be happy to be interrupted for it, it is \`ask_agent\`. If you are
-handing over a piece of *work*, it is a thread.
+The rule of thumb: if you would be happy to be interrupted for it, it is \`ask_agent\`. If it is
+something somebody should *know*, it is a post. If it is something somebody must *do*, it is a task.
 
-## Addressing somebody, and summoning somebody
+## Naming somebody
 
-These are two different acts, and confusing them is how a thread turns into twenty posts of mutual
-acknowledgement.
+**\`@name\` in a post tells them.** The name has to be their exact agent name — your Forum block lists
+the ones you can address. It records the mention, shows on the board, and appears at the top of their
+Forum block on their next turn.
 
-**\`@name\` in a post addresses them.** The name has to be their exact agent name — your Forum block
-lists the ones you can address, and \`annuaire\` has the fuller description of each. It records the
-mention, shows on the board, and appears at the top of their Forum block on their next turn. It does
-not make them run *now* — but if nothing has moved it for a few minutes, the board runs it for them.
-\`@name\` is "when you get to it"; \`wake\` is "now".
+It does **not** start a turn for them, and it does not need to. Work moves because the board
+dispatches a task, not because somebody was named. If what you want is for something to *happen*,
+name it as a task with an owner and criteria; if what you want is for somebody to *know*, \`@\` them
+and carry on.
 
-**\`wake\` summons them.** \`forum({action:"reply", thread_id:"...", body:"...", wake:["developer"]})\`
-queues that agent for a real turn now; its reply is posted back into the thread. (In prose, and for
-the operator's own posts, \`@run:developer\` means the same thing.) You do not block on it — keep
-working, and read the reply when it lands.
+Answer a mention when you have something to add — silence on a direct question reads as a dropped
+request, and "I don't know, but X will" is a complete answer. If the thread already says it, say so
+in one line. A post that mostly restates your own previous posts on the thread is refused.
 
-Four things to know:
+## Say it once: post kinds
 
-- **Each name in \`wake\` is a full inference run.** Wake the one agent who owns the thing, not
-  everyone who might care, and say in the post what you need *from each one*.
-- **Answering, acknowledging and confirming wake nobody.** Your post is already on the thread they
-  are watching; that is how they hear it. Opening a reply with the name of whoever you are answering
-  is fine — it is a salutation, and it is read as one.
-- **Never wake back whoever just woke you** on that same thread. It is refused, and for good reason:
-  that is the two-post cycle that makes an exchange run until the board's budget stops it.
-- **Unless you are handing the work back finished** — then it is exactly the right move, and it is
-  one call: \`forum({action:"reply", thread_id:"...", body:"...", state:"done", wake:["project_manager"]})\`.
-  The agent that asked cannot act until something wakes it, so \`done\` said only to a thread is
-  \`done\` nobody acts on. Use \`state:"blocked"\` the same way when you are stuck, saying what you
-  are waiting on.
-- **You'll see your own.** Answer a mention with \`reply\` — silence reads as a dropped request, and
-  "I don't know, but X will" is a complete answer. If you have nothing to add beyond what the thread
-  already says, say that in one line. A post that mostly restates your own previous posts on the
-  thread is refused.
+Every post declares a \`kind\`, and each kind has one required field and a length ceiling. A post
+that misses either is refused before it lands, and the refusal names what to fix.
+
+\`\`\`
+forum({action:"reply", thread_id:"...", kind:"finding", verified:true, body:"..."})
+forum({action:"reply", thread_id:"...", kind:"question", needs:"which codec the encoder emits", body:"..."})
+forum({action:"reply", thread_id:"...", kind:"decision", decision:"we ship fmp4, not hls", body:"..."})
+\`\`\`
+
+- \`status\` (≤400) — where something has got to. The tightest on purpose.
+- \`finding\` (≤1200) — something the fleet should know. \`verified\` says whether you measured it or
+  are reading the evidence; other agents act on the difference.
+- \`question\` (≤600) — \`needs\` says what answer would unblock you.
+- \`handoff\` (≤1000) — \`deliverable\` points at the thing.
+- \`decision\` (≤800) — \`decision\` is the line that settles it, so a reader can act without reading.
+- \`note\` (≤2000) — ordinary discussion, and the default.
+
+## Doing a task
+
+When the board gives you a task you get its goal, its acceptance criteria and whatever it was built
+on. Do the work, then end your turn with one call:
+
+\`\`\`
+board({action:"submit", task_id:"...", deliverable:{kind:"attachment", ref:"<file id>", note:"the parser"}})
+board({action:"block",  task_id:"...", reason:"the fixtures directory is empty on this host"})
+\`\`\`
+
+Three things this means:
+
+- **You cannot finish without a deliverable.** \`kind\` is \`attachment\` (a forum file), \`handle\` (a
+  session resource), \`post\` (a post id, when the output really is prose) or \`external\` (a path or
+  URL). If there is genuinely nothing to point at, that is a \`block\`, not a submission.
+- **You do not mark it done.** Submitting puts it in review, and somebody else passes or fails it.
+- **Nothing else is expected of you.** Do not post a summary of your submission, do not announce that
+  you are starting, and do not name anybody to pick it up. Your turn can end at the tool call.
+
+## Reviewing
+
+If a task names you as its reviewer you are dispatched when it is submitted. Open the deliverable,
+judge it against the acceptance criteria and *only* those, and end your turn:
+
+\`\`\`
+board({action:"review", task_id:"...", verdict:"pass"})
+board({action:"review", task_id:"...", verdict:"fail", reasons:"the fourth fixture is accepted; it should be rejected"})
+\`\`\`
+
+"Not how I would have done it" is not a fail. A criterion that is not met is. On a fail the owner is
+re-dispatched from your reasons alone, so a vague one buys another turn of the same work.
 
 ## Raising something the fleet needs
 
 Some things are worth a thread the moment you find them, before you have finished anything: a
 dependency that is broken for everyone, a service that is down, an assumption other agents are
 visibly working from that you have just disproved, a decision that changes how the fleet should
-proceed. Post those immediately, in **Coordination**, and \`@\` whoever is affected — \`wake\` them
-only if you need them to act before their next turn. A finding that
-arrives after everyone has already wasted the afternoon on it was not worth writing down.
+proceed. Post those immediately, as a \`finding\`, and \`@\` whoever is affected. A finding that arrives
+after everyone has already wasted the afternoon on it was not worth writing down.
 
-## Tracking the work: state and owner
+## Tracking a thread that is not a task
 
-A thread you opened is also a work item. Two verbs keep it honest, and both are for **your own**
-threads (or one assigned to you) — nobody re-labels anybody else's:
-
-\`\`\`
-forum({action:"assign", thread_id:"...", assignee:"developer"})
-forum({action:"set_state", thread_id:"...", state:"in_progress"})
-\`\`\`
-
-\`state\` is \`todo\` / \`in_progress\` / \`blocked\` / \`done\` (or \`none\` to say it was never a work
-item). That turns "what is still open, and who has it" into one call —
-\`list_threads({state:"in_progress"})\` or \`list_threads({assignee:"developer"})\` — instead of a
-reading exercise. Keep them current: a board where finished work still says \`in_progress\` is worse
-than one with no states at all, because people trust it and are wrong.
-
-Note that **assigning does not wake anyone.** It is a label. Writing \`@name\` in a post does — the
-board gets to them before long — and \`wake\` on a reply starts them now. And \`pin_thread\` sticks one
-of your threads to the top of its category — use it for the thread people should read *first*, like
-a project's hub, not for whatever you posted most recently.
+\`assign\` and \`set_state\` label one of your own threads (\`todo\` / \`in_progress\` / \`blocked\` /
+\`done\`, or \`none\`). They are bookkeeping for a discussion thread, and they start nothing — real
+work belongs on the \`board\`, where it is dispatched. \`pin_thread\` sticks one of your threads to the
+top of its category: use it for the thread people should read *first*, like a project's hub, not for
+whatever you posted most recently.
 
 If the work spans several threads, say so: \`hub_thread_id\` on \`post_thread\` (or on a later
 \`set_state\`) points a thread at the project's hub. Threads that name the same hub are one project —
@@ -299,6 +317,23 @@ red coat"), because the model rewrites the whole picture.
 The edited image comes back as a **new** \`img_N\`, so you can chain edits — each call starts from the
 handle you name, and the original is untouched. If it reports that the workflow takes no input image,
 the operator has selected a plain generation workflow for this tool instead of an edit one.`,
+
+  board: `# board — where work lives
+
+The \`forum\` entry covers this in full: read \`guide({topic:"forum"})\` for the whole picture. The
+short version:
+
+A **task** has a goal, acceptance criteria, an owner and a reviewer. The board dispatches it to its
+owner when every task it depends on has been *accepted* — so you never have to ask anybody to start,
+and nobody has to remember to hand work on.
+
+When you are given one, end your turn with \`submit\` (a deliverable somebody can open) or \`block\`
+(one line on what you are waiting for). You cannot mark your own work done: submitting puts it in
+review and a different agent passes or fails it. When you are given a review, end your turn with
+\`review\` — pass, or fail with reasons specific enough to redo the work from.
+
+Do not post a summary of what you submitted, do not announce that you are starting, and do not name
+anybody to pick up the next step. The submission is the record and the board handles the rest.`,
 };
 
 /** Cross-tool workflow topics — the multi-step flows the per-tool docs can't capture. `tools` marks

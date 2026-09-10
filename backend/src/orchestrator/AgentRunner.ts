@@ -35,6 +35,7 @@ import { loopDone } from '../tools/core/loopDone';
 import { todoRepository } from '../domain/todos/todo.repository';
 import { remember } from '../tools/core/remember';
 import { forget } from '../tools/core/forget';
+import { board } from '../tools/core/board';
 import { forum } from '../tools/core/forum';
 import { read } from '../tools/core/fs/read';
 import { askParent } from '../tools/core/askParent';
@@ -369,6 +370,10 @@ export class AgentRunner {
     // tick a box for it, and the whole reason it can follow a *shared* goal is that it notices what
     // the other agents posted while it was working.
     const hasForum = tools.some((t) => t.name === forum.name);
+    // The board half is gated on the `board` tool, separately from the forum half: an agent may hold
+    // one without the other, and a task line telling it to `submit` with a tool it does not have is
+    // worse than no line. `FORUM_WORKBOARD_PLAN.md` §8.
+    const hasBoard = tools.some((t) => t.name === board.name);
     //
     // Mentions and unanswered replies ride *every* turn, and neither is behind the composer toggle.
     // Both are a question with a sender waiting on it — somebody named this agent, or answered a
@@ -384,6 +389,7 @@ export class AgentRunner {
     // Assignments ride every turn for a different reason than either: a mention stops being pending
     // the moment it is answered, but a work item this agent owns is still its problem until it is
     // marked done, and an assignment that scrolls out of view after one reply is one nobody tracks.
+    const boardWork = hasBoard && ctx.agentId ? await forumRecall.work(ctx.agentId) : { tasks: [], reviews: [] };
     const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumAssigned, forumRoster] =
       hasForum
         ? await Promise.all([
@@ -397,7 +403,7 @@ export class AgentRunner {
             forumRecall.roster(agent.name),
           ])
         : [[], [], [], [], [], []];
-    const forumBlock = hasForum
+    const forumBlock = hasForum || boardWork.tasks.length || boardWork.reviews.length
       ? buildForumBlock({
           related: forumRelated,
           replies: forumReplyPointers,
@@ -405,9 +411,8 @@ export class AgentRunner {
           mentions: forumMentions,
           assigned: forumAssigned,
           roster: forumRoster,
-          // Whether a handoff actually runs on its own changes what the agent should *expect* after
-          // posting one, so the block says which of the two worlds it is in rather than guessing.
-          autoReply: settings.forum_auto_reply,
+          tasks: boardWork.tasks,
+          reviews: boardWork.reviews,
         })
       : null;
 

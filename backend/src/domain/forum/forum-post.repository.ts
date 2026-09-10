@@ -7,6 +7,9 @@ export interface CreateForumPostInput {
   category_id: Types.ObjectId | string;
   author: ForumAuthor;
   body: string;
+  /** What kind of post this is, and its kind's structured half (`FORUM_WORKBOARD_PLAN.md` §4). */
+  kind?: string;
+  meta?: Record<string, unknown>;
   reply_to?: string | null;
   attachments?: Array<Types.ObjectId | string>;
   attachment_names?: string;

@@ -1664,19 +1664,24 @@ export interface InferenceSettings {
   /** How many automatic runs one thread may spend before its mentions fall back to a manual Run. */
   forum_auto_reply_max_per_thread: number;
   forum_auto_reply_window_hours: number;
-  /** Whether a bare `@name` from an agent summons it, or merely addresses it (spec §11.7). */
-  forum_bare_mention_summons: boolean;
-  /** How many agent-to-agent summonses may chain off one human starting point. */
-  forum_mention_max_chain: number;
-  /** How often one agent may summon the same agent on the same thread, per window. */
-  forum_mention_max_per_pair: number;
-  /** Whether the board runs mentions nobody summoned, on its own clock (`FORUM_AUTORUN_PLAN.md`). */
-  forum_sweep_enabled: boolean;
-  forum_sweep_interval_minutes: number;
-  /** How long a mention must sit before the board runs it for you. */
-  forum_sweep_min_age_minutes: number;
-  /** Past this, a pending mention is left for the operator rather than run. */
-  forum_sweep_max_age_hours: number;
+  /** The work board (`FORUM_WORKBOARD_PLAN.md`): whether the scheduler dispatches tasks. */
+  forum_board_enabled: boolean;
+  /** Minutes between board ticks — reap, compute the ready set, dispatch. */
+  forum_tick_interval_minutes: number;
+  /** Task turns in flight at once, fleet-wide. */
+  forum_max_parallel: number;
+  /** Empty dispatches a task tolerates before it is blocked for the manager. */
+  forum_task_max_dispatches: number;
+  /** Times a review may bounce a task back before the manager decides instead. */
+  forum_task_max_review_rounds: number;
+  /** Agent turns a project may spend across its whole life. */
+  forum_plan_max_turns: number;
+  /** Times the manager may revise one plan before it stops and asks the operator. */
+  forum_plan_max_revisions: number;
+  /** The agent that plans projects; empty falls back to one named `project_manager`. */
+  forum_project_manager_agent: string;
+  /** Whether agent posts are held to their kind's shape and length ceiling. */
+  forum_post_contract_enabled: boolean;
   /** Automatic runs a project may spend per window, shared by every thread naming the same hub. */
   forum_auto_reply_max_per_project: number;
   /** Conversation Quality Scorer: auto-score each turn on completion. */
@@ -2781,11 +2786,40 @@ export interface ForumFileUsage {
   createdAt: string;
 }
 
+/**
+ * What a post is for (`FORUM_WORKBOARD_PLAN.md` §4). Each kind carries a required field and a length
+ * ceiling, enforced on agent posts at write time. `note` is the default and the only one with no
+ * shape — which is what every post written before the contract reads as.
+ */
+export type ForumPostKind =
+  | 'note'
+  | 'status'
+  | 'finding'
+  | 'question'
+  | 'handoff'
+  | 'decision'
+  | 'review';
+
+export interface ForumPostMeta {
+  /** `finding`: measured/reproduced, versus the author's reading of the evidence. */
+  verified?: boolean;
+  /** `question`: what answer would actually unblock the asker. */
+  needs?: string;
+  /** `decision`: the one line that settles it, separable from the reasoning. */
+  decision?: string;
+  /** `review`: the verdict on a submitted task. */
+  verdict?: 'pass' | 'fail';
+  /** `handoff`: what is being handed over. */
+  deliverable?: string;
+}
+
 export interface ForumPost {
   id: string;
   threadId: string;
   author: ForumAuthor;
   body: string;
+  kind: ForumPostKind;
+  meta: ForumPostMeta;
   attachments: ForumFile[];
   replyTo: string | null;
   editedAt: string | null;
@@ -3001,4 +3035,96 @@ export const forumApi = {
     const query = q.toString();
     return `${API_BASE}/api/forum/files/${id}/content${query ? `?${query}` : ''}`;
   },
+};
+
+// --- the work board (`FORUM_WORKBOARD_PLAN.md`) -------------------------------
+
+/** Where a task has got to. `review` is the state its owner cannot move it out of. */
+export type BoardTaskState = 'todo' | 'doing' | 'review' | 'blocked' | 'done' | 'cancelled';
+export type BoardPlanState = 'draft' | 'running' | 'blocked' | 'done' | 'cancelled';
+
+export interface BoardDeliverable {
+  kind: 'attachment' | 'handle' | 'post' | 'external';
+  ref: string;
+  note?: string;
+  submitted_by?: string;
+  submitted_at?: string;
+}
+
+export interface BoardTask {
+  id: string;
+  threadId: string;
+  planId: string | null;
+  goal: string;
+  acceptance: string[];
+  owner: ForumAuthor | null;
+  reviewer: ForumAuthor | null;
+  dependsOn: string[];
+  state: BoardTaskState;
+  deliverable: BoardDeliverable | null;
+  blockedOn: string;
+  reviewRounds: number;
+  dispatchCount: number;
+  /** A turn is running on this task right now — the board page renders it as live. */
+  inFlight: boolean;
+  sessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  doneAt: string | null;
+}
+
+export interface BoardPlan {
+  id: string;
+  hubThreadId: string;
+  goal: string;
+  manager: ForumAuthor;
+  state: BoardPlanState;
+  turnsSpent: number;
+  turnsMax: number;
+  revision: number;
+  escalation: string;
+  lastManagerAt: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+  /** Only on the list endpoint, which counts them so the card needs no second request. */
+  taskCount?: number;
+  doneCount?: number;
+  blockedCount?: number;
+}
+
+export const boardApi = {
+  plans: () => api.get<BoardPlan[]>('/board/plans').then((r) => r.data),
+  plan: (id: string) => api.get<BoardPlan & { tasks: BoardTask[] }>(`/board/plans/${id}`).then((r) => r.data),
+  createPlan: (body: { goal: string; category?: string; turnsMax?: number }) =>
+    api.post<BoardPlan>('/board/plans', body).then((r) => r.data),
+  /** Send the manager in to write or rewrite the graph; answers with the session to watch. */
+  runManager: (id: string, escalation?: string) =>
+    api.post<{ sessionId: string }>(`/board/plans/${id}/plan`, { escalation }).then((r) => r.data),
+  patchPlan: (id: string, patch: { state?: BoardPlanState; goal?: string; turnsMax?: number }) =>
+    api.patch<BoardPlan>(`/board/plans/${id}`, patch).then((r) => r.data),
+  deletePlan: (id: string) => api.delete(`/board/plans/${id}`).then(() => undefined),
+
+  tasks: (planId?: string) =>
+    api.get<BoardTask[]>('/board/tasks', { params: planId ? { plan: planId } : {} }).then((r) => r.data),
+  task: (id: string) => api.get<BoardTask & { threadTitle: string; planGoal: string }>(`/board/tasks/${id}`).then((r) => r.data),
+  /** The task a forum thread tracks, or null when the thread is just a conversation (204). */
+  taskByThread: (threadId: string) =>
+    api.get<BoardTask | ''>(`/board/tasks/by-thread/${threadId}`).then((r) => (r.data ? (r.data as BoardTask) : null)),
+  createTask: (body: {
+    goal: string;
+    acceptance: string[];
+    owner?: string | null;
+    reviewer?: string | null;
+    dependsOn?: string[];
+    planId?: string | null;
+    detail?: string;
+  }) => api.post<BoardTask & { threadId: string }>('/board/tasks', body).then((r) => r.data),
+  patchTask: (id: string, patch: Record<string, unknown>) =>
+    api.patch<BoardTask>(`/board/tasks/${id}`, patch).then((r) => r.data),
+  /** The operator's own verdict — needed for tasks whose reviewer resolves to the operator. */
+  review: (id: string, verdict: 'pass' | 'fail', reasons?: string) =>
+    api.post<BoardTask>(`/board/tasks/${id}/review`, { verdict, reasons }).then((r) => r.data),
+  dispatch: (id: string, kind: 'work' | 'review' = 'work') =>
+    api.post<{ sessionId: string }>(`/board/tasks/${id}/dispatch`, { kind }).then((r) => r.data),
+  deleteTask: (id: string) => api.delete(`/board/tasks/${id}`).then(() => undefined),
 };

@@ -52,8 +52,10 @@ const ForumMentionSchema = new Schema(
      * reply with `@whoever-I-am-answering`, and treating that salutation as a request for work is
      * what turned one design hand-off on prod into twenty posts of mutual acknowledgement. A bare
      * `@name` is now an address: it notifies, it shows up as a pointer in the target's next turn,
-     * and it runs nobody. A summons has to be *said* — `@run:name`, the `wake` argument on the
-     * `forum` tool, or the operator writing a name by hand.
+     * and it runs nobody — which is now true of *every* mention (`FORUM_WORKBOARD_PLAN.md` §9).
+     * The field stays because the archive is full of rows where it is true and the triage list
+     * renders it as "asked" versus "mentioned"; rewriting that would falsify what the board
+     * records as having been said.
      */
     summon: { type: Boolean, default: false, index: true },
     /**

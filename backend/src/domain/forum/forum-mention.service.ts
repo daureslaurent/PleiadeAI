@@ -3,7 +3,6 @@ import { eventBus } from '../../core/event-bus/EventBus';
 import { alertEngine } from '../../alerts/AlertEngine';
 import { settingsService } from '../settings/settings.service';
 import { sessionRepository } from '../sessions/session.repository';
-import { forumAutoReply } from './forum-auto-reply';
 import { loadRoster, type MentionTarget, type Roster } from './forum-roster';
 import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumSummonBlock } from './forum-mention.model';
@@ -19,7 +18,10 @@ const log = createLogger('forum-mentions');
 export { loadRoster, invalidateRoster, OPERATOR_HANDLE, type MentionTarget } from './forum-roster';
 
 /**
- * The prefix that turns an address into a summons: `@run:developer`.
+ * The retired summons prefix (`@run:developer`). Still stripped rather than deleted so a post that
+ * uses it — the archive is full of them, and an operator's prompt may still teach it — resolves to
+ * an ordinary mention of that agent instead of to nobody. It no longer runs anything
+ * (`FORUM_WORKBOARD_PLAN.md` §9).
  *
  * Deliberately not something a model produces by reflex. The whole failure this exists to stop is
  * that `@name` at the head of a reply is the *addressee marker* every forum and mail convention
@@ -48,7 +50,7 @@ function isBoundary(ch: string | undefined): boolean {
 /** One handle found in a body, and whether it was written as a summons or as an address. */
 export interface ParsedMention {
   target: MentionTarget;
-  /** True when it was written `@run:name` — an explicit request for a turn. */
+  /** True when it was written `@run:name`. Retained on the parse; nothing acts on it any more. */
   explicit: boolean;
 }
 
@@ -184,99 +186,28 @@ function asAuthor(t: MentionTarget): ForumAuthor {
  *
  * - `wake: ["name"]` on the tool call. The strongest, because a model cannot fill a structured
  *   argument by reflex the way it opens a reply with a name.
- * - `@run:name` in the body, for the operator's plain textarea and for a model that inlines it.
  * - a bare `@name` **written by the operator**, or by an agent when the fleet has opted back in.
  *   A human typing a name means it; the loop this guards against is agent-to-agent.
  */
 export async function planSummons(input: {
   body: string;
   author: ForumAuthor;
-  /** Names from the tool's `wake` argument. Resolved against the roster like any other handle. */
+  /** Retired. Accepted so the old call sites keep compiling; nothing reads it. */
   wake?: string[];
   context?: SummonContext;
-  /** The thread being posted to — needed to tell a back-summon from an ordinary hand-off. */
   threadId?: string | null;
-  /**
-   * The work state this post sets, when it sets one. `done` or `blocked` makes the post a hand-back,
-   * which is the one case allowed to summon back the agent that woke you.
-   */
   state?: ForumWorkState | 'none' | null;
-  /** How many files this post carries. Delivering something is also handing work back. */
   attachmentCount?: number;
 }): Promise<SummonPlan> {
   const roster = await loadRoster();
-  const settings = await settingsService.get();
-  const ctx = input.context ?? ROOT_CONTEXT;
-  const chainDepth = ctx.mentionId ? ctx.depth + 1 : 0;
-
   const parsed = parseMentions(input.body, roster).filter(
     // Naming yourself in your own post is prose, not paging yourself.
     (p) => !isSame(asAuthor(p.target), input.author),
   );
-
-  // `wake` may name somebody the body never mentions — asking for a turn without writing the handle
-  // into the prose is legitimate, and the row still has to exist for the target to see it.
-  const woken = new Set<string>();
-  for (const raw of input.wake ?? []) {
-    const name = String(raw).replace(/^@/, '').replace(new RegExp(`^${SUMMON_PREFIX}`, 'i'), '').trim();
-    const target = roster.byName.get(name.toLowerCase());
-    if (!target || isSame(asAuthor(target), input.author)) continue;
-    woken.add(target.name.toLowerCase());
-    if (!parsed.some((p) => p.target.name.toLowerCase() === target.name.toLowerCase())) {
-      parsed.push({ target, explicit: true });
-    }
-  }
-
-  const bareSummons = input.author.kind === 'operator' || settings.forum_bare_mention_summons === true;
-  const maxChain = Math.max(1, settings.forum_mention_max_chain ?? 4);
-
-  /**
-   * Is this post handing finished work back, rather than acknowledging?
-   *
-   * The distinction the back-summon guard could not previously make. Both look like "a reply to the
-   * agent that woke me", but one of them is the moment the asker has to run again — it commissioned
-   * this work and cannot act on it until something wakes it — and the other is the salutation that
-   * ate a thread. A state transition and an attachment are the two things a courtesy reply does not
-   * have, and both are structured: an agent cannot produce either by reflex.
-   */
-  const handBack =
-    input.state === 'done' || input.state === 'blocked' || (input.attachmentCount ?? 0) > 0;
-
-  const mentions: PlannedMention[] = parsed.map(({ target, explicit }) => {
-    // The operator is addressable but never runnable — @Operator is a question for a person.
-    // An agent excluded from auto-reply is *not* handled here: it was still genuinely asked, and
-    // saying otherwise would show the operator "mentioned" on a row that is actually waiting on
-    // them. Its exclusion is applied where it belongs, at the point of queueing.
-    if (target.kind !== 'agent') return { target, summon: false, blocked: null };
-
-    const asked = explicit || woken.has(target.name.toLowerCase()) || bareSummons;
-    if (!asked) return { target, summon: false, blocked: null };
-
-    // The back-summon. B is running because A woke it; B's reply already reaches A, on the very
-    // thread A is watching. Waking A *again* from that reply is the two-post cycle that ate a whole
-    // thread's budget on prod. Only on the same thread: summoning A on a different thread is a
-    // genuine hand-off, not a bounce.
-    //
-    // Unless B is handing the finished work back, which is the case this guard was refusing on the
-    // live board: A commissioned the work and will not run again on its own, so "done" said only to
-    // a thread is done nobody acts on. The old answer — go and post it on some other thread — asked
-    // a model to route around a rule it could not see; delivering it where it was asked for and
-    // waking the asker is what everybody was trying to do anyway. The pair cap remains the leash.
-    if (
-      ctx.mentionId &&
-      isSame(ctx.wokenBy, asAuthor(target)) &&
-      input.threadId &&
-      ctx.threadId === String(input.threadId) &&
-      !handBack
-    ) {
-      return { target, summon: true, blocked: 'back_summon' };
-    }
-
-    if (chainDepth > maxChain) return { target, summon: true, blocked: 'chain_depth' };
-    return { target, summon: true, blocked: null };
-  });
-
-  return { mentions, chainDepth };
+  // Every mention is an address and nothing more. `summon` is retained on the row because the
+  // triage list renders it and the archive is full of rows where it is true — rewriting history to
+  // match a mechanism that no longer exists would make the old board unreadable.
+  return { mentions: parsed.map(({ target }) => ({ target, summon: false, blocked: null })), chainDepth: 0 };
 }
 
 /**
@@ -302,11 +233,9 @@ export interface SummonsOutcome {
 
 export function summonsOutcome(plan: SummonPlan): SummonsOutcome {
   return {
-    woke: plan.mentions.filter((m) => m.summon && !m.blocked).map((m) => m.target.name),
-    addressed: plan.mentions.filter((m) => !m.summon).map((m) => m.target.name),
-    notWoken: plan.mentions
-      .filter((m) => m.blocked)
-      .map((m) => ({ agent: m.target.name, reason: blockReason(m.blocked!, m.target.name) })),
+    woke: [],
+    addressed: plan.mentions.map((m) => m.target.name),
+    notWoken: [],
   };
 }
 
@@ -426,41 +355,15 @@ export const forumMentionService = {
       {
         thread: String(input.thread._id),
         by: input.author.display_name,
-        depth: plan.chainDepth,
-        summoned: plan.mentions.filter((m) => m.summon && !m.blocked).map((m) => m.target.name),
-        addressed: plan.mentions.filter((m) => !m.summon).map((m) => m.target.name),
-        withheld: plan.mentions.filter((m) => m.blocked).map((m) => `${m.target.name}:${m.blocked}`),
+        addressed: plan.mentions.map((m) => m.target.name),
       },
       'forum mentions recorded',
     );
 
-    // Auto-reply (§11.6). `rows` mirrors `plan.mentions`, which `parseMentions` returns in the order
-    // the handles appear in the body — so "ask @run:architect, then @run:developer" is queued as
-    // written, and each agent runs only once the one before it has posted. Fire-and-forget like the
-    // rest of this method: the queue drains on its own clock, and a post must never fail because of
-    // it. Blocked summonses are deliberately not queued: they stay `pending`, which is exactly the
-    // state the operator's Run button expects.
-    void forumAutoReply
-      .enqueue(
-        rows
-          .map((row, i) => ({
-            mentionId: String(row._id),
-            threadId: String(input.thread._id),
-            threadTitle: input.thread.title,
-            agentId: row.target.agent_id ?? null,
-            agentName: row.target.display_name,
-            authorName: input.author.display_name,
-            // A summons no guard withheld, addressed to an agent that has not opted out of running
-            // itself. The opt-out lives here rather than in the plan because it changes who *runs*,
-            // not what was *asked* — the row stays a summons and the operator's Run button honours it.
-            eligible:
-              Boolean(plan.mentions[i]?.summon) &&
-              !plan.mentions[i]?.blocked &&
-              plan.mentions[i]?.target.autoReply === true,
-          }))
-          .filter((r) => r.eligible),
-      )
-      .catch((err) => log.warn({ err: String(err) }, 'auto-reply queueing failed'));
+    // Nothing is dispatched from a mention any more (`FORUM_WORKBOARD_PLAN.md` §9). Naming somebody
+    // notifies them and rides into their next turn as a pointer; work moves because the board
+    // dispatches a task, not because an agent remembered to wake somebody. The operator's Run button
+    // is the one path from a mention to a turn, and it is unchanged.
   },
 
   /** Operator triage: this one didn't need a turn. Reversible — reopening just flips it back. */

@@ -5,6 +5,8 @@ import { ForumThreadModel } from './forum-thread.model';
 import { forumIndexService } from './forum-index.service';
 import { ForumMentionModel } from './forum-mention.model';
 import { loadRoster, OPERATOR_HANDLE } from './forum-roster';
+import { forumTaskRepository } from './forum-task.repository';
+import type { ForumTaskDoc } from './forum-task.model';
 
 const log = createLogger('forum-recall');
 
@@ -304,6 +306,36 @@ export const forumRecall = {
       return [];
     }
   },
+  /**
+   * What this agent is on the hook for, for the block (spec `FORUM_WORKBOARD_PLAN.md` §8).
+   *
+   * Two indexed finds, and the only part of the block that is *addressed to* the agent rather than
+   * offered to it. Unlike a mention — which stops being pending the moment it is answered — a task
+   * stays here until somebody else accepts it, which is the point: it is what the agent still owes.
+   */
+  async work(agentId: string): Promise<{ tasks: TaskPointer[]; reviews: TaskPointer[] }> {
+    try {
+      const { owned, reviewing } = await forumTaskRepository.listForAgent(agentId);
+      return {
+        tasks: owned.map((t: ForumTaskDoc) => ({
+          taskId: String(t._id),
+          goal: clip(t.goal),
+          state: t.state,
+          blockedOn: t.blocked_on || undefined,
+        })),
+        reviews: reviewing.map((t: ForumTaskDoc) => ({
+          taskId: String(t._id),
+          goal: clip(t.goal),
+          state: t.state,
+          owner: t.owner?.display_name,
+        })),
+      };
+    } catch (err) {
+      // Same rule as every other pointer source here: a board lookup must never fail a turn.
+      log.warn({ err: String(err), agentId }, 'board work unavailable this turn');
+      return { tasks: [], reviews: [] };
+    }
+  },
 };
 
 /**
@@ -333,6 +365,15 @@ function files(p: ForumPointer): string {
   return p.attachments ? ` · ${p.attachments} file${p.attachments === 1 ? '' : 's'}` : '';
 }
 
+/** One line of work in the block: what it is, where it stands, and nothing else. */
+export interface TaskPointer {
+  taskId: string;
+  goal: string;
+  state: string;
+  blockedOn?: string;
+  owner?: string;
+}
+
 export interface ForumBlockInput {
   related: ForumPointer[];
   replies: ForumPointer[];
@@ -342,6 +383,9 @@ export interface ForumBlockInput {
   roster?: string[];
   /** Open work items assigned to this agent (spec §13). */
   assigned?: ForumPointer[];
+  /** Tasks this agent owns, and submitted tasks waiting on its verdict (`FORUM_WORKBOARD_PLAN.md` §8). */
+  tasks?: TaskPointer[];
+  reviews?: TaskPointer[];
   /** Whether the board runs mentions on its own (`settings.forum_auto_reply`, spec §11.6). */
   autoReply?: boolean;
 }
@@ -354,114 +398,106 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     mentions = [],
     assigned = [],
     roster = [],
-    autoReply = false,
+    tasks = [],
+    reviews = [],
   } = input;
 
-  // The roster alone is not a reason to spend tokens: an agent with nothing pending and nothing
-  // related gets the block only because the instructions below are what change its behaviour.
-  const lines = ['## Forum'];
+  const lines: string[] = [];
 
-  // Mentions lead: being asked something directly outranks a thread that merely looked topical.
-  if (mentions.length) {
-    lines.push(
-      '',
-      'You were addressed by name on the forum and have not answered yet. Read the thread and',
-      '`reply` to it in this turn — your reply is posted straight back to whoever asked. If you have',
-      'nothing to add beyond what the thread already says, say that in one line and stop:',
-      ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
-    );
+  // Work leads, and it is the only part of this block that is *addressed to* the agent rather than
+  // offered to it. Everything below is a pointer it may ignore; this is what it is on the hook for.
+  if (tasks.length || reviews.length) {
+    lines.push('## Board');
+    if (tasks.length) {
+      lines.push(
+        '',
+        'Your open tasks. The board dispatches each one to you when it is ready — you do not have to',
+        'start them, and you do not have to tell anybody you have:',
+        ...tasks.map((t) => `- \`${t.taskId}\` [${t.state}] ${t.goal}${t.blockedOn ? ` · blocked: ${t.blockedOn}` : ''}`),
+      );
+    }
+    if (reviews.length) {
+      lines.push(
+        '',
+        'Submitted work waiting on **your** verdict — `board` `review`, pass or fail with reasons:',
+        ...reviews.map((t) => `- \`${t.taskId}\` ${t.goal} (from ${t.owner ?? 'unknown'})`),
+      );
+    }
   }
 
-  // Straight after mentions: an assignment outranks anything merely topical, and unlike a mention
-  // it stays here every turn until the agent marks it done — which is the nudge to actually do so.
-  if (assigned.length) {
+  const hasForum = mentions.length || assigned.length || related.length || replies.length || digest.length;
+  // The forum half is omitted entirely when there is nothing on it. The old block was unconditional
+  // and spent ~180 tokens a turn on doctrine about who to wake — doctrine for a mechanism that no
+  // longer exists, on a turn that may have nothing to do with the board at all.
+  if (!hasForum && !lines.length) return null;
+
+  if (hasForum) {
+    lines.push('', '## Forum');
+
+    if (mentions.length) {
+      lines.push(
+        '',
+        'You were named on the forum. Answer if you have something to add; one line is a complete',
+        'answer, and silence is fine if the thread already says it:',
+        ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
+      );
+    }
+
+    if (assigned.length) {
+      lines.push(
+        '',
+        'Threads labelled as yours (these are labels, not dispatched work — real tasks are above):',
+        ...assigned.map((p) => `- \`${p.threadId}\` — ${p.title} [${p.workState}]${files(p)}`),
+      );
+    }
+
+    if (replies.length) {
+      lines.push(
+        '',
+        'Somebody replied to a thread you took part in:',
+        ...replies.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.lastPostAuthor})${files(p)}`),
+      );
+    }
+
+    if (related.length) {
+      lines.push(
+        '',
+        'Threads that look related to this task — pointers, not content; `forum` `read_thread` to read one:',
+        ...related.map((p) => `- \`${p.threadId}\` — ${p.title}${files(p)}`),
+      );
+    }
+
+    if (digest.length) {
+      lines.push(
+        '',
+        'New on the board since your last turn:',
+        ...digest.map(
+          (p) => `- \`${p.threadId}\` — ${p.title} (${p.opening ? 'new thread' : 'new reply'} by ${p.lastPostAuthor})`,
+        ),
+      );
+    }
+
+    if (roster.length) {
+      lines.push(
+        '',
+        `Agents you can name in a post (exact spelling): ${roster.map((r) => r.split(' — ')[0]).join(', ')}.`,
+        'Naming somebody tells them; it starts nothing, and it does not need to. Work that has to',
+        'happen belongs on the `board` as a task with acceptance criteria and an owner — that is',
+        'what gets dispatched.',
+      );
+    }
+
+    // What survives of the old doctrine: four lines about *what to write down*, and none about who
+    // to wake. Posting stays conditional for the reason it always was — an agent told it must post
+    // every turn files "task completed successfully" a hundred times.
     lines.push(
       '',
-      'Work items on the forum assigned to **you**, still open. Move them along, and keep their',
-      'state honest with `forum` `set_state` (`in_progress` when you start, `blocked` with a reply',
-      'saying what you are waiting on, `done` when it is finished):',
-      ...assigned.map((p) => `- \`${p.threadId}\` — ${p.title} [${p.workState}]${files(p)}`),
+      'Post when you find something the fleet is wrong about or blocked by (say it immediately, not',
+      'when you finish), or something that would cost another agent an hour to rediscover. Search',
+      'before opening a thread. Every post declares a `kind` and each kind has a length limit — say',
+      'it once; a post that restates your own last one on the thread is refused.',
     );
   }
-
-  if (related.length) {
-    lines.push(
-      '',
-      'Threads on the shared agent forum that look related to this task. These are pointers, not',
-      'content — call `forum` with `read_thread` to actually read one before relying on it:',
-      ...related.map((p) => `- \`${p.threadId}\` — ${p.title}${files(p)}`),
-    );
-  }
-
-  if (replies.length) {
-    lines.push(
-      '',
-      'Someone has replied to a thread you took part in, and you have not answered:',
-      ...replies.map((p) => `- \`${p.threadId}\` — ${p.title} (last reply by ${p.lastPostAuthor})${files(p)}`),
-    );
-  }
-
-  if (digest.length) {
-    lines.push(
-      '',
-      'New on the board since your last turn (you were not addressed — read only what bears on your goal):',
-      ...digest.map(
-        (p) =>
-          `- \`${p.threadId}\` — ${p.title} (${p.opening ? 'new thread' : 'new reply'} by ${p.lastPostAuthor})${files(p)}`,
-      ),
-    );
-  }
-
-  if (roster.length) {
-    lines.push(
-      '',
-      'Agents you can address, by writing `@name` anywhere in a post (exact name, as written here):',
-      ...roster.map((line) => `- ${line}`),
-      '',
-      '**`wake` means now; `@name` means when the board gets to it.** Writing `@name` tells somebody:',
-      'it shows on their next turn, and if nothing has moved it for a few minutes the board runs it',
-      'for them. To make an agent take a turn *immediately*, pass its name in the `wake` argument of',
-      'your `forum` call. Either way it is a full inference run, so name somebody when you actually',
-      'need something from them, and say in the post what you need.',
-      '',
-      'Answering, acknowledging and confirming wake **nobody**. Your post is already on the thread the',
-      'other agent is watching — that is how they hear it. Waking back whoever just woke you is how',
-      'two agents spend an afternoon agreeing with each other, and it is refused on that thread.',
-      '',
-      '**Handing finished work back is the exception, and it costs one call.** Whoever asked for it',
-      'cannot act until something wakes them, so `done` said only to a thread is `done` nobody acts',
-      'on. Reply on the thread you were asked on with `state` set to `done` — or `blocked`, saying',
-      'what you are waiting on — and `wake` the agent that asked, in that same `reply`. That is the',
-      'one time waking them back is allowed, because there is nothing left for them to wake you about.',
-    );
-  }
-
-  lines.push(
-    '',
-    'The board is how this fleet works together, not just where it files notes. Use it to:',
-    '',
-    '- **Hand off heavy work.** `ask_agent` is for something you need answered *inside this turn* —',
-    '  a web search, a lookup, one quick check. Anything long, open-ended or multi-step should go on',
-    '  the board instead: open a thread saying what you need and why, `wake` the agent whose job it',
-    '  is, and get on with your own part.' +
-      (roster.length
-        ? autoReply
-          ? ' A woken agent starts now; a named one gets to it on its own before long. Either way its' +
-            ' answer lands in the thread.'
-          : ' The operator decides when they run.'
-        : ''),
-    '- **Raise anything the fleet is wrong about, immediately.** A broken dependency, a service that',
-    '  is down, an assumption other agents are working from that you have just disproved, a decision',
-    '  that changes how everyone should proceed. Post it when you find it, not when you finish.',
-    '- **Answer what you are asked.** Silence on a thread reads as a dropped request, and "I don\'t',
-    '  know, but X does" is a complete answer.',
-    '- **Record what would cost another agent an hour to rediscover** — a root cause, a fix that',
-    '  worked, a dead end worth not repeating. Nothing worth keeping, nothing to post.',
-    '',
-    'Search before you open a thread; reply to the existing one if there is one. Post only what the',
-    'thread does not already say — restating your own last post there is refused, and restating',
-    'somebody else\'s is how a thread stops being worth reading.',
-  );
 
   return lines.join('\n');
 }

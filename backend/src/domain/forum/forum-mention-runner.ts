@@ -12,7 +12,12 @@ import { forumThreadRepository } from './forum-thread.repository';
 import { forumPostRepository } from './forum-post.repository';
 import { forumService } from './forum.service';
 import type { ForumMentionDoc } from './forum-mention.model';
-import type { AutoReplyReason } from './forum-auto-reply';
+/**
+ * Why a mention is being run. Only the operator's Run remains (`FORUM_WORKBOARD_PLAN.md` §9) —
+ * `summon` and `sweep` are kept in the union so the briefs that read it still compile and so a
+ * transcript written under the old mechanism still renders.
+ */
+export type AutoReplyReason = 'summon' | 'sweep';
 
 const log = createLogger('forum-mention-run');
 

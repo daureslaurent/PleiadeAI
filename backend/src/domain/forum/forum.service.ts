@@ -6,6 +6,13 @@ import { forumThreadRepository } from './forum-thread.repository';
 import { forumPostRepository } from './forum-post.repository';
 import { forumFileRepository } from './forum-file.repository';
 import { forumIndexService, snippetOf } from './forum-index.service';
+import {
+  assertPostContract,
+  isPostKind,
+  normaliseMeta,
+  type ForumPostKind,
+  type ForumPostMeta,
+} from './post-contract';
 import { forumMentionService, type SummonPlan } from './forum-mention.service';
 import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumAuthor } from './forum-author';
@@ -225,6 +232,10 @@ export const forumService = {
      */
     assignee?: ForumAuthor | null;
     workState?: ForumWorkState | null;
+    /** The opening post's kind and its structured half (spec `FORUM_WORKBOARD_PLAN.md` §4). */
+    kind?: string;
+    meta?: ForumPostMeta;
+    enforceContract?: boolean;
   }): Promise<{ thread: ForumThreadDoc; post: ForumPostDoc }> {
     const category = await this.requirePostableCategory(input.category, input.byAgent);
     // Resolved before the thread exists, so a bad hub reference refuses the whole call rather than
@@ -246,6 +257,9 @@ export const forumService = {
       attachments: input.attachments,
       opening: true,
       summons: input.summons,
+      kind: input.kind,
+      meta: input.meta,
+      enforceContract: input.enforceContract,
     });
     log.info({ threadId: String(thread._id), author: input.author.display_name }, 'forum thread created');
     return { thread, post };
@@ -276,7 +290,25 @@ export const forumService = {
      * check. See `assertNotARepeat`.
      */
     repeatThreshold?: number;
+    /**
+     * What kind of post this is, and the structured half its kind requires (spec
+     * `FORUM_WORKBOARD_PLAN.md` §4). Omitted → `note`, which carries no contract.
+     */
+    kind?: string;
+    meta?: ForumPostMeta;
+    /**
+     * Whether to hold this post to its kind's contract. The `forum` tool passes the operator's
+     * switch; the HTTP routes pass false, because a human writing on the board is not the failure
+     * mode the contract exists for and holding them to it makes the operator's own corrections the
+     * hardest thing on the board to write.
+     */
+    enforceContract?: boolean;
   }): Promise<ForumPostDoc> {
+    const kind: ForumPostKind = isPostKind(input.kind) ? input.kind : 'note';
+    const meta = normaliseMeta(kind, input.meta ?? {});
+    // Before the write and before the *next* turn — which is the whole difference from
+    // `assertNotARepeat` below, which refuses a post only after the turn producing it was paid for.
+    if (input.enforceContract && input.author.kind === 'agent') assertPostContract(kind, input.body, meta);
     const repeatThreshold = input.repeatThreshold ?? DEFAULT_REPEAT_THRESHOLD;
     if (!input.opening && input.author.kind === 'agent' && repeatThreshold > 0) {
       await this.assertNotARepeat(input.thread, input.body, input.author, repeatThreshold);
@@ -287,6 +319,8 @@ export const forumService = {
       category_id: input.thread.category_id,
       author: input.author,
       body: input.body,
+      kind,
+      meta: meta as Record<string, unknown>,
       reply_to: input.replyTo ?? null,
       attachments: files.map((f) => f._id),
       attachment_names: attachmentNames(files),

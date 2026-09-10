@@ -13,7 +13,7 @@ import { alertEngine } from '../alerts/AlertEngine';
 import { conversationGenService } from '../domain/conversation-gen/conversation-gen.service';
 import { generatorRepository } from '../domain/conversation-gen/generator.repository';
 import type { ConversationGeneratorDoc } from '../domain/conversation-gen/generator.model';
-import { forumSweeper } from '../domain/forum/forum-sweeper';
+import { forumScheduler } from '../domain/forum/forum-scheduler';
 import { settingsService } from '../domain/settings/settings.service';
 
 const log = createLogger('agenda');
@@ -21,15 +21,15 @@ const log = createLogger('agenda');
 export const AUTONOMOUS_RUN_JOB = 'agent:autonomous_run';
 
 /**
- * The forum's fallback clock (`FORUM_AUTORUN_PLAN.md`).
+ * The work board's clock (`FORUM_WORKBOARD_PLAN.md` §5).
  *
  * Through Agenda rather than an in-process interval, which is the house rule for anything
  * cron-shaped: the schedule survives a restart with no bespoke `restore()`, the job is locked in
- * Mongo so nothing can double-sweep, and the operator can see it in `agenda_jobs` beside every other
+ * Mongo so two ticks cannot race, and the operator can see it in `agenda_jobs` beside every other
  * scheduled thing. `TimerScheduler`'s in-process timers are the exception, and only because a stream
- * ticks in seconds — a five-minute sweep has no such excuse.
+ * ticks in seconds.
  */
-export const FORUM_SWEEP_JOB = 'forum:mention_sweep';
+export const FORUM_TICK_JOB = 'forum:board_tick';
 
 /** Scheduled execution of a saved flow (FLOWS_PLAN.md §7). */
 export const FLOW_RUN_JOB = 'flow:scheduled_run';
@@ -247,11 +247,11 @@ export async function setupAgenda(): Promise<Agenda> {
     await conversationGenService.runOnce(generatorId);
   });
 
-  // The handler is only the clock: it hands the queue one mention and returns in milliseconds. It
-  // must never await the turn — an inference run can outlast the job's lock, and a scheduler that
-  // re-fires a job it believes died would start a second turn on the same mention.
-  agenda.define(FORUM_SWEEP_JOB, async () => {
-    await forumSweeper.tick();
+  // The tick reaps, computes the ready set and dispatches — it never awaits an inference turn. A
+  // run can outlast the job's lock, and a scheduler that re-fires a job it believes died would start
+  // a second turn on the same task. The atomic `claimDispatch` is the backstop if it ever does.
+  agenda.define(FORUM_TICK_JOB, async () => {
+    await forumScheduler.tick();
   });
 
   agenda.on('fail', (err: Error, job: Job) => {
@@ -260,7 +260,7 @@ export async function setupAgenda(): Promise<Agenda> {
 
   await agenda.start();
   await syncConversationGenerators();
-  await syncForumSweep();
+  await syncForumTick();
   log.info('agenda started');
   return agenda;
 }
@@ -307,20 +307,22 @@ export async function syncConversationGenerators(): Promise<void> {
 }
 
 /**
- * (Re)register the forum sweep tick. Cancel-then-create, like the generators, so a changed interval
- * takes effect without a restart and a restart cannot leave two ticks racing.
+ * (Re)register the board tick. Cancel-then-create, like the generators, so a changed interval takes
+ * effect without a restart and a restart cannot leave two ticks racing.
  *
- * Registered whether or not sweeping is enabled: the switch is re-read inside `tick()`, so toggling
- * it in Settings takes effect on the next tick rather than needing the schedule rebuilt. `skipImmediate`
- * so saving an unrelated setting never fires a sweep on the spot.
+ * Registered whether or not the board is enabled: the switch is re-read inside `tick()`, so toggling
+ * it in Settings takes effect on the next tick rather than needing the schedule rebuilt. Also
+ * cancels the retired `forum:mention_sweep` job, which Agenda would otherwise keep firing from Mongo
+ * against a handler that no longer exists.
  */
-export async function syncForumSweep(): Promise<void> {
+export async function syncForumTick(): Promise<void> {
   const a = getAgenda();
-  await a.cancel({ name: FORUM_SWEEP_JOB });
+  await a.cancel({ name: FORUM_TICK_JOB });
+  await a.cancel({ name: 'forum:mention_sweep' });
   const settings = await settingsService.get();
-  const minutes = Math.max(1, settings.forum_sweep_interval_minutes ?? 5);
-  const job = a.create(FORUM_SWEEP_JOB, {});
+  const minutes = Math.max(1, settings.forum_tick_interval_minutes ?? 2);
+  const job = a.create(FORUM_TICK_JOB, {});
   job.repeatEvery(`${minutes} minutes`, { skipImmediate: true });
   await job.save();
-  log.info({ every: minutes, enabled: settings.forum_sweep_enabled === true }, 'forum sweep scheduled');
+  log.info({ every: minutes, enabled: settings.forum_board_enabled === true }, 'forum board tick scheduled');
 }

@@ -1,5 +1,6 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 import { ForumAuthorSchema } from './forum-author';
+import { FORUM_POST_KINDS } from './post-contract';
 
 /**
  * `forum_posts` — one message in a thread (spec `FORUM_PLAN.md` §2). Bodies are markdown, rendered
@@ -15,6 +16,24 @@ const ForumPostSchema = new Schema(
     category_id: { type: Schema.Types.ObjectId, ref: 'ForumCategory', required: true, index: true },
     author: { type: ForumAuthorSchema, required: true },
     body: { type: String, required: true },
+    /**
+     * What this post is for (spec `FORUM_WORKBOARD_PLAN.md` §4). `note` is the default and carries no
+     * contract — which is what every post written before this existed becomes, because a rule applied
+     * retroactively to an archive only makes the archive unreadable.
+     */
+    kind: { type: String, enum: FORUM_POST_KINDS, default: 'note', index: true },
+    /**
+     * The structured half the kind requires: `verified` on a finding, `needs` on a question, `verdict`
+     * on a review. Stored beside the prose rather than rendered into it so the frontend can chip it,
+     * a query can filter on it, and an edit to the body cannot silently drop it.
+     */
+    meta: {
+      verified: { type: Boolean, default: undefined },
+      needs: { type: String, default: undefined },
+      decision: { type: String, default: undefined },
+      verdict: { type: String, enum: ['pass', 'fail', undefined], default: undefined },
+      deliverable: { type: String, default: undefined },
+    },
     /**
      * The post this one answers — the "objection to reply #3" link that makes a debate thread
      * readable. Rendered as a single "in reply to …" line, deliberately *not* as nested threading:

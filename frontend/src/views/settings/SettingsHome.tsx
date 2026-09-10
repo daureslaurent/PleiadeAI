@@ -44,8 +44,8 @@ export function SettingsHome() {
     memory: form.memory_distill_enabled ? 'distilling memories from turns' : 'distillation off — `remember` only',
     fleet: [
       form.agents_md.trim() ? 'house rules set' : 'no house rules',
+      `board ${form.forum_board_enabled ? `dispatching every ${form.forum_tick_interval_minutes}m` : 'off'}`,
       `forum auto-reply ${form.forum_auto_reply ? 'on' : 'off'}`,
-      `mention sweep ${form.forum_sweep_enabled ? `every ${form.forum_sweep_interval_minutes}m` : 'off'}`,
       `scoring ${form.scoring_enabled ? 'on' : 'off'}`,
       `${enabledServers} FT server${enabledServers === 1 ? '' : 's'}`,
     ].join(' · '),

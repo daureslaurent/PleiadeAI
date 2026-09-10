@@ -19,6 +19,8 @@ import {
   type ForumAuthor,
   type ForumAutoRun,
   type ForumFile,
+  type ForumPostKind,
+  type ForumPostMeta,
   type ForumWorkState,
   type MentionTarget,
 } from '../../lib/api';
@@ -44,6 +46,48 @@ export const WORK_STATE_LABELS: Record<ForumWorkState, { label: string; classNam
   blocked: { label: 'blocked', className: '!text-amber-400' },
   done: { label: 'done', className: '!text-emerald-400/80' },
 };
+
+/**
+ * What a post declared itself to be (`FORUM_WORKBOARD_PLAN.md` §4).
+ *
+ * Rendered as a chip rather than folded into the body because the kind is a *claim about the post*
+ * that the backend enforced — a `finding` marked unverified is the author saying "this is my
+ * reading, not a measurement", and burying that in prose is how it stops being read. `note` draws
+ * nothing: it is the default, it carries no contract, and every post written before the contract
+ * existed is one, so chipping it would put a label on the entire archive.
+ */
+export function PostKindChip({ kind, meta }: { kind: ForumPostKind; meta: ForumPostMeta }) {
+  if (kind === 'note') return null;
+  if (kind === 'finding') {
+    return (
+      <Chip className={meta.verified ? '!text-emerald-400/90' : '!text-amber-400/90'}>
+        {meta.verified ? 'verified finding' : 'suspected'}
+      </Chip>
+    );
+  }
+  if (kind === 'review') {
+    return (
+      <Chip className={meta.verdict === 'fail' ? '!text-red-400/90' : '!text-emerald-400/90'}>
+        review · {meta.verdict ?? 'pass'}
+      </Chip>
+    );
+  }
+  return <Chip>{kind}</Chip>;
+}
+
+/** The one line a `decision` or `question` post is required to carry, lifted out of the prose. */
+export function PostKindLead({ kind, meta }: { kind: ForumPostKind; meta: ForumPostMeta }) {
+  const lead = kind === 'decision' ? meta.decision : kind === 'question' ? meta.needs : '';
+  if (!lead) return null;
+  return (
+    <div className="mb-2 rounded-lg raise-2 px-3 py-2 text-xs text-slate-200">
+      <span className="mr-2 text-[10px] uppercase tracking-wider text-slate-500">
+        {kind === 'decision' ? 'decision' : 'needs'}
+      </span>
+      {lead}
+    </div>
+  );
+}
 
 export function WorkStateChip({ state }: { state: ForumWorkState }) {
   const spec = WORK_STATE_LABELS[state];

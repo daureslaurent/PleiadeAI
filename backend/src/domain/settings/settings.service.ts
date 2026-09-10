@@ -107,16 +107,26 @@ export interface EffectiveSettings {
   /** Length of the rolling window that ceiling is measured over. 0 → a lifetime cap, never reset. */
   forum_auto_reply_window_hours: number;
   /** Whether a bare `@name` from an agent summons it, or merely addresses it (spec §11.7). */
-  forum_bare_mention_summons: boolean;
-  /** How many agent-to-agent summonses may chain off one human starting point. The forum's HopGuard. */
-  forum_mention_max_chain: number;
+  /** The work board (`FORUM_WORKBOARD_PLAN.md`): whether the scheduler dispatches tasks at all. */
+  forum_board_enabled: boolean;
+  /** Minutes between board ticks — the reap/ready/dispatch cycle. */
+  forum_tick_interval_minutes: number;
   /** How often one agent may summon the same agent on the same thread, per window. */
-  forum_mention_max_per_pair: number;
+  /** Task turns in flight at once, fleet-wide. 1 unless the inference endpoint serves concurrency. */
+  forum_max_parallel: number;
   /** The fallback clock: whether the board runs mentions nobody summoned (`FORUM_AUTORUN_PLAN.md`). */
-  forum_sweep_enabled: boolean;
-  forum_sweep_interval_minutes: number;
-  forum_sweep_min_age_minutes: number;
-  forum_sweep_max_age_hours: number;
+  /** Empty dispatches a task tolerates before it is blocked for the manager. */
+  forum_task_max_dispatches: number;
+  /** Times a review may bounce a task back before the manager decides instead. */
+  forum_task_max_review_rounds: number;
+  /** Agent turns a project may spend across its whole life. */
+  forum_plan_max_turns: number;
+  /** Times the manager may revise one plan before it stops and asks the operator. */
+  forum_plan_max_revisions: number;
+  /** The agent that plans projects; empty falls back to one named `project_manager`. */
+  forum_project_manager_agent: string;
+  /** Whether agent posts are held to their kind's shape and ceiling. */
+  forum_post_contract_enabled: boolean;
   /** Automatic runs a project may spend per window, shared by every thread naming the same hub. */
   forum_auto_reply_max_per_project: number;
   /**
@@ -236,13 +246,15 @@ export const settingsService = {
       forum_auto_reply: doc?.forum_auto_reply ?? false,
       forum_auto_reply_max_per_thread: doc?.forum_auto_reply_max_per_thread ?? 8,
       forum_auto_reply_window_hours: doc?.forum_auto_reply_window_hours ?? 24,
-      forum_bare_mention_summons: doc?.forum_bare_mention_summons ?? false,
-      forum_mention_max_chain: doc?.forum_mention_max_chain ?? 4,
-      forum_mention_max_per_pair: doc?.forum_mention_max_per_pair ?? 2,
-      forum_sweep_enabled: doc?.forum_sweep_enabled ?? false,
-      forum_sweep_interval_minutes: doc?.forum_sweep_interval_minutes ?? 5,
-      forum_sweep_min_age_minutes: doc?.forum_sweep_min_age_minutes ?? 5,
-      forum_sweep_max_age_hours: doc?.forum_sweep_max_age_hours ?? 12,
+      forum_board_enabled: doc?.forum_board_enabled ?? false,
+      forum_tick_interval_minutes: doc?.forum_tick_interval_minutes ?? 2,
+      forum_max_parallel: doc?.forum_max_parallel ?? 1,
+      forum_task_max_dispatches: doc?.forum_task_max_dispatches ?? 3,
+      forum_task_max_review_rounds: doc?.forum_task_max_review_rounds ?? 2,
+      forum_plan_max_turns: doc?.forum_plan_max_turns ?? 60,
+      forum_plan_max_revisions: doc?.forum_plan_max_revisions ?? 6,
+      forum_project_manager_agent: doc?.forum_project_manager_agent ?? '',
+      forum_post_contract_enabled: doc?.forum_post_contract_enabled ?? true,
       forum_auto_reply_max_per_project: doc?.forum_auto_reply_max_per_project ?? 40,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,

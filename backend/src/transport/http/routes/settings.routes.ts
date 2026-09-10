@@ -14,7 +14,7 @@ import { endpointHealth } from '../../../inference/endpoint-health';
 import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
 import { applyTelegramConfig } from '../../../telegram/telegram-config';
 import { telegramBot } from '../../../telegram/TelegramBot';
-import { syncForumSweep } from '../../../autonomy/agenda.setup';
+import { syncForumTick } from '../../../autonomy/agenda.setup';
 import { Types } from 'mongoose';
 import type { GlobalMode } from '../../../domain/endpoints/endpoint.model';
 import { BUILTIN_GLOBAL_MODES, isBuiltinModeId } from '../../../domain/settings/builtin-modes';
@@ -162,29 +162,25 @@ settingsRouter.put('/', async (req, res) => {
     const hours = Number(b.forum_auto_reply_window_hours);
     patch.forum_auto_reply_window_hours = Number.isFinite(hours) ? Math.max(0, Math.min(720, hours)) : 24;
   }
-  // Address vs. summons (§11.7), and the two guards that bound a chain of summonses. All three are
-  // whitelisted here or they silently never persist.
-  if (b.forum_bare_mention_summons !== undefined)
-    patch.forum_bare_mention_summons = Boolean(b.forum_bare_mention_summons);
-  if (b.forum_mention_max_chain !== undefined)
-    patch.forum_mention_max_chain = Math.min(12, Math.max(1, Number(b.forum_mention_max_chain) || 4));
-  if (b.forum_mention_max_per_pair !== undefined)
-    patch.forum_mention_max_per_pair = Math.min(20, Math.max(1, Number(b.forum_mention_max_per_pair) || 2));
-  // The fallback clock (`FORUM_AUTORUN_PLAN.md`) and the project-wide budget. Same rule as above:
-  // whitelisted here or the field silently never persists.
-  if (b.forum_sweep_enabled !== undefined) patch.forum_sweep_enabled = Boolean(b.forum_sweep_enabled);
-  if (b.forum_sweep_interval_minutes !== undefined)
-    patch.forum_sweep_interval_minutes = Math.min(
-      1440,
-      Math.max(1, Number(b.forum_sweep_interval_minutes) || 5),
-    );
-  if (b.forum_sweep_min_age_minutes !== undefined)
-    patch.forum_sweep_min_age_minutes = Math.min(
-      1440,
-      Math.max(1, Number(b.forum_sweep_min_age_minutes) || 5),
-    );
-  if (b.forum_sweep_max_age_hours !== undefined)
-    patch.forum_sweep_max_age_hours = Math.min(720, Math.max(1, Number(b.forum_sweep_max_age_hours) || 12));
+  // The work board (`FORUM_WORKBOARD_PLAN.md`). Whitelisted here or the field silently never
+  // persists — the one rule about this file that has bitten every feature that touched it.
+  if (b.forum_board_enabled !== undefined) patch.forum_board_enabled = Boolean(b.forum_board_enabled);
+  if (b.forum_tick_interval_minutes !== undefined)
+    patch.forum_tick_interval_minutes = Math.min(1440, Math.max(1, Number(b.forum_tick_interval_minutes) || 2));
+  if (b.forum_max_parallel !== undefined)
+    patch.forum_max_parallel = Math.min(8, Math.max(1, Number(b.forum_max_parallel) || 1));
+  if (b.forum_task_max_dispatches !== undefined)
+    patch.forum_task_max_dispatches = Math.min(10, Math.max(1, Number(b.forum_task_max_dispatches) || 3));
+  if (b.forum_task_max_review_rounds !== undefined)
+    patch.forum_task_max_review_rounds = Math.min(10, Math.max(1, Number(b.forum_task_max_review_rounds) || 2));
+  if (b.forum_plan_max_turns !== undefined)
+    patch.forum_plan_max_turns = Math.min(2000, Math.max(1, Number(b.forum_plan_max_turns) || 60));
+  if (b.forum_plan_max_revisions !== undefined)
+    patch.forum_plan_max_revisions = Math.min(50, Math.max(1, Number(b.forum_plan_max_revisions) || 6));
+  if (typeof b.forum_project_manager_agent === 'string')
+    patch.forum_project_manager_agent = b.forum_project_manager_agent.trim();
+  if (b.forum_post_contract_enabled !== undefined)
+    patch.forum_post_contract_enabled = Boolean(b.forum_post_contract_enabled);
   if (b.forum_auto_reply_max_per_project !== undefined)
     patch.forum_auto_reply_max_per_project = Math.max(
       1,
@@ -245,11 +241,11 @@ settingsRouter.put('/', async (req, res) => {
     applyTelegramConfig(updated);
     void telegramBot.restart().catch((err) => log.error({ err }, 'telegram bot restart failed'));
   }
-  // Re-arm the forum sweep only when its *cadence* changed. The enable switch is re-read inside the
-  // tick, so toggling it needs no reschedule — rebuilding the job for that would just move the next
-  // sweep a full interval away every time the operator flipped it.
-  if (patch.forum_sweep_interval_minutes !== undefined) {
-    void syncForumSweep().catch((err) => log.error({ err }, 'forum sweep reschedule failed'));
+  // Re-arm the board's clock only when its *cadence* changed. The enable switch is re-read inside
+  // the tick, so toggling it needs no reschedule — rebuilding the job for that would just push the
+  // next tick a full interval away every time the operator flipped it.
+  if (patch.forum_tick_interval_minutes !== undefined) {
+    void syncForumTick().catch((err) => log.error({ err }, 'forum tick reschedule failed'));
   }
   res.json(updated);
 });

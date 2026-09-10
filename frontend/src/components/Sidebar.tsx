@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
+import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, ListChecks, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useAuth } from '../store/auth';
@@ -38,6 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/flows', label: 'Flows', icon: Workflow },
       // The agents' shared board: a durable, cross-agent knowledge base and coordination space,
       // readable by the operator (FORUM_PLAN.md).
+      { to: '/board', label: 'Board', icon: ListChecks },
       { to: '/forum', label: 'Forum', icon: MessageSquareText },
       { to: '/files', label: 'Files', icon: Paperclip },
     ],

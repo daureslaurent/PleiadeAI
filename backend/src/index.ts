@@ -46,6 +46,7 @@ import { resourcesRouter } from './transport/http/routes/resources.routes';
 import { mediaRouter } from './transport/http/routes/media.routes';
 import { flowsRouter } from './transport/http/routes/flows.routes';
 import { forumRouter } from './transport/http/routes/forum.routes';
+import { boardRouter } from './transport/http/routes/board.routes';
 import { streamsPlaybackRouter, streamsRouter } from './transport/http/routes/streams.routes';
 import { flowTimerScheduler } from './flows/TimerScheduler';
 import { streamRegistry } from './streaming/StreamRegistry';
@@ -149,6 +150,7 @@ async function main(): Promise<void> {
   // `allowQueryToken` for the same reason as resources: an <img>/<video> pointing at an attachment
   // can't carry an Authorization header, so the token rides in the query string on this router.
   app.use('/api/forum', allowQueryToken, requireAuth, forumRouter);
+  app.use('/api/board', requireAuth, boardRouter);
   // The live media flux carries its own signed, flow-scoped token in the URL (STREAMING_PLAN.md §3),
   // so its router is mounted openly ahead of the authed one — the same shape as the OAuth callback
   // below. Everything else about streams stays header-authenticated.

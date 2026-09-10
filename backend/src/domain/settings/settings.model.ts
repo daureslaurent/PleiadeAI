@@ -182,73 +182,67 @@ const SettingsSchema = new Schema(
     forum_auto_reply_max_per_thread: { type: Number, default: 8 },
     forum_auto_reply_window_hours: { type: Number, default: 24 },
     /**
-     * Whether a bare `@name` written by an *agent* summons that agent, or merely addresses it
-     * (spec §11.7).
+     * The work board (spec `FORUM_WORKBOARD_PLAN.md`): whether the scheduler dispatches tasks.
      *
-     * Off is the honest default, and the reason is empirical. Every post in the runaway exchange
-     * that motivated this setting opened with `@name` as its first token — the addressee marker of
-     * a reply, which is what a model reaches for and what this fleet's own prompts teach ("when it
-     * is done, reply on this thread and `@project_manager`"). Reading that as a request for work
-     * makes every answer generate the next question, forever. With it off, waking somebody is a
-     * separate, deliberate act — `@run:name` or the `wake` argument — that a courtesy salutation
-     * cannot produce by accident.
+     * Off by default and off on upgrade, exactly as `forum_auto_reply` shipped. Turning it on with
+     * no plans filed does nothing at all, which is the property that makes it safe to deploy — and
+     * a plan stays `draft` until the operator starts it, so enabling this cannot set a half-read
+     * plan running either.
+     */
+    forum_board_enabled: { type: Boolean, default: false },
+    /**
+     * Minutes between scheduler ticks. A tick reaps finished dispatches, computes the ready set and
+     * dispatches at most `forum_max_parallel` turns, so this is the board's real clock rate. Short
+     * is safe here in a way it never was for the sweeper: a tick with nothing ready does no
+     * inference and costs one indexed find per running plan.
+     */
+    forum_tick_interval_minutes: { type: Number, default: 2 },
+    /**
+     * How many task turns may be in flight at once, fleet-wide.
      *
-     * The operator is unaffected either way: a human typing a name means it. Turn this on to restore
-     * the old behaviour for a fleet whose prompts still depend on it.
+     * 1 because this fleet has one inference endpoint. Raising it is correct only when that endpoint
+     * serves concurrent streams — otherwise the scheduler cheerfully dispatches four turns into a
+     * queue of one and every one of them counts against the plan's leash while it waits.
      */
-    forum_bare_mention_summons: { type: Boolean, default: false },
+    forum_max_parallel: { type: Number, default: 1 },
     /**
-     * How many agent-to-agent summons may chain off one human (or cron) starting point before the
-     * board stops running them by itself — the forum's `max_agent_hops`.
+     * How many times a task may be dispatched and come back with nothing before it is `blocked` for
+     * the manager to look at. The circuit breaker for a task an agent cannot do — without it, an
+     * impossible task is re-dispatched every tick until the plan's whole allowance is gone.
+     */
+    forum_task_max_dispatches: { type: Number, default: 3 },
+    /**
+     * How many times a review may bounce a task back before the manager decides instead. Two agents
+     * disagreeing about what "done" means do not converge by repeating themselves at each other.
+     */
+    forum_task_max_review_rounds: { type: Number, default: 2 },
+    /**
+     * Agent turns a project may spend across its whole life — work, review and manager turns alike.
+     * Seeded onto the plan at creation and raisable there per project, so lifting the fleet default
+     * does not silently restart a project the operator let run out on purpose.
+     */
+    forum_plan_max_turns: { type: Number, default: 60 },
+    /** How many times the manager may revise one plan before it stops and asks the operator. */
+    forum_plan_max_revisions: { type: Number, default: 6 },
+    /**
+     * The agent that plans projects and is called when one hits a problem. Resolved by name; empty
+     * falls back to an agent called `project_manager` if the fleet has one. Deliberately an ordinary
+     * operator-owned agent rather than a built-in like `forum_keeper` — a moderator's powers had to
+     * be authorised in code, while a planner's entire output is task documents the operator reads.
+     */
+    forum_project_manager_agent: { type: String, default: '' },
+    /**
+     * Whether agent posts are held to their kind's shape and ceiling (spec §4). On by default: this
+     * is the guard that runs *before* a turn is spent, and switching it off restores the world where
+     * a status update can be three thousand characters of restatement.
+     */
+    forum_post_contract_enabled: { type: Boolean, default: true },
+    /**
+     * Automatic mention runs a *project* may spend per window, when its threads name a hub thread.
      *
-     * 4 fits the relay this is actually for: architect → design → implement → verify, each handing
-     * to the next and reporting back, with the manager's own re-wake spending a step. A two-agent
-     * ping-pong reaches the ceiling in four posts instead of burning a whole thread's budget.
-     */
-    forum_mention_max_chain: { type: Number, default: 4 },
-    /**
-     * How many times one agent may summon the *same* agent on the *same* thread within the
-     * auto-reply window. The direct-ping-pong signature, caught by name rather than by volume.
-     */
-    forum_mention_max_per_pair: { type: Number, default: 2 },
-    /**
-     * The fallback clock (`FORUM_AUTORUN_PLAN.md`): whether the board runs mentions nobody summoned.
-     *
-     * Separate from `forum_auto_reply` because they answer different questions. That one asks
-     * whether the board may run itself at all; this one asks whether it may start turns *nobody
-     * asked for*. With summoning made deliberate in §11.7, the fleet stopped asking — 89 posts in 33
-     * hours used `wake` once — and every project froze at its first hand-off. This is what unfreezes
-     * them, and it is the switch to reach for first if the board becomes talkative.
-     *
-     * Off by default, including on upgrade: turning it on runs whatever is already pending, which on
-     * a board that has been stalled is a decision rather than a side effect of deploying.
-     */
-    forum_sweep_enabled: { type: Boolean, default: false },
-    /**
-     * Minutes between sweeps. One mention per tick, fleet-wide, serialised behind the same queue as
-     * summonses — which makes this the real ceiling on autonomous spend: a runaway costs twelve turns
-     * an hour, not twelve a minute.
-     */
-    forum_sweep_interval_minutes: { type: Number, default: 5 },
-    /**
-     * How long a mention must sit before the board runs it for you. Gives the two paths that might
-     * legitimately answer it first — an explicit summons draining in the queue, and the operator —
-     * their turn, and keeps "run eventually" honest rather than "run in five minutes".
-     */
-    forum_sweep_min_age_minutes: { type: Number, default: 5 },
-    /**
-     * How old a mention may be and still be worth running. Past this it is left for the operator: a
-     * board's state moves, and answering a day-old "the design is delivered" produces a post about a
-     * situation that no longer exists. It is also what stops enabling this from replaying a backlog.
-     */
-    forum_sweep_max_age_hours: { type: Number, default: 12 },
-    /**
-     * Automatic runs a *project* may spend per window, when its threads name a hub thread.
-     *
-     * A project is several threads — hub, design, architecture, implementation, verify — and the
-     * per-thread allowance was the wrong unit for it: eight runs each either starves the project or,
-     * raised enough not to, stops braking any single runaway exchange inside it. Threads with no hub
-     * keep using `forum_auto_reply_max_per_thread`, unchanged.
+     * Retained for threads outside a plan: a plan has its own leash (`forum_plans.turns_max`), which
+     * counts agent turns rather than mention runs and is the number the operator raises for a
+     * project. This governs the hub/child shape that predates plans and still works.
      */
     forum_auto_reply_max_per_project: { type: Number, default: 40 },
     memory_distill_enabled: { type: Boolean, default: true },

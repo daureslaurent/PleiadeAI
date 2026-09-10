@@ -14,6 +14,7 @@ import {
   type ForumWorkState,
 } from '../../domain/forum/forum-thread.model';
 import { loadRoster } from '../../domain/forum/forum-roster';
+import { FORUM_POST_KINDS, KIND_HELP, PostContractError } from '../../domain/forum/post-contract';
 import {
   planSummons,
   summonContextFor,
@@ -375,22 +376,35 @@ export const forum: Tool = {
         type: 'string',
         description:
           'For `post_thread`/`reply`/`edit_post`: markdown. State what you verified versus what you ' +
-          'are guessing — other agents will act on this. Writing `@name` here *addresses* somebody: ' +
-          'it tells them, and the board runs them when it gets to them, which may be several ' +
-          'minutes. Use `wake` when you need them to start now. Do not repeat what the thread ' +
-          'already says; add only what is new.',
+          'are guessing — other agents will act on this. Writing `@name` tells that agent: it shows ' +
+          'on their next turn. It does not make them run, and it does not need to — work moves ' +
+          'because the board dispatches a task, not because somebody was named. Do not repeat what ' +
+          'the thread already says; add only what is new. Each `kind` has a length limit and a post ' +
+          'over it is refused, so say it once.',
       },
-      wake: {
-        type: 'array',
-        items: { type: 'string' },
+      kind: {
+        type: 'string',
+        enum: [...FORUM_POST_KINDS],
+        description: `What this post is. Each has a shape and a length limit: ${KIND_HELP}. Default: note.`,
+      },
+      verified: {
+        type: 'boolean',
         description:
-          'For `post_thread`/`reply`: agents to *run now* over this post, by exact name. Each one ' +
-          'is a full turn on the GPU, so name only those you actually need something from, and say ' +
-          'in the body what you need from each. Leave it out when you are answering or ' +
-          'acknowledging — your post already reaches everyone on the thread, and waking them back ' +
-          'is how two agents end up talking past each other forever. Reporting work finished is ' +
-          'the exception, and it needs no `wake`: reply with `state` set to "done" and whoever ' +
-          'asked for it is woken to pick it up.',
+          'Required on a `finding`: true if you measured or reproduced it, false if it is your ' +
+          'reading of the evidence. Other agents act on this, so the difference matters more than ' +
+          'the finding.',
+      },
+      needs: {
+        type: 'string',
+        description:
+          'Required on a `question`: what answer would actually unblock you. A question that does ' +
+          'not say gets an essay back.',
+      },
+      decision: {
+        type: 'string',
+        description:
+          'Required on a `decision`: the one line that settles it, separate from the reasoning, so ' +
+          'somebody can act on it without reading the rest.',
       },
       reply_to: { type: 'string', description: 'For `reply`: the post id you are answering.' },
       hub_thread_id: {
@@ -469,6 +483,19 @@ export const forum: Tool = {
     const action = String(args.action ?? '').trim();
     const str = (key: string): string => String(args[key] ?? '').trim();
     const repeatThreshold = Math.max(0, Number(config.repeat_threshold ?? 0.8) || 0);
+    const contractOn = (await settingsService.get()).forum_post_contract_enabled !== false;
+    /**
+     * The structured half of a post, gathered from the flat tool arguments.
+     *
+     * Flat rather than a nested `meta` object because that is one level of structure fewer for a
+     * small model to get wrong, and `FORUM_AUTORUN_PLAN.md` §RC1 is the standing evidence on what
+     * happens when a model has to construct a shape to be heard.
+     */
+    const postMeta = () => ({
+      verified: typeof args.verified === 'boolean' ? args.verified : undefined,
+      needs: args.needs === undefined ? undefined : String(args.needs),
+      decision: args.decision === undefined ? undefined : String(args.decision),
+    });
 
     /**
      * Decide who this post addresses and who it actually wakes, *before* writing it (spec §11.7).
@@ -488,7 +515,6 @@ export const forum: Tool = {
       return planSummons({
         body,
         author,
-        wake: Array.isArray(args.wake) ? args.wake.map(String) : [],
         context,
         threadId,
         state: carries.state ?? null,
@@ -526,8 +552,9 @@ export const forum: Tool = {
           ? {
               addressed,
               addressed_note:
-                'Told, not run *now* — the board will run them when it gets to them, which may be ' +
-                'several minutes. Add them to `wake` if you need the answer sooner.',
+                'Told. It shows on their next turn. Naming somebody does not start a turn for them ' +
+                'and does not need to — if this is work that has to happen, it belongs on the ' +
+                '`board` as a task, where it is dispatched on its own.',
             }
           : {}),
         ...(withheld.length ? { not_woken: withheld } : {}),
@@ -719,6 +746,9 @@ export const forum: Tool = {
             byAgent: true,
             summons,
             hubThreadId: args.hub_thread_id === undefined ? undefined : str('hub_thread_id'),
+            kind: str('kind') || 'note',
+            meta: postMeta(),
+            enforceContract: contractOn,
           });
           log.info({ agent: ctx.agentName, threadId: String(thread._id) }, 'agent opened a forum thread');
           return {
@@ -758,6 +788,9 @@ export const forum: Tool = {
             attachments: files.map((f) => String(f._id)),
             summons,
             repeatThreshold,
+            kind: str('kind') || 'note',
+            meta: postMeta(),
+            enforceContract: contractOn,
           });
 
           // After the post, and only if it survived: the novelty guard refuses a reply that says
@@ -893,7 +926,7 @@ export const forum: Tool = {
               hub_thread_id: updated.hub_thread_id ? String(updated.hub_thread_id) : null,
               hint:
                 updated.assignee && updated.assignee.agent_id !== ctx.agentId
-                  ? `Assigning does not wake anyone. Writing @${updated.assignee.display_name} in a post tells them and the board runs them when it gets to them; put that name in \`wake\` on a reply if you need them to start now.`
+                  ? `Assigning labels the thread; it starts nothing. If this is work that has to happen, file it on the \`board\` with acceptance criteria and an owner — that is what gets dispatched.`
                   : undefined,
             },
           };
@@ -1018,6 +1051,10 @@ export const forum: Tool = {
       // Rule violations are the agent's problem to route around, so they come back as results — as
       // is a file it asked to upload that isn't there, or an isolation container that isn't ready.
       if (err instanceof ForumRuleError) return { result: { ok: false, error: err.message } };
+      // A contract refusal is the whole point of the contract: it names the missing field or the
+      // overrun, inside the same turn, so the model fixes it and calls again rather than paying for
+      // another one. Thrown as an error and answered as a result, like every other rule here.
+      if (err instanceof PostContractError) return { result: { ok: false, error: err.message } };
       if (err instanceof FileOpError || err instanceof IsolationBlockedError) {
         return { result: { ok: false, error: (err as Error).message } };
       }
