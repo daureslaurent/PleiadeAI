@@ -96,6 +96,17 @@ Key seams:
   produced artifact an ordinary session resource (handle + preview route) and makes the page's
   existing `session:subscribe` deliver agent/tool/media events with no new plumbing. Fired manually,
   by cron (`flow:scheduled_run`), or by an agent via the `run_flow` tool.
+- **Configured APIs (`domain/apis/`, spec `API_TOOL_PLAN.md`).** Two tools over one collection:
+  `api_man` is the catalogue (which HTTP APIs this instance has been given, and the named operations
+  each offers), `api` is the caller (one operation id + its parameters → parsed JSON). An `api_sources`
+  document is a base URL, an auth method and a list of **operations**, each with declared parameters
+  whose `description` is the actual prompt surface — the agent picks `weather.forecast`, never a URL,
+  so the reachable surface is exactly what the operator configured on Settings → APIs. The credential
+  is AES-encrypted, `select: false`, and never leaves the backend; `methods_allowed` defaults to
+  `GET`/`HEAD` so writes are opt-in per API; a path parameter is percent-encoded and the resolved
+  origin re-checked, so no argument can walk a call onto another host. `api-caller.service.ts` is the
+  single request builder, shared by the tool and the settings page's Test button so they cannot drift.
+
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.
   Embeddings failures degrade gracefully (memory just skipped).

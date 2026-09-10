@@ -32,6 +32,7 @@ import { scoringRouter } from './transport/http/routes/scoring.routes';
 import { reconcileScoringIndexes } from './domain/scoring/conversation-score.repository';
 import { finetuneServersRouter } from './transport/http/routes/finetune-servers.routes';
 import { androidDevicesRouter } from './transport/http/routes/android-devices.routes';
+import { apiSourcesRouter } from './transport/http/routes/api-sources.routes';
 import { finetuneJobsRouter } from './transport/http/routes/finetune-jobs.routes';
 import { startFinetunePoller } from './finetune/poller';
 import { monitorRouter } from './transport/http/routes/monitor.routes';
@@ -139,6 +140,7 @@ async function main(): Promise<void> {
   app.use('/api/tools', requireAuth, toolsRouter);
   app.use('/api/isolations', requireAuth, isolationsRouter);
   app.use('/api/android-devices', requireAuth, androidDevicesRouter);
+  app.use('/api/api-sources', requireAuth, apiSourcesRouter);
   app.use('/api/images', requireAuth, imagesRouter);
   // `allowQueryToken` on these two only: they are the surfaces a bare <img>/<video>/<audio> element
   // fetches directly, and those can't be given an Authorization header. Every other route keeps

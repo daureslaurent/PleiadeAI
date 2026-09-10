@@ -5,6 +5,7 @@ import {
   KeyRound,
   Palette,
   MonitorDot,
+  Webhook,
   RefreshCcwDot,
   Server,
   Users,
@@ -65,6 +66,13 @@ export const CATEGORIES: SettingsCategory[] = [
     blurb: 'External services and devices agents can reach.',
     contains: ['Google OAuth client', 'Linked mailboxes', 'ComfyUI server', 'Android devices'],
     icon: Cable,
+  },
+  {
+    slug: 'apis',
+    title: 'APIs',
+    blurb: 'The HTTP APIs agents may call, and the named operations on each.',
+    contains: ['Configured APIs', 'Operations', 'Credentials'],
+    icon: Webhook,
   },
   {
     slug: 'monitor',

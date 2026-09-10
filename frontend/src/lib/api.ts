@@ -3128,3 +3128,107 @@ export const boardApi = {
     api.post<{ sessionId: string }>(`/board/tasks/${id}/dispatch`, { kind }).then((r) => r.data),
   deleteTask: (id: string) => api.delete(`/board/tasks/${id}`).then(() => undefined),
 };
+
+// ── Configured HTTP APIs (Settings → APIs; API_TOOL_PLAN.md) ────────────────────────────────────
+// One entry is an API the `api_man`/`api` tools expose to agents: a base URL, how it authenticates,
+// and the named operations that may be called on it. The credential is write-only across this
+// surface — reads report `has_secret`, never the value.
+
+export const API_AUTH_TYPES = ['none', 'header', 'query', 'bearer', 'basic'] as const;
+export type ApiAuthType = (typeof API_AUTH_TYPES)[number];
+
+export const API_HTTP_METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+export type ApiHttpMethod = (typeof API_HTTP_METHODS)[number];
+
+export const API_PARAM_LOCATIONS = ['query', 'path', 'body', 'header'] as const;
+export type ApiParamLocation = (typeof API_PARAM_LOCATIONS)[number];
+
+export const API_PARAM_TYPES = ['string', 'number', 'boolean', 'object', 'array'] as const;
+export type ApiParamType = (typeof API_PARAM_TYPES)[number];
+
+export interface ApiPair {
+  key: string;
+  value: string;
+}
+
+export interface ApiParamSpec {
+  name: string;
+  in: ApiParamLocation;
+  type: ApiParamType;
+  required: boolean;
+  /** What the model reads in `api_man` before choosing a value — the real prompt surface. */
+  description: string;
+  default: string;
+}
+
+export interface ApiOperationSpec {
+  id: string;
+  description: string;
+  method: ApiHttpMethod;
+  path: string;
+  query: ApiPair[];
+  body_template: string;
+  params: ApiParamSpec[];
+  enabled: boolean;
+}
+
+export interface ApiSource {
+  _id: string;
+  name: string;
+  description: string;
+  base_url: string;
+  enabled: boolean;
+  auth_type: ApiAuthType;
+  auth_header: string;
+  auth_query: string;
+  auth_username: string;
+  headers: ApiPair[];
+  methods_allowed: ApiHttpMethod[];
+  timeout_ms: number;
+  operations: ApiOperationSpec[];
+  notes: string;
+  last_error: string;
+  last_used_at: string | null;
+  has_secret: boolean;
+}
+
+export interface ApiSourcePatch {
+  name?: string;
+  description?: string;
+  base_url?: string;
+  enabled?: boolean;
+  auth_type?: ApiAuthType;
+  auth_header?: string;
+  auth_query?: string;
+  auth_username?: string;
+  /** Omit to keep the stored credential; `''` clears it. */
+  secret?: string;
+  headers?: ApiPair[];
+  methods_allowed?: ApiHttpMethod[];
+  timeout_ms?: number;
+  operations?: ApiOperationSpec[];
+  notes?: string;
+}
+
+/** Outcome of the settings page's Test button — the same call path an agent's `api` takes. */
+export interface ApiTestResult {
+  ok: boolean;
+  status?: number;
+  url?: string;
+  duration_ms?: number;
+  truncated?: string;
+  data?: unknown;
+  error?: string;
+}
+
+export const apiSourcesApi = {
+  list: () => api.get<ApiSource[]>('/api-sources').then((r) => r.data),
+  create: (body: ApiSourcePatch & { name: string; base_url: string }) =>
+    api.post<ApiSource>('/api-sources', body).then((r) => r.data),
+  update: (id: string, patch: ApiSourcePatch) =>
+    api.put<ApiSource>(`/api-sources/${id}`, patch).then((r) => r.data),
+  remove: (id: string) => api.delete(`/api-sources/${id}`).then((r) => r.data),
+  /** Run one operation live; `operation` may be the bare id or the full `<api>.<id>`. */
+  test: (id: string, operation: string, params: Record<string, unknown>) =>
+    api.post<ApiTestResult>(`/api-sources/${id}/test`, { operation, params }).then((r) => r.data),
+};

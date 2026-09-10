@@ -8,6 +8,7 @@ import { InferencePanel } from './panels/InferencePanel';
 import { MemoryPanel } from './panels/MemoryPanel';
 import { FleetPanel } from './panels/FleetPanel';
 import { ConnectionsPanel } from './panels/ConnectionsPanel';
+import { ApisPanel } from './panels/ApisPanel';
 import { MonitorPanel } from './panels/MonitorPanel';
 import { InterfacePanel } from './panels/InterfacePanel';
 import { SystemPanel } from './panels/SystemPanel';
@@ -30,6 +31,7 @@ const PANELS: Record<string, () => ReactNode> = {
   memory: MemoryPanel,
   fleet: FleetPanel,
   connections: ConnectionsPanel,
+  apis: ApisPanel,
   monitor: MonitorPanel,
   interface: InterfacePanel,
   system: SystemPanel,

@@ -26,6 +26,7 @@ import {
 } from './core/android';
 import { analyzeImage } from './core/analyzeImage';
 import { editImage, generateImage, generateSound, generateVideo } from './core/media';
+import { api, apiMan } from './core/api';
 import { data } from './core/data';
 import { runFlow } from './core/runFlow';
 import { board } from './core/board';
@@ -125,6 +126,10 @@ const CORE_TOOLS: Record<string, Tool> = {
   // Operator-authored pipelines (FLOWS_PLAN.md). Opt-in per agent: a flow can spend real GPU time,
   // so an agent gets to fire one only when the operator says so.
   [runFlow.name]: runFlow,
+  // Operator-configured HTTP APIs (API_TOOL_PLAN.md): `api_man` is the catalogue, `api` the caller.
+  // Opt-in per agent via tools_allowed — an API entry can carry a real credential.
+  [apiMan.name]: apiMan,
+  [api.name]: api,
   [board.name]: board,
   [forum.name]: forum,
   [forumAdmin.name]: forumAdmin,
@@ -247,6 +252,8 @@ export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
 const CATEGORY_BY_TOOL: Record<string, ToolCategory> = {
   web_search: 'web',
   webfetch: 'web',
+  api: 'web',
+  api_man: 'web',
   read: 'files',
   write: 'files',
   edit: 'files',

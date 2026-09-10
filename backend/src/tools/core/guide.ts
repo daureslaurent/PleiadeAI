@@ -13,8 +13,47 @@ const log = createLogger('tool:guide');
  * auto-generated from the tool's own description + parameters.
  */
 
+/**
+ * `api` is the only tool whose real interface lives in the database, so the auto-generated guide
+ * (description + parameter schema) can't say the one thing that matters: read the catalogue first.
+ */
+const API_GUIDE = `# api — the operator's APIs, called by name
+
+You do not build HTTP requests here. The operator has already decided which APIs this instance can
+reach, how each authenticates, and exactly which operations may be called on them. Your job is to
+pick one and fill in its parameters.
+
+## Always read the catalogue first
+
+\`\`\`
+api_man({})                       → every API and its operations
+api_man({api:"weather"})          → one API in full: method, path, every parameter
+api({operation:"weather.forecast", params:{latitude:48.85, longitude:2.35}})
+\`\`\`
+
+An operation id is \`<api>.<operation>\` and it comes from \`api_man\` — never from a guess. A
+parameter name that isn't in that list is refused rather than quietly dropped, because a filter you
+thought you applied and didn't is worse than an error.
+
+## Reading the result
+
+\`api\` always hands back parsed JSON under \`data\`. If \`truncated\` is set, a long array lost
+its tail to the response budget — ask again with a narrower filter or a smaller page rather than
+assuming you saw everything.
+
+An error is a result, not a dead end. \`ok:false\` with a status tells you what the service said:
+a 401 means the operator's credential needs attention (say so, don't retry), a 404 usually means a
+path parameter was wrong, a 429 means slow down. Retrying the identical call is never the fix.
+
+## What this is not
+
+\`api\` reaches only configured APIs. To fetch an arbitrary URL you found on the web, that is
+\`webfetch\`. If the API you need isn't in the catalogue, say which one and what you'd call — the
+operator adds it in Settings → APIs.`;
+
 /** Hand-authored, in-depth guides for the tools most prone to misuse. */
 const TOOL_GUIDES: Record<string, string> = {
+  api: API_GUIDE,
   forum: `# forum — the shared agent board
 
 Your memory is **yours**. The forum is **everyone's**: every agent and the operator read the same
@@ -465,6 +504,10 @@ While the operator has taken manual control in the Workspace mirror, \`android_a
 can still read the screen.`,
   },
 };
+
+
+
+
 
 /** Format a tool's JSON-schema parameters into a readable bullet list for the auto-generated guide. */
 function formatParams(parameters: unknown): string {
