@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ListChecks, Plus, Sparkles } from 'lucide-react';
 import { boardApi, type BoardPlan } from '../../lib/api';
 import { Button, Callout, EmptyState, Field, Row, Section, Spinner, Textarea } from '../../components/ui';
-import { PlanStateBadge, TurnMeter } from './boardBits';
+import { PlanStateBadge, ProgressTrack, TurnMeter } from './boardBits';
 
 /**
  * The board's front page: every project, and what each one is waiting on.
@@ -99,32 +99,56 @@ export function BoardView() {
           ) : null}
 
           <div className="space-y-2">
-            {plans.map((plan) => (
-              <Row key={plan.id} className="p-3" onClick={() => nav(`/board/${plan.id}`)}>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <PlanStateBadge state={plan.state} />
-                    <span className="truncate text-sm text-slate-100">{plan.goal}</span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                    <span>
-                      {plan.doneCount ?? 0}/{plan.taskCount ?? 0} accepted
-                    </span>
-                    {plan.blockedCount ? <span className="text-red-400">{plan.blockedCount} blocked</span> : null}
-                    <span>managed by {plan.manager.display_name}</span>
-                    {plan.revision > 0 ? <span>revision {plan.revision}</span> : null}
-                    <TurnMeter spent={plan.turnsSpent} max={plan.turnsMax} />
-                  </div>
-                  {/* The reason the scheduler gave up, verbatim. Without it, "needs you" is a colour. */}
-                  {plan.escalation ? (
-                    <div className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-400">
-                      <Sparkles size={11} className="mt-0.5 shrink-0" />
-                      <span className="min-w-0">{plan.escalation}</span>
+            {plans.map((plan) => {
+              const total = plan.taskCount ?? 0;
+              const done = plan.doneCount ?? 0;
+              const blocked = plan.blockedCount ?? 0;
+              return (
+                <Row key={plan.id} className="p-3" onClick={() => nav(`/board/${plan.id}`)}>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <span className="min-w-0 flex-1 text-sm leading-snug text-slate-100">{plan.goal}</span>
+                      <PlanStateBadge state={plan.state} />
                     </div>
-                  ) : null}
-                </div>
-              </Row>
-            ))}
+
+                    {/* The bar is the card's answer to "is this moving?", and the numbers under it
+                        are the exact version for whoever wants it. */}
+                    {total ? (
+                      <div className="space-y-1.5">
+                        <ProgressTrack
+                          counts={{ done, blocked, todo: Math.max(0, total - done - blocked), doing: 0, review: 0, cancelled: 0 }}
+                          total={total}
+                        />
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                          <span className="text-slate-400">
+                            {done}/{total} accepted
+                          </span>
+                          {blocked ? <span className="text-red-400">{blocked} blocked</span> : null}
+                          <span className="ml-auto">
+                            <TurnMeter spent={plan.turnsSpent} max={plan.turnsMax} />
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-amber-400">not planned yet — open it and press Plan it</div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                      <span>managed by {plan.manager.display_name}</span>
+                      {plan.revision > 0 ? <span>revision {plan.revision}</span> : null}
+                    </div>
+
+                    {/* The reason the scheduler gave up, verbatim. Without it, "needs you" is a colour. */}
+                    {plan.escalation ? (
+                      <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1.5 text-[11px] leading-relaxed text-amber-300">
+                        <Sparkles size={11} className="mt-0.5 shrink-0" />
+                        <span className="line-clamp-2 min-w-0">{plan.escalation}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </Row>
+              );
+            })}
           </div>
         </Section>
       </div>

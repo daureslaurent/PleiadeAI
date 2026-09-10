@@ -87,3 +87,66 @@ export function Detail({ label, children }: { label: string; children: ReactNode
     </div>
   );
 }
+
+/**
+ * The state ordering used everywhere the board sorts or groups tasks: what the operator has to act
+ * on first, then what is moving, then what is finished. A project page that lists tasks in creation
+ * order buries the one thing that has stopped under three that are fine.
+ */
+export const TASK_ORDER: Record<BoardTaskState, number> = {
+  blocked: 0,
+  review: 1,
+  doing: 2,
+  todo: 3,
+  done: 4,
+  cancelled: 5,
+};
+
+/** The bar segments, in reading order — done first so progress grows from the left. */
+const TRACK: { state: BoardTaskState; className: string }[] = [
+  { state: 'done', className: 'bg-emerald-400' },
+  { state: 'review', className: 'bg-accent' },
+  { state: 'doing', className: 'bg-amber-400' },
+  { state: 'blocked', className: 'bg-red-400' },
+];
+
+/**
+ * A project's tasks as one segmented bar.
+ *
+ * The counts were previously four numbers in a metadata line, which is a thing you read only after
+ * deciding to. The bar answers "is this moving, and is anything stuck?" pre-attentively — a red
+ * notch is visible without reading a word — and the counts stay underneath for the exact answer.
+ */
+export function ProgressTrack({ counts, total }: { counts: Record<BoardTaskState, number>; total: number }) {
+  const denom = Math.max(1, total);
+  return (
+    <span className="flex h-1.5 w-full overflow-hidden rounded-full raise-2">
+      {TRACK.map(({ state, className }) =>
+        counts[state] ? (
+          <span
+            key={state}
+            className={className}
+            style={{ width: `${(counts[state] / denom) * 100}%` }}
+            title={`${counts[state]} ${TASK_STATES[state].label}`}
+          />
+        ) : null,
+      )}
+    </span>
+  );
+}
+
+/** Tally a task list by state — the shape `ProgressTrack` and the filter tabs both read. */
+export function tallyStates(states: BoardTaskState[]): Record<BoardTaskState, number> {
+  const counts = { todo: 0, doing: 0, review: 0, blocked: 0, done: 0, cancelled: 0 };
+  for (const s of states) counts[s] += 1;
+  return counts;
+}
+
+/**
+ * A task the board cannot move on its own: nobody but the operator can review it, or it has stopped
+ * with a reason. This is the definition the "needs you" filter and the auto-expanded cards share, so
+ * the count on the tab and the cards that open themselves can never disagree.
+ */
+export function needsOperator(task: { state: BoardTaskState; reviewer: unknown | null }): boolean {
+  return task.state === 'blocked' || (task.state === 'review' && !task.reviewer);
+}
