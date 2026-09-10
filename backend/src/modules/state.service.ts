@@ -5,12 +5,16 @@ import { CUSTOM_MODULE_PREFIX, isCustomModuleId, type BlockPlacement, type Custo
 /**
  * Which modules are on, what the operator has rewritten, and what they have written themselves.
  *
- * Enablement is stored as a list of *disabled* ids rather than a row per module — the same shape
- * `global_modes_disabled` uses, and for the same reason: the modules themselves are code-defined, so
- * a release that adds one has it on by default instead of missing from a table nobody migrated.
+ * Enablement is stored as a list of ids *overridden away from their default* rather than a row per
+ * module — the same shape `global_modes_disabled` uses, and for the same reason: the modules
+ * themselves are code-defined, so a release that adds one has it on by default instead of missing
+ * from a table nobody migrated. Almost every module defaults on, so in practice this list reads as
+ * "disabled" — but the one module that ships off (`board`) needs the same list to mean "enabled" for
+ * its id, which is why membership is interpreted relative to `moduleDefaultEnabled`, never as a
+ * literal "off".
  */
 export interface ModuleState {
-  /** Ids the operator switched off (built-in modules only). */
+  /** Ids whose enabled state the operator flipped away from `moduleDefaultEnabled`. */
   disabled: Set<string>;
   /** `{ [moduleId]: { [blockTitle]: text } }` — a rewritten block's replacement wording. */
   overrides: Record<string, Record<string, string>>;
@@ -51,8 +55,11 @@ export function moduleStateFrom(settings: SettingsShape): ModuleState {
       // module that was removed, and a typo must never gate a tool nobody owns.
       if (!mod) return false;
       if (mod.mandatory) return true;
-      if (disabled.has(id)) return false;
-      return moduleDefaultEnabled(mod);
+      const def = moduleDefaultEnabled(mod);
+      // Presence in the list means "flipped away from default", not "off" — a module that ships off
+      // (`board`) is turned ON by being in this same list, exactly the way one that ships on is
+      // turned off by it.
+      return disabled.has(id) ? !def : def;
     },
     override(moduleId: string, blockTitle: string) {
       const text = overrides?.[moduleId]?.[blockTitle];

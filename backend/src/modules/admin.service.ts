@@ -33,6 +33,12 @@ async function doc(): Promise<Record<string, unknown>> {
  * its own work wrongly and never notices. The **board** writes `forum_board_enabled` as well as its
  * own row: that flag is what `forum-scheduler.ts` reads to decide whether to dispatch at all, and a
  * module switch that left a scheduler running would be a switch that lies.
+ *
+ * `modules_disabled` holds ids *flipped away from their default* (`state.service.ts`), not literal
+ * off-switches — `board` ships `defaultEnabled: false`, so enabling it has to ADD its id to that list
+ * rather than delete from it, or the toggle is a no-op forever (which is exactly the bug that left
+ * `forum_board_enabled: true` with the scheduler dispatching while every agent's `board` tool stayed
+ * gated off).
  */
 export async function setModuleEnabled(id: string, enabled: boolean): Promise<void> {
   const mod = moduleById(id);
@@ -43,7 +49,7 @@ export async function setModuleEnabled(id: string, enabled: boolean): Promise<vo
 
   const current = await doc();
   const disabled = new Set(((current.modules_disabled as string[] | undefined) ?? []).filter(Boolean));
-  if (enabled) disabled.delete(id);
+  if (enabled === moduleDefaultEnabled(mod)) disabled.delete(id);
   else disabled.add(id);
 
   const set: Record<string, unknown> = { modules_disabled: [...disabled] };
