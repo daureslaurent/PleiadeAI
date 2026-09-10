@@ -57,75 +57,77 @@ export function BoardView() {
   if (!plans) return <Spinner />;
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 p-4">
-      <Section
-        title="Projects"
-        icon={<ListChecks size={13} />}
-        right={
-          <Button variant="primary" icon={<Plus size={13} />} onClick={() => setCreating((v) => !v)}>
-            New project
-          </Button>
-        }
-      >
-        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-          A goal, broken into tasks with owners and acceptance criteria. The board dispatches each
-          task when everything it waits on has been accepted — nobody has to remember to hand it on.
-        </p>
-        {error ? <Callout tone="error">{error}</Callout> : null}
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto w-full max-w-5xl space-y-4 p-4">
+        <Section
+          title="Projects"
+          icon={<ListChecks size={13} />}
+          right={
+            <Button variant="primary" icon={<Plus size={13} />} onClick={() => setCreating((v) => !v)}>
+              New project
+            </Button>
+          }
+        >
+          <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+            A goal, broken into tasks with owners and acceptance criteria. The board dispatches each
+            task when everything it waits on has been accepted — nobody has to remember to hand it on.
+          </p>
+          {error ? <Callout tone="error">{error}</Callout> : null}
 
-        {creating ? (
-          <div className="space-y-3 rounded-lg hairline p-3">
-            <Field
-              label="Goal"
-              hint="Say what you want to exist when this is finished, in the words you would use to a person. The manager turns it into tasks."
-            >
-              <Textarea rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
-            </Field>
-            <div className="flex gap-2">
-              <Button variant="primary" loading={busy} onClick={create}>
-                Open project
-              </Button>
-              <Button onClick={() => setCreating(false)}>Cancel</Button>
-            </div>
-          </div>
-        ) : null}
-
-        {!plans.length && !creating ? (
-          <EmptyState icon={<ListChecks size={20} />}>
-            No projects yet. Open one with a goal — the project manager agent breaks it into tasks,
-            and the board runs them.
-          </EmptyState>
-        ) : null}
-
-        <div className="space-y-2">
-          {plans.map((plan) => (
-            <Row key={plan.id} className="p-3" onClick={() => nav(`/board/${plan.id}`)}>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <PlanStateBadge state={plan.state} />
-                  <span className="truncate text-sm text-slate-100">{plan.goal}</span>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                  <span>
-                    {plan.doneCount ?? 0}/{plan.taskCount ?? 0} accepted
-                  </span>
-                  {plan.blockedCount ? <span className="text-red-400">{plan.blockedCount} blocked</span> : null}
-                  <span>managed by {plan.manager.display_name}</span>
-                  {plan.revision > 0 ? <span>revision {plan.revision}</span> : null}
-                  <TurnMeter spent={plan.turnsSpent} max={plan.turnsMax} />
-                </div>
-                {/* The reason the scheduler gave up, verbatim. Without it, "needs you" is a colour. */}
-                {plan.escalation ? (
-                  <div className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-400">
-                    <Sparkles size={11} className="mt-0.5 shrink-0" />
-                    <span className="min-w-0">{plan.escalation}</span>
-                  </div>
-                ) : null}
+          {creating ? (
+            <div className="space-y-3 rounded-lg hairline p-3">
+              <Field
+                label="Goal"
+                hint="Say what you want to exist when this is finished, in the words you would use to a person. The manager turns it into tasks."
+              >
+                <Textarea rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
+              </Field>
+              <div className="flex gap-2">
+                <Button variant="primary" loading={busy} onClick={create}>
+                  Open project
+                </Button>
+                <Button onClick={() => setCreating(false)}>Cancel</Button>
               </div>
-            </Row>
-          ))}
-        </div>
-      </Section>
+            </div>
+          ) : null}
+
+          {!plans.length && !creating ? (
+            <EmptyState icon={<ListChecks size={20} />}>
+              No projects yet. Open one with a goal — the project manager agent breaks it into tasks,
+              and the board runs them.
+            </EmptyState>
+          ) : null}
+
+          <div className="space-y-2">
+            {plans.map((plan) => (
+              <Row key={plan.id} className="p-3" onClick={() => nav(`/board/${plan.id}`)}>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <PlanStateBadge state={plan.state} />
+                    <span className="truncate text-sm text-slate-100">{plan.goal}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                    <span>
+                      {plan.doneCount ?? 0}/{plan.taskCount ?? 0} accepted
+                    </span>
+                    {plan.blockedCount ? <span className="text-red-400">{plan.blockedCount} blocked</span> : null}
+                    <span>managed by {plan.manager.display_name}</span>
+                    {plan.revision > 0 ? <span>revision {plan.revision}</span> : null}
+                    <TurnMeter spent={plan.turnsSpent} max={plan.turnsMax} />
+                  </div>
+                  {/* The reason the scheduler gave up, verbatim. Without it, "needs you" is a colour. */}
+                  {plan.escalation ? (
+                    <div className="mt-1 flex items-start gap-1.5 text-[11px] text-amber-400">
+                      <Sparkles size={11} className="mt-0.5 shrink-0" />
+                      <span className="min-w-0">{plan.escalation}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </Row>
+            ))}
+          </div>
+        </Section>
+      </div>
     </div>
   );
 }
