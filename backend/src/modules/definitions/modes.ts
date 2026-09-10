@@ -56,6 +56,7 @@ export const modesModule: PromptModule = {
       title: 'Active modes (user turn)',
       placement: 'user_suffix',
       order: 900,
+      detect: /^\[Active modes —/,
       render: (ctx: PromptContext) => (ctx.modes.user.length ? renderModeUserSuffix(ctx.modes.user) : null),
     },
   ],

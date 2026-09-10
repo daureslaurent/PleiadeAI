@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Hash, PieChart, RefreshCw } from 'lucide-react';
 import { llmDebugApi, type Agent, type LlamaCallRecord, type PromptUsageBreakdown } from '../../lib/api';
 import { useStream } from '../../store/stream';
@@ -23,6 +23,13 @@ interface Props {
  * It reads the **latest** captured inference call of the session and re-reads when a turn finishes
  * streaming; while one is in flight, `useLiveUsageGuess` re-estimates the same shape every render off
  * the live stream state so the bar keeps moving instead of sitting frozen until the turn settles.
+ *
+ * That re-read is a short *poll*, not a single fetch: a capture is persisted fire-and-forget off
+ * `llama:call_end`, so the instant streaming stops the just-finished call is usually not in Mongo
+ * yet. One fetch there reads the state from *before* the turn — nothing at all on a session's first
+ * turn — which is how the tab used to go blank exactly when it finally had something exact to show.
+ * The poll stops on the first record newer than the one already on screen, and a fetch that comes
+ * back empty or fails leaves the last good breakdown up rather than clearing it.
  */
 export function PromptUsagePanel({ sessionId, agent }: Props) {
   const streaming = useStream((s) => s.streaming);
@@ -30,44 +37,65 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
   const [usage, setUsage] = useState<PromptUsageBreakdown | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!sessionId) {
-      setCall(null);
-      setUsage(null);
-      return;
-    }
-    setLoading(true);
-    try {
-      const rows = await llmDebugApi.bySession(sessionId, 12);
-      // The last pass carries the fullest context — that's the window the next turn starts from.
-      const latest = rows.at(-1) ?? null;
-      setCall(latest);
-      if (!latest) {
-        setUsage(null);
-        return;
-      }
-      setUsage(
-        await llmDebugApi.usageBreakdown(
+  /** The call currently on screen — read by the poll without making it a render dependency. */
+  const shownIdRef = useRef<string | null>(null);
+
+  /**
+   * Fetch the session's latest capture and size it. Returns whether it found one *newer* than
+   * `knownId`, which is what lets the post-turn poll stop as soon as the new record lands.
+   */
+  const load = useCallback(
+    async (knownId?: string | null): Promise<boolean> => {
+      if (!sessionId) return false;
+      setLoading(true);
+      try {
+        const rows = await llmDebugApi.bySession(sessionId, 12);
+        // The last pass carries the fullest context — that's the window the next turn starts from.
+        const latest = rows.at(-1) ?? null;
+        if (!latest || (knownId !== undefined && latest.id === knownId)) return false;
+        const breakdown = await llmDebugApi.usageBreakdown(
           latest.request.messages ?? [],
           latest.tools ?? undefined,
           agent?._id ?? null,
-        ),
-      );
-    } catch {
-      setUsage(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [sessionId, agent?._id]);
+        );
+        shownIdRef.current = latest.id;
+        setCall(latest);
+        setUsage(breakdown);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sessionId, agent?._id],
+  );
 
+  // Switching sessions is the one time the panel must forget: another conversation's window is not
+  // a stale view of this one, it's the wrong answer.
   useEffect(() => {
-    void load();
-  }, [load]);
+    shownIdRef.current = null;
+    setCall(null);
+    setUsage(null);
+  }, [sessionId]);
 
-  // Captures are persisted at call end, so a finished turn is when there is something new to read.
+  // Initial read, and the post-turn poll — the capture is written fire-and-forget after the stream
+  // ends, so give it a few tries with a widening gap before settling for what's already shown.
   useEffect(() => {
-    if (!streaming) void load();
-  }, [streaming, load]);
+    if (streaming || !sessionId) return;
+    let cancelled = false;
+    const known = shownIdRef.current;
+    void (async () => {
+      for (const wait of [0, 400, 1000, 2000, 4000]) {
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        if (cancelled) return;
+        if (await load(known)) return;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [streaming, sessionId, load]);
 
   const guess = useLiveUsageGuess(usage, streaming);
   const isGuess = streaming && guess !== null;
@@ -141,8 +169,10 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
         </div>
       </div>
 
-      {/* Detail: every module and category, its tokens and share — expand a module for its blocks. */}
-      {shown && !loading ? <UsageDetailList breakdown={shown} /> : null}
+      {/* Detail: every module and category, its tokens and share — expand a module for its blocks.
+          Kept up while a refresh or the post-turn poll runs: a list that blanks on every attempt is
+          worse than one that's a second stale, and the spinner already says a read is in flight. */}
+      {shown ? <UsageDetailList breakdown={shown} /> : null}
     </div>
   );
 }

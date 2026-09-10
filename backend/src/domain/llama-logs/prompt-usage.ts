@@ -80,9 +80,9 @@ const TAIL_BLOCKS = new Set([...blockTitles('system_tail'), ...blockTitles('syst
  * `HEAD_BLOCKS`/`TAIL_BLOCKS` above.
  *
  * `user_suffix` blocks (the image note, a prompt mode) render *inside* the user message rather than
- * as their own titled block, so `planUsagePieces` never produces a piece with their slug — they stay
- * folded into the generic `history`/`user` row. Splitting them out would need `splitSystemMessage`-
- * style marker parsing on user messages; left for later.
+ * as their own titled block. They are cut back out by `splitUserMessage` below, matching each
+ * block's declared `detect` signature against the message's trailing paragraphs — so every module
+ * that spent tokens this turn owns a row, wherever its text landed.
  */
 const MODULE_BY_SLUG = new Map<
   string,
@@ -97,6 +97,16 @@ for (const placement of ['system_head', 'system_tail', 'system_suffix', 'user_su
     });
   }
 }
+
+/**
+ * The `user_suffix` blocks, in reverse render order (the assembler appends them by ascending
+ * `order`, so the *last* paragraph of the message is the *highest* order). Only blocks that declared
+ * a `detect` signature can be recognised again; one without stays folded into the user's own row.
+ */
+const USER_SUFFIX_BLOCKS = blocksAt('user_suffix')
+  .filter(({ block }) => block.detect)
+  .map(({ block }) => ({ id: slug(block.title), label: block.title, detect: block.detect! }))
+  .reverse();
 
 /** The fence the assembler puts on either side of the operator-authored `system_prompt`. */
 const AUTHORED_SEPARATOR = '\n\n---\n\n';
@@ -194,6 +204,35 @@ function splitSystemMessage(content: string, assembled = true): { title: string 
   ];
 }
 
+/**
+ * Take a captured user message apart into the operator's own words and the module blocks the
+ * assembler appended to them (`modules/assemble.ts`: `[baseText, ...user_suffix blocks].join('\n\n')`).
+ *
+ * Read from the end, one paragraph at a time, against the `detect` signature each `user_suffix`
+ * block declares. A paragraph nobody claims ends the walk — an unrecognised tail is the user's text,
+ * and stopping there is what keeps a message that merely *ends* in a bracketed line from being
+ * mis-billed to a module. The blocks are billed once per user turn they rode on, which is exactly
+ * what the conversation is paying for them.
+ */
+function splitUserMessage(text: string): { id: string; label: string; body: string }[] {
+  if (!USER_SUFFIX_BLOCKS.length || !text.includes('[')) return [{ id: 'user', label: 'User', body: text }];
+
+  const paragraphs = text.split('\n\n');
+  const found: { id: string; label: string; body: string }[] = [];
+  const claimed = new Set<string>();
+
+  while (paragraphs.length > 1) {
+    const last = paragraphs[paragraphs.length - 1]!.trim();
+    const block = USER_SUFFIX_BLOCKS.find((b) => !claimed.has(b.id) && b.detect.test(last));
+    if (!block) break;
+    claimed.add(block.id);
+    found.unshift({ id: block.id, label: block.label, body: last });
+    paragraphs.pop();
+  }
+
+  return [{ id: 'user', label: 'User', body: paragraphs.join('\n\n') }, ...found];
+}
+
 /** One text to size, tagged with the row it belongs to. */
 interface Piece {
   id: string;
@@ -234,7 +273,14 @@ export function planUsagePieces(messages: unknown[], tools: unknown[] | undefine
       systemSeen = true;
       continue;
     }
-    if (m?.role === 'user') pieces.push({ id: 'user', label: 'User', group: 'conversation', text });
+    if (m?.role === 'user') {
+      // The user turn is the operator's words *plus* whatever `user_suffix` modules appended to
+      // them; billing the lot to `user` hides a per-turn module cost inside the conversation.
+      for (const part of splitUserMessage(text)) {
+        if (!part.body.trim() && part.id === 'user') continue;
+        pieces.push({ id: part.id, label: part.label, group: 'conversation', text: part.body });
+      }
+    }
     else if (m?.role === 'assistant')
       pieces.push({ id: 'assistant', label: 'Assistant', group: 'conversation', text });
     else if (m?.role === 'tool')

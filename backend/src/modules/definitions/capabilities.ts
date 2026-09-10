@@ -76,6 +76,9 @@ export const visualsModule: PromptModule = {
       title: 'Images in scope',
       placement: 'user_suffix',
       order: 10,
+      // Every variant of the note opens the same way: `[3 images are attached…`, `[1 image from
+      // earlier…`, `[The 2 images shown…`.
+      detect: /^\[(?:The )?\d+ images?\b/,
       render: (ctx: PromptContext) => renderImageNote(ctx.images),
     },
   ],

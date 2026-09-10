@@ -78,6 +78,15 @@ export interface PromptBlock {
    * for blocks that are pure static text — a block that renders live data has nothing to override.
    */
   overridable?: boolean;
+  /**
+   * `user_suffix` only: how `domain/llama-logs/prompt-usage.ts` recognises this block's rendered
+   * text again at the tail of a captured user message. A `system_*` block announces itself with its
+   * `## Title` and needs nothing here; a `user_suffix` block is glued headingless onto the
+   * operator's own words (a chat template honours a control token nowhere else), so without a
+   * signature its cost is billed to the user's message instead of to the module that wrote it.
+   * Matched against one trailing paragraph at a time, so anchor it (`/^\[Active modes —/`).
+   */
+  detect?: RegExp;
   render(ctx: PromptContext): string | null;
 }
 
