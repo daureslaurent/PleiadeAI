@@ -8,6 +8,9 @@ import { agentRepository } from '../agents/agent.repository';
 import { introspectModels } from '../../inference/llama-introspect';
 import { endpointGate, type GateCall } from '../../inference/endpoint-gate';
 import { endpointHealth } from '../../inference/endpoint-health';
+import { settingsService } from '../settings/settings.service';
+import { defaultModeIds, offeredModes } from '../../inference/modes';
+import type { EndpointMode } from './endpoint.model';
 
 const log = createLogger('endpoint-service');
 
@@ -63,6 +66,33 @@ function openAiBase(url: string): string {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export const endpointService = {
+  /**
+   * Every inference mode on offer for one agent's *resolved* model (`MODES_PLAN.md`): the endpoint's
+   * per-model ones plus the fleet-wide globals, with the standing (`default_on`) ids called out.
+   *
+   * The endpoint/model precedence is the resolver's, replayed here rather than re-implemented by a
+   * caller — which is why both the composer's chip list and the session route that records an
+   * opt-out come through this one function. They must agree on what the turn would actually apply,
+   * or unticking a chip would record an opt-out against a mode the turn never had.
+   */
+  async modesForAgent(
+    agentId: string | Types.ObjectId,
+  ): Promise<{ endpointId: string | null; model: string; modes: EndpointMode[]; defaults: string[] } | null> {
+    const agent = await agentRepository.findById(agentId).catch(() => null);
+    if (!agent) return null;
+    const endpoint = agent.endpoint_id
+      ? await endpointRepository.findById(agent.endpoint_id)
+      : await endpointRepository.findDefault();
+    const model = agent.model || endpoint?.default_model || endpoint?.models?.[0] || '';
+    const settings = await settingsService.get();
+    return {
+      endpointId: endpoint ? String(endpoint._id) : null,
+      model,
+      modes: offeredModes(endpoint, model, settings.global_modes),
+      defaults: defaultModeIds(endpoint, model, settings.global_modes),
+    };
+  },
+
   /**
    * Autodiscover the models an endpoint serves via `GET /v1/models` and cache them on the doc.
    * Returns the updated endpoint. Throws on transport/HTTP errors so the route can 502.

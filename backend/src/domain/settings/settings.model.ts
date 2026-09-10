@@ -10,6 +10,8 @@ const GlobalModeSchema = new Schema(
     id: { type: String, required: true },
     name: { type: String, required: true, trim: true },
     enabled: { type: Boolean, default: true },
+    /** Standing: on in every conversation and every side task until one explicitly opts out. */
+    default_on: { type: Boolean, default: false },
     text: { type: String, default: '' },
     placement: { type: String, enum: ['system_suffix', 'user_suffix'], default: 'system_suffix' },
   },
@@ -148,6 +150,13 @@ const SettingsSchema = new Schema(
      * list of their ids. A choice about which chips the composer offers, not an edit to the mode.
      */
     global_modes_disabled: { type: [String], default: [] },
+    /**
+     * Built-in modes the operator made **standing** (`default_on`). Same reason as
+     * `global_modes_disabled`: a built-in has no database row to carry the flag, and making one
+     * standing is a choice about this install rather than an edit to the app's wording. The
+     * operator's own global modes carry `default_on` on the record itself.
+     */
+    global_modes_default_on: { type: [String], default: [] },
     /**
      * Memory distillation (`docs/memory-souvenirs.md`). When on, a completed turn is passed back
      * through the agent's *own* model, which writes 0..N standalone memories instead of the raw

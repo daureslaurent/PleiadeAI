@@ -15,6 +15,12 @@ import { modeTone } from '../../lib/modeTone';
  * The selection is persisted on the session rather than held here, so a reload, a `continue` nudge
  * and an auto-loop tick all keep running the conversation the way the operator set it up.
  *
+ * A **standing** mode (`default_on`, set in Settings → Inference) starts lit without having been
+ * picked: it is on for every call in the app, this conversation included. Unticking one here is a
+ * real edit rather than a no-op, which is why the save sends the lit set and the server works out
+ * which standing modes that leaves off — an id missing from the list can no longer mean "off" by
+ * itself.
+ *
  * UI: a single collapsed trigger (avoids a full always-visible row eating composer space) that opens
  * a checklist popover; the current selection shows as small removable chips next to the trigger so
  * it's never invisible, just not the whole row.
@@ -29,14 +35,22 @@ export function ModeBar({ agentId, sessionId }: { agentId: string; sessionId: st
   // switching conversation changes which of them are on.
   useEffect(() => {
     let live = true;
-    void endpointsApi
-      .modesForAgent(agentId)
-      .then((r) => live && setModes(r.modes))
-      .catch(() => live && setModes([]));
-    void sessionsApi
-      .get(sessionId)
-      .then((s) => live && setActive(s.mode_ids ?? []))
-      .catch(() => live && setActive([]));
+    // Both halves in one pass: what a standing mode resolves to depends on the offer, so the lit set
+    // can't be worked out from the session alone.
+    void Promise.all([
+      endpointsApi.modesForAgent(agentId).catch(() => ({ modes: [] as EndpointMode[] })),
+      sessionsApi.get(sessionId).catch(() => null),
+    ]).then(([offer, session]) => {
+      if (!live) return;
+      const picked = session?.mode_ids ?? [];
+      const off = session?.modes_off ?? [];
+      setModes(offer.modes);
+      setActive(
+        offer.modes
+          .filter((m) => (picked.includes(m.id) || m.default_on) && !off.includes(m.id))
+          .map((m) => m.id),
+      );
+    });
     return () => {
       live = false;
     };
@@ -140,6 +154,14 @@ export function ModeBar({ agentId, sessionId }: { agentId: string; sessionId: st
                   </span>
                   {mode.type === 'sampling' ? <SlidersHorizontal size={12} className="shrink-0" /> : <Type size={12} className="shrink-0" />}
                   <span className="truncate">{mode.name}</span>
+                  {mode.default_on && (
+                    <span
+                      className="ml-auto shrink-0 text-[10px] text-slate-500"
+                      title="On by default everywhere — unticking it applies to this conversation only"
+                    >
+                      default
+                    </span>
+                  )}
                 </button>
               );
             })}

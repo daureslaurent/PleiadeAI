@@ -41,19 +41,43 @@ const SAMPLER_FIELD: Record<ModeSampler, keyof ModeSampling> = {
 
 /**
  * The modes that actually apply to this turn: enabled, attached to the *resolved* model (or global,
- * which every model gets), and picked by the operator — in the endpoint's array order, which is the order overlapping sampling fields
- * resolve in. An id that no longer resolves (the mode was deleted, or the agent moved to another
- * model) is silently dropped: a stale selection must never break the conversation that made it.
+ * which every model gets), and either picked by the operator or standing (`default_on`) — in the
+ * endpoint's array order, which is the order overlapping sampling fields resolve in. An id that no
+ * longer resolves (the mode was deleted, or the agent moved to another model) is silently dropped: a
+ * stale selection must never break the conversation that made it.
+ *
+ * `off` is the conversation's explicit opt-out list. It exists because a default cannot be undone by
+ * omission: once a mode is standing, "not in `ids`" is indistinguishable from "never touched", so
+ * unticking one has to be *recorded*. A caller with no conversation (a side task) passes neither
+ * list and gets exactly the standing modes.
  */
 export function selectModes(
   endpoint: Pick<Endpoint, 'modes'> | null,
   model: string,
   ids: readonly string[] | undefined,
   globals?: GlobalMode[],
+  off?: readonly string[],
 ): EndpointMode[] {
-  if (!ids?.length) return [];
-  const wanted = new Set(ids);
-  return offeredModes(endpoint, model, globals).filter((m) => wanted.has(m.id));
+  const wanted = new Set(ids ?? []);
+  const optedOut = new Set(off ?? []);
+  return offeredModes(endpoint, model, globals).filter(
+    (m) => (wanted.has(m.id) || m.default_on === true) && !optedOut.has(m.id),
+  );
+}
+
+/**
+ * The standing modes on offer here — the ones a conversation starts with lit and a side task runs
+ * under. Ids only: the composer needs to know which of its chips are on without the operator having
+ * picked them, and the session route needs them to work out which of them a save just switched off.
+ */
+export function defaultModeIds(
+  endpoint: Pick<Endpoint, 'modes'> | null,
+  model: string,
+  globals?: GlobalMode[],
+): string[] {
+  return offeredModes(endpoint, model, globals)
+    .filter((m) => m.default_on === true)
+    .map((m) => m.id);
 }
 
 /**

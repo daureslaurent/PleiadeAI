@@ -89,10 +89,12 @@ body, so they're set on a cast body object).
 
 Scope rules, deliberately:
 
-- **Depth 0 only.** `AgentRunner` reads `session.mode_ids` for the top-level run. A sub-agent hop
-  resolves without them: the operator's chat-level choice is not an instruction to every delegate.
-- **Fallback endpoints get no modes.** A mode belongs to one model on one endpoint; the failover
-  chain is a different box running a different model, so `resolveFallbacks` stays untouched.
+- **Depth 0 only** *(picked modes)*. `AgentRunner` reads `session.mode_ids` for the top-level run. A
+  sub-agent hop resolves without them: the operator's chat-level choice is not an instruction to
+  every delegate. A **standing** mode (§5) is the opposite claim and does reach the hop.
+- **Fallback endpoints get no picked modes.** A mode belongs to one model on one endpoint; the
+  failover chain is a different box running a different model. Standing modes still resolve there,
+  against the fallback's own model.
 - **A stale id is silently ignored** — deleting a mode can't break the conversations that used it.
 
 ## 3. Surfaces
@@ -102,7 +104,8 @@ Scope rules, deliberately:
   it would silently never persist).
 - `GET /api/endpoints/modes?agentId=…` returns the modes applicable to that agent's resolved
   endpoint+model — the composer never has to re-implement the resolution precedence.
-- `PATCH /api/sessions/:id` accepts `mode_ids`.
+- `PATCH /api/sessions/:id` accepts `mode_ids` — the lit set only. The opt-out list it implies
+  (§5) is derived server-side from the same offer the composer was rendered from.
 
 ## 4. UI
 
@@ -118,3 +121,34 @@ The row is absent entirely when the agent's model has no modes — the default i
 chrome. Per DIRECT_ART, the two types are visually distinct: `sampling` chips read in **accent
 blue** (a knob on the machine), `prompt` chips in **reasoning purple** (words entering the model's
 head), inactive chips as on-glass neutrals.
+
+## 5. Standing modes (`default_on`)
+
+A mode can be **standing**: on for every LLM call it is offered on, without anyone picking it. It is
+a second flag, not a second meaning for `enabled` — `enabled` says whether a mode is *offered*,
+`default_on` says whether being offered already means being on.
+
+- **Scope is every call, not every chat.** `resolveInference`, `resolveForEndpoint` and
+  `resolveFallbacks` all fold the standing stack in, so it reaches sub-agent hops, cron ticks, flow
+  nodes *and* the side tasks that have no conversation to be picked from: session titling, memory
+  distillation, the judge, the interviewer, `web_fetch`'s summariser. One helper (`fromModes`) is
+  the only place any of them build their sampling + prompt fields, which is what keeps that true.
+- **Per-model and global, sampling and prompt.** Anything that can be a mode can stand. A per-model
+  standing mode only applies where that model actually runs, which is the same narrowing it always
+  had.
+- **Built-ins stand too**, and like their off switch the flag cannot live on the mode — there is no
+  document — so it is an id list on the settings singleton: `settings.global_modes_default_on`,
+  the mirror of `global_modes_disabled`.
+- **A conversation can opt out**, and the opt-out is *recorded*: `sessions.modes_off`. This is the
+  one thing standing modes force. Before them, an id absent from `mode_ids` meant "not picked",
+  which is also what "picked, then unticked" would look like — so unticking a standing chip would
+  survive exactly until the next reload. The client keeps sending only the lit set; the session
+  route resolves the agent's offer (`endpointService.modesForAgent`, the same call that renders the
+  chips) and stores `defaults − lit` as the opt-out.
+- **Retroactive by construction.** Nothing is stamped into a session at creation: the standing set
+  is resolved at call time, so switching one on in Settings changes the next turn of every
+  conversation, old ones included, and switching it off removes it just as widely.
+
+**UI**: a pin next to the eye on every mode row (Settings → Inference), live on built-in rows too —
+neither switch is an edit to wording that ships with the app. In the composer a standing mode is
+lit with a `default` marker, so unticking it reads as the deliberate exception it is.

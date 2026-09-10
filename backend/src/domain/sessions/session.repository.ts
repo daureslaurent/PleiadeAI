@@ -74,20 +74,39 @@ export const sessionRepository = {
   },
 
   /**
-   * The inference modes switched on for this conversation (`MODES_PLAN.md`), or `[]`. Guarded by an
-   * id-shape check because not every `sessionId` in the system is a session document: a flow run uses
-   * its run id as the session id, and handing that to `findById` would throw a CastError on a lookup
-   * that only ever wanted "no modes".
+   * How this conversation is moded (`MODES_PLAN.md`): the ids it switched **on**, and the standing
+   * ones it switched **off**. Both halves are needed — a standing mode applies to a conversation that
+   * never mentioned it, so only an explicit `off` entry can take one away.
+   *
+   * Guarded by an id-shape check because not every `sessionId` in the system is a session document: a
+   * flow run uses its run id as the session id, and handing that to `findById` would throw a
+   * CastError on a lookup that only ever wanted "nothing picked" (the standing modes still apply
+   * there — they are resolved from the endpoint, not from this document).
    */
-  async modeIds(id: string | Types.ObjectId): Promise<string[]> {
-    if (!Types.ObjectId.isValid(id)) return [];
-    const session = await SessionModel.findById(id).select('mode_ids').lean().exec();
-    return (session?.mode_ids as string[] | undefined) ?? [];
+  async modeSelection(id: string | Types.ObjectId): Promise<{ on: string[]; off: string[] }> {
+    if (!Types.ObjectId.isValid(id)) return { on: [], off: [] };
+    const session = await SessionModel.findById(id).select('mode_ids modes_off').lean().exec();
+    return {
+      on: (session?.mode_ids as string[] | undefined) ?? [],
+      off: (session?.modes_off as string[] | undefined) ?? [],
+    };
   },
 
-  /** Replace the conversation's mode selection (the composer's chips). */
-  setModes(id: string | Types.ObjectId, modeIds: string[]): Promise<SessionDoc | null> {
-    return SessionModel.findByIdAndUpdate(id, { $set: { mode_ids: modeIds } }, { new: true }).exec();
+  /**
+   * Replace the conversation's mode selection (the composer's chips). `modesOff` is the standing set
+   * the operator just unticked, worked out by the route from what is actually on offer — the client
+   * only ever says which chips are lit.
+   */
+  setModes(
+    id: string | Types.ObjectId,
+    modeIds: string[],
+    modesOff: string[] = [],
+  ): Promise<SessionDoc | null> {
+    return SessionModel.findByIdAndUpdate(
+      id,
+      { $set: { mode_ids: modeIds, modes_off: modesOff } },
+      { new: true },
+    ).exec();
   },
 
   create(input: {

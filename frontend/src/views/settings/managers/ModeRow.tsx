@@ -1,4 +1,4 @@
-import { ChevronDown, Eye, EyeOff, SlidersHorizontal, Trash2, Type } from 'lucide-react';
+import { ChevronDown, Eye, EyeOff, Pin, PinOff, SlidersHorizontal, Trash2, Type } from 'lucide-react';
 import { Button, Input, Select, Textarea } from '../../../components/ui';
 import { MODE_SAMPLERS, type EndpointMode } from '../../../lib/api';
 import { modeTone } from '../../../lib/modeTone';
@@ -8,6 +8,11 @@ import { modeTone } from '../../../lib/modeTone';
  * the per-model editor on each endpoint and the fleet-wide global list, which differ only in whether
  * a mode is bound to a model — `models: null` says "this one applies everywhere", so the row drops
  * the model picker instead of showing an empty one.
+ *
+ * Two switches, and they answer different questions. The eye is whether the mode is *offered*; the
+ * pin is whether it is **standing** — on for every call it is offered on, from a new conversation to
+ * a side task nobody watches, until a conversation unticks it. Both stay live on a built-in row:
+ * neither is an edit to wording that ships with the app.
  */
 export function ModeRow({
   mode,
@@ -71,6 +76,23 @@ export function ModeRow({
             {mode.enabled ? <Eye size={13} /> : <EyeOff size={13} />}
           </button>
           <button
+            onClick={() => onChange({ ...mode, default_on: !mode.default_on })}
+            disabled={!mode.enabled}
+            title={
+              !mode.enabled
+                ? 'Disabled modes are never applied — enable it first'
+                : mode.default_on
+                  ? 'On by default — applies to every call on this model, including side tasks, until a conversation unticks it'
+                  : 'Off by default — applies only where you tick it'
+            }
+            className={[
+              'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:raise-2',
+              !mode.enabled ? 'cursor-not-allowed text-slate-700' : mode.default_on ? 'text-accent' : 'text-slate-600',
+            ].join(' ')}
+          >
+            {mode.default_on ? <Pin size={13} /> : <PinOff size={13} />}
+          </button>
+          <button
             onClick={onToggleOpen}
             title={open ? 'Collapse' : 'Edit'}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:raise-2 hover:text-slate-200"
@@ -83,6 +105,13 @@ export function ModeRow({
             </Button>
           )}
         </div>
+
+        {mode.default_on && mode.enabled && (
+          <p className="text-[11px] text-accent/80">
+            On by default — every call on {models === null ? 'every model' : 'this model'} runs with it,
+            including titling, memory and other side tasks. A conversation can still untick it.
+          </p>
+        )}
 
         {models === null ? (
           <p className="text-[11px] text-slate-500">

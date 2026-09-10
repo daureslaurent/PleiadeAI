@@ -3,6 +3,7 @@ import { autoLoopRunner } from '../../../autonomy/AutoLoopRunner';
 import { autoLoopRepository } from '../../../domain/auto-loops/auto-loop.repository';
 import { sessionRepository } from '../../../domain/sessions/session.repository';
 import { agentRepository } from '../../../domain/agents/agent.repository';
+import { endpointService } from '../../../domain/endpoints/endpoint.service';
 import { todoRepository } from '../../../domain/todos/todo.repository';
 
 /** CRUD for conversation sessions + their message history (backs the Workspace). */
@@ -72,7 +73,19 @@ sessionsRouter.patch('/:id', async (req, res) => {
   // title is renamed only when one was actually sent — otherwise toggling a chip would blank it.
   if (Array.isArray(req.body?.mode_ids)) {
     const ids = (req.body.mode_ids as unknown[]).filter((id): id is string => typeof id === 'string');
-    const session = await sessionRepository.setModes(req.params.id, ids);
+    const existing = await sessionRepository.findById(req.params.id).catch(() => null);
+    if (!existing) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    // The client sends which chips are lit, nothing more. Which of the standing (`default_on`) modes
+    // that leaves *off* is worked out here, from the same offer the composer was rendered from — a
+    // client-supplied opt-out list could name a mode the turn never had, and would go stale the
+    // moment the agent moved to another model.
+    const offer = await endpointService.modesForAgent(existing.agent_id);
+    const picked = new Set(ids);
+    const modesOff = (offer?.defaults ?? []).filter((id) => !picked.has(id));
+    const session = await sessionRepository.setModes(req.params.id, ids, modesOff);
     if (!session) {
       res.status(404).json({ error: 'not found' });
       return;

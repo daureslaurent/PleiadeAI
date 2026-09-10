@@ -1,10 +1,7 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
-import { agentRepository } from '../../../domain/agents/agent.repository';
 import { endpointRepository } from '../../../domain/endpoints/endpoint.repository';
 import { MODE_SAMPLERS, type EndpointMode } from '../../../domain/endpoints/endpoint.model';
-import { offeredModes } from '../../../inference/modes';
-import { settingsService } from '../../../domain/settings/settings.service';
 import { endpointService } from '../../../domain/endpoints/endpoint.service';
 import { createLogger } from '../../../config/logger';
 
@@ -47,6 +44,7 @@ function normalizeModes(raw: unknown): EndpointMode[] {
         name,
         type,
         enabled: m.enabled !== false,
+        default_on: m.default_on === true,
         params,
         text: type === 'prompt' && typeof m.text === 'string' ? m.text : '',
         placement: m.placement === 'user_suffix' ? 'user_suffix' : 'system_suffix',
@@ -68,28 +66,20 @@ endpointsRouter.get('/health', async (_req, res) => {
 
 /**
  * The inference modes offered for one agent's *resolved* model — what the chat composer renders as
- * chips: the endpoint's per-model ones plus the fleet-wide global prompt modes. Resolved server-side (agent's endpoint → default endpoint; agent's model → the endpoint's
- * default → its first discovered model) so the client never re-implements that precedence and can't
- * offer a mode the turn wouldn't actually apply. An agent with no modes returns an empty list, which
- * is what hides the chip row entirely.
+ * chips: the endpoint's per-model ones plus the fleet-wide global prompt modes, with `defaults`
+ * naming the standing ones a conversation starts with lit. Resolved server-side (agent's endpoint →
+ * default endpoint; agent's model → the endpoint's default → its first discovered model) so the
+ * client never re-implements that precedence and can't offer a mode the turn wouldn't actually
+ * apply. An agent with no modes returns an empty list, which is what hides the chip row entirely.
  */
 endpointsRouter.get('/modes', async (req, res) => {
   const agentId = String(req.query.agentId ?? '');
-  const agent = agentId && Types.ObjectId.isValid(agentId) ? await agentRepository.findById(agentId) : null;
-  if (!agent) {
+  const offer = agentId && Types.ObjectId.isValid(agentId) ? await endpointService.modesForAgent(agentId) : null;
+  if (!offer) {
     res.status(404).json({ error: 'agent not found' });
     return;
   }
-  const endpoint = agent.endpoint_id
-    ? await endpointRepository.findById(agent.endpoint_id)
-    : await endpointRepository.findDefault();
-  const model = agent.model || endpoint?.default_model || endpoint?.models?.[0] || '';
-  const settings = await settingsService.get();
-  res.json({
-    endpointId: endpoint ? String(endpoint._id) : null,
-    model,
-    modes: offeredModes(endpoint, model, settings.global_modes),
-  });
+  res.json(offer);
 });
 
 endpointsRouter.post('/', async (req, res) => {

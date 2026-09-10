@@ -44,6 +44,7 @@ function normalizeGlobalModes(raw: unknown): GlobalMode[] {
       name: (typeof m.name === 'string' ? m.name.trim() : '') || 'Untitled mode',
       type: 'prompt',
       enabled: m.enabled !== false,
+      default_on: m.default_on === true,
       params: {},
       text: typeof m.text === 'string' ? m.text : '',
       placement: m.placement === 'user_suffix' ? 'user_suffix' : 'system_suffix',
@@ -139,6 +140,14 @@ settingsRouter.put('/', async (req, res) => {
   if (Array.isArray(b.global_modes_disabled)) {
     const known = new Set(BUILTIN_GLOBAL_MODES.map((m) => m.id));
     patch.global_modes_disabled = (b.global_modes_disabled as unknown[]).filter(
+      (id): id is string => typeof id === 'string' && known.has(id),
+    );
+  }
+  // Which built-ins are standing (on everywhere without being picked). Same shape and the same
+  // narrowing: the flag can't live on a mode that has no database row.
+  if (Array.isArray(b.global_modes_default_on)) {
+    const known = new Set(BUILTIN_GLOBAL_MODES.map((m) => m.id));
+    patch.global_modes_default_on = (b.global_modes_default_on as unknown[]).filter(
       (id): id is string => typeof id === 'string' && known.has(id),
     );
   }

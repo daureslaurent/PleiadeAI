@@ -95,6 +95,8 @@ export interface EffectiveSettings {
   global_modes: GlobalMode[];
   /** Ids of built-in modes the operator switched off — the built-ins are code-defined, so "off" lives here. */
   global_modes_disabled: string[];
+  /** Ids of built-in modes the operator made standing (on everywhere) — same reason they live here. */
+  global_modes_default_on: string[];
   /**
    * Forum auto-reply: a *summons* of an agent on the board runs it without the operator pressing
    * Run, and the answer is posted back to the thread. Off → a mention only ever raises an alert.
@@ -164,6 +166,7 @@ export const settingsService = {
   async get(): Promise<EffectiveSettings> {
     const doc = await SettingsModel.findOne({ key: KEY }).lean();
     const disabled = (doc?.global_modes_disabled as string[] | undefined) ?? [];
+    const standing = (doc?.global_modes_default_on as string[] | undefined) ?? [];
     return {
       llama_url: doc?.llama_url ?? env.LLAMA_API_URL,
       llama_model: doc?.llama_model ?? env.LLAMA_MODEL,
@@ -221,10 +224,15 @@ export const settingsService = {
       // app instead of staying frozen at whatever a migration wrote. A disabled one is still
       // returned (the Settings page has to render its row) but marked so nothing offers it in chat.
       global_modes: [
-        ...BUILTIN_GLOBAL_MODES.map((m) => ({ ...m, enabled: !disabled.includes(m.id) })),
+        ...BUILTIN_GLOBAL_MODES.map((m) => ({
+          ...m,
+          enabled: !disabled.includes(m.id),
+          default_on: standing.includes(m.id),
+        })),
         ...((doc?.global_modes as GlobalMode[] | undefined) ?? []),
       ],
       global_modes_disabled: disabled,
+      global_modes_default_on: standing,
       forum_auto_reply: doc?.forum_auto_reply ?? false,
       forum_auto_reply_max_per_thread: doc?.forum_auto_reply_max_per_thread ?? 8,
       forum_auto_reply_window_hours: doc?.forum_auto_reply_window_hours ?? 24,

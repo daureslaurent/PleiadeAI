@@ -795,6 +795,8 @@ export interface Session {
   forum_mention_id?: string | null;
   /** Inference modes switched on for this conversation (`MODES_PLAN.md`); ids of endpoint modes. */
   mode_ids?: string[];
+  /** Standing (`default_on`) modes this conversation switched off — a default can't be undone by omission. */
+  modes_off?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -1605,6 +1607,8 @@ export interface InferenceSettings {
   global_modes: GlobalMode[];
   /** Ids of built-in modes switched off — the built-ins are code-defined, so "off" is stored here. */
   global_modes_disabled: string[];
+  /** Ids of built-in modes the operator made standing — a built-in has no row to carry the flag. */
+  global_modes_default_on: string[];
   llama_url: string;
   llama_model: string;
   llama_api_key: string;
@@ -1835,6 +1839,12 @@ export interface EndpointMode {
   name: string;
   type: 'sampling' | 'prompt';
   enabled: boolean;
+  /**
+   * Standing: on for every call this mode is offered on, without anyone picking it. A new
+   * conversation starts with it lit and so does a side task with no conversation at all; the
+   * operator can still untick it for one chat, which the server records as an explicit opt-out.
+   */
+  default_on?: boolean;
   /** Only the samplers the operator set. Absent on documents stored before `minimize: false`. */
   params?: Partial<Record<ModeSampler, number>>;
   text: string;
@@ -2170,7 +2180,7 @@ export const endpointsApi = {
    */
   modesForAgent: (agentId: string) =>
     api
-      .get<{ endpointId: string | null; model: string; modes: EndpointMode[] }>('/endpoints/modes', {
+      .get<{ endpointId: string | null; model: string; modes: EndpointMode[]; defaults: string[] }>('/endpoints/modes', {
         params: { agentId },
       })
       .then((r) => r.data),

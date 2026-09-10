@@ -59,6 +59,14 @@ const SessionSchema = new Schema(
      * set it up. Only the depth-0 run consults them; ids that no longer resolve are ignored.
      */
     mode_ids: { type: [String], default: [] },
+    /**
+     * Standing modes (`default_on`) this conversation switched **off**. A default cannot be undone by
+     * omission: once a mode is on without being picked, an id missing from `mode_ids` is
+     * indistinguishable from one the operator never touched, so the opt-out has to be recorded to
+     * survive a reload. Derived server-side on save (the standing ids on offer, minus what the
+     * composer just sent), never trusted from the client.
+     */
+    modes_off: { type: [String], default: [] },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

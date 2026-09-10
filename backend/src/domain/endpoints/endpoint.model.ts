@@ -15,6 +15,16 @@ const ModeSchema = new Schema(
     type: { type: String, enum: ['sampling', 'prompt'], required: true },
     /** Unticked modes stay configured but are hidden from the composer. */
     enabled: { type: Boolean, default: true },
+    /**
+     * Standing mode: on for every call this mode is offered on, without anyone picking it — a new
+     * conversation starts with it lit, and so does a side task that has no conversation at all
+     * (titling, distillation, judging). Distinct from `enabled`, which only says whether the mode is
+     * *offered*; a mode that is off here is offered and unlit, the behaviour every mode had before.
+     * The operator can still untick it for one conversation, which is recorded on the session as an
+     * explicit opt-out (`sessions.modes_off`) — an absent id cannot mean "switched off" once a
+     * default exists.
+     */
+    default_on: { type: Boolean, default: false },
     /** `sampling` only: the subset of samplers this mode overrides. */
     params: { type: Schema.Types.Mixed, default: {} },
     /** `prompt` only: the text appended to the turn. */
@@ -156,6 +166,8 @@ export interface EndpointMode {
   name: string;
   type: 'sampling' | 'prompt';
   enabled: boolean;
+  /** On by default for every call this mode is offered on, until a conversation opts out. */
+  default_on?: boolean;
   /** Only the samplers the operator set. May be absent on rows written before `minimize: false`. */
   params?: Partial<Record<ModeSampler, number | null>>;
   text: string;

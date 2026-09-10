@@ -23,6 +23,7 @@ export function GlobalModesManager() {
   const builtins = all.filter((m) => m.builtin);
   const custom = all.filter((m) => !m.builtin);
   const disabled = form.global_modes_disabled ?? [];
+  const standing = form.global_modes_default_on ?? [];
   const [openId, setOpenId] = useState<string | null>(null);
 
   /** Replace one of the operator's own modes (by index within `custom`) and save; `null` deletes it. */
@@ -34,12 +35,28 @@ export function GlobalModesManager() {
   }
 
   /**
-   * Switch a built-in on or off. Not an edit — the wording is still the app's — so it is stored as an
-   * id in `global_modes_disabled` rather than on the mode, which does not exist in the database.
+   * The two live controls on a built-in row: whether it is offered at all, and whether it is
+   * standing. Neither is an edit — the wording is still the app's — so both are stored as id lists on
+   * the settings singleton rather than on the mode, which has no database row to carry them.
+   *
+   * The row hands back a whole mode, so which switch was pressed is read off the value that changed.
    */
-  function toggleBuiltin(id: string) {
-    const next = disabled.includes(id) ? disabled.filter((d) => d !== id) : [...disabled, id];
-    commit({ global_modes_disabled: next });
+  function toggleBuiltin(mode: GlobalMode, next: EndpointMode) {
+    if (next.enabled !== mode.enabled) {
+      commit({
+        global_modes_disabled: next.enabled
+          ? disabled.filter((d) => d !== mode.id)
+          : [...disabled, mode.id],
+      });
+      return;
+    }
+    if ((next.default_on ?? false) !== (mode.default_on ?? false)) {
+      commit({
+        global_modes_default_on: next.default_on
+          ? [...standing, mode.id]
+          : standing.filter((d) => d !== mode.id),
+      });
+    }
   }
 
   function add() {
@@ -50,6 +67,7 @@ export function GlobalModesManager() {
       name: 'New snippet',
       type: 'prompt',
       enabled: true,
+      default_on: false,
       params: {},
       text: '',
       placement: 'user_suffix',
@@ -66,6 +84,7 @@ export function GlobalModesManager() {
       <div className="space-y-2">
         <p className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
           Built in — {builtins.length - disabled.length} of {builtins.length} offered
+          {standing.length > 0 && `, ${standing.length} on by default`}
         </p>
         {builtins.map((m) => (
           <ModeRow
@@ -75,8 +94,9 @@ export function GlobalModesManager() {
             readOnly
             open={openId === m.id}
             onToggleOpen={() => setOpenId(openId === m.id ? null : m.id)}
-            // The only live control on a built-in row: whether it appears in the composer.
-            onChange={() => toggleBuiltin(m.id)}
+            // The live controls on a built-in row: whether it appears in the composer, and whether
+            // it is standing.
+            onChange={(next) => toggleBuiltin(m, next)}
             onDelete={() => undefined}
           />
         ))}
@@ -97,6 +117,7 @@ export function GlobalModesManager() {
                 name: next.name,
                 type: 'prompt',
                 enabled: next.enabled,
+                default_on: next.default_on ?? false,
                 params: {},
                 text: next.text,
                 placement: next.placement,

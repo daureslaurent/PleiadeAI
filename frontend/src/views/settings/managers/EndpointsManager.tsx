@@ -357,6 +357,7 @@ function ModesEditor({ endpoint: e, onPatch }: { endpoint: Endpoint; onPatch: (p
       name: type === 'sampling' ? 'New preset' : 'New snippet',
       type,
       enabled: true,
+      default_on: false,
       params: {},
       text: '',
       placement: type === 'prompt' ? 'user_suffix' : 'system_suffix',

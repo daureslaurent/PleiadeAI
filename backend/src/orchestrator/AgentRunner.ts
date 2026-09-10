@@ -255,10 +255,15 @@ export class AgentRunner {
     // `analyze_image` at all. (Failover chain resolved alongside.)
     // Inference modes (`MODES_PLAN.md`): the operator's per-conversation picks, read from the session
     // rather than passed in, so an auto-loop tick and a `continue` nudge run in the same modes the
-    // chips show. Depth 0 only — a mode is the operator's choice for *this* chat, not a standing
-    // instruction inherited by every agent the turn delegates to.
-    const modeIds = input.depth === 0 ? await sessionRepository.modeIds(input.sessionId) : [];
-    const inference = await resolveInference(agent, modeIds);
+    // chips show. Depth 0 only — a *picked* mode is the operator's choice for this chat, not an
+    // instruction inherited by every agent the turn delegates to. A standing (`default_on`) mode is
+    // exactly the opposite claim and needs nothing here: the resolver folds it into every call,
+    // subagent hops included.
+    const picked =
+      input.depth === 0
+        ? await sessionRepository.modeSelection(input.sessionId)
+        : { on: [], off: [] };
+    const inference = await resolveInference(agent, picked.on, picked.off);
     const fallbacks = await resolveFallbacks(inference.url);
 
     // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides
