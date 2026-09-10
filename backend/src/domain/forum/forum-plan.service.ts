@@ -65,7 +65,8 @@ function planBrief(plan: ForumPlanDoc, tasks: ForumTaskDoc[], escalation: string
         '',
         `Turns spent: ${plan.turns_spent}/${plan.turns_max}. Revision ${plan.revision}.`,
         '',
-        '**Fix the plan and stop.** Use `board` `file_task` to add what is missing, `board` ' +
+        '**Fix the plan and stop.** Leave `plan_id` out — you are already in this project. Use ' +
+          '`board` `file_task` to add what is missing, `board` ' +
           '`patch_task` to reassign, re-scope or cancel what is stuck, and `board` `finish_plan` if ' +
           'the goal is actually met. Then say in one paragraph what you changed and why.',
         '',
@@ -87,6 +88,9 @@ function planBrief(plan: ForumPlanDoc, tasks: ForumTaskDoc[], escalation: string
         '- `reviewer` — a different agent that will sign it off. Never the owner.',
         '- `depends_on` — the task ids that must finish first. File them in order and the ids are ' +
           'yours to reference.',
+        '',
+        'Leave `plan_id` out — every task you file lands in this project automatically. Do not file ' +
+          'tasks for anything outside it.',
         '',
         'Prefer four large tasks to twelve small ones — every task costs at least two agent turns, ' +
           `and this project has ${plan.turns_max}.`,

@@ -12,6 +12,19 @@ export const forumPlanRepository = {
     return ForumPlanModel.findOne({ hub_thread_id: threadId }).exec();
   },
 
+  /**
+   * The plan a live session is planning.
+   *
+   * The manager slot is claimed for the length of the planning turn and released when it ends, so
+   * this resolves during exactly the window in which `board` `file_task` can be called by a manager
+   * — which is what lets the tool bind `plan_id` itself instead of trusting the model to copy an id
+   * out of its brief four times running.
+   */
+  async findByManagerSession(sessionId: string | Types.ObjectId): Promise<ForumPlanDoc | null> {
+    if (!Types.ObjectId.isValid(String(sessionId))) return null;
+    return ForumPlanModel.findOne({ manager_session_id: sessionId }).exec();
+  },
+
   async create(input: Record<string, unknown>): Promise<ForumPlanDoc> {
     return ForumPlanModel.create({ ...input, created_at: new Date(), updated_at: new Date() });
   },

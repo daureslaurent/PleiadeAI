@@ -58,7 +58,12 @@ export const board: Tool = {
           'planning verbs.',
       },
       task_id: { type: 'string', description: 'The task, for read_task / submit / block / review / patch_task.' },
-      plan_id: { type: 'string', description: 'The project, for file_task / list_plan / finish_plan.' },
+      plan_id: {
+        type: 'string',
+        description:
+          'The project, for file_task / list_plan / finish_plan. Omit it while you are planning a ' +
+          'project — the board knows which one you are in and files against it.',
+      },
       goal: { type: 'string', description: 'For file_task: one sentence saying what is true when it is finished.' },
       acceptance: {
         type: 'array',
@@ -107,6 +112,24 @@ export const board: Tool = {
     const action = String(args.action ?? '').trim();
     const str = (k: string): string => String(args[k] ?? '').trim();
     const arr = (k: string): string[] => (Array.isArray(args[k]) ? (args[k] as unknown[]).map(String) : []);
+
+    /**
+     * The project this call belongs to, without asking the model to remember it.
+     *
+     * A manager plans inside a session that holds the plan's manager slot for the length of the
+     * turn, so the plan is derivable from `ctx` — and derived beats declared here, because a
+     * `file_task` that silently omits `plan_id` produces a task the board can see but the project
+     * cannot: the graph is orphaned, the project page reads empty, and `setState('running')` then
+     * refuses the plan for having no tasks. An explicit `plan_id` still wins, so an operator-driven
+     * or cross-project call is unaffected.
+     */
+    const planId = async (): Promise<string | null> => {
+      const given = str('plan_id');
+      if (given) return given;
+      if (!ctx.sessionId) return null;
+      const managing = await forumPlanRepository.findByManagerSession(ctx.sessionId);
+      return managing ? String(managing._id) : null;
+    };
 
     try {
       switch (action) {
@@ -207,7 +230,7 @@ export const board: Tool = {
             owner: str('owner') || null,
             reviewer: str('reviewer') || null,
             dependsOn: arr('depends_on'),
-            planId: str('plan_id') || null,
+            planId: await planId(),
             detail: str('detail'),
             author: actor,
             byAgent: true,
@@ -235,8 +258,9 @@ export const board: Tool = {
         }
 
         case 'list_plan': {
-          const plan = await forumPlanRepository.findById(str('plan_id'));
-          if (!plan) return { result: { ok: false, error: `no such project: "${str('plan_id')}"` } };
+          const id = (await planId()) ?? '';
+          const plan = await forumPlanRepository.findById(id);
+          if (!plan) return { result: { ok: false, error: `no such project: "${id}"` } };
           const tasks = await forumTaskRepository.listByPlan(plan._id);
           return {
             result: {
@@ -256,7 +280,7 @@ export const board: Tool = {
         }
 
         case 'finish_plan': {
-          const plan = await forumPlanService.finish(str('plan_id'), actor);
+          const plan = await forumPlanService.finish((await planId()) ?? '', actor);
           return { result: { ok: true, state: plan.state, note: 'Project closed.' } };
         }
 
