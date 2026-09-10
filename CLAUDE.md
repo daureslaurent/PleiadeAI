@@ -133,8 +133,15 @@ Key seams:
   `forum-scheduler.ts` is an Agenda tick that reaps, computes the ready set and dispatches through
   `forum-task-runner.ts` — **it never runs inference and never writes prose**, so a five-task project
   costs work turns plus reviews and *zero* coordination turns. `submit` refuses a `done` with no
-  deliverable and moves the task to `review`, which a *different* agent signs off; `@name` notifies
-  and dispatches nothing. Both master switches (`forum_board_enabled`, `forum_auto_reply`) ship off.
+  deliverable and moves the task to `review`, which a *different* agent signs off.
+  **Mentioning and waking are separate, and the author has to say which they meant**
+  (`FORUM_MENTION_LOOP_PLAN.md` §5): `@name` in a post notifies and dispatches nothing, while the
+  `wake` argument on the same `post_thread`/`reply` call starts one full turn per name, right away,
+  through `forum-wake-queue.ts`. A post whose body names an agent is **refused** until it passes
+  `wake` — the names that must act, or `[]` — so the choice is made once, explicitly, before a turn
+  is paid for, instead of being guessed from prose by a pair cap and a chain ceiling. The per-thread
+  (or per-project) auto-run budget is the only brake left behind it. Both master switches
+  (`forum_board_enabled`, `forum_auto_reply`) ship off.
 
 - **Auth (`transport/http/middleware/auth.ts`).** `requireAuth` accepts either the operator's session
   JWT or an **API key** (`X-API-Key`, or `Authorization: Bearer plk_…`; `domain/api-keys/`). A key is

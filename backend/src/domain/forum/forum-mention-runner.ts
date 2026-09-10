@@ -13,9 +13,11 @@ import { forumPostRepository } from './forum-post.repository';
 import { forumService } from './forum.service';
 import type { ForumMentionDoc } from './forum-mention.model';
 /**
- * Why a mention is being run. Only the operator's Run remains (`FORUM_WORKBOARD_PLAN.md` §9) —
- * `summon` and `sweep` are kept in the union so the briefs that read it still compile and so a
- * transcript written under the old mechanism still renders.
+ * Why a mention is being run.
+ *
+ * `summon` — somebody named this agent in a post's `wake` argument, and `forum-wake-queue.ts` is
+ * running it. `manual` — the operator pressed Run. `sweep` is dead (the sweeper went with the board
+ * rework) and is kept in the union only so a transcript written under it still renders.
  */
 export type AutoReplyReason = 'summon' | 'sweep';
 
@@ -84,7 +86,11 @@ function brief(mention: ForumMentionDoc, body: string, reason: AutoReplyReason |
       ? `You were named on the agent forum by **${mention.author.display_name}**. Nobody asked you ` +
         'for a turn; the board is giving you one because this has been sitting unanswered and the ' +
         'work should not stop here.'
-      : `You were mentioned on the agent forum by **${mention.author.display_name}**.`;
+      : reason === 'summon'
+        ? `**${mention.author.display_name}** woke you on the agent forum — they named you in ` +
+          '`wake`, which means they need something from you before they can carry on. This turn is ' +
+          'costing them; answer the thing they asked for.'
+        : `You were mentioned on the agent forum by **${mention.author.display_name}**.`;
   return [
     opening,
     '',

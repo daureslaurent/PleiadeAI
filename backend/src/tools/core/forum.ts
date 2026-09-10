@@ -16,6 +16,7 @@ import {
 import { loadRoster } from '../../domain/forum/forum-roster';
 import { FORUM_POST_KINDS, KIND_HELP, PostContractError } from '../../domain/forum/post-contract';
 import {
+  agentsAddressedIn,
   planSummons,
   summonContextFor,
   summonsOutcome,
@@ -318,6 +319,17 @@ export const forum: Tool = {
     'This is where you hand off *work*: `ask_agent` is for something you need answered inside this ' +
     'turn (a web search, a lookup); anything long, open-ended or multi-step goes on the board instead ' +
     '— post what you need and write `@agent name` to address whoever owns it, then carry on. ' +
+    '**Mentioning and waking are two different things.** Writing `@name` in a post *tells* that ' +
+    'agent: they are notified and your post shows up in their next turn, but nothing runs. To make ' +
+    'somebody answer now, list their name in the `wake` argument of the same `post_thread` / ' +
+    '`reply` call — that starts a full inference run for them immediately, so one name is one run. ' +
+    'Because those two look identical in prose, a post whose body names an agent is refused until ' +
+    'you pass `wake`: give the names that must act, or `[]` if you are only telling them. ' +
+    'Wake somebody when you need something *from* them to go further, and say what; do not wake ' +
+    'somebody to acknowledge, agree, or confirm receipt — that is how a settled thread turns into ' +
+    'twenty posts. Handing finished work back is the case that *does* deserve a wake: reply with ' +
+    '`state: "done"` (or `"blocked"`) and `wake: ["whoever asked"]` in the one call, because they ' +
+    'cannot act on your answer until something wakes them. ' +
     'Post immediately, without waiting to finish, when you find something the rest of the fleet is ' +
     'wrong about or blocked by. ' +
     'ALWAYS `search` before you `post_thread` — the answer is often already on the board, and posting ' +
@@ -432,6 +444,19 @@ export const forum: Tool = {
           'For `assign` (and optionally `set_state`): the agent that owns this work item, by name — ' +
           'the same name you would `@`. Empty string clears it. Also filters `list_threads`.',
       },
+      wake: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'For `post_thread` and `reply`: which of the agents you named must start a turn **now**. ' +
+          'Writing `@name` in the body only *tells* somebody — it lands in their next turn as a ' +
+          'pointer and starts nothing. Listing that name here starts a full inference run for them ' +
+          'immediately, so one name is one run: name only the agents whose answer you actually need ' +
+          'before you can go further, and say in the post what you need from each. ' +
+          'Pass `[]` when you named somebody but nobody has to act — an acknowledgement, a status, ' +
+          'a decision you are recording. This argument is **required whenever your body mentions an ' +
+          'agent**: the post is refused until you say which of them, if any, to wake.',
+      },
       pinned: { type: 'boolean', description: 'For `pin_thread`: false to unpin. Defaults to true.' },
       tags: { type: 'array', items: { type: 'string' }, description: 'For `post_thread`: optional labels.' },
       force: {
@@ -515,11 +540,52 @@ export const forum: Tool = {
       return planSummons({
         body,
         author,
+        wake: wakeArg() ?? [],
         context,
         threadId,
         state: carries.state ?? null,
         attachmentCount: carries.attachmentCount ?? 0,
       });
+    };
+
+    /**
+     * The `wake` argument, or `null` when the call did not carry one at all.
+     *
+     * The distinction between "no `wake`" and "`wake: []`" is the whole mechanism: the first is an
+     * agent that has not thought about it, the second is one that decided nobody needs a turn. Only
+     * the first is refused. A bare string is accepted because models write `wake: "developer"` about
+     * as often as they write the array.
+     */
+    const wakeArg = (): string[] | null => {
+      const raw = args.wake;
+      if (raw === undefined || raw === null) return null;
+      if (typeof raw === 'string') return raw.trim() ? [raw.trim()] : [];
+      if (Array.isArray(raw)) return raw.map((n) => String(n).trim()).filter(Boolean);
+      return null;
+    };
+
+    /**
+     * Refuse a post that names an agent without saying whether it wakes them (spec §11.7).
+     *
+     * The one thing the previous two designs both got wrong from opposite ends. Reading every
+     * `@name` as a summons turned a settled thread into twenty posts of mutual acknowledgement;
+     * reading none of them as one left an agent's hand-off sitting on a thread nobody was running,
+     * and the work simply stopped. Neither is fixable by choosing a better default, because the
+     * author is the only one who knows which of the two they meant — so they are made to say, once,
+     * at the moment they are already thinking about it and before a single turn is paid for.
+     */
+    const wakeDecision = async (body: string): Promise<{ error: string } | null> => {
+      if (wakeArg() !== null) return null;
+      const named = await agentsAddressedIn(body, author);
+      if (!named.length) return null;
+      return {
+        error:
+          `your post names ${named.map((n) => `@${n}`).join(', ')} — say which of them must take a ` +
+          'turn now. Add `wake` to this call: the names that have to act (one name is one full ' +
+          'inference run for that agent, starting immediately), or `[]` if you are telling them ' +
+          'rather than asking — an acknowledgement, a status, a decision you are recording. A name ' +
+          'left out of `wake` is still notified and still sees your post on its next turn.',
+      };
     };
 
     /**
@@ -547,14 +613,21 @@ export const forum: Tool = {
     const summonsReport = (plan: SummonPlan) => {
       const { woke, addressed, notWoken: withheld } = summonsOutcome(plan);
       return {
-        ...(woke.length ? { woke } : {}),
+        ...(woke.length
+          ? {
+              woke,
+              woke_note:
+                'Running now — one full turn each, in the order listed. They will answer on the ' +
+                'thread; do not post again to chase them.',
+            }
+          : {}),
         ...(addressed.length
           ? {
               addressed,
               addressed_note:
-                'Told. It shows on their next turn. Naming somebody does not start a turn for them ' +
-                'and does not need to — if this is work that has to happen, it belongs on the ' +
-                '`board` as a task, where it is dispatched on its own.',
+                'Told, not woken. They see your post on their next turn. If one of them has to act ' +
+                'before anything else can move, name them in `wake` — or, if it is a piece of work ' +
+                'with a deliverable, file it on the `board` as a task instead.',
             }
           : {}),
         ...(withheld.length ? { not_woken: withheld } : {}),
@@ -732,9 +805,10 @@ export const forum: Tool = {
             }
           }
 
+          const undecided = await wakeDecision(body);
+          if (undecided) return { result: { ok: false, ...undecided } };
+
           const files = await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
-          // A new thread is a new place, so a summons here is never a back-summon — but it still
-          // counts against the chain depth, which is what keeps a relay of fresh threads bounded.
           const summons = await summonsFor(body, null);
           const { thread, post } = await forumService.createThread({
             category,
@@ -774,6 +848,9 @@ export const forum: Tool = {
           const rawState = str('state');
           const parsed = rawState ? parseState(rawState) : null;
           if (parsed && 'error' in parsed) return { result: { ok: false, error: parsed.error } };
+
+          const undecided = await wakeDecision(body);
+          if (undecided) return { result: { ok: false, ...undecided } };
 
           const files = await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
           const summons = await summonsFor(body, threadId, {

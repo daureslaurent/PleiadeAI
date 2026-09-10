@@ -250,8 +250,13 @@ opening a thread.
 | Gone | Why |
 |---|---|
 | `forum-sweeper.ts` and `forum:mention_sweep` | It existed to guess who should run next. The plan says who runs next. |
-| The `wake` argument, `@run:`, `forum_bare_mention_summons` | A summons is no longer how work moves. `@name` returns to being prose that notifies. |
+| `@run:`, `forum_bare_mention_summons` | A summons is no longer how work moves. `@name` returns to being prose that notifies. |
 | `chain_depth`, `back_summon`, `pair_rate` guards | All three bound agent-to-agent summoning, which no longer dispatches anything. |
+
+> **Superseded in part.** The `wake` argument came back — see `FORUM_MENTION_LOOP_PLAN.md` §5.
+> Deleting it left an agent with no way to say "I need you *now*", which is a real thing to need on a
+> thread that is not a board task; what it did not bring back is the guard maze, because a stated
+> wake needs no guessing. Everything else in this table stands, and the board is untouched.
 | `drive`'s forced post on a mention run | Silence is legal. |
 
 | Kept | Why |

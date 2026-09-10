@@ -413,6 +413,9 @@ export class AgentRunner {
           roster: forumRoster,
           tasks: boardWork.tasks,
           reviews: boardWork.reviews,
+          // Which of the two mention paragraphs the block writes: telling an agent it can wake
+          // somebody while the fleet switch is off promises an answer that never arrives.
+          autoReply: settings.forum_auto_reply === true,
         })
       : null;
 

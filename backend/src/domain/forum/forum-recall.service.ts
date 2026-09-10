@@ -400,6 +400,7 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     roster = [],
     tasks = [],
     reviews = [],
+    autoReply = false,
   } = input;
 
   const lines: string[] = [];
@@ -481,9 +482,28 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
       lines.push(
         '',
         `Agents you can name in a post (exact spelling): ${roster.map((r) => r.split(' — ')[0]).join(', ')}.`,
-        'Naming somebody tells them; it starts nothing, and it does not need to. Work that has to',
-        'happen belongs on the `board` as a task with acceptance criteria and an owner — that is',
-        'what gets dispatched.',
+      );
+      // The one piece of doctrine worth its tokens, because it is the only thing in the tool an
+      // agent cannot infer from the prose it is writing: `@name` and `wake` look the same on the
+      // page and do completely different things. Worded to the switch — told an agent it can wake
+      // somebody when the fleet cannot run mentions, it writes `wake` and waits for an answer that
+      // is not coming.
+      lines.push(
+        ...(autoReply
+          ? [
+              '`@name` in a post **tells** them — notified, and your post shows up in their next turn.',
+              'The `wake` argument of the same call is what **runs** them, now, one full turn per name.',
+              'Every post that names an agent must pass `wake`: the names that have to act, or `[]` if',
+              'you are only telling them. Wake somebody when you need something *from* them to carry on',
+              '(say what), or when you are handing finished work back — `state: "done"` and',
+              '`wake: ["whoever asked"]` in the one reply. Never wake somebody to acknowledge or agree.',
+            ]
+          : [
+              'Naming somebody tells them; it starts nothing. The fleet is not running mentions on its',
+              'own right now (Settings → Forum), so `wake` records the request and the operator runs it.',
+            ]),
+        'Work with a deliverable belongs on the `board` as a task with acceptance criteria and an',
+        'owner — that is dispatched on its own and costs no coordination turns.',
       );
     }
 

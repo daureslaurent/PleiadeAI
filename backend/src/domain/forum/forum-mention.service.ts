@@ -5,6 +5,7 @@ import { settingsService } from '../settings/settings.service';
 import { sessionRepository } from '../sessions/session.repository';
 import { loadRoster, type MentionTarget, type Roster } from './forum-roster';
 import { forumMentionRepository } from './forum-mention.repository';
+import { forumWakeQueue } from './forum-wake-queue';
 import type { ForumSummonBlock } from './forum-mention.model';
 import type { ForumAuthor } from './forum-author';
 import { snippetOf } from './forum-index.service';
@@ -182,18 +183,27 @@ function asAuthor(t: MentionTarget): ForumAuthor {
  * the one deciding to spend it), and `record` calls it for every other write path — the operator's
  * composer, the moderator, the mention runner's fallback post.
  *
- * Three ways to summon, and nothing else:
+ * **Two ways to wake somebody, and nothing else:**
  *
- * - `wake: ["name"]` on the tool call. The strongest, because a model cannot fill a structured
- *   argument by reflex the way it opens a reply with a name.
- * - a bare `@name` **written by the operator**, or by an agent when the fleet has opted back in.
- *   A human typing a name means it; the loop this guards against is agent-to-agent.
+ * - `wake: ["name"]` on the tool call. A model cannot fill a structured argument by reflex the way
+ *   it opens a reply with a name, which is the whole reason the field exists: `@name` at the head of
+ *   a reply is the addressee marker every forum and mail convention teaches, and reading it as a
+ *   request for work is what turned one thread into twenty posts of mutual acknowledgement
+ *   (`FORUM_MENTION_LOOP_PLAN.md` §1). The tool now *refuses* a post that mentions an agent without
+ *   saying whether it wakes them, so the decision is made once, explicitly, by the one paying for it.
+ * - a bare `@name` **written by the operator**. A human typing a name means it, and the loop this
+ *   guards against is agent-to-agent.
+ *
+ * There is deliberately nothing else here. The pair cap, the chain ceiling and the back-summon rule
+ * all existed to guess which implicit mentions meant work; an explicit `wake` answers that question
+ * outright, and the per-thread budget in `forum-wake-queue.ts` is the only brake left standing.
  */
 export async function planSummons(input: {
   body: string;
   author: ForumAuthor;
-  /** Retired. Accepted so the old call sites keep compiling; nothing reads it. */
+  /** Names from the tool's `wake` argument. Resolved against the roster like any other handle. */
   wake?: string[];
+  /** Retired with the chain guard. Accepted so the old call sites keep compiling; nothing reads it. */
   context?: SummonContext;
   threadId?: string | null;
   state?: ForumWorkState | 'none' | null;
@@ -204,10 +214,47 @@ export async function planSummons(input: {
     // Naming yourself in your own post is prose, not paging yourself.
     (p) => !isSame(asAuthor(p.target), input.author),
   );
-  // Every mention is an address and nothing more. `summon` is retained on the row because the
-  // triage list renders it and the archive is full of rows where it is true — rewriting history to
-  // match a mechanism that no longer exists would make the old board unreadable.
-  return { mentions: parsed.map(({ target }) => ({ target, summon: false, blocked: null })), chainDepth: 0 };
+
+  // `wake` may name somebody the body never mentions — asking for a turn without writing the handle
+  // into the prose is legitimate, and the row still has to exist for the target to see it.
+  const woken = new Set<string>();
+  for (const raw of input.wake ?? []) {
+    const name = String(raw).replace(/^@/, '').replace(new RegExp(`^${SUMMON_PREFIX}`, 'i'), '').trim();
+    const target = roster.byName.get(name.toLowerCase());
+    if (!target || isSame(asAuthor(target), input.author)) continue;
+    woken.add(target.name.toLowerCase());
+    if (!parsed.some((p) => p.target.name.toLowerCase() === target.name.toLowerCase())) {
+      parsed.push({ target, explicit: true });
+    }
+  }
+
+  const byOperator = input.author.kind === 'operator';
+
+  const mentions: PlannedMention[] = parsed.map(({ target, explicit }) => {
+    // The operator is addressable but never runnable — @Operator is a question for a person.
+    // An agent excluded from auto-reply is *not* handled here: it was still genuinely asked, and
+    // saying otherwise would show the operator "mentioned" on a row that is actually waiting on
+    // them. Its exclusion is applied where it belongs, at the point of queueing.
+    if (target.kind !== 'agent') return { target, summon: false, blocked: null };
+    const asked = explicit || woken.has(target.name.toLowerCase()) || byOperator;
+    return { target, summon: asked, blocked: null };
+  });
+
+  return { mentions, chainDepth: 0 };
+}
+
+/**
+ * The agents a body names, for the tool's "say who you are waking" check.
+ *
+ * Only agents, and never the author: the operator cannot be woken, and naming yourself is prose. An
+ * empty result means there is no decision to make and the post goes through untouched.
+ */
+export async function agentsAddressedIn(body: string, author: ForumAuthor): Promise<string[]> {
+  const roster = await loadRoster();
+  return parseMentions(body, roster)
+    .map((p) => p.target)
+    .filter((t) => t.kind === 'agent' && !isSame(asAuthor(t), author))
+    .map((t) => t.name);
 }
 
 /**
@@ -233,9 +280,11 @@ export interface SummonsOutcome {
 
 export function summonsOutcome(plan: SummonPlan): SummonsOutcome {
   return {
-    woke: [],
-    addressed: plan.mentions.map((m) => m.target.name),
-    notWoken: [],
+    woke: plan.mentions.filter((m) => m.summon && !m.blocked).map((m) => m.target.name),
+    addressed: plan.mentions.filter((m) => !m.summon).map((m) => m.target.name),
+    notWoken: plan.mentions
+      .filter((m) => m.blocked)
+      .map((m) => ({ agent: m.target.name, reason: blockReason(m.blocked!, m.target.name) })),
   };
 }
 
@@ -272,10 +321,10 @@ export const forumMentionService = {
    * the same reason indexing is: a mention that could fail somebody's post would cost more than the
    * feature is worth.
    *
-   * Notification is not, by itself, a run — and now neither is being named. A bare `@name` from an
-   * agent records the row, raises the alert legs, and rides into the target's next turn as a
-   * pointer. Only a *summons* (`@run:name`, the tool's `wake` argument, or the operator writing a
-   * name) reaches the auto-reply queue, and only if the chain and back-summon guards let it.
+   * Notification is not, by itself, a run. A bare `@name` from an agent records the row, raises the
+   * alert legs, and rides into the target's next turn as a pointer. Only a *summons* — the tool's
+   * `wake` argument, or the operator writing a name — reaches `forumWakeQueue`, and only if the
+   * fleet switch is on and the thread still has budget.
    */
   async record(input: {
     post: ForumPostDoc;
@@ -355,15 +404,38 @@ export const forumMentionService = {
       {
         thread: String(input.thread._id),
         by: input.author.display_name,
-        addressed: plan.mentions.map((m) => m.target.name),
+        woken: plan.mentions.filter((m) => m.summon && !m.blocked).map((m) => m.target.name),
+        addressed: plan.mentions.filter((m) => !m.summon).map((m) => m.target.name),
       },
       'forum mentions recorded',
     );
 
-    // Nothing is dispatched from a mention any more (`FORUM_WORKBOARD_PLAN.md` §9). Naming somebody
-    // notifies them and rides into their next turn as a pointer; work moves because the board
-    // dispatches a task, not because an agent remembered to wake somebody. The operator's Run button
-    // is the one path from a mention to a turn, and it is unchanged.
+    // The wake. `rows` mirrors `plan.mentions`, which `parseMentions` returns in the order the
+    // handles appear in the body — so "wake architect, then developer" runs as written, and each
+    // agent sees the previous one's posted reply before it starts. Fire-and-forget like the rest of
+    // this method: the queue drains on its own clock, and a post must never fail because of it.
+    void forumWakeQueue
+      .enqueue(
+        rows
+          .map((row, i) => ({
+            mentionId: String(row._id),
+            threadId: String(input.thread._id),
+            threadTitle: input.thread.title,
+            agentName: row.target.display_name,
+            authorName: input.author.display_name,
+            // Woken, addressed to an agent, and to one that has not opted out of running itself.
+            // The opt-out lives here rather than in the plan because it changes who *runs*, not what
+            // was *asked* — the row stays a summons and the operator's Run button honours it.
+            eligible:
+              Boolean(plan.mentions[i]?.summon) &&
+              !plan.mentions[i]?.blocked &&
+              Boolean(row.target.agent_id) &&
+              plan.mentions[i]?.target.autoReply === true,
+          }))
+          .filter((r) => r.eligible)
+          .map(({ eligible: _eligible, ...row }) => row),
+      )
+      .catch((err) => log.warn({ err: String(err) }, 'wake queueing failed'));
   },
 
   /** Operator triage: this one didn't need a turn. Reversible — reopening just flips it back. */

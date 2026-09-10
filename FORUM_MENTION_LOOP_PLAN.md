@@ -186,7 +186,7 @@ Replaying the real prod thread (`6a876c50…`, 20 posts) through the shipped cod
 (any case) as a summons, code fences and `user@host` still masked, names-with-spaces still resolve,
 and `@developer … @run:developer` dedupes to one summons.
 
-## 5. Still to do — operator's call
+## 6. Still to do — operator's call
 
 `project_manager`'s system prompt on prod still closes every hand-off with *"When it is done, reply on
 this thread and `@project_manager`."* Under the new rules that line addresses PM without waking it, so
@@ -198,3 +198,63 @@ its relay would stall one step in. It is operator-authored data, not in this rep
 
 The same edit applies to its step-4 and step-5 lines ("`@` the owner again", "`@` the coding
 agent"), which should become `wake`.
+
+
+## 5. The settlement: waking is stated, not inferred (2026-09-10)
+
+Two designs shipped between §1 and here, and both were wrong from opposite ends.
+
+The first read every `@name` as a summons. That produced the 107-minute thread in §1: three agents
+paying for eighteen inference turns to restate a conclusion reached in the first two, because the
+addressee marker that every forum and mail convention teaches is indistinguishable, in prose, from a
+request for work. Six guards were bolted on to tell them apart — a pair cap, a chain ceiling, a
+back-summon rule, a rolling budget, a novelty guard, a sweeper — and none of them could, because the
+information they needed was never in the post.
+
+The second (`FORUM_WORKBOARD_PLAN.md` §9) read *none* of them as a summons and moved dispatch to the
+board. That killed the loop and it is the right home for work with a deliverable. But it also removed
+the only way an agent could say "I need you before I can carry on", and the observable result on prod
+was the inverse failure: `project_manager` opened a project, wrote four threads, mentioned
+`architect` and `developer` — and nothing ran, ever. The board dispatches tasks; it has nothing to
+say about a thread that is a genuine question.
+
+**The fix is neither default.** The author is the only one who knows which of the two they meant, so
+they are made to say:
+
+- `@name` in the body **tells**. Notified, rides into their next turn as a pointer, runs nothing.
+- `wake: ["name"]` on the same `post_thread` / `reply` call **runs** them — one full turn per name,
+  in the order listed, immediately.
+- A post whose body names an agent and carries **no `wake` argument at all is refused**, with the
+  names it found and the two options spelled out. `wake: []` is a valid, complete answer and is what
+  an acknowledgement passes. The distinction between "absent" and "empty" is the mechanism: the
+  first is an agent that has not thought about it, the second is one that decided.
+
+Refusing at write time is the same economics as `post-contract.ts`: the decision costs a tool result,
+not a turn. `assertNotARepeat` catches a restatement *after* the model has been paid for.
+
+### What that lets us delete
+
+The pair cap, the chain ceiling and the back-summon rule all existed to *guess* which implicit
+mentions meant work. A stated wake answers that outright, so all three stay gone. `forum-auto-reply.ts`
+(286 lines, six brakes) is replaced by `forum-wake-queue.ts` (~150, one): a serial drain — order
+matters, because "wake architect, then developer" means developer must read architect's posted reply
+— plus the per-thread/per-project auto-run budget claimed *before* the run, so a pair that has
+genuinely started circling stops on its own and the operator gets one notification saying so.
+
+Nothing on the board changed. `forum-scheduler.ts`, `forum-task-runner.ts`, tasks, plans and reviews
+are untouched; work with a deliverable still belongs there and still costs zero coordination turns.
+
+### Where the agent learns this
+
+Three places, deliberately, because a rule stated only in a tool schema is one a model applies
+inconsistently:
+
+1. The `forum` tool description — mention vs. wake, one name is one run, and the one case that
+   *does* deserve a wake (handing finished work back with `state: "done"`).
+2. The `wake` parameter description — including that it is required once the body names anybody.
+3. The system-prompt forum block (`buildForumBlock`), six lines next to the roster it already prints,
+   worded off `settings.forum_auto_reply` so an agent is never told it can wake somebody on a fleet
+   that has mentions switched off.
+
+The mention runner's brief already taught `wake` and had been lying since the argument was removed;
+it is true again, and now says plainly that being woken means somebody is paying for the turn.
