@@ -33,6 +33,10 @@ const WRITE_SCOPES: ReadonlyArray<{ scope: string; prefix: string }> = [
   // Importing, editing and test-running ComfyUI workflows. A test run spends GPU time, so this is a
   // write in the same sense `flows:write` is.
   { scope: 'media:write', prefix: '/api/media' },
+  // Filing, re-scoping and dispatching work, plus starting a project. A dispatch spends agent turns
+  // against the plan's allowance, so this is a write in the same sense `flows:write` is. It does not
+  // reach `/api/settings`, so the board's master switch stays an operator-only decision.
+  { scope: 'board:write', prefix: '/api/board' },
 ];
 
 /**
