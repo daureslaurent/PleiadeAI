@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { env } from '../config/env';
 import { createLogger } from '../config/logger';
-import { dockerService } from './docker.service';
+import { dockerService, isStaleNetnsError } from './docker.service';
 import { sshMaterialForIsolation, sudoPasswordForIsolation } from './ssh.service';
 import { vpnConfigForIsolation, gluetunEnvArgs } from './vpn.service';
 import {
@@ -315,6 +315,13 @@ class AgentContainerManager {
   private readonly idleWindows = new Map<string, number>();
   /** Commands in flight per agent; while this is non-zero the container is never idle-stopped. */
   private readonly activeExecs = new Map<string, number>();
+  /**
+   * In-flight idle stops, keyed by agent id. `docker stop` is not instant (SIGTERM, then a grace
+   * period), and the container reads back as `running` for its whole duration — so a tool call that
+   * lands in that window would see a healthy container, skip the revive, and then fail its `exec`
+   * against a container that died a moment later. Revive awaits this first.
+   */
+  private readonly stopping = new Map<string, Promise<void>>();
   /** Booted visual sessions, keyed by agent id (host/port/password for the VNC proxy). */
   private readonly visualSessions = new Map<string, VisualEndpoint>();
   /** Serialises concurrent `ensureVisual` calls for the same agent. */
@@ -329,12 +336,20 @@ class AgentContainerManager {
   private readonly harnessLocalDir = path.join(__dirname, 'harness');
 
   /**
+   * The last `ensureReady` inputs per agent. `reviveContainer` runs from an `AgentExecutor`, which
+   * knows only a container name — this is what lets a mid-turn repair re-run the *whole* ensure
+   * (gluetun health, a stale netns, recreation) instead of a bare `docker start` that can only fail.
+   */
+  private readonly ensureInputs = new Map<string, { agent: IsolatedAgent; iso: IsolationProfile }>();
+
+  /**
    * Ensure the agent's container (built from its profile's image) is created and running; return an
    * executor bound to it. Throws `IsolationNotReadyError` if the profile image isn't built — callers
    * must surface this as a tool error and never fall back to the backend.
    */
   async ensureReady(agent: IsolatedAgent, iso: IsolationProfile): Promise<AgentExecutor> {
     const agentId = String(agent._id);
+    this.ensureInputs.set(agentId, { agent, iso });
     const existing = this.inflight.get(agentId);
     if (existing) return existing;
 
@@ -642,12 +657,20 @@ class AgentContainerManager {
     // VPN mode: bring up (and health-gate) this profile's gluetun container first, then attach the
     // agent container to its network namespace. A freshly (re)created gluetun means the agent
     // container's netns is stale, so drop it and let it recreate against the new namespace.
+    //
+    // The `recreated` flag only covers the agent that *triggered* the recreation. Gluetun is shared
+    // by every agent on the profile, so the others are left pinned to a namespace that is gone —
+    // silently, until each one's next turn fails to start. Hence the second check, which asks docker
+    // what namespace this container is actually attached to and compares it to the live gluetun.
     let networkOverride: string | undefined;
     if (iso.network === 'vpn') {
       const gluetun = await this.ensureGluetun(isoId);
       networkOverride = `container:${gluetun.name}`;
-      if (gluetun.recreated) {
+      if (gluetun.recreated || (await this.netnsIsStale(container, gluetun.name))) {
+        log.warn({ agentId, isoId }, 'agent container is pinned to a replaced vpn namespace — recreating it');
         await dockerService.removeContainer(container).catch(() => undefined);
+        this.visualSessions.delete(agentId);
+        this.remoteProvisioned.delete(agentId);
       }
     }
 
@@ -657,11 +680,24 @@ class AgentContainerManager {
     if (remote) networkOverride = 'bridge';
 
     const state = await dockerService.containerState(container);
-    const created = state === null;
+    let created = state === null;
+    if (!created && state !== 'running') {
+      // Last resort: docker itself says the namespace is gone. Recreate rather than hand the agent
+      // an error it can never clear — the workspace volume is what carries its work, and that
+      // survives. Anything the container held outside the volume does not.
+      try {
+        await dockerService.startContainer(container);
+      } catch (err) {
+        if (!isStaleNetnsError(String(err))) throw err;
+        log.warn({ agentId, isoId, err: String(err) }, 'container start hit a dead network namespace — recreating it');
+        await dockerService.removeContainer(container).catch(() => undefined);
+        this.visualSessions.delete(agentId);
+        this.remoteProvisioned.delete(agentId);
+        created = true;
+      }
+    }
     if (created) {
       await this.createAndProvision(agent, iso, agentId, image, networkOverride);
-    } else if (state !== 'running') {
-      await dockerService.startContainer(container);
     }
 
     this.resetIdle(agentId, iso.idle_timeout_ms);
@@ -730,6 +766,29 @@ class AgentContainerManager {
 
     this.remoteProvisioned.add(agentId);
     log.info({ agentId, host: remote.host, port: remote.port }, 'remote ssh execution ready');
+  }
+
+  /**
+   * Is this container attached to a network namespace that is no longer the profile's live gluetun?
+   *
+   * `--network container:<name>` is resolved to the gluetun container's *id* at create time and
+   * frozen there, so replacing gluetun leaves every other agent container on the profile pointing at
+   * a dead id — `docker start` then fails forever with "joining network namespace of container: No
+   * such container". Comparing the recorded id against the running gluetun's catches that whatever
+   * replaced it (a health failure here, an operator, a host reboot between two backend runs), which
+   * an in-memory `recreated` flag cannot.
+   *
+   * `false` when the container doesn't exist yet, isn't namespace-attached, or is already on the
+   * right namespace — nothing to repair in any of those cases.
+   */
+  private async netnsIsStale(container: string, gluetunName: string): Promise<boolean> {
+    const mode = await dockerService.networkMode(container);
+    if (!mode?.startsWith('container:')) return false;
+    const pinned = mode.slice('container:'.length);
+    const live = await dockerService.containerId(gluetunName);
+    if (!live) return true;
+    // Docker records the full id, but tolerate a short-id or name reference from an older create.
+    return !(pinned === live || live.startsWith(pinned) || pinned === gluetunName);
   }
 
   /**
@@ -904,9 +963,15 @@ class AgentContainerManager {
       this.visualSessions.delete(agentId);
       this.remoteProvisioned.delete(agentId);
       log.info({ agentId }, 'idle timeout — stopping container');
-      void dockerService.stopContainer(agentContainerName(agentId)).catch((err) => {
-        log.warn({ agentId, err: String(err) }, 'idle stop failed');
-      });
+      const stop = dockerService
+        .stopContainer(agentContainerName(agentId))
+        .catch((err) => {
+          log.warn({ agentId, err: String(err) }, 'idle stop failed');
+        })
+        .finally(() => {
+          if (this.stopping.get(agentId) === stop) this.stopping.delete(agentId);
+        });
+      this.stopping.set(agentId, stop);
     }, ms);
     timer.unref?.();
     this.idleTimers.set(agentId, timer);
@@ -942,9 +1007,14 @@ class AgentContainerManager {
    * Restart the container behind a live executor if it stopped, so a turn survives a stop that
    * happened between two of its tool calls. A container that no longer *exists* is not revived
    * here: `ensureReady` owns creation, and silently recreating one mid-turn would hand the agent a
-   * different, empty machine than the one it has been working in — better an honest error.
+   * different, empty machine than the one it has been working in — better an honest error. One that
+   * still exists but can no longer start (a `vpn` profile whose gluetun was replaced) *is* rebuilt,
+   * since its workspace volume — the part that holds the agent's work — is carried over.
    */
   async reviveContainer(agentId: string, container: string, remote?: RemoteTarget): Promise<void> {
+    // Let an idle stop that is already under way finish, so we read a settled state rather than the
+    // `running` a stopping container still reports.
+    await this.stopping.get(agentId);
     const state = await dockerService.containerState(container);
     if (state === 'running') return;
     if (state === null) {
@@ -953,12 +1023,23 @@ class AgentContainerManager {
       );
     }
     log.warn({ agentId, state }, 'container was not running mid-turn — restarting it');
-    await dockerService.startContainer(container);
     // Whatever lived in the stopped container's memory is gone: the desktop stack, and the SSH
-    // control sockets an `ssh`-mode hop multiplexes over. Drop those caches so they are
-    // re-established on demand rather than assumed still good.
+    // control sockets an `ssh`-mode hop multiplexes over. Drop those caches (before any re-ensure
+    // reads them) so they are re-established on demand rather than assumed still good.
     this.visualSessions.delete(agentId);
     this.remoteProvisioned.delete(agentId);
+
+    // A bare `docker start` cannot repair a container whose network namespace died with it (a `vpn`
+    // profile whose gluetun was replaced) — it fails, identically, on every remaining tool call of
+    // the turn. Re-running the full ensure is what knows how to fix that: it re-health-gates
+    // gluetun and recreates the container against the live namespace.
+    const inputs = this.ensureInputs.get(agentId);
+    if (inputs) {
+      await this.ensureReady(inputs.agent, inputs.iso);
+      return;
+    }
+
+    await dockerService.startContainer(container);
     if (remote) await this.ensureRemote(container, agentId, remote, true);
   }
 

@@ -100,6 +100,24 @@ class DockerService {
     return res.stdout.trim();
   }
 
+  /** The container's full 64-char id, or `null` if it doesn't exist. */
+  async containerId(container: string): Promise<string | null> {
+    const res = await this.run(['inspect', '-f', '{{.Id}}', container]);
+    if (res.exitCode !== 0) return null;
+    return res.stdout.trim() || null;
+  }
+
+  /**
+   * The container's configured network mode (`bridge`, `host`, `container:<id>`, …), or `null` if it
+   * doesn't exist. A `vpn`-profile agent container reads back `container:<gluetun id>`, which is what
+   * lets us tell a live netns attachment from one pinned to a gluetun that has since been replaced.
+   */
+  async networkMode(container: string): Promise<string | null> {
+    const res = await this.run(['inspect', '-f', '{{.HostConfig.NetworkMode}}', container]);
+    if (res.exitCode !== 0) return null;
+    return res.stdout.trim() || null;
+  }
+
   /**
    * Container healthcheck status (`starting`/`healthy`/`unhealthy`) or `null` when the container
    * doesn't exist or defines no HEALTHCHECK. The `if` guard emits an empty string for images without
@@ -356,6 +374,20 @@ class DockerService {
     const base = ['exec', ...(opts.stdin !== undefined ? ['-i'] : []), container, ...argv];
     return this.run(base, opts);
   }
+}
+
+/**
+ * Does this docker error mean the container is pinned to a network namespace that no longer exists?
+ *
+ * A `vpn`-profile agent container is created with `--network container:<gluetun>`, which docker
+ * resolves to the gluetun container's *id* at create time. Replace gluetun (a health failure, a VPN
+ * drop, a host reboot) and every container still pointing at the old id becomes permanently
+ * unstartable: `docker start` fails with "joining network namespace of container: No such
+ * container: <old id>". The only cure is recreating the container against the new namespace, so
+ * callers use this to tell that dead end apart from an ordinary start failure.
+ */
+export function isStaleNetnsError(message: string): boolean {
+  return /joining network namespace/i.test(message) || /cannot join network of a non running container/i.test(message);
 }
 
 export const dockerService = new DockerService();
