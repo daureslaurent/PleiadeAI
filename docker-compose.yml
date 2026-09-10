@@ -158,6 +158,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # Build weight (see BACKEND_BUILD_WEIGHT_PLAN.md). Caps `tsc`'s heap. This stage builds at
+        # the same time as the frontend's, so its ceiling is what decides whether the two together
+        # fit in what a small, swapless VPS has free. Floor is ~640 MB on the current tree.
+        BACKEND_BUILD_HEAP_MB: ${BACKEND_BUILD_HEAP_MB:-1024}
     container_name: pleiades_backend
     restart: unless-stopped
     environment:
