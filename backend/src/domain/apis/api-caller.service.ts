@@ -316,9 +316,38 @@ export function shrinkJson(data: unknown, charBudget: number): { data: unknown; 
   };
 }
 
+/**
+ * Record the outcome on the API document, fire-and-forget.
+ *
+ * Never awaited and never allowed to throw: the operator's health readout is worth a write, but not
+ * worth failing a call the service already answered.
+ */
+function note(
+  source: ApiSourceDoc,
+  opts: CallOptions,
+  operation: string,
+  outcome: { ok: boolean; status: number | null; duration_ms: number; error?: string },
+): void {
+  void apiSourceRepository
+    .noteCall(String(source._id), {
+      operation,
+      ok: outcome.ok,
+      status: outcome.status,
+      duration_ms: outcome.duration_ms,
+      error: outcome.error ?? '',
+      via: opts.via ?? 'agent',
+      agent: opts.agent ?? '',
+    })
+    .catch((err) => log.debug({ err: String(err) }, 'could not record the call outcome'));
+}
+
 export interface CallOptions {
   /** Response budget in tokens (~4 chars each). */
   maxResponseTokens: number;
+  /** Who made this call — recorded on the API so the settings page can attribute the last one. */
+  via?: 'agent' | 'test';
+  /** The calling agent's name, when an agent made it. */
+  agent?: string;
   /** Overrides the API's own timeout (used by the Test button). */
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -346,12 +375,46 @@ export async function callOperation(
     const available = (await apiSourceRepository.listEnabled()).map((s) => s.name).join(', ') || 'none configured';
     throw new ApiCallError(`no API named "${split.api}" — available: ${available}`);
   }
+
+  // Everything from here on is recorded on the API document, refusals included. A call rejected for
+  // a missing credential or a bad argument never reached the service, but the operator still needs
+  // to see it: "the last thing that happened to this API" is the question the settings page asks,
+  // and an attempt that failed validation is one of the answers.
+  const started = Date.now();
+  try {
+    const outcome = await executeCall(source, split.operation, operationId, params, opts, started);
+    note(source, opts, operationId, { ok: true, status: outcome.status, duration_ms: outcome.duration_ms });
+    return outcome;
+  } catch (err) {
+    const failure =
+      err instanceof ApiCallError
+        ? err
+        : new ApiCallError(`${source.name}.${split.operation} failed: ${String((err as Error)?.message ?? err)}`);
+    note(source, opts, operationId, {
+      ok: false,
+      status: failure.status ?? null,
+      duration_ms: Date.now() - started,
+      error: failure.message,
+    });
+    throw failure;
+  }
+}
+
+/** The call itself, once the API is known. Throws {@link ApiCallError}; the caller records it. */
+async function executeCall(
+  source: ApiSourceDoc,
+  operationName: string,
+  operationId: string,
+  params: Record<string, unknown>,
+  opts: CallOptions,
+  started: number,
+): Promise<ApiCallOutcome> {
   if (!source.enabled) throw new ApiCallError(`the "${source.name}" API is switched off`);
 
-  const operation = source.operations.find((o) => o.id === split.operation);
+  const operation = source.operations.find((o) => o.id === operationName);
   if (!operation || !operation.enabled) {
     const ops = source.operations.filter((o) => o.enabled).map((o) => `${source.name}.${o.id}`).join(', ') || 'none';
-    throw new ApiCallError(`"${source.name}" has no operation "${split.operation}" — it offers: ${ops}`);
+    throw new ApiCallError(`"${source.name}" has no operation "${operationName}" — it offers: ${ops}`);
   }
 
   const method = operation.method as HttpMethod;
@@ -383,7 +446,6 @@ export async function callOperation(
   const timer = setTimeout(() => controller.abort(), timeout);
   const onAbort = () => controller.abort();
   opts.signal?.addEventListener('abort', onAbort, { once: true });
-  const started = Date.now();
 
   try {
     const res = await fetch(url.toString(), { method, headers, body, signal: controller.signal });
@@ -395,10 +457,10 @@ export async function callOperation(
       parsed = text.length ? JSON.parse(text) : null;
     } catch {
       if (!res.ok) {
-        throw new ApiCallError(`${source.name}.${operation.id} failed: HTTP ${res.status} — ${text.slice(0, 400)}`, res.status);
+        throw new ApiCallError(`${operationId} failed: HTTP ${res.status} — ${text.slice(0, 400)}`, res.status);
       }
       throw new ApiCallError(
-        `${source.name}.${operation.id} returned ${res.headers.get('content-type') ?? 'an unknown type'}, not JSON — first bytes: ${text.slice(0, 200)}`,
+        `${operationId} returned ${res.headers.get('content-type') ?? 'an unknown type'}, not JSON — first bytes: ${text.slice(0, 200)}`,
         res.status,
       );
     }
@@ -409,24 +471,19 @@ export async function callOperation(
       if (res.status === 401 && source.auth_type === 'oauth2') invalidateToken(source);
       // The service's own JSON error is far more useful to the agent than the status alone.
       const detail = JSON.stringify(parsed).slice(0, 600);
-      throw new ApiCallError(`${source.name}.${operation.id} failed: HTTP ${res.status} — ${detail}`, res.status);
+      throw new ApiCallError(`${operationId} failed: HTTP ${res.status} — ${detail}`, res.status);
     }
 
     const budget = Math.max(200, opts.maxResponseTokens) * CHARS_PER_TOKEN;
     const { data, truncated } = shrinkJson(parsed, budget);
-    void apiSourceRepository.noteResult(String(source._id), '');
     return { status: res.status, data, truncated, url: url.toString(), method, duration_ms: duration };
   } catch (err) {
-    if (err instanceof ApiCallError) {
-      void apiSourceRepository.noteResult(String(source._id), err.message);
-      throw err;
-    }
+    if (err instanceof ApiCallError) throw err;
     const aborted = (err as Error)?.name === 'AbortError';
     const message = aborted
-      ? `${source.name}.${operation.id} timed out after ${timeout}ms`
-      : `${source.name}.${operation.id} could not be reached: ${String((err as Error)?.message ?? err)}`;
+      ? `${operationId} timed out after ${timeout}ms`
+      : `${operationId} could not be reached: ${String((err as Error)?.message ?? err)}`;
     log.warn({ api: source.name, operation: operation.id, err: String(err) }, 'api call failed');
-    void apiSourceRepository.noteResult(String(source._id), message);
     throw new ApiCallError(message);
   } finally {
     clearTimeout(timer);

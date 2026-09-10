@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, Plus, Trash2, Webhook } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, Webhook } from 'lucide-react';
 import { Button, Callout, Checkbox, Field, Input, Row, Select, Textarea, Toggle, useConfirm } from '../../../components/ui';
 import {
   API_AUTH_TYPES,
@@ -13,6 +13,7 @@ import {
 } from '../../../lib/api';
 import { ApiOperationEditor } from './ApiOperationEditor';
 import { BuiltinApisPicker } from './BuiltinApisPicker';
+import { ApiHealthSummary, ApiLastCallLine, LastCallDot } from './ApiLastCall';
 
 /**
  * Configured HTTP APIs (Settings → APIs; `API_TOOL_PLAN.md`).
@@ -82,6 +83,36 @@ export function ApiSourcesManager() {
   }, []);
 
   /**
+   * Refresh the call outcomes while the page is open. An agent's call happens nowhere near this
+   * page, so without a poll the health readout is only ever as fresh as the last navigation.
+   *
+   * Only the *server-owned* fields are adopted: merging a whole row would overwrite a field the
+   * operator is typing into, and a poll landing mid-edit would yank the text out from under them.
+   */
+  const refreshOutcomes = useCallback(async () => {
+    try {
+      const fresh = await apiSourcesApi.list();
+      const byId = new Map(fresh.map((s) => [s._id, s]));
+      latest.current = latest.current.map((s) => {
+        const server = byId.get(s._id);
+        return server ? { ...s, last_call: server.last_call, has_secret: server.has_secret } : s;
+      });
+      // Rows added elsewhere still need picking up, but never at the cost of a field being edited.
+      const known = new Set(latest.current.map((s) => s._id));
+      const added = fresh.filter((s) => !known.has(s._id));
+      if (added.length) latest.current = [...latest.current, ...added].sort((a, b) => a.name.localeCompare(b.name));
+      setSources(latest.current);
+    } catch {
+      /* a missed refresh is a stale badge, not an error worth showing */
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => void refreshOutcomes(), 15_000);
+    return () => clearInterval(id);
+  }, [refreshOutcomes]);
+
+  /**
    * Apply an edit locally, then flush that source once the operator stops typing. The next value is
    * computed from a ref rather than inside the state updater — an updater that also schedules a
    * request would fire twice under StrictMode's double-invocation.
@@ -101,7 +132,7 @@ export function ApiSourcesManager() {
           // Only adopt the server's copy for fields the operator isn't still editing: overwriting
           // the whole row here would yank the cursor out of a field typed into during the flight.
           latest.current = latest.current.map((s) =>
-            s._id === id ? { ...s, last_error: saved.last_error, has_secret: saved.has_secret } : s,
+            s._id === id ? { ...s, last_call: saved.last_call, has_secret: saved.has_secret } : s,
           );
           setSources(latest.current);
         })
@@ -155,6 +186,8 @@ export function ApiSourcesManager() {
 
   return (
     <div className="space-y-3">
+      <ApiHealthSummary calls={sources.map((s) => s.last_call)} />
+
       {sources.map((s) => (
         <Row key={s._id} className="space-y-2 p-3">
           <div className="flex items-center gap-2">
@@ -168,6 +201,7 @@ export function ApiSourcesManager() {
               ) : (
                 <ChevronRight size={14} className="shrink-0 text-slate-500" />
               )}
+              <LastCallDot call={s.last_call} />
               <span className="shrink-0 font-mono text-sm font-medium text-slate-200">{s.name}</span>
               {s.builtin && (
                 <span
@@ -175,6 +209,11 @@ export function ApiSourcesManager() {
                   title="Installed from the shipped catalogue. Yours to edit or delete."
                 >
                   built-in
+                </span>
+              )}
+              {s.last_call && !s.last_call.ok && openId !== s._id && (
+                <span className="truncate text-[10px] text-red-400" title={s.last_call.error}>
+                  {s.last_call.operation || 'last call'} failed
                 </span>
               )}
               {s.auth_type !== 'none' && !s.auth_optional && !s.has_secret && (
@@ -194,15 +233,10 @@ export function ApiSourcesManager() {
             </Button>
           </div>
 
-          {s.last_error && (
-            <p className="flex items-start gap-1.5 text-[10px] text-amber-400">
-              <AlertTriangle size={11} className="mt-px shrink-0" />
-              <span className="break-words">Last call failed: {s.last_error}</span>
-            </p>
-          )}
-
           {openId === s._id && (
             <div className="space-y-3 border-t hairline pt-3">
+              <ApiLastCallLine call={s.last_call} />
+
               <Field label="Description" hint="The single line api_man returns — what this API is for.">
                 <Input
                   value={s.description}
@@ -311,7 +345,13 @@ export function ApiSourcesManager() {
                           edit(s._id, { operations: s.operations.map((o, idx) => (idx === i ? next : o)) })
                         }
                         onRemove={() => edit(s._id, { operations: s.operations.filter((_, idx) => idx !== i) })}
-                        onTest={(params) => apiSourcesApi.test(s._id, op.id, params)}
+                        onTest={async (params) => {
+                          const result = await apiSourcesApi.test(s._id, op.id, params);
+                          // The backend just recorded this as the API's last call; show it now
+                          // rather than leaving the row stale until the next poll.
+                          void refreshOutcomes();
+                          return result;
+                        }}
                       />
                     ))}
                   </div>

@@ -3174,6 +3174,21 @@ export interface ApiOperationSpec {
   enabled: boolean;
 }
 
+/** How the most recent call to an API went — success or failure, and who made it. */
+export interface ApiLastCall {
+  /** Full operation id, e.g. `wikipedia.summary`. Blank on a record carried over from before. */
+  operation: string;
+  ok: boolean;
+  /** HTTP status when the call reached the service; null when it never got that far. */
+  status: number | null;
+  duration_ms: number;
+  at: string;
+  error: string;
+  /** `agent` — a real tool call; `test` — the operator's Test button. */
+  via: 'agent' | 'test';
+  agent: string;
+}
+
 export interface ApiSource {
   _id: string;
   name: string;
@@ -3199,8 +3214,8 @@ export interface ApiSource {
   notes: string;
   /** Installed from the shipped catalogue rather than hand-added. */
   builtin: boolean;
-  last_error: string;
-  last_used_at: string | null;
+  /** The most recent call, success or failure. Null until this API has been called at all. */
+  last_call: ApiLastCall | null;
   has_secret: boolean;
 }
 

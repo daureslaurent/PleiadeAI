@@ -179,6 +179,8 @@ export const api: Tool = {
         maxResponseTokens: Number(config.max_response_tokens) || 8000,
         timeoutMs: Number(config.timeout_ms) > 0 ? Number(config.timeout_ms) : undefined,
         signal: ctx.signal,
+        via: 'agent',
+        agent: ctx.agentName,
       });
       log.info(
         { agent: ctx.agentName, operation, status: outcome.status, ms: outcome.duration_ms },

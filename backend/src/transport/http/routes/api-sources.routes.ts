@@ -142,7 +142,7 @@ apiSourcesRouter.post('/:id/test', async (req, res) => {
     const outcome = await callOperation(
       operationId.includes('.') ? operationId : `${doc.name}.${operationId}`,
       params,
-      { maxResponseTokens: 1200 },
+      { maxResponseTokens: 1200, via: 'test' },
     );
     res.json({
       ok: true,

@@ -272,7 +272,7 @@ export function ApiOperationEditor({
             {result && result !== 'running' && (
               <div
                 className={`mt-2 max-h-48 overflow-auto rounded px-2 py-1.5 font-mono text-[10px] leading-relaxed ${
-                  result.ok ? 'bg-emerald-500/[0.08] text-emerald-300' : 'bg-red-500/[0.08] text-red-300'
+                  result.ok ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
                 }`}
               >
                 {result.ok ? (

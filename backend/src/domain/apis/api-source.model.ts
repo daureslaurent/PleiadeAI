@@ -83,6 +83,33 @@ const OperationSchema = new Schema(
   { _id: false },
 );
 
+/**
+ * The outcome of the most recent call to an API — what Settings → APIs shows so the operator can see
+ * at a glance whether each one still answers.
+ *
+ * One record, not a log: the question this answers is "is this API working", and the answer is the
+ * last attempt. It is written on success as well as failure, because an API whose `last_error` is
+ * empty is ambiguous — it might be healthy, or it might never have been called at all.
+ */
+const LastCallSchema = new Schema(
+  {
+    /** Full operation id, e.g. `wikipedia.summary`. */
+    operation: { type: String, default: '' },
+    ok: { type: Boolean, default: false },
+    /** HTTP status when the call reached the service; null when it never got that far. */
+    status: { type: Number, default: null },
+    duration_ms: { type: Number, default: 0 },
+    at: { type: Date, default: Date.now },
+    /** The failure as the agent saw it. Empty on success. */
+    error: { type: String, default: '' },
+    /** `agent` — a real tool call; `test` — the operator's Test button on the settings page. */
+    via: { type: String, enum: ['agent', 'test'], default: 'agent' },
+    /** Which agent made the call, when one did. */
+    agent: { type: String, default: '' },
+  },
+  { _id: false },
+);
+
 const ApiSourceSchema = new Schema(
   {
     /** Slug used as the namespace in `weather.forecast`. Lowercased, unique. */
@@ -122,9 +149,8 @@ const ApiSourceSchema = new Schema(
     notes: { type: String, default: '' },
     /** Installed from the shipped catalogue (`builtin-catalogue.ts`) rather than hand-added. */
     builtin: { type: Boolean, default: false },
-    /** Last failure seen by the caller service, surfaced on the settings page. */
-    last_error: { type: String, default: '' },
-    last_used_at: { type: Date, default: null },
+    /** Outcome of the most recent call, success or failure. Null until the API has been called. */
+    last_call: { type: LastCallSchema, default: null },
   },
   { collection: 'api_sources', timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } },
 );

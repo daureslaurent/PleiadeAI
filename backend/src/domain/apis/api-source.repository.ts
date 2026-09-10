@@ -49,8 +49,11 @@ export const apiSourceRepository = {
     return ApiSourceModel.findByIdAndDelete(id).exec();
   },
 
-  /** Record the outcome of a call, so the settings page can show an API that has started failing. */
-  async noteResult(id: string, error: string): Promise<void> {
-    await ApiSourceModel.updateOne({ _id: id }, { $set: { last_error: error, last_used_at: new Date() } }).exec();
+  /**
+   * Record how the most recent call went — success included, since "no error recorded" cannot
+   * distinguish a healthy API from one nobody has ever called.
+   */
+  async noteCall(id: string, call: Record<string, unknown>): Promise<void> {
+    await ApiSourceModel.updateOne({ _id: id }, { $set: { last_call: { ...call, at: new Date() } } }).exec();
   },
 };

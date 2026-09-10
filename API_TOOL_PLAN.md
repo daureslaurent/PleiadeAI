@@ -104,6 +104,25 @@ the value; a write with an empty secret leaves the stored one alone (the `monito
   `managers/ApiSourcesManager.tsx`. Each API is a row that expands into its editor, with its
   operations as a nested list and a Test button that runs one against the live service.
 
+### Is it working?
+
+Each API records its **last call** — success included, not just failures. `last_error` alone could
+not answer the question the settings page is really asked: an empty one means either "healthy" or
+"never called", and those are the two states an operator most needs to tell apart. So the readout is
+three-way — answering, failing, never called — with a dot on every collapsed row, the full record
+when a row is open (operation, HTTP status, duration, age, and whether an agent or the operator's own
+Test made it), and one summary line over the list.
+
+A refusal counts as a call. A missing credential, an unknown parameter, a switched-off API: none of
+them reached the service, but each is the last thing that happened to that API, and hiding them would
+leave the operator staring at a row that says nothing while their agent gets an error every turn. The
+error shown is the exact string the agent was handed, so the two are debugging the same text.
+
+The page polls while it is open, because an agent's call happens nowhere near it — and the poll
+adopts only server-owned fields, so it can never overwrite a field being typed into. Colour comes
+from the app's shared tone vocabulary (`Dot`/`StatusBadge`), whose ramps are theme variables: the
+readout follows Terminal's phosphor green and Paper's darkened ink without knowing either exists.
+
 ## 8. The shipped catalogue
 
 `domain/apis/builtin-catalogue.ts` holds the APIs this instance comes with — Wikipedia, Wikidata,
