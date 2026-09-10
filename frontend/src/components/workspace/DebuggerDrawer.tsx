@@ -1,29 +1,33 @@
 import { useState } from 'react';
-import { Bug, X, Box, Database } from 'lucide-react';
+import { Bug, X, Box, Database, PieChart } from 'lucide-react';
 import { useStream } from '../../store/stream';
 import type { Agent } from '../../lib/api';
 import { IsolationPanel } from './IsolationPanel';
 import { DataPanel } from './DataPanel';
 import { TraceColumn } from './TraceColumn';
+import { PromptUsagePanel } from './PromptUsagePanel';
 
 interface Props {
   onClose: () => void;
   agent: Agent | null;
+  /** The session whose prompt the **Usage** tab weighs. */
+  sessionId: string | null;
   /** The chat layout already docks the trace beside the conversation — don't offer it twice. */
   hideTrace?: boolean;
 }
 
-type Tab = 'trace' | 'isolation' | 'data';
+type Tab = 'trace' | 'usage' | 'isolation' | 'data';
 
 /**
- * Right drawer with three tabs: **Trace** (the live + persisted execution trace for the active
- * session — tool calls, cross-agent hops, `<think>` reasoning, alerts), **Isolation** (the active
+ * Right drawer with four tabs: **Trace** (the live + persisted execution trace for the active
+ * session — tool calls, cross-agent hops, `<think>` reasoning, alerts), **Usage** (where the
+ * context window goes, broken down by which part of the prompt spent it), **Isolation** (the active
  * agent's container: live usage + a `/workspace` file explorer), and **Data** (the session's
  * persisted resources — tool-read images and fetched binary blobs, by handle).
  */
-export function DebuggerDrawer({ onClose, agent, hideTrace = false }: Props) {
+export function DebuggerDrawer({ onClose, agent, sessionId, hideTrace = false }: Props) {
   const streaming = useStream((s) => s.streaming);
-  const [tab, setTab] = useState<Tab>(hideTrace ? 'isolation' : 'trace');
+  const [tab, setTab] = useState<Tab>(hideTrace ? 'usage' : 'trace');
 
   return (
     <aside className="glass flex w-96 shrink-0 flex-col border-l">
@@ -33,6 +37,12 @@ export function DebuggerDrawer({ onClose, agent, hideTrace = false }: Props) {
             {streaming && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />}
           </TabButton>
         )}
+        <TabButton
+          icon={PieChart}
+          label="Usage"
+          active={tab === 'usage'}
+          onClick={() => setTab('usage')}
+        />
         <TabButton
           icon={Box}
           label="Isolation"
@@ -52,8 +62,10 @@ export function DebuggerDrawer({ onClose, agent, hideTrace = false }: Props) {
         <IsolationPanel agent={agent} />
       ) : tab === 'data' ? (
         <DataPanel />
+      ) : tab === 'usage' ? (
+        <PromptUsagePanel sessionId={sessionId} agent={agent} />
       ) : hideTrace ? (
-        <IsolationPanel agent={agent} />
+        <PromptUsagePanel sessionId={sessionId} agent={agent} />
       ) : (
         <TraceColumn active={tab === 'trace'} />
       )}

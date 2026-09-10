@@ -2093,6 +2093,29 @@ export interface PromptTokenBreakdown {
   contextWindow?: number;
 }
 
+export type PromptUsageGroup = 'system' | 'tools' | 'conversation';
+
+/** One row of the Prompt-usage breakdown: a named part of the prompt and what it costs. */
+export interface PromptUsageSegment {
+  id: string;
+  label: string;
+  group: PromptUsageGroup;
+  /** `null` when the inference host couldn't tokenize it. */
+  tokens: number | null;
+  /** How many messages/blocks folded into the row. */
+  count: number;
+}
+
+/** The prompt sized by *what each part of it is* — backs the debugger's **Usage** tab. */
+export interface PromptUsageBreakdown {
+  segments: PromptUsageSegment[];
+  sum: number;
+  total: number | null;
+  contextWindow: number;
+  /** Ordered `## ` block titles of the assembled system message — the future prompt-module list. */
+  modules: string[];
+}
+
 export const llmDebugApi = {
   list: (limit: number) =>
     api.get<LlamaCallRecord[]>('/llama-logs', { params: { limit } }).then((r) => r.data),
@@ -2104,6 +2127,15 @@ export const llmDebugApi = {
   tokenize: (messages: unknown[], agentId?: string | null) =>
     api
       .post<PromptTokenBreakdown>('/llama-logs/tokenize', { messages, agentId: agentId ?? null })
+      .then((r) => r.data),
+  /** The same prompt, sized by part rather than by message. */
+  usageBreakdown: (messages: unknown[], tools: unknown[] | undefined, agentId?: string | null) =>
+    api
+      .post<PromptUsageBreakdown>('/llama-logs/usage-breakdown', {
+        messages,
+        tools: tools ?? [],
+        agentId: agentId ?? null,
+      })
       .then((r) => r.data),
   get: (id: string) => api.get<LlamaCallRecord>(`/llama-logs/${id}`).then((r) => r.data),
   stats: () => api.get<LlamaLogStats>('/llama-logs/stats').then((r) => r.data),

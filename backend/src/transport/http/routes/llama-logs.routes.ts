@@ -5,7 +5,13 @@ import { truncateRequestImages } from '../../../inference/truncate-images';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { resolveInference } from '../../../inference/inference-resolver';
 import { llamaClient } from '../../../inference/LlamaClient';
-import type { ChatMessage, ContentPart } from '../../../domain/agents/jit-builder';
+import type { ChatMessage } from '../../../domain/agents/jit-builder';
+import {
+  foldSegments,
+  messageText,
+  planUsagePieces,
+  promptModules,
+} from '../../../domain/llama-logs/prompt-usage';
 import type { LlamaRequestCapture } from '../../../core/event-bus/events.types';
 
 /** LLM Debug page — raw llama call inspector + DB size readout + archive purge. */
@@ -95,24 +101,6 @@ llamaLogsRouter.get('/session/:sessionId', async (req, res) => {
   res.json(docs.map(toListRecord));
 });
 
-/** Flatten a captured message's content to the plain text the tokenizer should size. */
-function messageText(msg: unknown): string {
-  const m = msg as ChatMessage | undefined;
-  if (!m) return '';
-  const body =
-    typeof m.content === 'string'
-      ? m.content
-      : Array.isArray(m.content)
-        ? (m.content as ContentPart[])
-            .map((p) => (p.type === 'text' ? p.text : (p.image_url?.url ?? '')))
-            .join('\n')
-        : '';
-  // A tool-calling assistant message often has empty content — its weight is entirely in the
-  // serialized call, so size that too or the row reads as free.
-  const calls = m.tool_calls?.length ? JSON.stringify(m.tool_calls) : '';
-  return [body, calls].filter(Boolean).join('\n');
-}
-
 /**
  * Size a captured message array: a per-message breakdown (raw `/tokenize`, no chat template) plus
  * the exact templated `total`. The two disagree by the template's per-message scaffolding — that is
@@ -132,6 +120,41 @@ llamaLogsRouter.post('/tokenize', async (req, res) => {
     llamaClient.tokenizeMessages(target, messages as ChatMessage[]).catch(() => null),
   ]);
   res.json({ perMessage, total, contextWindow: target.contextWindow });
+});
+
+/**
+ * **Prompt usage** — the same prompt sized by *what each part of it is* rather than by message.
+ *
+ * `/tokenize` answers "which message is big"; this answers "which part of the agent's configuration
+ * is big", which is the question you can actually act on. The assembled system message is cut back
+ * into the `jit-builder` blocks it was glued from (Environment, AGENTS.md, Notebook, Task list…),
+ * the operator-authored `system_prompt` gets its own row, the toolset's JSON schemas — billed on
+ * every call and present in no message — get theirs, and the conversation folds into user /
+ * assistant / tool-result rows. One bounded-concurrency tokenize pass sizes them all.
+ */
+llamaLogsRouter.post('/usage-breakdown', async (req, res) => {
+  const body = req.body as { agentId?: string | null; messages?: unknown[]; tools?: unknown[] };
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const agent = body.agentId ? await agentRepository.findById(body.agentId) : null;
+  const target = await resolveInference(agent ?? {});
+  if (!messages.length) {
+    res.json({ segments: [], sum: 0, total: 0, contextWindow: target.contextWindow, modules: [] });
+    return;
+  }
+
+  const pieces = planUsagePieces(messages, body.tools);
+  const [counts, total] = await Promise.all([
+    llamaClient.tokenizeTexts(target, pieces.map((p) => p.text)),
+    llamaClient.tokenizeMessages(target, messages as ChatMessage[]).catch(() => null),
+  ]);
+  const segments = foldSegments(pieces, counts);
+  res.json({
+    segments,
+    sum: segments.reduce((a, s) => a + (s.tokens ?? 0), 0),
+    total,
+    contextWindow: target.contextWindow,
+    modules: promptModules(messages),
+  });
 });
 
 /** Full archive detail for one call (raw chunks + full images). */

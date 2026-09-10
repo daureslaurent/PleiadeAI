@@ -400,7 +400,12 @@ export function AgentWorkspace() {
         </aside>
       )}
       {drawer && (
-        <DebuggerDrawer onClose={() => setDrawer(false)} agent={activeAgent} hideTrace={tracePinned} />
+        <DebuggerDrawer
+          onClose={() => setDrawer(false)}
+          agent={activeAgent}
+          sessionId={activeSessionId}
+          hideTrace={tracePinned}
+        />
       )}
       {promptOpen && (
         <PromptDrawer
