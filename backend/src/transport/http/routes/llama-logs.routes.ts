@@ -8,6 +8,7 @@ import { llamaClient } from '../../../inference/LlamaClient';
 import type { ChatMessage } from '../../../domain/agents/jit-builder';
 import {
   foldSegments,
+  groupByModule,
   messageText,
   planUsagePieces,
   promptModules,
@@ -138,7 +139,14 @@ llamaLogsRouter.post('/usage-breakdown', async (req, res) => {
   const agent = body.agentId ? await agentRepository.findById(body.agentId) : null;
   const target = await resolveInference(agent ?? {});
   if (!messages.length) {
-    res.json({ segments: [], sum: 0, total: 0, contextWindow: target.contextWindow, modules: [] });
+    res.json({
+      segments: [],
+      moduleGroups: [],
+      sum: 0,
+      total: 0,
+      contextWindow: target.contextWindow,
+      modules: [],
+    });
     return;
   }
 
@@ -150,6 +158,7 @@ llamaLogsRouter.post('/usage-breakdown', async (req, res) => {
   const segments = foldSegments(pieces, counts);
   res.json({
     segments,
+    moduleGroups: groupByModule(segments),
     sum: segments.reduce((a, s) => a + (s.tokens ?? 0), 0),
     total,
     contextWindow: target.contextWindow,

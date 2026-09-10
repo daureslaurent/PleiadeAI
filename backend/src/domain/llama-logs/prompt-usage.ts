@@ -1,5 +1,6 @@
 import type { ChatMessage, ContentPart } from '../agents/jit-builder';
-import { blockTitles } from '../../modules/registry';
+import { MODULES, blockTitles, blocksAt } from '../../modules/registry';
+import type { ModuleGroup } from '../../modules/types';
 
 /**
  * Which slice of the window a row belongs to. Three groups is the whole story: what the *agent's
@@ -8,6 +9,15 @@ import { blockTitles } from '../../modules/registry';
  * touch the third, which is exactly why the split is worth drawing.
  */
 export type UsageGroup = 'system' | 'tools' | 'conversation';
+
+/**
+ * What a row *is*, orthogonal to which window-slice (`UsageGroup`) it falls in: `module` is a block
+ * a `PromptModule` rendered (`MODULES_PLAN.md`), the rest are the fixed non-module consumers of the
+ * window. `reasoning` never appears here — the tokenizer only ever sizes a *sent* prompt, and a
+ * `<think>` block is completion output, not prompt input; it exists only as a live, guess-only row
+ * on the frontend while a turn is still streaming.
+ */
+export type UsageKind = 'module' | 'history' | 'system_prompt' | 'tools' | 'reasoning';
 
 export interface UsageSegment {
   /** Stable row key — a slug of the block title, or the role for conversation rows. */
@@ -18,10 +28,26 @@ export interface UsageSegment {
   tokens: number | null;
   /** How many messages/blocks folded into this row (a session has many `tool` messages, one row). */
   count: number;
+  kind: UsageKind;
+  /** Set only when `kind === 'module'`. */
+  moduleId: string | null;
+  moduleName: string | null;
+  moduleGroup: ModuleGroup | null;
+}
+
+/** One module's rendered blocks folded into a single total, in `MODULES` registry order. */
+export interface UsageModuleGroup {
+  moduleId: string;
+  moduleName: string;
+  moduleGroup: ModuleGroup;
+  tokens: number;
+  segments: UsageSegment[];
 }
 
 export interface PromptUsageBreakdown {
   segments: UsageSegment[];
+  /** `segments` with `kind === 'module'`, aggregated per module and ordered like `MODULES`. */
+  moduleGroups: UsageModuleGroup[];
   /** Sum of the segments — excludes the chat template's own per-message scaffolding. */
   sum: number;
   /** Exact templated prompt total, when the host can render it. Always ≥ `sum`. */
@@ -29,8 +55,8 @@ export interface PromptUsageBreakdown {
   contextWindow: number;
   /**
    * Ordered titles of the `## ` blocks found in the assembled system message — the prompt's *shape*
-   * as it was actually sent. Placeholder surface for the prompt-module system: today these are the
-   * blocks the enabled modules rendered (`MODULES_PLAN.md`).
+   * as it was actually sent. Superseded by `moduleGroups` for anything that needs token weights;
+   * kept for callers that only want the shape.
    */
   modules: string[];
 }
@@ -47,6 +73,30 @@ export interface PromptUsageBreakdown {
  */
 const HEAD_BLOCKS = new Set(blockTitles('system_head'));
 const TAIL_BLOCKS = new Set([...blockTitles('system_tail'), ...blockTitles('system_suffix')]);
+
+/**
+ * Slug → owning module, for every block any module can render at any placement. Built once from the
+ * registry so a module added anywhere shows up here on the same commit — same reasoning as
+ * `HEAD_BLOCKS`/`TAIL_BLOCKS` above.
+ *
+ * `user_suffix` blocks (the image note, a prompt mode) render *inside* the user message rather than
+ * as their own titled block, so `planUsagePieces` never produces a piece with their slug — they stay
+ * folded into the generic `history`/`user` row. Splitting them out would need `splitSystemMessage`-
+ * style marker parsing on user messages; left for later.
+ */
+const MODULE_BY_SLUG = new Map<
+  string,
+  { moduleId: string; moduleName: string; moduleGroup: ModuleGroup }
+>();
+for (const placement of ['system_head', 'system_tail', 'system_suffix', 'user_suffix'] as const) {
+  for (const { module, block } of blocksAt(placement)) {
+    MODULE_BY_SLUG.set(slug(block.title), {
+      moduleId: module.id,
+      moduleName: module.name,
+      moduleGroup: module.group,
+    });
+  }
+}
 
 /** The fence the assembler puts on either side of the operator-authored `system_prompt`. */
 const AUTHORED_SEPARATOR = '\n\n---\n\n';
@@ -210,13 +260,30 @@ export function planUsagePieces(messages: unknown[], tools: unknown[] | undefine
  * Fold the sized pieces back into one row per category, preserving first-appearance order within
  * group order (system → tools → conversation) so the list reads top-down like the prompt itself.
  */
+function classify(piece: Piece): {
+  kind: UsageKind;
+  moduleId: string | null;
+  moduleName: string | null;
+  moduleGroup: ModuleGroup | null;
+} {
+  const owner = MODULE_BY_SLUG.get(piece.id);
+  if (owner) return { kind: 'module', ...owner };
+  if (piece.id === 'system_prompt' || piece.id === 'injected_system') {
+    return { kind: 'system_prompt', moduleId: null, moduleName: null, moduleGroup: null };
+  }
+  if (piece.id === 'tool_schemas') {
+    return { kind: 'tools', moduleId: null, moduleName: null, moduleGroup: null };
+  }
+  return { kind: 'history', moduleId: null, moduleName: null, moduleGroup: null };
+}
+
 export function foldSegments(pieces: Piece[], counts: (number | null)[]): UsageSegment[] {
   const byId = new Map<string, UsageSegment>();
   pieces.forEach((p, i) => {
     const n = counts[i] ?? null;
     const row = byId.get(p.id);
     if (!row) {
-      byId.set(p.id, { id: p.id, label: p.label, group: p.group, tokens: n, count: 1 });
+      byId.set(p.id, { id: p.id, label: p.label, group: p.group, tokens: n, count: 1, ...classify(p) });
       return;
     }
     row.count += 1;
@@ -225,6 +292,33 @@ export function foldSegments(pieces: Piece[], counts: (number | null)[]): UsageS
 
   const order: UsageGroup[] = ['system', 'tools', 'conversation'];
   return [...byId.values()].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
+}
+
+/**
+ * `segments` with `kind === 'module'`, summed per module and ordered like the `MODULES` registry —
+ * not by block-placement order — so the bar doesn't reshuffle turn to turn as different blocks
+ * happen to render.
+ */
+export function groupByModule(segments: UsageSegment[]): UsageModuleGroup[] {
+  const byModule = new Map<string, UsageModuleGroup>();
+  for (const s of segments) {
+    if (s.kind !== 'module' || !s.moduleId) continue;
+    const g = byModule.get(s.moduleId);
+    if (!g) {
+      byModule.set(s.moduleId, {
+        moduleId: s.moduleId,
+        moduleName: s.moduleName ?? s.moduleId,
+        moduleGroup: s.moduleGroup ?? 'core',
+        tokens: s.tokens ?? 0,
+        segments: [s],
+      });
+      continue;
+    }
+    g.tokens += s.tokens ?? 0;
+    g.segments.push(s);
+  }
+  const order = MODULES.map((m) => m.id);
+  return [...byModule.values()].sort((a, b) => order.indexOf(a.moduleId) - order.indexOf(b.moduleId));
 }
 
 /** Ordered `## ` block titles of the assembled system message — the future module list. */

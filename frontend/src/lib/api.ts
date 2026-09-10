@@ -2172,6 +2172,13 @@ export interface PromptTokenBreakdown {
 
 export type PromptUsageGroup = 'system' | 'tools' | 'conversation';
 
+/**
+ * What a row *is*, orthogonal to `group`: `module` is a block a prompt module rendered, the rest are
+ * the fixed non-module consumers of the window. `reasoning` is never sent by the backend — it's a
+ * live-only row synthesized on the frontend while a turn streams (see `useLiveUsageGuess`).
+ */
+export type PromptUsageKind = 'module' | 'history' | 'system_prompt' | 'tools' | 'reasoning';
+
 /** One row of the Prompt-usage breakdown: a named part of the prompt and what it costs. */
 export interface PromptUsageSegment {
   id: string;
@@ -2181,15 +2188,31 @@ export interface PromptUsageSegment {
   tokens: number | null;
   /** How many messages/blocks folded into the row. */
   count: number;
+  kind: PromptUsageKind;
+  /** Set only when `kind === 'module'`. */
+  moduleId: string | null;
+  moduleName: string | null;
+  moduleGroup: ModuleGroup | null;
+}
+
+/** One module's rendered blocks folded into a single total, in registry order. */
+export interface PromptUsageModuleGroup {
+  moduleId: string;
+  moduleName: string;
+  moduleGroup: ModuleGroup;
+  tokens: number;
+  segments: PromptUsageSegment[];
 }
 
 /** The prompt sized by *what each part of it is* — backs the debugger's **Usage** tab. */
 export interface PromptUsageBreakdown {
   segments: PromptUsageSegment[];
+  /** `segments` with `kind === 'module'`, aggregated per module and ordered like the registry. */
+  moduleGroups: PromptUsageModuleGroup[];
   sum: number;
   total: number | null;
   contextWindow: number;
-  /** Ordered `## ` block titles of the assembled system message — the future prompt-module list. */
+  /** Ordered `## ` block titles of the assembled system message. Superseded by `moduleGroups`. */
   modules: string[];
 }
 
