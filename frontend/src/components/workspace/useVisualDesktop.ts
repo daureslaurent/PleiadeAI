@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import RFB from '@novnc/novnc';
 import { visualApi } from '../../lib/api';
+import { NOVNC_ENABLED } from '../../lib/features';
 
 export type VisualStatus = 'connecting' | 'connected' | 'error' | 'closed';
 
@@ -39,6 +40,13 @@ export function useVisualDesktop(agentId: string) {
   // (Re)connect on agent change or manual retry. The screen div stays mounted so RFB always has a
   // target; connection state is surfaced as `status`/`error` for the consumer to overlay.
   useEffect(() => {
+    // Compiled out (`VITE_FEATURE_NOVNC=0`): say so plainly instead of connecting. The panels
+    // already render `error` over the screen div, so this needs no separate surface.
+    if (!NOVNC_ENABLED) {
+      setStatus('error');
+      setError('The live desktop was not included in this build.');
+      return;
+    }
     let disposed = false;
     let rfb: RFB | null = null;
     setStatus('connecting');

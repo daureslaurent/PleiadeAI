@@ -238,6 +238,13 @@ services:
         # the SPA and the API under one origin, so no absolute host needs baking into the build.
         VITE_API_URL: ""
         VITE_WS_URL: ""
+        # Build weight (see FRONTEND_BUILD_WEIGHT_PLAN.md). `0` compiles a heavy dependency out
+        # rather than lazy-loading it, and the heap cap is what pins peak RSS — together they are
+        # what lets a small, swapless VPS finish this stage instead of thrashing to a reboot.
+        VITE_FEATURE_MERMAID: ${VITE_FEATURE_MERMAID:-1}
+        VITE_FEATURE_MONACO: ${VITE_FEATURE_MONACO:-1}
+        VITE_FEATURE_NOVNC: ${VITE_FEATURE_NOVNC:-1}
+        FRONTEND_BUILD_HEAP_MB: ${FRONTEND_BUILD_HEAP_MB:-2048}
     container_name: pleiades_frontend
     restart: unless-stopped
     healthcheck:

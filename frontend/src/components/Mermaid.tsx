@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Code2, Maximize2, Workflow, X } from 'lucide-react';
 import { usePrefs } from '../store/prefs';
+import { MERMAID_ENABLED } from '../lib/features';
 import { themeById, type ThemeId } from '../theme/themes';
 
 type MermaidApi = typeof import('mermaid').default;
@@ -58,6 +59,10 @@ export function MermaidBlock({ code, fallback }: { code: string; fallback: React
   const themeId = usePrefs((s) => s.theme);
 
   useEffect(() => {
+    // Compiled out (`VITE_FEATURE_MERMAID=0`): never load, so `svg` stays empty and the fence
+    // renders as the plain code block below. A literal `false` here also lets Rollup drop the
+    // `import('mermaid')` call site entirely.
+    if (!MERMAID_ENABLED) return;
     let cancelled = false;
     // Debounce: while streaming, `code` changes on every token and each render is a full parse.
     const timer = setTimeout(() => {
@@ -81,7 +86,8 @@ export function MermaidBlock({ code, fallback }: { code: string; fallback: React
     // `themeId`: mermaid bakes its palette into the SVG, so a theme switch has to re-render.
   }, [code, baseId, themeId]);
 
-  // Nothing renderable yet — show the source so the user still sees something streaming in.
+  // Nothing renderable yet — show the source so the user still sees something streaming in. Also
+  // the permanent state when mermaid was compiled out of this build.
   if (!svg) return <>{fallback}</>;
 
   const diagram = (
