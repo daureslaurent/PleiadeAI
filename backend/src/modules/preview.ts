@@ -51,6 +51,9 @@ export function previewContext(agent: AgentDoc, houseRules: string): PromptConte
     },
     images: { supportsVision: false, current: [], session: [], pooled: [] },
     modes: { system: ['(sample) an active mode'], user: ['(sample) an active mode'] },
+    // The preview shows the block in its on-shape; the wording it takes from the live setting is a
+    // sentence, and reading the settings doc to render a preview is exactly what this avoids.
+    toolParallel: { enabled: true, max: 4 },
   };
 }
 

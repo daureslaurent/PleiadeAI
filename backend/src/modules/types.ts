@@ -39,6 +39,8 @@ export interface PromptContext {
   images: ImagePromptState;
   /** Active `prompt` modes, already split by the placement each one declared. */
   modes: { system: string[]; user: string[] };
+  /** How this instance executes a batch of tool calls — what the batching block may promise. */
+  toolParallel: { enabled: boolean; max: number };
   /** Injected so the environment block is deterministic under test. */
   now?: Date;
 }

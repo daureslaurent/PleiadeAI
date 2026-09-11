@@ -83,6 +83,27 @@ overlapped others) plus `startedAt` / `durationMs`. Both the client reducer and 
 reload. `groupBatches` in `Blocks.tsx` folds neighbouring blocks sharing a `batch.id`; the Workbench
 layout (`toolStyle: 'none'`) skips it, having moved tools into its trace column entirely.
 
+## The prompt module
+
+`parallel-tools` (`modules/definitions/core.ts`, group **core**, ships **on**, ordinary toggle on
+Settings → Modules) contributes one `system_head` block, *Calling several tools at once*, right
+after the tool-use contract. Without it the fleet batches only when the work obviously decomposes;
+with it, batching is the habit.
+
+Two things the block is careful about:
+
+- **It never promises what this instance doesn't do.** The "they run at the same time" sentence is
+  rendered from `ctx.toolParallel`, which `AgentRunner` fills from the same two settings the runner
+  obeys. With execution off it says so — and points out that batching still saves an inference pass
+  per call, which is true either way and is why the module is worth having on a serial instance.
+- **It states the counter-instruction in the same breath.** A model that batches a `read` with the
+  `edit` it implies has made things worse, not faster, so "issue it alone and wait" is part of the
+  same paragraph rather than a footnote.
+
+Switching the module off stops agents being *told* to batch. Whether batches that arrive anyway
+overlap is `tool_parallel_enabled` on Settings → Fleet — a property of the backend, not of the
+prompt. Both keys are listed on the module's row (`settingsKeys`).
+
 ## Known gap
 
 `read`, `list`, `grep`, `glob` and `annuaire` are root-owned in this working tree, so their

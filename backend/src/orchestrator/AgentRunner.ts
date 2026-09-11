@@ -468,6 +468,12 @@ export class AgentRunner {
         pooled: pooledImages,
       },
       modes: { system: inference.promptSuffixes.system, user: inference.promptSuffixes.user },
+      // What the batching block is allowed to promise: the same two settings the runner obeys below,
+      // so the prompt never tells an agent its calls overlap on an instance where they don't.
+      toolParallel: {
+        enabled: settings.tool_parallel_enabled !== false,
+        max: Math.max(0, Math.trunc(Number(settings.tool_parallel_max ?? 4))),
+      },
     };
 
     const systemMessage = assembleSystemMessage(mods, promptCtx);

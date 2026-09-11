@@ -10,7 +10,7 @@ import {
   visualsModule,
   webModule,
 } from './definitions/capabilities';
-import { environmentModule, sessionModule, toolUseModule } from './definitions/core';
+import { environmentModule, parallelToolsModule, sessionModule, toolUseModule } from './definitions/core';
 import { modesModule } from './definitions/modes';
 import { agentsMdModule, houseRulesModule, parametersModule } from './definitions/operator';
 import { memoryModule, notebookModule, todoModule } from './definitions/self';
@@ -26,6 +26,7 @@ export const MODULES: PromptModule[] = [
   // core
   environmentModule,
   toolUseModule,
+  parallelToolsModule,
   sessionModule,
   // operator-owned
   houseRulesModule,

@@ -105,3 +105,66 @@ export const sessionModule: PromptModule = {
   mandatory: true,
   tools: ['data', 'guide', 'ask_user'],
 };
+
+/**
+ * Teach the model to *use* the tool-call array it already has.
+ *
+ * A local model left to itself asks for one thing, reads the answer, asks for the next — a full
+ * inference pass per call, even when the two calls could not possibly affect each other. It will
+ * batch when the work obviously decomposes (prod shows `read`+`read`+`bash` going out together),
+ * but only sometimes, and never as a habit.
+ *
+ * The instruction is worth its tokens whether or not the calls then overlap: batching saves an
+ * inference pass either way, and the runner only *executes* the parallel-safe ones together
+ * (`tools/parallel-safety.ts`). What the block must not do is promise something this instance
+ * doesn't do — so the "they run at once" sentence is written from the live setting rather than
+ * assumed, and the counter-instruction (don't batch what depends on the previous answer) is stated
+ * in the same breath, because a model that batches a `read` with the `edit` it implies has made
+ * things worse, not faster.
+ */
+export function renderParallelToolsBlock(parallel: { enabled: boolean; max: number }): string {
+  const executes = parallel.enabled
+    ? 'They are executed at the same time where that is safe, so the batch costs about as long as ' +
+      'its slowest call instead of all of them added up.'
+    : 'They are executed one after another here, but asking for them together still saves you a ' +
+      'whole round of thinking per call.';
+  return (
+    '## Calling several tools at once\n' +
+    'You may put more than one tool call in a single reply. Do that whenever the calls do not ' +
+    'depend on each other — reading three files, opening two threads, a search plus a directory ' +
+    'listing. ' +
+    executes +
+    '\n' +
+    'Ask for them together only when you could not have learned anything from the first that would ' +
+    'change the second. If a call depends on what a previous one returns — reading a file before ' +
+    'editing it, listing a directory before opening something in it — issue it on its own and wait ' +
+    'for the answer. A batch built on a guess wastes the round it was meant to save.\n' +
+    'You see no result until every call in the batch has come back, and they come back together, ' +
+    'in the order you asked for them.'
+  );
+}
+
+/**
+ * Batching independent calls. A switch, not a mandate: it is an instruction about *how to work*,
+ * and an operator running a small model that handles one call at a time more reliably should be
+ * able to take it away without touching anything else.
+ *
+ * Switching this off stops the fleet being *told* to batch; whether batches that arrive anyway are
+ * overlapped is `tool_parallel_enabled` on Settings → Fleet, which is a property of this backend
+ * rather than of the prompt. Both are surfaced on the module's row.
+ */
+export const parallelToolsModule: PromptModule = {
+  id: 'parallel-tools',
+  name: 'Parallel tool calls',
+  description: 'Tells agents to batch independent calls into one reply instead of one at a time.',
+  group: 'core',
+  settingsKeys: ['tool_parallel_enabled', 'tool_parallel_max'],
+  blocks: [
+    {
+      title: 'Calling several tools at once',
+      placement: 'system_head',
+      order: 70,
+      render: (ctx: PromptContext) => renderParallelToolsBlock(ctx.toolParallel),
+    },
+  ],
+};
