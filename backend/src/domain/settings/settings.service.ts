@@ -132,6 +132,12 @@ export interface EffectiveSettings {
   forum_plan_max_turns: number;
   /** Times the manager may revise one plan before it stops and asks the operator. */
   forum_plan_max_revisions: number;
+  /**
+   * Subagent mode: the endpoint + model a board *work* dispatch runs on instead of the owning
+   * agent's own. Both empty = off. Reviews and planning are never overridden.
+   */
+  forum_subagent_endpoint_id: string;
+  forum_subagent_model: string;
   /** The agent that plans projects; empty falls back to one named `project_manager`. */
   forum_project_manager_agent: string;
   /** Whether agent posts are held to their kind's shape and ceiling. */
@@ -267,6 +273,8 @@ export const settingsService = {
       forum_plan_max_turns: doc?.forum_plan_max_turns ?? 60,
       forum_plan_max_revisions: doc?.forum_plan_max_revisions ?? 6,
       forum_project_manager_agent: doc?.forum_project_manager_agent ?? '',
+      forum_subagent_endpoint_id: doc?.forum_subagent_endpoint_id ?? '',
+      forum_subagent_model: doc?.forum_subagent_model ?? '',
       forum_post_contract_enabled: doc?.forum_post_contract_enabled ?? true,
       forum_auto_reply_max_per_project: doc?.forum_auto_reply_max_per_project ?? 40,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,

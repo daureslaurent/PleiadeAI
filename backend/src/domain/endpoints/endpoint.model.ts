@@ -116,6 +116,18 @@ const EndpointSchema = new Schema(
      */
     model_vision: { type: Schema.Types.Mixed, default: {} },
     /**
+     * How many calls this server streams at once — its llama.cpp `--parallel` / `-np` value (vLLM
+     * and friends: whatever concurrency they were sized for). The inference gate admits this many
+     * per endpoint and queues the rest; `1` is the strict serialization every endpoint had before
+     * slots existed, and stays the default.
+     *
+     * It must match what the server was actually launched with. Over-declaring does not make the box
+     * faster: llama.cpp accepts the extra requests and queues them *internally*, where this app can
+     * neither see nor meter them, and every in-flight request takes its own slice of the shared KV
+     * cache — so the real per-request context shrinks as concurrency rises.
+     */
+    parallel_slots: { type: Number, default: 1 },
+    /**
      * Runtime failover position. `0` means this endpoint is *not* part of the fallback chain.
      * Endpoints with `fallback_order > 0` form the ordered chain the inference client walks (ascending)
      * when the primary target can't be reached — e.g. a local CPU llama.cpp container as a last resort.

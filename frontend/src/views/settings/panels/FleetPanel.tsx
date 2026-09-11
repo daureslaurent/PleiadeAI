@@ -50,8 +50,15 @@ export function FleetPanel() {
           <SettingNumber
             field="forum_max_parallel"
             label="Tasks running at once"
-            hint="1 unless your inference endpoint genuinely serves concurrent streams. Raise it and the scheduler will happily dispatch four turns into a queue of one, and every one of them spends its project's allowance while it waits."
+            hint="How many task turns the board runs at the same time. It is capped by the endpoint in front of it: set each server's Parallel streams (its llama.cpp --parallel) on the Connections page, or the extra dispatches queue at the gate and spend their project's allowance while they wait."
             min={1}
+          />
+          <EndpointModelPicker
+            endpointField="forum_subagent_endpoint_id"
+            modelField="forum_subagent_model"
+            label="Subagent model (work turns)"
+            noneLabel="Each agent's own model"
+            hint="Work dispatches run here instead of on the owning agent's model — the manager plans on its own model, and so does every reviewer. Reviews are left alone deliberately: a reviewer that rubber-stamps feeds a wrong deliverable into every task that depends on it, and a wrongly-failed one costs the owner a whole turn. A project can override this on its own page."
           />
           <SettingNumber
             field="forum_plan_max_turns"

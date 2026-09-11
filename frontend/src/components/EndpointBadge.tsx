@@ -148,12 +148,20 @@ function EndpointRow({ ep }: { ep: EndpointHealth }) {
         ) : (
           <p className="text-[10px] text-red-400/80">unreachable</p>
         )}
-        {(ep.running || ep.queue.length > 0) && (
+        {(ep.running.length > 0 || ep.queue.length > 0) && (
           <div className="mt-1 space-y-0.5">
-            {ep.running && <CallLine call={ep.running} agents={ep.agents} />}
-            {ep.queue.map((q, i) => (
-              <CallLine key={i} call={q} position={i + 1} agents={ep.agents} />
+            {/* One line per streaming call: this endpoint serves `slots` of them at once. */}
+            {ep.running.map((r, i) => (
+              <CallLine key={`r${i}`} call={r} agents={ep.agents} />
             ))}
+            {ep.queue.map((q, i) => (
+              <CallLine key={`q${i}`} call={q} position={i + 1} agents={ep.agents} />
+            ))}
+            {ep.slots > 1 && (
+              <p className="pt-0.5 font-mono text-[9px] text-slate-600">
+                {ep.running.length}/{ep.slots} slots
+              </p>
+            )}
           </div>
         )}
         {ep.agents.length > 0 && (
@@ -192,7 +200,7 @@ export function EndpointBadge() {
       });
   }, []);
 
-  const runningCount = health?.filter((e) => e.running).length ?? 0;
+  const runningCount = health?.reduce((n, e) => n + e.running.length, 0) ?? 0;
   const queuedCount = health?.reduce((n, e) => n + e.queue.length, 0) ?? 0;
   const busy = runningCount > 0 || queuedCount > 0;
 

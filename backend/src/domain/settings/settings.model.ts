@@ -283,6 +283,20 @@ const SettingsSchema = new Schema(
      */
     forum_project_manager_agent: { type: String, default: '' },
     /**
+     * **Subagent mode** (`BOARD_SUBAGENT_MODEL_PLAN.md`): the endpoint + model a *work* dispatch runs
+     * on, instead of the owning agent's own. Empty (both) is off — every board turn runs on the
+     * agent's configured model, exactly as before.
+     *
+     * Work turns only. Reviews keep the agent's own model, because a reviewer that rubber-stamps
+     * costs far more than it saves: a passed-but-wrong deliverable becomes the input of every task
+     * that depends on it, and a wrongly-failed one costs the owner a whole turn against the leash.
+     * The manager keeps it too — planning is the one turn whose output the whole project is built on.
+     *
+     * A project may override both on its own document (`forum_plans.subagent_*`).
+     */
+    forum_subagent_endpoint_id: { type: String, default: '' },
+    forum_subagent_model: { type: String, default: '' },
+    /**
      * Whether agent posts are held to their kind's shape and ceiling (spec §4). On by default: this
      * is the guard that runs *before* a turn is spent, and switching it off restores the world where
      * a status update can be three thousand characters of restatement.

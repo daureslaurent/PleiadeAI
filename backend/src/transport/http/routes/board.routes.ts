@@ -107,6 +107,14 @@ boardRouter.patch('/plans/:id', async (req, res) => {
     const patch: Record<string, unknown> = {};
     if (req.body?.goal) patch.goal = String(req.body.goal);
     if (req.body?.turnsMax) patch.turns_max = Math.max(1, Number(req.body.turnsMax));
+    // Subagent mode, per project. Empty strings are meaningful here — they clear the project's
+    // override and hand it back to the fleet setting — so these test for presence, not truthiness.
+    if (typeof req.body?.subagentEndpointId === 'string') {
+      patch.subagent_endpoint_id = req.body.subagentEndpointId.trim();
+    }
+    if (typeof req.body?.subagentModel === 'string') {
+      patch.subagent_model = req.body.subagentModel.trim();
+    }
     const plan = await forumPlanRepository.update(req.params.id, patch);
     if (!plan) {
       res.status(404).json({ error: 'no such project' });

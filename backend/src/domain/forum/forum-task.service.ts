@@ -427,6 +427,8 @@ export function serialisePlan(plan: ForumPlanDoc): Record<string, unknown> {
     turnsSpent: plan.turns_spent,
     turnsMax: plan.turns_max,
     revision: plan.revision,
+    subagentEndpointId: plan.subagent_endpoint_id ?? '',
+    subagentModel: plan.subagent_model ?? '',
     escalation: plan.escalation,
     lastManagerAt: plan.last_manager_at,
     createdAt: plan.created_at,

@@ -1747,6 +1747,12 @@ export interface InferenceSettings {
   forum_tick_interval_minutes: number;
   /** Task turns in flight at once, fleet-wide. */
   forum_max_parallel: number;
+  /**
+   * Subagent mode: the endpoint + model a board *work* dispatch runs on instead of the owning
+   * agent's own. Both empty = off. Reviews and planning turns are never overridden.
+   */
+  forum_subagent_endpoint_id: string;
+  forum_subagent_model: string;
   /** Empty dispatches a task tolerates before it is blocked for the manager. */
   forum_task_max_dispatches: number;
   /** Times a review may bounce a task back before the manager decides instead. */
@@ -1964,6 +1970,13 @@ export interface Endpoint {
   /** System-managed built-in local docker fallback: read-only name/URL, cannot be deleted. */
   managed: boolean;
   /**
+   * How many calls this server streams at once — its llama.cpp `--parallel` / `-np` value. The
+   * backend's inference gate admits this many per endpoint and queues the rest; 1 (the default)
+   * is strict serialization. Must match how the server was launched: over-declaring only moves the
+   * queue inside llama.cpp, where nothing here can see it.
+   */
+  parallel_slots: number;
+  /**
    * Manual vision (multimodal) marker — the fallback when nothing was auto-detected. A probed
    * `model_vision` reading always wins; resolve via `endpointVision()`, don't read this directly.
    */
@@ -2020,10 +2033,12 @@ export interface EndpointHealth {
   managed: boolean;
   /** Agents targeting this endpoint; agents with no explicit endpoint count on the default. */
   agents: Array<{ name: string; color: number | null }>;
-  /** LLM call streaming on this endpoint right now (backend's endpoint gate), if any. */
-  running: EndpointCall | null;
+  /** LLM calls streaming on this endpoint right now (backend's endpoint gate) — up to `slots`. */
+  running: EndpointCall[];
   /** Calls parked behind `running`, FIFO. Empty when nothing is queued. */
   queue: EndpointCall[];
+  /** How many concurrent calls this endpoint admits (`parallel_slots`). */
+  slots: number;
 }
 
 export type NewEndpoint = Pick<Endpoint, 'name' | 'base_url' | 'api_key' | 'context_window'>;
@@ -2037,6 +2052,7 @@ export type EndpointPatch = Partial<
     | 'context_window_mode'
     | 'default_model'
     | 'fallback_order'
+    | 'parallel_slots'
     | 'supports_vision'
     | 'modes'
   >
@@ -3215,6 +3231,12 @@ export interface BoardPlan {
   turnsSpent: number;
   turnsMax: number;
   revision: number;
+  /**
+   * This project's own subagent model, overriding the fleet setting for its *work* dispatches.
+   * Empty inherits `forum_subagent_*`; empty there too means no override at all.
+   */
+  subagentEndpointId: string;
+  subagentModel: string;
   escalation: string;
   lastManagerAt: string | null;
   createdAt: string;
@@ -3233,7 +3255,17 @@ export const boardApi = {
   /** Send the manager in to write or rewrite the graph; answers with the session to watch. */
   runManager: (id: string, escalation?: string) =>
     api.post<{ sessionId: string }>(`/board/plans/${id}/plan`, { escalation }).then((r) => r.data),
-  patchPlan: (id: string, patch: { state?: BoardPlanState; goal?: string; turnsMax?: number }) =>
+  patchPlan: (
+    id: string,
+    patch: {
+      state?: BoardPlanState;
+      goal?: string;
+      turnsMax?: number;
+      // Empty strings clear the project's override and hand it back to the fleet setting.
+      subagentEndpointId?: string;
+      subagentModel?: string;
+    },
+  ) =>
     api.patch<BoardPlan>(`/board/plans/${id}`, patch).then((r) => r.data),
   deletePlan: (id: string) => api.delete(`/board/plans/${id}`).then(() => undefined),
 

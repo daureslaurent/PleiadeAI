@@ -6,13 +6,20 @@ import type { TokenUsage } from './LlamaClient';
 const log = createLogger('endpoint-gate');
 
 /**
- * Serializes inference calls per endpoint and records live call metrics.
+ * Meters inference calls per endpoint and records live call metrics.
  *
- * A remote `llama.cpp` server (and most single-GPU OpenAI-compatible backends) processes one
- * request per slot; firing several streamed turns at the same box in parallel just thrashes it.
- * Every chat inference therefore passes through {@link EndpointGate.acquire}, which grants the URL's
- * lock to one caller at a time — the rest queue (FIFO) and stream only once their turn comes up.
- * Different endpoints run fully independently (the lock is keyed by normalized base URL), so the
+ * A remote `llama.cpp` server processes one request per **slot**, and how many slots it has is a
+ * property of how it was launched (`--parallel` / `-np`). The gate therefore admits up to that many
+ * concurrent calls per URL and queues the rest (FIFO). The limit is the endpoint's
+ * `parallel_slots`, carried on every `ResolvedInference` so no caller has to look an endpoint up
+ * mid-stream; an endpoint that never declares one stays at 1, which is exactly the strict
+ * serialization this gate did before slots existed.
+ *
+ * Over-declaring is the failure to avoid: llama.cpp will accept the extra requests and queue them
+ * *inside* the server, where this app can neither see nor meter them, and each in-flight request
+ * costs its own slice of the shared KV cache.
+ *
+ * Different endpoints run fully independently (permits are keyed by normalized base URL), so the
  * CPU embeddings box and the GPU chat box never block each other.
  *
  * The gate is also the single source of truth for the LLM activity page: it tallies calls, errors,
@@ -45,13 +52,15 @@ export interface ModelStat {
 export interface EndpointStat {
   /** Normalized base URL (trailing slash stripped) — the metrics key. */
   url: string;
-  /** Calls currently streaming (0 or 1 while the gate holds the lock). */
+  /** Calls currently streaming — up to the endpoint's `parallel_slots`. */
   active: number;
-  /** Calls parked waiting for the lock. */
+  /** Calls parked waiting for a slot. */
   queued: number;
-  /** The call holding the lock right now (`at` = when it started streaming), or null when idle. */
-  current: GateCall | null;
-  /** Calls parked behind `current`, FIFO (`at` = when each entered the queue). */
+  /** How many concurrent calls this URL is admitting, as last declared by a caller. */
+  slots: number;
+  /** The calls holding a slot right now (`at` = when each started streaming). Empty when idle. */
+  running: GateCall[];
+  /** Calls parked behind `running`, FIFO (`at` = when each entered the queue). */
   waiting: GateCall[];
   calls: number;
   errors: number;
@@ -73,9 +82,15 @@ export interface CallHandle {
 
 const norm = (url: string): string => url.replace(/\/$/, '');
 
+/** One caller parked waiting for a slot, in arrival order. */
+interface Waiter {
+  entry: GateCall;
+  admit: () => void;
+}
+
 class EndpointGate {
-  /** Tail of the per-URL promise chain; awaiting it is "wait for everyone ahead of me". */
-  private tails = new Map<string, Promise<void>>();
+  /** FIFO of callers parked on each URL, oldest first. */
+  private queues = new Map<string, Waiter[]>();
   private stats = new Map<string, EndpointStat>();
 
   private stat(url: string): EndpointStat {
@@ -85,7 +100,8 @@ class EndpointGate {
         url,
         active: 0,
         queued: 0,
-        current: null,
+        slots: 1,
+        running: [],
         waiting: [],
         calls: 0,
         errors: 0,
@@ -111,15 +127,44 @@ class EndpointGate {
   }
 
   /**
-   * Wait for exclusive access to `url`, then return a handle. The caller MUST call exactly one of
-   * `success`/`fail` (in a `finally`) to release the lock — otherwise every later call to the same
-   * endpoint deadlocks. Resolves immediately when the endpoint is idle.
+   * Admit as many parked callers as there are free slots, oldest first. Called after every release
+   * and on arrival. The limit is re-read from the stat each time, so an operator lowering
+   * `parallel_slots` while calls are in flight simply stops admitting until the extra ones drain —
+   * no permit is stranded and no in-flight stream is cut short.
    */
-  async acquire(rawUrl: string, model: string): Promise<CallHandle> {
+  private pump(url: string): void {
+    const s = this.stat(url);
+    const queue = this.queues.get(url);
+    if (!queue?.length) return;
+    // `active` is the count, incremented HERE rather than derived from `running.length`. Resolving a
+    // promise only schedules its continuation, so an admitted caller has not yet pushed itself onto
+    // `running` when the next `acquire` of the same tick pumps — counting the list would admit every
+    // caller in that tick and hand a one-slot endpoint four concurrent streams.
+    while (queue.length && s.active < Math.max(1, s.slots)) {
+      const next = queue.shift();
+      if (!next) break;
+      s.queued--;
+      s.waiting.splice(s.waiting.indexOf(next.entry), 1);
+      s.active++;
+      next.admit();
+    }
+  }
+
+  /**
+   * Wait for a slot on `url`, then return a handle. The caller MUST call exactly one of
+   * `success`/`fail` (in a `finally`) to release it — otherwise that slot is gone for the life of
+   * the process. Resolves immediately when the endpoint has a slot free.
+   *
+   * @param slots How many concurrent calls this endpoint serves (`parallel_slots`, default 1).
+   *              Carried on `ResolvedInference`, so the newest resolution wins for the whole URL —
+   *              which is what makes a settings change take effect without a restart.
+   */
+  async acquire(rawUrl: string, model: string, slots = 1): Promise<CallHandle> {
     const url = norm(rawUrl);
     const s = this.stat(url);
-    // Who this call is for — read here (not after `await prev`) so the queue entry is identified
-    // the moment it parks. AsyncLocalStorage carries the caller's session/agent/source.
+    s.slots = Math.max(1, Math.floor(slots) || 1);
+    // Who this call is for — read here (not after we park) so the queue entry is identified the
+    // moment it queues. AsyncLocalStorage carries the caller's session/agent/source.
     const cc = getCaptureContext();
     const entry: GateCall = {
       model,
@@ -128,31 +173,29 @@ class EndpointGate {
       at: Date.now(),
     };
 
-    const prev = this.tails.get(url) ?? Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    // Everyone after us waits on `gate`; we wait on `prev`. The map always holds just the latest
-    // tail, so it never grows past one entry per endpoint.
-    this.tails.set(
-      url,
-      prev.then(() => gate),
-    );
-
+    // Always join the queue, even when a slot is free: going through `pump` is what keeps admission
+    // strictly FIFO. Jumping straight in when `running.length < slots` would let a call that arrived
+    // late overtake one parked since before the slot opened.
+    const queue = this.queues.get(url) ?? [];
+    if (!this.queues.has(url)) this.queues.set(url, queue);
     s.queued++;
     s.waiting.push(entry);
-    await prev;
-    s.queued--;
-    s.waiting.splice(s.waiting.indexOf(entry), 1);
-    s.active++;
+    await new Promise<void>((admit) => {
+      queue.push({ entry, admit });
+      this.pump(url);
+    });
+
     const started = Date.now();
-    s.current = { ...entry, at: started };
+    const running: GateCall = { ...entry, at: started };
+    s.running.push(running);
 
     let done = false;
     const finish = (usage: TokenUsage | null | undefined, ok: boolean): void => {
       if (done) return;
       done = true;
-      s.active--;
-      s.current = null;
+      const i = s.running.indexOf(running);
+      if (i >= 0) s.running.splice(i, 1);
+      s.active = Math.max(0, s.active - 1);
       s.calls++;
       s.lastCallAt = Date.now();
       s.lastModel = model;
@@ -172,10 +215,13 @@ class EndpointGate {
         ms.promptTokens += usage.promptTokens;
         ms.completionTokens += usage.completionTokens;
       }
-      release();
+      // Hand the freed slot to whoever has been waiting longest.
+      this.pump(url);
     };
 
-    if (s.queued > 0) log.debug({ url, queued: s.queued }, 'endpoint busy — call queued behind others');
+    if (s.queued > 0) {
+      log.debug({ url, queued: s.queued, slots: s.slots }, 'every slot busy — call queued behind others');
+    }
 
     return {
       success: (usage) => finish(usage, true),
@@ -187,6 +233,7 @@ class EndpointGate {
   snapshot(): EndpointStat[] {
     return [...this.stats.values()].map((s) => ({
       ...s,
+      running: [...s.running],
       waiting: [...s.waiting],
       models: new Map(s.models),
     }));

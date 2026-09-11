@@ -159,6 +159,17 @@ export interface RunInput {
    * really had. Recall is unaffected — the agent still answers with everything it genuinely knows.
    */
   persistMemory?: boolean;
+  /**
+   * Run this turn on an endpoint/model that is not the agent's own
+   * (`BOARD_SUBAGENT_MODEL_PLAN.md`). Set by the work board so a task's *work* turn runs on a cheap
+   * model while the same agent, reached any other way, still answers on the model it was configured
+   * with — the override belongs to the dispatch, not to the agent.
+   *
+   * Deliberately absent from `hop`'s `Pick`, so an `ask_agent` delegation inside an overridden turn
+   * lands on the target's own model: the caller is asking a specialist a question, and the
+   * specialist was configured with the model it needs. Same rule the picked inference modes follow.
+   */
+  inference?: { endpointId?: string | null; model?: string } | null;
 }
 
 /**
@@ -259,7 +270,7 @@ export class AgentRunner {
       input.depth === 0
         ? await sessionRepository.modeSelection(input.sessionId)
         : { on: [], off: [] };
-    const inference = await resolveInference(agent, picked.on, picked.off);
+    const inference = await resolveInference(agent, picked.on, picked.off, input.inference);
     const fallbacks = await resolveFallbacks(inference.url);
 
     // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides

@@ -95,6 +95,22 @@ function planBrief(plan: ForumPlanDoc, tasks: ForumTaskDoc[], escalation: string
         'Prefer four large tasks to twelve small ones — every task costs at least two agent turns, ' +
           `and this project has ${plan.turns_max}.`,
         '',
+        '**Plan it wide, and plan it collision-free.** Several tasks run *at the same time* here, so:',
+        '',
+        '- Use `depends_on` only where one task genuinely cannot start until another has finished. ' +
+          'A dependency added "to be safe" costs real time: it forces two tasks that could have run ' +
+          'together to run one after the other.',
+        '- Never leave two tasks that can run at once writing the same file, the same directory or ' +
+          'the same record. Nothing stops them colliding. Split the work by *what it touches*, not ' +
+          'by the order you imagined it happening in — and where two pieces must touch the same ' +
+          'thing, make one depend on the other.',
+        '- Each task must be finishable by its owner alone. One that needs an answer from a task ' +
+          'still in flight is a dependency you forgot to declare.',
+        '',
+        'The agents doing this work may be running on a smaller model than yours. Write acceptance ' +
+          'criteria that can be *checked* rather than interpreted, keep each task to one objective, ' +
+          'and put everything it needs into its `goal` — it cannot ask you what you meant.',
+        '',
         'File them all, then stop. Nothing needs to be announced and nobody needs to be woken: the ' +
           'board dispatches each task the moment everything it depends on is accepted.',
       ];

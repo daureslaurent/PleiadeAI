@@ -119,6 +119,11 @@ endpointsRouter.patch('/:id', async (req, res) => {
     patch.context_window_mode = b.context_window_mode;
   }
   if (b.fallback_order !== undefined) patch.fallback_order = Number(b.fallback_order);
+  // Concurrency the server was launched with. Capped at 16: past that the KV cache slice per request
+  // is small enough that the box is slower with the slots than without them.
+  if (b.parallel_slots !== undefined) {
+    patch.parallel_slots = Math.min(16, Math.max(1, Math.floor(Number(b.parallel_slots)) || 1));
+  }
   if (b.supports_vision !== undefined) patch.supports_vision = Boolean(b.supports_vision);
   if (b.modes !== undefined) patch.modes = normalizeModes(b.modes);
   const ep = await endpointRepository.update(req.params.id, patch);

@@ -66,6 +66,31 @@ export interface ResolvedInference {
   supportsVision: boolean;
   /** Fleet default per-turn tool-round ceiling; applies when the agent doesn't override it. */
   maxToolIterations: number;
+  /**
+   * How many calls this endpoint streams at once (`parallel_slots`, default 1). Carried here rather
+   * than looked up inside the gate so a streaming call never has to hit Mongo mid-turn, and so the
+   * fallback chain brings each box's own concurrency with it.
+   */
+  parallelSlots: number;
+}
+
+/**
+ * A per-run redirection of *where* a turn runs, overriding the agent's own `endpoint_id` / `model`.
+ *
+ * Field by field: an absent (or empty) field means "not overridden here", never "clear it", so a
+ * caller may move a run onto a different model while leaving it on the agent's endpoint. Used by the
+ * work board to run task turns on a cheap model (`BOARD_SUBAGENT_MODEL_PLAN.md`) — the override is a
+ * property of the *dispatch*, so the agent reads exactly as configured everywhere else.
+ */
+export interface InferenceOverride {
+  endpointId?: Types.ObjectId | string | null;
+  model?: string;
+}
+
+/** The endpoint's concurrency, floored at 1 — an unset or nonsense value serializes, as before. */
+function slotsOf(endpoint: EndpointDoc | null): number {
+  const n = Math.floor(Number(endpoint?.parallel_slots ?? 1));
+  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 /**
@@ -115,21 +140,34 @@ export interface InferenceTarget {
  * field by whichever of `modeIds` resolve to `sampling` modes on this endpoint's chosen model —
  * plus every standing (`default_on`) mode on offer here, which applies whether or not anyone picked
  * it, minus the ones this conversation explicitly switched off in `modesOff`.
+ *
+ * `override` redirects the run onto a different endpoint and/or model *before* any of that is read,
+ * so modes, context window, vision and samplers all resolve against the model that will actually
+ * run. That ordering is the point: a smaller model's smaller `n_ctx` has to be the meter's
+ * denominator, or the context bar understates exactly the turn most at risk of overflowing.
  */
 export async function resolveInference(
   agent: InferenceTarget,
   modeIds?: readonly string[],
   modesOff?: readonly string[],
+  override?: InferenceOverride | null,
 ): Promise<ResolvedInference> {
   const settings = await settingsService.get();
-  const endpoint = agent.endpoint_id
-    ? await endpointRepository.findById(agent.endpoint_id)
+  const endpointId = override?.endpointId || agent.endpoint_id;
+  const endpoint = endpointId
+    ? await endpointRepository.findById(endpointId)
     : await endpointRepository.findDefault();
 
   const url = endpoint?.base_url ?? settings.llama_url;
   const apiKey = endpoint?.api_key ?? settings.llama_api_key;
+  // The override's model only stands if it is *for* the endpoint we resolved: a model name picked
+  // for another box is not a model this one serves, and silently sending it would 404 the turn.
+  const wanted =
+    override?.model && (!override.endpointId || String(override.endpointId) === String(endpoint?._id ?? ''))
+      ? override.model
+      : '';
   const model =
-    agent.model || endpoint?.default_model || endpoint?.models?.[0] || settings.llama_model;
+    wanted || agent.model || endpoint?.default_model || endpoint?.models?.[0] || settings.llama_model;
   // Denominator for the context meter: auto → the server's probed real n_ctx; manual → the typed
   // value. Keeps the meter honest against the server's --ctx-size when auto-detection is on.
   const contextWindow = resolveContextWindow(endpoint, model, settings);
@@ -149,6 +187,7 @@ export async function resolveInference(
     ...fromModes(modes, settings),
     supportsVision: effectiveVision(endpoint, model),
     maxToolIterations: settings.max_tool_iterations,
+    parallelSlots: slotsOf(endpoint),
   };
 }
 
@@ -179,6 +218,7 @@ export async function resolveForEndpoint(
     ...fromModes(selectModes(endpoint, model, [], settings.global_modes), settings),
     supportsVision: effectiveVision(endpoint, model),
     maxToolIterations: settings.max_tool_iterations,
+    parallelSlots: slotsOf(endpoint),
   };
 }
 
@@ -214,6 +254,8 @@ export async function resolveFallbacks(excludeUrl?: string): Promise<ResolvedInf
         ...fromModes(selectModes(ep, model, [], settings.global_modes), settings),
         supportsVision: effectiveVision(ep, model),
         maxToolIterations: settings.max_tool_iterations,
+        // Each fallback box brings its own concurrency — the chain is by definition other machines.
+        parallelSlots: slotsOf(ep),
       };
     });
 }

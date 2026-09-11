@@ -33,10 +33,15 @@ export interface EndpointHealth {
   managed: boolean;
   /** Agents targeting this endpoint; agents with no explicit endpoint count on the default. */
   agents: Array<{ name: string; color: number | null }>;
-  /** LLM call streaming on this endpoint right now (from the in-process endpoint gate), if any. */
-  running: EndpointCall | null;
+  /**
+   * LLM calls streaming on this endpoint right now (from the in-process endpoint gate) — up to its
+   * `parallel_slots`, so a list rather than the single call this used to be. Empty when idle.
+   */
+  running: EndpointCall[];
   /** Calls parked behind `running`, FIFO. Empty when nothing is queued. */
   queue: EndpointCall[];
+  /** How many concurrent calls this endpoint admits (`parallel_slots`). */
+  slots: number;
 }
 
 /** One LLM call at the endpoint gate, as reported to the UI. */
@@ -182,7 +187,8 @@ export const endpointService = {
           fallback_order: ep.fallback_order,
           managed: ep.managed,
           agents: mine.map((a) => ({ name: a.name, color: a.color ?? null })),
-          running: gate?.current ? toEndpointCall(gate.current) : null,
+          running: (gate?.running ?? []).map(toEndpointCall),
+          slots: Math.max(1, Number(ep.parallel_slots ?? 1) || 1),
           queue: (gate?.waiting ?? []).map(toEndpointCall),
         };
       }),

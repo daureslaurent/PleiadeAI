@@ -11,8 +11,8 @@ import {
   Square,
   Wand2,
 } from 'lucide-react';
-import { boardApi, type BoardPlan, type BoardTask } from '../../lib/api';
-import { Button, Callout, Chip, EmptyState, Section, Spinner, Textarea } from '../../components/ui';
+import { boardApi, endpointsApi, type BoardPlan, type BoardTask, type Endpoint } from '../../lib/api';
+import { Button, Callout, Chip, EmptyState, Section, Select, Spinner, Textarea } from '../../components/ui';
 import { useConfirm } from '../../components/ui';
 import {
   DeliverableChip,
@@ -177,6 +177,8 @@ export function PlanView() {
               </Callout>
             </div>
           ) : null}
+
+          <SubagentModelRow plan={plan} onPatch={(patch) => act('model', () => boardApi.patchPlan(plan.id, patch))} />
 
           {/* The primary move first and alone on the left; the rest quiet; Delete pushed away from
               both so it is never the button next to the one you meant. */}
@@ -560,6 +562,74 @@ function TaskCard({
           )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * This project's subagent model (`BOARD_SUBAGENT_MODEL_PLAN.md`).
+ *
+ * Only the project's **work** turns are redirected. The manager plans on its own model and every
+ * reviewer signs off on theirs, which is why this row says so rather than reading as a project-wide
+ * model switch — the operator who believes the whole project moved would draw the wrong conclusion
+ * from a review that failed.
+ *
+ * Empty inherits the fleet setting, and empty there too means every turn runs on its agent's own
+ * model. Read on each dispatch rather than snapshotted, so moving a struggling project onto a bigger
+ * model takes effect on the very next task.
+ */
+function SubagentModelRow({
+  plan,
+  onPatch,
+}: {
+  plan: BoardPlan;
+  onPatch: (patch: { subagentEndpointId?: string; subagentModel?: string }) => void;
+}) {
+  const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
+
+  useEffect(() => {
+    endpointsApi
+      .list()
+      .then(setEndpoints)
+      .catch(() => {
+        // Connections unreachable — the row degrades to "inherit" rather than blocking the page.
+      });
+  }, []);
+
+  const selected = endpoints.find((e) => e._id === plan.subagentEndpointId);
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 border-t hairline pt-3">
+      <span className="shrink-0 text-[11px] text-slate-400" title="Work dispatches only — reviews and planning keep each agent's own model.">
+        Work turns run on
+      </span>
+      <Select
+        value={plan.subagentEndpointId}
+        onChange={(e) => onPatch({ subagentEndpointId: e.target.value, subagentModel: '' })}
+        className="w-44 py-1"
+      >
+        <option value="">Fleet setting</option>
+        {endpoints.map((e) => (
+          <option key={e._id} value={e._id}>
+            {e.name}
+          </option>
+        ))}
+      </Select>
+      {plan.subagentEndpointId ? (
+        <Select
+          value={plan.subagentModel}
+          onChange={(e) => onPatch({ subagentModel: e.target.value })}
+          className="w-56 py-1"
+        >
+          <option value="">Endpoint default</option>
+          {(selected?.models ?? []).map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </Select>
+      ) : null}
+      <span className="text-[11px] text-slate-500">reviews and planning keep each agent's own model</span>
     </div>
   );
 }

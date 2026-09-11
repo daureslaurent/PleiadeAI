@@ -196,6 +196,29 @@ export function EndpointsManager() {
             <span className="text-[11px] text-slate-500">0 = off</span>
           </label>
 
+          {/* Concurrency: the server's own --parallel / -np. The gate admits this many calls to this
+              URL at once and queues the rest, so it is what makes the board's "tasks running at once"
+              mean anything. Over-declaring does not help — llama.cpp just queues internally instead,
+              and every in-flight request takes its own slice of the shared KV cache. */}
+          <label className="flex items-center gap-2">
+            <span className="shrink-0 text-[11px] text-slate-400">Parallel streams</span>
+            <Input
+              type="number"
+              min={1}
+              max={16}
+              defaultValue={e.parallel_slots ?? 1}
+              title="How many calls this server streams at once — its llama.cpp --parallel / -np value."
+              onBlur={(ev) =>
+                Number(ev.target.value) !== (e.parallel_slots ?? 1) &&
+                void patch(e._id, { parallel_slots: Number(ev.target.value) })
+              }
+              className="w-20 py-1.5"
+            />
+            <span className="text-[11px] text-slate-500">
+              Match the server's <code className="font-mono">--parallel</code>; 1 = one call at a time
+            </span>
+          </label>
+
           <VisionControl endpoint={e} onPatch={(p) => void patch(e._id, p)} />
 
           <ModesEditor endpoint={e} onPatch={(p) => void patch(e._id, p)} />

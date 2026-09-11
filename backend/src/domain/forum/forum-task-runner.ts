@@ -22,6 +22,29 @@ const YIELD_TIMEOUT_MS = 60_000;
 
 export type DispatchKind = 'work' | 'review';
 
+/** A run pointed at a model that is not the agent's own, or `null` for "run as configured". */
+type SubagentTarget = { endpointId?: string | null; model?: string } | null;
+
+/**
+ * Subagent mode (`BOARD_SUBAGENT_MODEL_PLAN.md` §4): which model this dispatch runs on.
+ *
+ * `work` only. A review is the cheap turn in tokens and the expensive one in consequences — a
+ * reviewer that rubber-stamps feeds a wrong deliverable into every task that depends on it — so it
+ * keeps the model its agent was configured with, as does the manager's planning turn.
+ *
+ * The project's own setting wins over the fleet's, field by field: a plan may move its work onto a
+ * bigger model while inheriting the fleet's endpoint. Both empty everywhere = no override, and
+ * `resolveInference` falls through to the agent exactly as it always did.
+ */
+async function subagentTarget(kind: DispatchKind, plan: ForumPlanDoc | null): Promise<SubagentTarget> {
+  if (kind !== 'work') return null;
+  const settings = await settingsService.get();
+  const endpointId = (plan?.subagent_endpoint_id || settings.forum_subagent_endpoint_id || '').trim();
+  const model = (plan?.subagent_model || settings.forum_subagent_model || '').trim();
+  if (!endpointId && !model) return null;
+  return { endpointId: endpointId || null, model: model || undefined };
+}
+
 /**
  * The dispatch brief (spec `FORUM_WORKBOARD_PLAN.md` §6).
  *
@@ -198,8 +221,12 @@ export const forumTaskRunner = {
     const discussion = await forumTaskService.recentDiscussion(claimed.thread_id).catch(() => []);
     const text =
       kind === 'review' ? reviewBrief(claimed, plan, discussion) : workBrief(claimed, plan, deps, discussion);
+    const inference = await subagentTarget(kind, plan);
+    if (inference) {
+      log.info({ taskId, agent: agent.name, ...inference }, 'work turn runs on the subagent model');
+    }
 
-    const done = this.drive(sessionId, agent.name, String(agent._id), text)
+    const done = this.drive(sessionId, agent.name, String(agent._id), text, inference)
       .catch((err) => log.error({ err: String(err), taskId }, 'task dispatch failed'))
       .finally(async () => {
         // Whatever happened, the claim goes. The state itself was moved by `submit` / `block` /
@@ -220,8 +247,18 @@ export const forumTaskRunner = {
   /**
    * Run one turn. Lifted from `forum-mention-runner.drive` with the post-back removed — a task's
    * record is its submission, not its prose, so there is nothing to fall back to posting.
+   *
+   * `inference` redirects this one turn onto another endpoint/model. It is a parameter rather than
+   * something resolved in here because `forumPlanService.runManager` shares this method: the manager
+   * passes nothing and so keeps its own model, which is exactly the split subagent mode is.
    */
-  async drive(sessionId: string, agentName: string, agentId: string, text: string): Promise<void> {
+  async drive(
+    sessionId: string,
+    agentName: string,
+    agentId: string,
+    text: string,
+    inference: SubagentTarget = null,
+  ): Promise<void> {
     const ctx: EventContext = { sessionId, agentId, agentName, depth: 0 };
     await sessionRepository.addMessage(sessionId, { role: 'user', text });
     eventBus.emit('chat:user_message', { ctx, content: text });
@@ -241,6 +278,7 @@ export const forumTaskRunner = {
         depth: 0,
         userText: text,
         signal: controller.signal,
+        inference,
       });
       const turn = recorder.build(result.text);
       await sessionRepository.addMessage(sessionId, {

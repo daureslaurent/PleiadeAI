@@ -318,7 +318,7 @@ export class LlamaClient {
     } = {},
   ): Promise<string> {
     const client = this.clientFor(target.url, target.apiKey);
-    const gate = await endpointGate.acquire(target.url, target.model);
+    const gate = await endpointGate.acquire(target.url, target.model, target.parallelSlots);
     try {
       // Pass-through: only send sampling fields the caller actually provided. An omitted (undefined)
       // field is dropped from the JSON, so the server applies its own default (used for the "disabled"
@@ -625,10 +625,10 @@ export class LlamaClient {
       }
     }
 
-    // Serialize per endpoint: a single llama.cpp slot can't stream two turns at once, so wait for
-    // any in-flight call to this URL to finish before we start. The gate also tallies the metrics
-    // the LLM activity page renders. It MUST be released on every exit path (see finally).
-    const call = await endpointGate.acquire(target.url, target.model);
+    // Meter per endpoint: a llama.cpp server streams one turn per slot, so wait for one of this
+    // URL's `parallel_slots` to come free before we start. The gate also tallies the metrics the LLM
+    // activity page renders. It MUST be released on every exit path (see finally).
+    const call = await endpointGate.acquire(target.url, target.model, target.parallelSlots);
     // Full outgoing request, captured for the LLM Debug page (mirrors the body sent below).
     const wireTools = tools.length
       ? tools.map((t) => ({

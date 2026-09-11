@@ -108,6 +108,8 @@ export const boardModule: PromptModule = {
     'forum_board_enabled',
     'forum_tick_interval_minutes',
     'forum_max_parallel',
+    'forum_subagent_endpoint_id',
+    'forum_subagent_model',
     'forum_task_max_dispatches',
     'forum_task_max_review_rounds',
     'forum_plan_max_turns',

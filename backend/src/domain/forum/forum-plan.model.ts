@@ -38,6 +38,18 @@ const ForumPlanSchema = new Schema(
     turns_max: { type: Number, default: 60 },
     /** How many times the manager has revised the plan. Bounded by `forum_plan_max_revisions`. */
     revision: { type: Number, default: 0 },
+    /**
+     * This project's own subagent model (`BOARD_SUBAGENT_MODEL_PLAN.md`), overriding the fleet
+     * setting for its *work* dispatches. Empty inherits the fleet; the fleet empty too means no
+     * override at all and every turn runs on its agent's configured model.
+     *
+     * Read fresh on each dispatch rather than snapshotted like `turns_max`, and for the opposite
+     * reason: the leash is a decision about *this* project that a later fleet change must not undo,
+     * while the model is a routing choice the operator changes precisely to affect the runs still to
+     * come — a project struggling on a small model should move to a bigger one mid-flight.
+     */
+    subagent_endpoint_id: { type: String, default: '' },
+    subagent_model: { type: String, default: '' },
     /** In-flight marker for a manager turn, so a tick cannot start a second one. */
     manager_session_id: { type: Schema.Types.ObjectId, ref: 'Session', default: null },
     last_manager_at: { type: Date, default: null },

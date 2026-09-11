@@ -213,6 +213,12 @@ settingsRouter.put('/', async (req, res) => {
     patch.forum_plan_max_revisions = Math.min(50, Math.max(1, Number(b.forum_plan_max_revisions) || 6));
   if (typeof b.forum_project_manager_agent === 'string')
     patch.forum_project_manager_agent = b.forum_project_manager_agent.trim();
+  // Subagent mode. Either half may be set alone: an endpoint with no model runs that endpoint's own
+  // default, and a model with no endpoint runs on whatever endpoint the agent already uses.
+  if (typeof b.forum_subagent_endpoint_id === 'string')
+    patch.forum_subagent_endpoint_id = b.forum_subagent_endpoint_id.trim();
+  if (typeof b.forum_subagent_model === 'string')
+    patch.forum_subagent_model = b.forum_subagent_model.trim();
   if (b.forum_post_contract_enabled !== undefined)
     patch.forum_post_contract_enabled = Boolean(b.forum_post_contract_enabled);
   if (b.forum_auto_reply_max_per_project !== undefined)
