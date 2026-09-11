@@ -230,6 +230,22 @@ export interface Tool {
    */
   configSchema?: ToolConfigField[];
   /**
+   * Whether *this call* may run concurrently with the others the model emitted in the same batch.
+   *
+   * A model that asks for three things at once has already decided they are independent, but it has
+   * no idea what they cost us: the runner used to execute the batch strictly one after another, so
+   * two 120s `bash` probes took four minutes. Declaring a tool safe lets the batch overlap.
+   *
+   * The predicate form exists because our biggest tools are *verbs*, not endpoints — one `forum`
+   * tool reads threads and posts to them depending on `action`. A boolean would have to mark the
+   * whole tool unsafe and lose the common case (two `read_thread`s side by side), so a tool that
+   * mixes reads and writes decides per call from its own arguments.
+   *
+   * Absent means serial — a new tool is safe by default, and opting in is a deliberate statement
+   * that the call has no side effect another call in the same batch could observe.
+   */
+  parallelSafe?: boolean | ((args: Record<string, unknown>) => boolean);
+  /**
    * When present, called once per turn (by `resolveTools`) to produce this call's JSON schema in
    * place of the static `parameters` — e.g. reflecting which optional params the currently
    * configured ComfyUI workflow actually binds, so the agent only sees knobs that do something.

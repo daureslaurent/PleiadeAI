@@ -1775,6 +1775,14 @@ export interface InferenceSettings {
   scoring_model: string;
   /** Token budget for the judge reply. */
   scoring_max_tokens: number;
+  /**
+   * Run the parallel-safe calls of one model-emitted tool batch at once rather than in sequence.
+   * Only a tool that declares a call safe (a read) ever overlaps; results are still fed back in the
+   * model's emission order.
+   */
+  tool_parallel_enabled: boolean;
+  /** How many calls of a batch may be in flight together; `0` is unlimited. */
+  tool_parallel_max: number;
   /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
   max_tool_iterations: number;
   /** Ceiling on `ask_agent` delegation depth (depth 0 = the directly-addressed agent). Clamped 1–10. */

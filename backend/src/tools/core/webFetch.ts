@@ -164,6 +164,8 @@ function htmlToMarkdown(html: string): string {
  */
 export const webFetch: Tool = {
   name: 'webfetch',
+  /** Reads only — nothing it does can be observed by another call in the same batch. */
+  parallelSafe: true,
   description:
     "Fetches content from a URL and returns it. Use `format` to control the output: 'text' (readable plain text), 'markdown' (structured), or 'html' (raw). Prefer 'markdown' or 'text' for reading pages.",
   parameters: {

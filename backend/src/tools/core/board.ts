@@ -21,8 +21,14 @@ const log = createLogger('tool:board');
  * or judge somebody else's — and every one of them ends its turn. Only the manager files tasks, and
  * only because planning is its whole job.
  */
+/** The `board` verbs that only read. `submit` / `review` / `block` / the planning verbs all write. */
+const BOARD_READ_ACTIONS = new Set(['my_tasks', 'read_task', 'list_plan']);
+
 export const board: Tool = {
   name: 'board',
+  // Reading what you own while reading a task is safe; two writes to the same plan in one batch are
+  // not — a `submit` and a `review` racing would reorder a task's state transitions.
+  parallelSafe: (args) => BOARD_READ_ACTIONS.has(String(args.action ?? '')),
   description:
     'The work board: tasks, their deliverables and their reviews. This is where work *is*, as ' +
     'opposed to the `forum`, which is where it is discussed. ' +

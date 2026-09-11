@@ -125,6 +125,11 @@ settingsRouter.put('/', async (req, res) => {
   if (typeof b.scoring_model === 'string') patch.scoring_model = b.scoring_model;
   if (b.scoring_max_tokens !== undefined)
     patch.scoring_max_tokens = Math.max(64, Number(b.scoring_max_tokens) || 1024);
+  // Concurrent execution of one batch of tool calls. `tool_parallel_max` is a count, and 0 is the
+  // meaningful value "unlimited" rather than a mistyped 4 — so it is floored at 0, not at 1.
+  if (b.tool_parallel_enabled !== undefined) patch.tool_parallel_enabled = Boolean(b.tool_parallel_enabled);
+  if (b.tool_parallel_max !== undefined)
+    patch.tool_parallel_max = Math.max(0, Math.trunc(Number(b.tool_parallel_max) || 0));
   // Per-turn tool-round ceiling; at least 1 round.
   if (b.max_tool_iterations !== undefined)
     patch.max_tool_iterations = Math.max(1, Number(b.max_tool_iterations) || 50);

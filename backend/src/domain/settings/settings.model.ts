@@ -142,6 +142,22 @@ const SettingsSchema = new Schema(
     scoring_endpoint_id: { type: String, default: '' },
     scoring_model: { type: String, default: '' },
     scoring_max_tokens: { type: Number, default: 1024 },
+    /**
+     * Run the tool calls of one model-emitted batch concurrently instead of one after another.
+     *
+     * A model batches calls precisely because it judged them independent; executing them serially
+     * spends the sum of their durations for no reason. Only calls whose tool declares itself
+     * parallel-safe overlap (`tools/parallel-safety.ts`) — a write never joins a batch — and the
+     * tool messages are still appended in emission order, so the transcript the model reads back is
+     * identical either way. Off restores the strictly sequential behaviour.
+     */
+    tool_parallel_enabled: { type: Boolean, default: true },
+    /**
+     * How many calls of one batch may be in flight at once. `0` means unlimited (the whole
+     * parallel-safe run starts together). A low value is the throttle for an isolated container
+     * that doesn't enjoy three simultaneous commands.
+     */
+    tool_parallel_max: { type: Number, default: 4 },
     // Fleet default for the per-turn tool-round ceiling. An agent may override it with its own
     // `max_tool_iterations`; when the agent leaves that blank this value applies. Guards tool loops.
     max_tool_iterations: { type: Number, default: 50 },

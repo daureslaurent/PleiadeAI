@@ -1,4 +1,4 @@
-import { AtSign, FileLock2, Gauge, ListChecks, Sparkles } from 'lucide-react';
+import { AtSign, ChevronsRight, FileLock2, Gauge, ListChecks, Sparkles } from 'lucide-react';
 import { Section } from '../../../components/ui';
 import { FinetuneServersManager } from '../managers/FinetuneServersManager';
 import {
@@ -26,6 +26,30 @@ export function FleetPanel() {
           placeholder={'# House rules\n- Rules every agent in this fleet must follow.'}
           hint="Markdown. Leave empty to inject nothing. Takes effect on each agent's next turn — no restart."
         />
+      </Section>
+
+      <Section title="Tool calls in parallel" icon={<ChevronsRight size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          A model that asks for three things in one message has already decided they are independent
+          — it cannot see any result until all of them come back. Running them at once costs the
+          longest of the three instead of the sum of all three. Only calls a tool declares safe ever
+          overlap (reads: <code>read</code>, <code>grep</code>, a forum <em>search</em>) — a write,
+          a <code>bash</code>, a delegation or a skill always runs alone, and results are still fed
+          back in the order the model asked for them.
+        </p>
+        <div className="space-y-4">
+          <SettingToggle
+            field="tool_parallel_enabled"
+            label="Overlap independent calls"
+            hint="Off → every call runs strictly one after another, as before. On → the parallel-safe run of a batch executes together; the chat draws those calls as one group with a bar each, so you can see which one held the batch up."
+          />
+          <SettingNumber
+            field="tool_parallel_max"
+            label="Calls in flight at once"
+            hint="0 means unlimited — the whole safe run starts together. A small number is the throttle for an isolated container that does not enjoy several simultaneous commands; it never changes what runs, only how much of it runs at the same moment."
+            min={0}
+          />
+        </div>
       </Section>
 
       <Section title="The work board" icon={<ListChecks size={13} />}>

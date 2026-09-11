@@ -8,6 +8,7 @@ import type {
   TodoItemPayload,
   RecalledMemory,
   StreamChunkPayload,
+  ToolBatchInfo,
   ToolCompletePayload,
   ToolInvokePayload,
   ToolOutputChunkPayload,
@@ -38,6 +39,11 @@ export type Block =
       status: 'running' | 'success' | 'error';
       result?: unknown;
       images?: { id?: string; dataUrl: string }[];
+      /** Set when this call ran concurrently with others the model emitted with it. */
+      batch?: ToolBatchInfo;
+      /** Wall-clock start + duration, so a rehydrated turn can still draw the batch's waterfall. */
+      startedAt?: number;
+      durationMs?: number;
     }
   | {
       kind: 'agent';
@@ -79,6 +85,10 @@ type LiveItem =
       status: 'running' | 'success' | 'error';
       result?: unknown;
       images?: { id?: string; dataUrl: string }[];
+      /** Set when this call ran alongside the rest of its batch. */
+      batch?: ToolBatchInfo;
+      startedAt?: number;
+      durationMs?: number;
     }
   | { kind: 'agent'; frameId: string; refFrameId: string };
 
@@ -133,6 +143,9 @@ type SnapshotItem =
       status: 'running' | 'success' | 'error';
       result?: unknown;
       images?: { id?: string; dataUrl: string }[];
+      batch?: ToolBatchInfo;
+      startedAt?: number;
+      durationMs?: number;
     }
   | { kind: 'agent'; id: string; frameId: string; refFrameId: string };
 
@@ -285,6 +298,7 @@ export class TurnRecorder {
       args: p.args,
       output: '',
       status: 'running',
+      batch: p.batch,
     });
     this.trace.push({ kind: 'tool_start', label: `▶ ${p.tool}`, detail: JSON.stringify(p.args) });
   }
@@ -303,6 +317,9 @@ export class TurnRecorder {
         it.status = p.status;
         it.result = p.result;
         it.output = it.output || resultToOutput(p.result);
+        it.startedAt = p.startedAt;
+        it.durationMs = p.durationMs;
+        if (p.batch) it.batch = p.batch;
         const pics = p.images?.filter((img) => img.kind !== 'blob' && img.dataUrl);
         if (pics?.length) {
           it.images = pics.map((img) => ({ id: img.id, dataUrl: img.dataUrl! }));
@@ -406,6 +423,9 @@ export class TurnRecorder {
           status: it.status,
           result: it.result,
           images: it.images,
+          batch: it.batch,
+          startedAt: it.startedAt,
+          durationMs: it.durationMs,
         });
       } else {
         const f = this.frames.get(it.refFrameId);
@@ -453,6 +473,9 @@ export class TurnRecorder {
           status: it.status,
           result: it.result,
           images: it.images,
+          batch: it.batch,
+          startedAt: it.startedAt,
+          durationMs: it.durationMs,
         };
       return { kind: 'agent', id, frameId: it.frameId, refFrameId: it.refFrameId };
     });

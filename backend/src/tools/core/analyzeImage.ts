@@ -14,6 +14,8 @@ const log = createLogger('tool:analyze_image');
  */
 export const analyzeImage: Tool = {
   name: 'analyze_image',
+  /** Reads only — nothing it does can be observed by another call in the same batch. */
+  parallelSafe: true,
   description:
     'Analyse an image available in this turn (attached by the user, or read/acquired by a tool). Pass ' +
     '`question` to ask about something specific ("what does this error say?", "describe the chart"); ' +

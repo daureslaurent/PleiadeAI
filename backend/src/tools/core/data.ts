@@ -20,6 +20,9 @@ const log = createLogger('tool:data');
  */
 export const data: Tool = {
   name: 'data',
+  // Listing the session's resources is a read; `save` writes a file and `store` adds a resource to
+  // the pool, both of which the next call in the batch could otherwise observe half-done.
+  parallelSafe: (args) => String(args.action ?? '') === 'list',
   description:
     "Manage the session's saved resources (images and binary files) by handle (e.g. blob_1, img_2). " +
     'Resources persist for the whole session and are shared across agents, so to give a file to ' +

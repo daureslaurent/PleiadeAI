@@ -82,6 +82,13 @@ export interface EffectiveSettings {
   scoring_model: string;
   /** Token budget for the judge reply — enough for a reasoning model's `<think>` + the JSON verdict. */
   scoring_max_tokens: number;
+  /**
+   * Overlap the parallel-safe calls of one model-emitted tool batch instead of running them in
+   * sequence (`tools/parallel-safety.ts` decides which calls qualify).
+   */
+  tool_parallel_enabled: boolean;
+  /** How many calls of a batch may be in flight at once; `0` means unlimited. */
+  tool_parallel_max: number;
   /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
   max_tool_iterations: number;
   /** Ceiling on `ask_agent` delegation depth (depth 0 = the directly-addressed agent). */
@@ -242,6 +249,8 @@ export const settingsService = {
       scoring_endpoint_id: doc?.scoring_endpoint_id ?? '',
       scoring_model: doc?.scoring_model ?? '',
       scoring_max_tokens: doc?.scoring_max_tokens ?? 1024,
+      tool_parallel_enabled: doc?.tool_parallel_enabled ?? true,
+      tool_parallel_max: doc?.tool_parallel_max ?? 4,
       max_tool_iterations: doc?.max_tool_iterations ?? 50,
       max_agent_hops: doc?.max_agent_hops ?? env.MAX_AGENT_HOPS,
       agents_md: doc?.agents_md ?? '',

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, CornerDownRight, Loader2, Check, X, Brain, Gauge } from 'lucide-react';
 import { ToolCall } from '../ToolCall';
+import { ToolBatch } from '../ToolBatch';
 import { Markdown } from '../Markdown';
 import { agentColor, agentGlow, agentIcon, agentInitial } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
@@ -13,6 +14,29 @@ import { useStickyScroll } from '../../hooks/useStickyScroll';
 import type { Block } from '../../store/stream';
 
 type AgentBlock = Extract<Block, { kind: 'agent' }>;
+type ToolBlock = Extract<Block, { kind: 'tool' }>;
+
+/**
+ * Fold neighbouring tool blocks that share a `batch.id` into one array, leaving everything else as
+ * it was. A batch is only ever a run of adjacent blocks — the runner appends every call's result in
+ * the model's emission order — so this never reorders a turn, and a call that ran alone (no `batch`)
+ * passes straight through as itself.
+ */
+function groupBatches(blocks: Block[]): (Block | ToolBlock[])[] {
+  const out: (Block | ToolBlock[])[] = [];
+  for (const b of blocks) {
+    const batchId = b.kind === 'tool' ? b.batch?.id : undefined;
+    const prev = out[out.length - 1];
+    if (batchId && Array.isArray(prev) && prev[0]?.batch?.id === batchId) {
+      prev.push(b as ToolBlock);
+      continue;
+    }
+    out.push(batchId ? [b as ToolBlock] : b);
+  }
+  // A "batch" that turned out to hold one call (the rest were dropped, or a layout filtered them)
+  // is not a batch — unwrap it so it renders as an ordinary call.
+  return out.map((e) => (Array.isArray(e) && e.length === 1 ? e[0]! : e));
+}
 
 /**
  * Render an ordered list of assistant blocks: prose spans, thinking blocks, inline tool blocks, and
@@ -33,13 +57,21 @@ export function Blocks({
   isSub?: boolean;
 }) {
   const showSubThinking = usePrefs((s) => s.showSubagentThinking);
-  const { thinkingStyle } = useChatLayout();
+  const { thinkingStyle, toolStyle } = useChatLayout();
+  // Calls the model emitted together and the backend ran together are drawn as one group. The
+  // batch's members are always consecutive (their results are appended in emission order), so this
+  // is a fold over neighbours rather than a regroup of the whole turn — a block keeps its place.
+  // `toolStyle === 'none'` is the Workbench, which moved tools into its trace column entirely; there
+  // is nothing here to group.
+  const rendered = toolStyle === 'none' ? blocks : groupBatches(blocks);
   return (
     <>
-      {blocks.map((b, i) => {
+      {rendered.map((entry, i) => {
+        if (Array.isArray(entry)) return <ToolBatch key={entry[0]!.callId} blocks={entry} />;
+        const b = entry;
         if (b.kind === 'text') {
           // Streaming caret on the trailing live prose block, so the reader sees where text lands.
-          const isTail = live && i === blocks.length - 1;
+          const isTail = live && i === rendered.length - 1;
           return (
             <div key={i} className={isTail ? 'stream-caret' : undefined}>
               <Markdown>{b.text}</Markdown>
@@ -52,7 +84,7 @@ export function Blocks({
           if (!b.text.trim() || (isSub && !showSubThinking) || thinkingStyle === 'none') return null;
           // Auto-expanded only while it's the frame's live trailing block (i.e. actively thinking);
           // collapses as soon as output follows it or the turn ends.
-          const active = live && i === blocks.length - 1;
+          const active = live && i === rendered.length - 1;
           return thinkingStyle === 'block' ? (
             <ThinkingBlock key={i} text={b.text} active={active} />
           ) : (

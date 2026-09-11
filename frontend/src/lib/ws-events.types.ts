@@ -62,6 +62,20 @@ export type ToolCallStreamEvent = {
   | { phase: 'reset' }
 );
 
+/**
+ * The group of calls the model emitted in one assistant message and the backend ran concurrently.
+ *
+ * Only set when the call actually overlapped others — a lone call carries nothing, so the chat can
+ * tell "the model asked for one thing" apart from "it asked for three and got three at once".
+ * `index` is the position in the model's emission order, which is also the order the results were
+ * fed back, never the order they finished in.
+ */
+export interface ToolBatchInfo {
+  id: string;
+  index: number;
+  size: number;
+}
+
 export interface ToolStartEvent {
   type: 'tool_start';
   /** Conversation (or flow run) this belongs to — route on it. */
@@ -70,6 +84,7 @@ export interface ToolStartEvent {
   callId: string;
   tool: string;
   args: Record<string, unknown>;
+  batch?: ToolBatchInfo;
 }
 
 export interface ToolOutputEvent {
@@ -91,6 +106,10 @@ export interface ToolEndEvent {
   result: unknown;
   /** Images the tool acquired into the turn (e.g. a picture read via `read`), keyed by handle. */
   images?: { id?: string; dataUrl: string }[];
+  /** Wall-clock start (epoch ms) — with the duration, it places the call *within* its batch. */
+  startedAt?: number;
+  durationMs?: number;
+  batch?: ToolBatchInfo;
 }
 
 export interface SystemAlertEvent {

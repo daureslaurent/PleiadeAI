@@ -109,7 +109,7 @@ export function attachBridge(io: Server): void {
     });
   });
 
-  eventBus.on('agent:tool_invoke', ({ ctx, callId, tool, args }) => {
+  eventBus.on('agent:tool_invoke', ({ ctx, callId, tool, args, batch }) => {
     io.to(ctx.sessionId).emit('tool_start', {
       type: 'tool_start',
       sessionId: ctx.sessionId,
@@ -117,6 +117,8 @@ export function attachBridge(io: Server): void {
       callId,
       tool,
       args,
+      // Present only when this call is one of several running at once, so the chat can group them.
+      batch,
     });
   });
 
@@ -182,23 +184,31 @@ export function attachBridge(io: Server): void {
     });
   });
 
-  eventBus.on('tool:execution_complete', ({ ctx, callId, tool, status, result, images }) => {
-    io.to(ctx.sessionId).emit('tool_end', {
-      type: 'tool_end',
-      sessionId: ctx.sessionId,
-      agent: ctx.agentName,
-      callId,
-      tool,
-      status,
-      result,
-      // Thumbnails of any image the tool acquired (e.g. a picture read into the turn), so the operator
-      // sees what the agent pulled in. Handles ride along so the UI can label them (img_1, …). Blob
-      // resources (no pixels) are excluded here — they surface in the Data tab, not as chat thumbnails.
-      images: images
-        ?.filter((i) => i.kind !== 'blob' && i.dataUrl)
-        .map((i) => ({ id: i.id, dataUrl: i.dataUrl })),
-    });
-  });
+  eventBus.on(
+    'tool:execution_complete',
+    ({ ctx, callId, tool, status, result, images, durationMs, startedAt, batch }) => {
+      io.to(ctx.sessionId).emit('tool_end', {
+        type: 'tool_end',
+        sessionId: ctx.sessionId,
+        agent: ctx.agentName,
+        callId,
+        tool,
+        status,
+        result,
+        // When each call ran, not just how long it took — three 0.2s calls look identical whether
+        // they overlapped or queued, and the chat draws the difference.
+        startedAt,
+        durationMs,
+        batch,
+        // Thumbnails of any image the tool acquired (e.g. a picture read into the turn), so the
+        // operator sees what the agent pulled in. Handles ride along so the UI can label them
+        // (img_1, …). Blob resources (no pixels) are excluded — they surface in the Data tab.
+        images: images
+          ?.filter((i) => i.kind !== 'blob' && i.dataUrl)
+          .map((i) => ({ id: i.id, dataUrl: i.dataUrl })),
+      });
+    },
+  );
 
   // The agent's checklist changed. Depth routes it like `memory_recall`: a depth-0 list is the turn's
   // (and drives the pinned panel), a sub-agent's belongs to its own bubble.

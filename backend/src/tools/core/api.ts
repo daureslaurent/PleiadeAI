@@ -88,6 +88,8 @@ function detail(source: ApiSourceDoc) {
 
 export const apiMan: Tool = {
   name: 'api_man',
+  /** The catalogue only reads what the operator configured. */
+  parallelSafe: true,
   description:
     'List the HTTP APIs this instance can call and the named operations each one offers. Call it with ' +
     'no arguments for the catalogue, or with `api` for one API’s full contract (every operation, its ' +

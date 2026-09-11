@@ -588,6 +588,8 @@ Always verify: a click you didn't confirm with a fresh screenshot is a click you
 
 export const guide: Tool = {
   name: 'guide',
+  /** Reads only — nothing it does can be observed by another call in the same batch. */
+  parallelSafe: true,
   description:
     'Get in-depth usage guidance for your tools and common workflows — deeper than the tool ' +
     'descriptions (gotchas, examples, multi-tool flows). Call with no argument for an index of ' +

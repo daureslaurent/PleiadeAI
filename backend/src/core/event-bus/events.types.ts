@@ -81,6 +81,21 @@ export interface StreamChunkPayload {
   isReasoning: boolean;
 }
 
+/**
+ * The group of calls the model emitted in one assistant message and the runner ran together.
+ *
+ * Present only on a call that actually overlapped others — a lone call carries nothing, so the UI
+ * can tell "the model asked for one thing" from "the model asked for three and got three at once".
+ * `index` is the call's position in the *model's* emission order (which is also the order its result
+ * is appended in), never its completion order.
+ */
+export interface ToolBatchInfo {
+  /** Stable id shared by every call of the group, so the client can gather them. */
+  id: string;
+  index: number;
+  size: number;
+}
+
 export interface ToolInvokePayload {
   ctx: EventContext;
   /** LLM-assigned tool call id, echoed back on completion. */
@@ -88,6 +103,8 @@ export interface ToolInvokePayload {
   tool: string;
   /** Parsed JSON arguments the model requested. */
   args: Record<string, unknown>;
+  /** Set when this call ran concurrently with the rest of its batch. */
+  batch?: ToolBatchInfo;
 }
 
 /**
@@ -130,6 +147,14 @@ export interface ToolCompletePayload {
   /** Base64 images produced by the tool, appended to context by the JIT builder. */
   images?: ImageBlock[];
   durationMs: number;
+  /**
+   * Wall-clock start (epoch ms). Only a duration can't place a call *within* its batch: three calls
+   * of 0.2s, 0.2s and 1.8s look the same whether they overlapped or queued. With a start each, the
+   * UI can draw when each one actually ran.
+   */
+  startedAt?: number;
+  /** Set when this call ran concurrently with the rest of its batch. */
+  batch?: ToolBatchInfo;
 }
 
 export interface AskAgentPayload {

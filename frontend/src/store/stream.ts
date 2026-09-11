@@ -11,6 +11,7 @@ import type {
   SystemAlertEvent,
   ToolEndEvent,
   ToolOutputEvent,
+  ToolBatchInfo,
   ToolCallStreamEvent,
   ToolStartEvent,
   TruncatedEvent,
@@ -137,6 +138,15 @@ export type Block =
       progress?: ToolProgressInfo;
       /** Action marker attached to a `visual_act` call: screenshot + where the action landed. */
       visualAct?: VisualActInfo;
+      /**
+       * Set when the model emitted this call together with others and the backend ran them at once.
+       * Shared `id`, position in the model's emission order, and how many were in the group — enough
+       * for the chat to gather the batch back up and draw it as one thing.
+       */
+      batch?: ToolBatchInfo;
+      /** Wall-clock start (epoch ms) and duration — the two numbers the batch's waterfall needs. */
+      startedAt?: number;
+      durationMs?: number;
     }
   /**
    * A delegated sub-agent run (`ask_agent`). Rendered as a nested, color-coded bubble at the exact
@@ -193,6 +203,9 @@ type LiveItem =
       mediaGen?: MediaGenInfo;
       progress?: ToolProgressInfo;
       visualAct?: VisualActInfo;
+      batch?: ToolBatchInfo;
+      startedAt?: number;
+      durationMs?: number;
     }
   /** Placeholder marking where a child agent frame was spawned within this frame's stream. */
   | { kind: 'agent'; id: string; frameId: string; refFrameId: string };
@@ -267,6 +280,9 @@ export function buildBlocks(
         mediaGen: it.mediaGen,
         // `progress` is deliberately dropped here: settled blocks show their result, not a bar.
         visualAct: it.visualAct,
+        batch: it.batch,
+        startedAt: it.startedAt,
+        durationMs: it.durationMs,
       });
     } else {
       const f = frames[it.refFrameId];
@@ -616,6 +632,8 @@ export const useStream = create<StreamState>((set, get) => ({
           status: 'running' as const,
           argsText: undefined,
           streamIndex: undefined,
+          // Only present when this call is actually sharing its execution with the rest of a batch.
+          batch: e.batch,
         };
         const draft = at >= 0 ? s.liveItems[at] : undefined;
         return {
@@ -632,6 +650,7 @@ export const useStream = create<StreamState>((set, get) => ({
                   args: e.args,
                   output: '',
                   status: 'running',
+                  batch: e.batch,
                 },
               ],
           trace: [
@@ -764,6 +783,9 @@ export const useStream = create<StreamState>((set, get) => ({
                 result: e.result,
                 images: e.images,
                 output: it.output || resultToOutput(e.result),
+                startedAt: e.startedAt,
+                durationMs: e.durationMs,
+                ...(e.batch ? { batch: e.batch } : {}),
               }
             : it,
         ),

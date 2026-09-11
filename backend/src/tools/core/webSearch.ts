@@ -192,6 +192,8 @@ async function searchTavily(
  */
 export const webSearch: Tool = {
   name: 'web_search',
+  /** Reads only — nothing it does can be observed by another call in the same batch. */
+  parallelSafe: true,
   description:
     'Search the web and return a ranked list of results (title, url, snippet). Use for current events, documentation lookups, and facts outside your training data.',
   parameters: {

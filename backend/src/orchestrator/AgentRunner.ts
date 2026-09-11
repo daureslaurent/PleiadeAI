@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../config/logger';
 import { eventBus } from '../core/event-bus/EventBus';
-import type { EventContext, ImageBlock } from '../core/event-bus/events.types';
+import type { EventContext, ImageBlock, ToolBatchInfo } from '../core/event-bus/events.types';
 import { agentRepository } from '../domain/agents/agent.repository';
 import { buildUserMessage, type ChatMessage } from '../domain/agents/jit-builder';
 import { assembleSystemMessage, assembleUserText } from '../modules/assemble';
@@ -37,6 +37,7 @@ import { askParent } from '../tools/core/askParent';
 import { askUser } from '../tools/core/askUser';
 import { askUserBroker } from '../transport/ws/AskUserBroker';
 import type { Tool, ToolContext } from '../tools/types';
+import { isParallelSafe } from '../tools/parallel-safety';
 import { hopGuard } from './HopGuard';
 import { TurnImagePool } from './TurnImagePool';
 import {
@@ -644,41 +645,73 @@ export class AgentRunner {
 
       if (assistantText.trim()) interimTexts.push(assistantText.trim());
 
-      for (const call of toolCalls) {
-        const cacheKey = `${call.name}${call.argsJson}`;
-        // An observation tool is exempt: re-reading a screen after acting on it is the loop, not a
-        // repeat (see `OBSERVATION_TOOL_NAMES`).
-        const cached = OBSERVATION_TOOL_NAMES.has(call.name) ? undefined : toolResultCache.get(cacheKey);
-        if (cached !== undefined) {
-          log.warn(
-            { agent: agent.name, tool: call.name },
-            'duplicate tool call short-circuited (identical args already executed this turn)',
-          );
-          messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            content: JSON.stringify({
-              ok: false,
-              error:
-                'Duplicate call: this exact tool and arguments already ran this turn. Do not repeat it — use the previous result and continue.',
-              previous_result: safeParse(cached),
-            }),
+      // The model emitted these calls *together* because it judged them independent — that is what a
+      // tool-call array means. Running them one after another therefore spends the sum of their
+      // durations for nothing: two 120s `bash` probes cost four minutes. Group the consecutive
+      // parallel-safe ones and overlap them (Settings → Fleet), leaving everything else exactly as
+      // it was. Ordering is never at stake: results are appended in the model's emission order.
+      const parallelEnabled = settings.tool_parallel_enabled !== false;
+      const parallelMax = Math.max(0, Math.trunc(Number(settings.tool_parallel_max ?? 4)));
+      const groups = planToolGroups(toolCalls, toolMap, parallelEnabled);
+
+      for (const group of groups) {
+        // A group of one is a plain serial call, whatever its tool declares — no batch to report.
+        const batchId = group.length > 1 ? randomUUID() : null;
+        // Each call writes into its own buffer instead of straight into `messages`: concurrent calls
+        // finish in whatever order they finish, and a tool result that landed before the assistant's
+        // *earlier* tool_call message would be malformed chat. The buffers are spliced in below, in
+        // emission order, so the transcript is byte-identical to the sequential one.
+        const sinks: ChatMessage[][] = group.map(() => []);
+
+        const runOne = async (call: (typeof group)[number], i: number): Promise<void> => {
+          const sink = sinks[i]!;
+          const cacheKey = `${call.name}${call.argsJson}`;
+          // An observation tool is exempt: re-reading a screen after acting on it is the loop, not a
+          // repeat (see `OBSERVATION_TOOL_NAMES`).
+          const cached = OBSERVATION_TOOL_NAMES.has(call.name) ? undefined : toolResultCache.get(cacheKey);
+          if (cached !== undefined) {
+            log.warn(
+              { agent: agent.name, tool: call.name },
+              'duplicate tool call short-circuited (identical args already executed this turn)',
+            );
+            sink.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: JSON.stringify({
+                ok: false,
+                error:
+                  'Duplicate call: this exact tool and arguments already ran this turn. Do not repeat it — use the previous result and continue.',
+                previous_result: safeParse(cached),
+              }),
+            });
+            return;
+          }
+          const toolMsg = await this.executeToolCall(call, toolMap, ctx, sink, resolveExec, {
+            callerHistory,
+            caller: input.caller,
+            signal,
+            turnId,
+            pool: imagePool,
+            supportsVision: inference.supportsVision,
+            frames: liveFrames,
+            persistMemory: input.persistMemory !== false,
+            batch: batchId ? { id: batchId, index: i, size: group.length } : undefined,
           });
-          continue;
+          // executeToolCall already appended the tool message (and any following image message) to
+          // the sink in the correct order; here we only cache its content for the duplicate short-circuit.
+          if (typeof toolMsg.content === 'string') toolResultCache.set(cacheKey, toolMsg.content);
+        };
+
+        if (batchId) {
+          log.info(
+            { agent: agent.name, tools: group.map((c) => c.name), max: parallelMax || 'unlimited' },
+            'running tool batch in parallel',
+          );
+          await runWithConcurrency(group, parallelMax, runOne);
+        } else {
+          await runOne(group[0]!, 0);
         }
-        const toolMsg = await this.executeToolCall(call, toolMap, ctx, messages, resolveExec, {
-          callerHistory,
-          caller: input.caller,
-          signal,
-          turnId,
-          pool: imagePool,
-          supportsVision: inference.supportsVision,
-          frames: liveFrames,
-          persistMemory: input.persistMemory !== false,
-        });
-        // executeToolCall already appended the tool message (and any following image message) to
-        // `messages` in the correct order; here we only cache its content for the duplicate short-circuit.
-        if (typeof toolMsg.content === 'string') toolResultCache.set(cacheKey, toolMsg.content);
+        for (const sink of sinks) messages.push(...sink);
       }
 
       // A sub-agent hop's abort surfaces here as a swallowed tool error; bail immediately so a
@@ -910,6 +943,11 @@ export class AgentRunner {
     call: { id: string; name: string; argsJson: string },
     toolMap: Map<string, Tool>,
     ctx: EventContext,
+    /**
+     * Where this call's messages are appended — its tool result, then any image note. A serial call
+     * is handed the turn's `messages` directly; a call running as part of a parallel batch is handed
+     * its own buffer, which the caller splices in at the right place once the whole batch settles.
+     */
     messages: ChatMessage[],
     resolveExec: (() => Promise<AgentExecutor>) | null,
     delegation: {
@@ -931,6 +969,8 @@ export class AgentRunner {
       frames: Array<{ msg: ChatMessage; handles: string }>;
       /** Carried into any sub-agent hop, so a synthetic turn doesn't write memories anywhere. */
       persistMemory: boolean;
+      /** Set when this call is one of several running concurrently; echoed to the UI on both events. */
+      batch?: ToolBatchInfo;
     },
   ): Promise<ChatMessage> {
     let args: Record<string, unknown> = {};
@@ -940,7 +980,13 @@ export class AgentRunner {
       log.warn({ tool: call.name, argsJson: call.argsJson }, 'unparseable tool args');
     }
 
-    eventBus.emit('agent:tool_invoke', { ctx, callId: call.id, tool: call.name, args });
+    eventBus.emit('agent:tool_invoke', {
+      ctx,
+      callId: call.id,
+      tool: call.name,
+      args,
+      batch: delegation.batch,
+    });
 
     const tool = toolMap.get(call.name);
     const startedAt = Date.now();
@@ -954,6 +1000,8 @@ export class AgentRunner {
         status: 'error',
         result,
         durationMs: 0,
+        startedAt,
+        batch: delegation.batch,
       });
       return { role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) };
     }
@@ -1055,6 +1103,8 @@ export class AgentRunner {
       result: payload,
       images,
       durationMs,
+      startedAt,
+      batch: delegation.batch,
     });
 
     // Push the tool result first — it must immediately follow the assistant's tool_call message —
@@ -1260,6 +1310,67 @@ function buildRecallQuery(input: { userText: string; history?: ChatMessage[] }):
 }
 
 /** Best-effort parse of a cached tool result string; falls back to the raw string. */
+/** One tool call as the streaming parser assembled it. */
+type PlannedCall = { id: string; name: string; argsJson: string };
+
+/**
+ * Cut one batch of tool calls into the runs that may execute together.
+ *
+ * Consecutive calls whose tool declares itself parallel-safe form one group; everything else is a
+ * group of one. Two rules keep this conservative:
+ *
+ * - **Order across groups is preserved.** A write between two reads splits them, so the reads never
+ *   jump over it — the model asked for `read, write, read` and gets exactly that sequence.
+ * - **A repeat closes the group.** The duplicate short-circuit answers the second identical call
+ *   from a cache the first one fills, which only works if the first has already finished.
+ */
+function planToolGroups(
+  calls: PlannedCall[],
+  toolMap: Map<string, Tool>,
+  enabled: boolean,
+): PlannedCall[][] {
+  const groups: PlannedCall[][] = [];
+  let groupIsParallel = false;
+  const keysInGroup = new Set<string>();
+
+  for (const call of calls) {
+    const key = `${call.name}${call.argsJson}`;
+    const safe = enabled && isParallelSafe(toolMap.get(call.name), safeParseArgs(call.argsJson));
+    const current = groups[groups.length - 1];
+    if (safe && groupIsParallel && current && !keysInGroup.has(key)) {
+      current.push(call);
+      keysInGroup.add(key);
+      continue;
+    }
+    groups.push([call]);
+    groupIsParallel = safe;
+    keysInGroup.clear();
+    keysInGroup.add(key);
+  }
+  return groups;
+}
+
+/** Run `task` over every item, at most `limit` in flight (`0` = all at once). Order is preserved by
+ * the caller writing each result into its own slot, never by completion order. */
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  const width = limit > 0 ? Math.min(limit, items.length) : items.length;
+  let next = 0;
+  const workers = Array.from({ length: width }, async () => {
+    for (let i = next++; i < items.length; i = next++) await task(items[i]!, i);
+  });
+  await Promise.all(workers);
+}
+
+/** A call's arguments as an object, for the parallel-safety predicate. Unparseable args → `{}`. */
+function safeParseArgs(argsJson: string): Record<string, unknown> {
+  const parsed = safeParse(argsJson);
+  return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+}
+
 function safeParse(s: string): unknown {
   try {
     return JSON.parse(s);

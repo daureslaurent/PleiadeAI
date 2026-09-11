@@ -56,7 +56,12 @@ Key seams:
   injects the agent's `parameters` KV map + auto-recalled memories into a *single* leading system
   message — a second `system` turn breaks the GGUF chat templates), streams inference, and loops
   tool calls up to `MAX_TOOL_ITERATIONS` (8). Cross-agent delegation recurses via `makeInvoker`
-  guarded by `HopGuard` (`MAX_AGENT_HOPS`, default 3).
+  guarded by `HopGuard` (`MAX_AGENT_HOPS`, default 3). **A batch of tool calls runs concurrently**
+  (`TOOL_PARALLEL_PLAN.md`): the model emits independent calls together, so `planToolGroups` groups
+  the consecutive ones whose tool declares `parallelSafe` (reads only — `tools/parallel-safety.ts`)
+  and runs each group with a concurrency cap. Each call buffers its own messages and the buffers are
+  spliced back in *emission* order, so the transcript is identical to the sequential one; the chat
+  draws such a group as one card with a waterfall bar per call.
 - **Tools vs Skills.** Core tools live in `tools/core/` and are registered statically in
   `tools/registry.ts`. Skills are user-authored TS/Python stored in MongoDB and wrapped as tools at
   resolve time. `resolveTools()` binds core names directly and looks the rest up as skills; disabled

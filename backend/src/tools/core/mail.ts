@@ -63,6 +63,8 @@ const ACCOUNT_PARAM = {
  */
 export const listMail: Tool = {
   name: 'list_mail',
+  /** Reads only — nothing it does can be observed by another call in the same batch. */
+  parallelSafe: true,
   description:
     'List messages from a linked Gmail mailbox, newest first — metadata only (sender, subject, date, ' +
     'snippet, unread flag), no bodies. Use `read_mail` with a returned `id` to read one. Filter with ' +
@@ -119,6 +121,8 @@ export const listMail: Tool = {
  */
 export const readMail: Tool = {
   name: 'read_mail',
+  /** Reads only — nothing it does can be observed by another call in the same batch. */
+  parallelSafe: true,
   description:
     'Read one email from a linked Gmail mailbox by the `id` returned from `list_mail`: full headers ' +
     'plus the body as plain text (HTML is converted; long bodies are truncated with a marker). ' +

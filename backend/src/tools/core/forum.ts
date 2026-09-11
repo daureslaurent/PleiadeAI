@@ -310,8 +310,18 @@ async function resolveAttachmentArg(
  * - **Echo chambers.** Authorship comes from `ToolContext`, never from an argument, so a claim can
  *   always be traced to the agent that actually made it.
  */
+/**
+ * The `forum` actions that only *read* the board. Everything absent from this set writes something
+ * another agent (or another call in the same batch) can see — a post, a state change, an upload —
+ * or pulls a file into the turn's resource pool, so it runs on its own.
+ */
+const FORUM_READ_ACTIONS = new Set(['list_categories', 'search', 'list_threads', 'read_thread', 'list_files']);
+
 export const forum: Tool = {
   name: 'forum',
+  // One tool, both halves of the board: reading two threads at once is the common case and is safe,
+  // posting to two at once is not. Decided per call, from the action the model actually asked for.
+  parallelSafe: (args) => FORUM_READ_ACTIONS.has(String(args.action ?? '')),
   description:
     'The shared agent forum: a persistent, cross-agent board of threads and posts used as a team ' +
     'knowledge base, for coordinating work, and for proposing and reviewing each other\'s work. ' +

@@ -28,17 +28,23 @@ export function ToolCall({ block }: { block: ToolBlock }) {
   return <ToolCard block={block} />;
 }
 
-/** The full inline card, whichever variant this tool calls for. */
-function ToolCard({ block }: { block: ToolBlock }) {
+/**
+ * The full inline card, whichever variant this tool calls for.
+ *
+ * `defaultOpen` starts the card's own body expanded. A batch row already cost the reader a click to
+ * get here, and making them click the identical chevron again to see the output is a toll, not a
+ * disclosure.
+ */
+export function ToolCard({ block, defaultOpen = false }: { block: ToolBlock; defaultOpen?: boolean }) {
   // Still being written by the model — no arguments to shape a real card from yet.
   if (block.status === 'drafting') return <DraftingBlock block={block} />;
-  if (block.tool === 'bash') return <BashBlock block={block} />;
+  if (block.tool === 'bash') return <BashBlock block={block} defaultOpen={defaultOpen} />;
   if (block.tool === 'visual_act' || block.visualAct) return <VisualActBlock block={block} />;
   if (block.tool === 'visual_screenshot' || block.tool === 'android_screenshot' ||
       block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
   if (MEDIA_TOOLS.has(block.tool) || block.mediaGen) return <MediaGenBlock block={block} />;
-  return <GenericToolBlock block={block} />;
+  return <GenericToolBlock block={block} defaultOpen={defaultOpen} />;
 }
 
 /**
@@ -254,8 +260,8 @@ function StatusIcon({ status }: { status: ToolBlock['status'] }) {
 }
 
 /** OpenCode-style terminal block for bash: `$ command`, collapsible live output, exit code. */
-function BashBlock({ block }: { block: ToolBlock }) {
-  const [open, setOpen] = useState(false);
+function BashBlock({ block, defaultOpen = false }: { block: ToolBlock; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const command = String(block.args?.command ?? '');
   const exit =
     block.result && typeof block.result === 'object' && 'exit_code' in block.result
@@ -284,9 +290,18 @@ function BashBlock({ block }: { block: ToolBlock }) {
         </span>
       </button>
       {(open || block.status === 'running') && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t hairline px-3 py-2 text-slate-300">
-          {block.output || (block.status === 'running' ? '…' : '(no output)')}
-        </pre>
+        <>
+          {/* The header truncates to one line, and a long command's interesting half is exactly what
+              the ellipsis eats — so the expanded card always carries the command in full. */}
+          {command.length > 0 && (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap border-t hairline px-3 py-1.5 text-[11px] text-slate-400">
+              <span className="text-emerald-400">$</span> {command}
+            </pre>
+          )}
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t hairline px-3 py-2 text-slate-300">
+            {block.output || (block.status === 'running' ? '…' : '(no output)')}
+          </pre>
+        </>
       )}
     </div>
   );
@@ -646,8 +661,8 @@ function MediaGenBlock({ block }: { block: ToolBlock }) {
 }
 
 /** Compact card for non-terminal tools: icon + name + at-a-glance action summary, expandable args/result. */
-function GenericToolBlock({ block }: { block: ToolBlock }) {
-  const [open, setOpen] = useState(false);
+function GenericToolBlock({ block, defaultOpen = false }: { block: ToolBlock; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const { Icon, value, title, hint } = describeTool(block.tool, block.args ?? {}, block.result, block.status);
   // A tool that had to shrink its output (e.g. webfetch truncating a long page, or storing a binary
   // body as a blob instead of inlining it) flags the result — surface an amber warning so the operator
