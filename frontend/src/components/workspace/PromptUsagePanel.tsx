@@ -11,6 +11,9 @@ interface Props {
   agent: Agent | null;
 }
 
+/** Backoff between attempts at reading a capture that is written fire-and-forget after the turn. */
+const POLL_WAITS = [0, 400, 1000, 2000, 4000, 8000];
+
 /**
  * **Usage** — where this agent's context window actually goes.
  *
@@ -20,25 +23,42 @@ interface Props {
  * schemas (billed on every call, present in no message) and folds the conversation into role rows —
  * a 15%-of-window `AGENTS.md` is visible as a thing you could go and shorten.
  *
- * It reads the **latest** captured inference call of the session and re-reads when a turn finishes
- * streaming; while one is in flight, `useLiveUsageGuess` re-estimates the same shape every render off
- * the live stream state so the bar keeps moving instead of sitting frozen until the turn settles.
+ * **Two sources, and the panel never has neither.** The exact breakdown comes from re-sizing the
+ * session's latest *captured* inference call; the headline meter comes from the `context_usage`
+ * events the run already streams (`store/stream.ts`), which are exact prompt-token counts from the
+ * server and need no fetch at all. So a turn in flight moves the meter from its first reading —
+ * including on a session's very first turn, where there is no capture to fetch yet and the panel
+ * used to sit on "no inference call captured".
  *
- * That re-read is a short *poll*, not a single fetch: a capture is persisted fire-and-forget off
- * `llama:call_end`, so the instant streaming stops the just-finished call is usually not in Mongo
- * yet. One fetch there reads the state from *before* the turn — nothing at all on a session's first
- * turn — which is how the tab used to go blank exactly when it finally had something exact to show.
- * The poll stops on the first record newer than the one already on screen, and a fetch that comes
- * back empty or fails leaves the last good breakdown up rather than clearing it.
+ * **Nothing here is gated on the turn being over.** The fetch is triggered by *anything* that says
+ * the session moved — mount, session change, a settled `context_usage`, a new turn, the streaming
+ * flag dropping — and each trigger retries from scratch, so one failed read (or one stale
+ * `streaming` flag) can't wedge the tab until a reload. It is a short *poll*, not a single fetch: a
+ * capture is persisted fire-and-forget off `llama:call_end`, so the instant streaming stops the
+ * just-finished call is usually not in Mongo yet.
+ *
+ * **It never clears.** A fetch that fails or comes back empty leaves the last good breakdown up
+ * (flagged stale) rather than blanking — a call that ended is still the truest thing we know about
+ * this window, and an empty panel is strictly less informative than a second-old one.
  */
 export function PromptUsagePanel({ sessionId, agent }: Props) {
   const streaming = useStream((s) => s.streaming);
+  // The run's own readings: `liveContext` is this turn's climbing prompt total, `contextUsage` the
+  // settled one. Either lets the meter render with no capture in hand at all.
+  const liveContext = useStream((s) => s.liveContext);
+  const settledContext = useStream((s) => s.contextUsage);
+  // Any of these changing means "the session moved, go look for a newer capture".
+  const turnCount = useStream((s) => s.turns.length);
+
   const [call, setCall] = useState<LlamaCallRecord | null>(null);
   const [usage, setUsage] = useState<PromptUsageBreakdown | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stale, setStale] = useState(false);
 
   /** The call currently on screen — read by the poll without making it a render dependency. */
   const shownIdRef = useRef<string | null>(null);
+  /** Bumped on every session change so a slow read can't paint the previous conversation's window. */
+  const genRef = useRef(0);
 
   /**
    * Fetch the session's latest capture and size it. Returns whether it found one *newer* than
@@ -47,6 +67,7 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
   const load = useCallback(
     async (knownId?: string | null): Promise<boolean> => {
       if (!sessionId) return false;
+      const gen = genRef.current;
       setLoading(true);
       try {
         const rows = await llmDebugApi.bySession(sessionId, 12);
@@ -58,14 +79,20 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
           latest.tools ?? undefined,
           agent?._id ?? null,
         );
+        // The operator switched conversation while this was in flight: drop it on the floor rather
+        // than paint another session's window over theirs.
+        if (gen !== genRef.current) return false;
         shownIdRef.current = latest.id;
         setCall(latest);
         setUsage(breakdown);
+        setStale(false);
         return true;
       } catch {
+        // Keep whatever is on screen; the next trigger (or the refresh button) tries again.
+        if (gen === genRef.current) setStale(true);
         return false;
       } finally {
-        setLoading(false);
+        if (gen === genRef.current) setLoading(false);
       }
     },
     [sessionId, agent?._id],
@@ -74,19 +101,23 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
   // Switching sessions is the one time the panel must forget: another conversation's window is not
   // a stale view of this one, it's the wrong answer.
   useEffect(() => {
+    genRef.current += 1;
     shownIdRef.current = null;
     setCall(null);
     setUsage(null);
+    setStale(false);
   }, [sessionId]);
 
-  // Initial read, and the post-turn poll — the capture is written fire-and-forget after the stream
-  // ends, so give it a few tries with a widening gap before settling for what's already shown.
+  // The read, on every signal that the session moved — deliberately *not* gated on `streaming`.
+  // Mounting mid-turn still fetches: the last completed call is exactly the baseline the live
+  // estimate re-scales, so opening the tab during a turn shows a moving bar instead of nothing.
+  // The widening poll covers the capture being written fire-and-forget after the stream ends.
   useEffect(() => {
-    if (streaming || !sessionId) return;
+    if (!sessionId) return;
     let cancelled = false;
     const known = shownIdRef.current;
     void (async () => {
-      for (const wait of [0, 400, 1000, 2000, 4000]) {
+      for (const wait of POLL_WAITS) {
         if (wait) await new Promise((r) => setTimeout(r, wait));
         if (cancelled) return;
         if (await load(known)) return;
@@ -95,21 +126,34 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [streaming, sessionId, load]);
+    // `settledContext` identity changes once per finished turn — the earliest reliable "this turn
+    // produced a call" signal, and it arrives even if the `streaming` flag never flips back.
+  }, [sessionId, load, streaming, turnCount, settledContext]);
 
   const guess = useLiveUsageGuess(usage, streaming);
   const isGuess = streaming && guess !== null;
   const shown = isGuess ? guess : usage;
 
-  const total = shown?.total ?? shown?.sum ?? call?.usage?.promptTokens ?? null;
-  const windowSize = shown?.contextWindow ?? 0;
+  // The meter prefers the run's own exact reading while a turn is live, then the sized breakdown,
+  // then the capture's reported prompt tokens.
+  const reading = liveContext ?? settledContext;
+  const breakdownTotal = shown?.total ?? shown?.sum ?? null;
+  const total =
+    (streaming && liveContext ? liveContext.promptTokens : null) ??
+    breakdownTotal ??
+    reading?.promptTokens ??
+    call?.usage?.promptTokens ??
+    null;
+  const windowSize = shown?.contextWindow || reading?.contextWindow || 0;
   const fill = windowSize > 0 && total !== null ? total / windowSize : 0;
   const partCount = useMemo(
     () => (shown ? shown.moduleGroups.length + shown.segments.filter((s) => s.kind !== 'module').length : 0),
     [shown],
   );
 
-  if (!sessionId || (!call && !loading)) {
+  // Empty only when there is genuinely nothing to say: no capture, no breakdown, no reading from the
+  // live run, and no read in flight. A finished call stays on screen; a live turn shows its meter.
+  if (!sessionId || (!call && !shown && !reading && !loading)) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
         <PieChart size={26} className="text-slate-600" />
@@ -141,6 +185,12 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
               estimated
             </span>
           )}
+          {!isGuess && streaming && reading && (
+            <span className="flex items-center gap-1 font-mono text-[10px] text-slate-500">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              live
+            </span>
+          )}
           <span
             className={`ml-auto font-mono text-[11px] ${
               fill > 0.8 ? 'text-red-400' : fill > 0.5 ? 'text-amber-400' : 'text-slate-400'
@@ -150,8 +200,10 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
           </span>
           <button
             onClick={() => void load()}
-            title="Recompute"
-            className="rounded p-1 text-slate-500 transition-colors hover:raise-2 hover:text-slate-300"
+            title={stale ? "Couldn't size the last call — retry" : 'Recompute'}
+            className={`rounded p-1 transition-colors hover:raise-2 hover:text-slate-300 ${
+              stale ? 'text-amber-400' : 'text-slate-500'
+            }`}
           >
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
           </button>
@@ -172,7 +224,15 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
       {/* Detail: every module and category, its tokens and share — expand a module for its blocks.
           Kept up while a refresh or the post-turn poll runs: a list that blanks on every attempt is
           worse than one that's a second stale, and the spinner already says a read is in flight. */}
-      {shown ? <UsageDetailList breakdown={shown} /> : null}
+      {shown ? (
+        <UsageDetailList breakdown={shown} />
+      ) : (
+        <p className="px-3 py-3 text-[11px] text-slate-500">
+          {loading
+            ? 'Sizing the last call…'
+            : 'Breakdown appears once this turn’s call is captured — the meter above is the run’s own reading.'}
+        </p>
+      )}
     </div>
   );
 }

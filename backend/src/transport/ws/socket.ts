@@ -118,6 +118,21 @@ export function attachSocket(httpServer: HttpServer): Server {
           // depth-0 agent-run) lets the client tag the saved message so the top-level turn's quality
           // score attaches on refresh; `turnId` groups it with any sub-agent runs.
           socket.emit('chat:done', { sessionId, answer, turnId, runId });
+          // Every *other* client watching this session got `chat:running` (and a snapshot) when it
+          // subscribed, so it is sitting on `streaming: true` with no terminal event coming — its
+          // composer, its meters and its Usage tab would stay stuck on a live turn until a reload.
+          // Send them the same turn marked `persisted`, which renders it and saves nothing: the
+          // originating client above is still the one that owns the write.
+          const mirror = recorder.build(answer);
+          socket.to(sessionId).emit('chat:done', {
+            sessionId,
+            answer,
+            persisted: true,
+            blocks: mirror.blocks,
+            memories: mirror.memories,
+            turnId,
+            runId,
+          });
         } else {
           // The client left mid-run (a refresh) or moved on to another conversation while this one
           // kept running. Persist the *rich* turn ourselves —
