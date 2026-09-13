@@ -16,15 +16,19 @@ const GROUP_PALETTE: Record<ModuleGroup, string[]> = {
   capabilities: ['bg-sky-400', 'bg-sky-300', 'bg-sky-500', 'bg-sky-200'],
 };
 
-/** The fixed non-module consumers of the window — same handful every turn, so fixed colors suit. */
+/**
+ * The fixed non-module consumers of the window — same handful every turn, so fixed colors suit.
+ * The conversation roles each get their own hue rather than shades of one, so User vs Tool results
+ * is readable at a glance in the bar; they stay off the 200–500 stops the module groups cycle through.
+ */
 const CATEGORY_COLOR: Record<string, string> = {
   system_prompt: 'bg-accent',
   injected_system: 'bg-accent/60',
   tool_schemas: 'bg-reasoning',
   user: 'bg-emerald-400',
-  assistant: 'bg-emerald-300',
-  tool_results: 'bg-emerald-200',
-  reasoning: 'bg-emerald-500',
+  assistant: 'bg-amber-600',
+  tool_results: 'bg-red-400',
+  reasoning: 'bg-reasoning/50',
 };
 
 /** Stable within one breakdown: shade index = position among same-group modules that rendered. */

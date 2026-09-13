@@ -16,6 +16,8 @@ interface Row {
   tokens: number;
   color: string;
   children: PromptUsageSegment[];
+  /** Category rows color each child by its own id (User, Assistant, Tool results…); module rows don't. */
+  childColors: boolean;
 }
 
 /** One row per rendered module, one per non-empty non-module category, biggest concerns first-ish (registry/segment order). */
@@ -28,6 +30,7 @@ function buildRows(breakdown: PromptUsageBreakdown): Row[] {
       tokens: g.tokens,
       color: moduleColor(g, breakdown.moduleGroups),
       children: g.segments,
+      childColors: false,
     }));
 
   const byKind = new Map<string, PromptUsageSegment[]>();
@@ -47,6 +50,7 @@ function buildRows(breakdown: PromptUsageBreakdown): Row[] {
       tokens,
       color: categoryColor(segs[0]!.id),
       children: segs,
+      childColors: segs.length > 1,
     });
   }
   return [...moduleRows, ...categoryRows];
@@ -99,13 +103,33 @@ export function UsageDetailList({ breakdown }: Props) {
               ) : (
                 <span className="w-[10px] shrink-0" />
               )}
-              <span className={`h-2 w-2 shrink-0 rounded-sm ${row.color}`} />
+              {row.childColors ? (
+                <span className="flex h-2 w-2 shrink-0 overflow-hidden rounded-sm">
+                  {row.children.map((s) => (
+                    <span key={s.id} className={`h-full flex-1 ${categoryColor(s.id)}`} />
+                  ))}
+                </span>
+              ) : (
+                <span className={`h-2 w-2 shrink-0 rounded-sm ${row.color}`} />
+              )}
               <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">{row.label}</span>
               <span className="h-1 w-14 shrink-0 overflow-hidden rounded-full raise-2">
-                <span
-                  className={`block h-full ${row.color}`}
-                  style={{ width: `${Math.min(100, share * 100)}%` }}
-                />
+                {row.childColors ? (
+                  <span className="flex h-full" style={{ width: `${Math.min(100, share * 100)}%` }}>
+                    {row.children.map((s) => (
+                      <span
+                        key={s.id}
+                        className={`h-full ${categoryColor(s.id)}`}
+                        style={{ width: `${((s.tokens ?? 0) / row.tokens) * 100}%` }}
+                      />
+                    ))}
+                  </span>
+                ) : (
+                  <span
+                    className={`block h-full ${row.color}`}
+                    style={{ width: `${Math.min(100, share * 100)}%` }}
+                  />
+                )}
               </span>
               <span className="w-14 shrink-0 text-right font-mono text-[10px] text-slate-400">
                 {row.tokens.toLocaleString()}
@@ -118,6 +142,9 @@ export function UsageDetailList({ breakdown }: Props) {
               <div className="ml-4 border-l hairline pl-2">
                 {row.children.map((s) => (
                   <div key={s.id} className="flex items-center gap-2 rounded px-1.5 py-0.5">
+                    {row.childColors && (
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-sm ${categoryColor(s.id)}`} />
+                    )}
                     <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">
                       {s.label}
                       {s.count > 1 && (
