@@ -87,6 +87,23 @@ export interface ToolSchema {
   parameters: Record<string, unknown>; // JSON schema
 }
 
+/**
+ * The toolset in OpenAI wire shape — what actually goes on the request, what the chat template
+ * renders into the prompt, and what the debug capture stores.
+ *
+ * Exported because anything that wants to *weigh* the toolset has to weigh the same bytes the model
+ * is charged for: `ToolSchema` is the flat internal shape, and handing that to `/apply-template` or
+ * to the usage sizer both under-reports it and, in front of a strict template, fails outright.
+ */
+export function toWireTools(tools: ToolSchema[]): OpenAI.ChatCompletionTool[] | undefined {
+  return tools.length
+    ? tools.map((t) => ({
+        type: 'function' as const,
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      }))
+    : undefined;
+}
+
 /** A fully-assembled tool call the model requested by the end of a streamed turn. */
 export interface AssembledToolCall {
   id: string;
@@ -433,7 +450,11 @@ export class LlamaClient {
    * Best-effort: returns `null` if either endpoint is missing (non-llama.cpp server) or errors, and
    * the caller falls back to whatever it had (usually the previous reading).
    */
-  async tokenizeMessages(target: ResolvedInference, messages: ChatMessage[]): Promise<number | null> {
+  async tokenizeMessages(
+    target: ResolvedInference,
+    messages: ChatMessage[],
+    tools?: unknown[],
+  ): Promise<number | null> {
     const base = target.url.replace(/\/$/, '');
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -443,7 +464,17 @@ export class LlamaClient {
       const tpl = await fetch(`${base}/apply-template`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ messages }),
+        // Two things this body must carry that are easy to leave out, both failing silently:
+        //
+        // `model` — not optional in front of a router (llama-swap and friends serve several models
+        // behind one port and answer `400 model name is missing from the request` without it). A
+        // single-model llama.cpp server ignores the field, so naming the model is always right.
+        //
+        // `tools` — part of the prompt the model is charged for, since the template renders every
+        // schema into the system turn, but present nowhere in `messages`. Templating without them
+        // returns a prompt short by the entire toolset, which is how an exact-looking total ends up
+        // *below* the sum of the parts it is supposed to bound.
+        body: JSON.stringify({ model: target.model, messages, ...(tools?.length ? { tools } : {}) }),
       });
       if (!tpl.ok) return null;
       const { prompt } = (await tpl.json()) as { prompt?: string };
@@ -452,7 +483,7 @@ export class LlamaClient {
       const tok = await fetch(`${base}/tokenize`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ content: prompt }),
+        body: JSON.stringify({ model: target.model, content: prompt }),
       });
       if (!tok.ok) return null;
       const { tokens } = (await tok.json()) as { tokens?: unknown[] };
@@ -487,7 +518,8 @@ export class LlamaClient {
         const res = await fetch(`${base}/tokenize`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ content, add_special: false }),
+          // Named for the same reason as `/apply-template` above: a router refuses an unnamed request.
+          body: JSON.stringify({ model: target.model, content, add_special: false }),
         });
         if (!res.ok) return null;
         const { tokens } = (await res.json()) as { tokens?: unknown[] };
@@ -665,12 +697,7 @@ export class LlamaClient {
     // activity page renders. It MUST be released on every exit path (see finally).
     const call = await endpointGate.acquire(target.url, target.model, target.parallelSlots);
     // Full outgoing request, captured for the LLM Debug page (mirrors the body sent below).
-    const wireTools = tools.length
-      ? tools.map((t) => ({
-          type: 'function' as const,
-          function: { name: t.name, description: t.description, parameters: t.parameters },
-        }))
-      : undefined;
+    const wireTools = toWireTools(tools);
     const capture = CallCapture.begin(target, {
       model: target.model,
       messages,

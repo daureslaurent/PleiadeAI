@@ -11,7 +11,7 @@ import { agentMemory, embedRecallQuery } from '../domain/memory/agent-memory.ser
 import { memoryDistiller } from '../domain/memory/memory-distiller';
 import { forumRecall } from '../domain/forum/forum-recall.service';
 import { settingsService } from '../domain/settings/settings.service';
-import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
+import { llamaClient, toWireTools, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { scoringService } from '../domain/scoring/scoring.service';
 import { sizePrompt } from '../domain/llama-logs/usage-sizer';
 import { resolveInference, resolveFallbacks, type ResolvedInference } from '../inference/inference-resolver';
@@ -418,6 +418,11 @@ export class AgentRunner {
       description: t.description,
       parameters: t.parameters,
     }));
+    // The same toolset in the shape that actually rides the request. Anything that *measures* the
+    // prompt has to measure these bytes: the template renders them into the system turn, and the
+    // debug capture stores them, so sizing the flat internal shape instead would both under-report
+    // the row and make the live breakdown disagree with the one fetched from a capture.
+    const wireTools = toWireTools(toolSchemas);
 
     // Which modules are live (`MODULES_PLAN.md` §7). Read per turn, from the same settings document
     // the rest of this block already needs, so a switch on Settings → Modules binds every agent on
@@ -617,7 +622,7 @@ export class AgentRunner {
       sizingBusy = true;
       sizingPrompt = sizingPrompt
         .then(async () => {
-          const breakdown = await sizePrompt(inference, sent, toolSchemas, knownTotal);
+          const breakdown = await sizePrompt(inference, sent, wireTools, knownTotal);
           eventBus.emit('agent:prompt_usage', { ctx, phase, breakdown });
         })
         .catch((err) => {
@@ -883,7 +888,11 @@ export class AgentRunner {
     // Exactness fallback: a server that doesn't emit streaming `usage` leaves `lastUsage` null, so
     // the meter would never settle. Count the final message set via llama.cpp's tokenizer instead.
     if (!lastUsage) {
-      const counted = await llamaClient.tokenizeMessages(inference, messages).catch(() => null);
+      // With the toolset: it is rendered into the templated prompt and paid for on every call, so
+      // counting without it hands the meter a reading short by the whole schema block.
+      const counted = await llamaClient
+        .tokenizeMessages(inference, messages, wireTools)
+        .catch(() => null);
       if (counted != null) {
         lastUsage = { promptTokens: counted, completionTokens: 0, totalTokens: counted };
       }

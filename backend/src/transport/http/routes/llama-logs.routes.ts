@@ -103,7 +103,7 @@ llamaLogsRouter.get('/session/:sessionId', async (req, res) => {
  * expected and the UI labels them accordingly. Both are best-effort `null` on a non-llama.cpp server.
  */
 llamaLogsRouter.post('/tokenize', async (req, res) => {
-  const body = req.body as { agentId?: string | null; messages?: unknown[] };
+  const body = req.body as { agentId?: string | null; messages?: unknown[]; tools?: unknown[] };
   const messages = Array.isArray(body.messages) ? body.messages : [];
   if (!messages.length) {
     res.json({ perMessage: [], total: 0 });
@@ -113,7 +113,7 @@ llamaLogsRouter.post('/tokenize', async (req, res) => {
   const target = await resolveInference(agent ?? {});
   const [perMessage, total] = await Promise.all([
     llamaClient.tokenizeTexts(target, messages.map(messageText)),
-    llamaClient.tokenizeMessages(target, messages as ChatMessage[]).catch(() => null),
+    llamaClient.tokenizeMessages(target, messages as ChatMessage[], body.tools).catch(() => null),
   ]);
   res.json({ perMessage, total, contextWindow: target.contextWindow });
 });

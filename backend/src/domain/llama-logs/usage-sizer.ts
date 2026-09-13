@@ -44,7 +44,7 @@ export async function sizePrompt(
     llamaClient.tokenizeTexts(target, pieces.map((p) => p.text)),
     knownTotal != null
       ? Promise.resolve(knownTotal)
-      : llamaClient.tokenizeMessages(target, messages as ChatMessage[]).catch(() => null),
+      : llamaClient.tokenizeMessages(target, messages as ChatMessage[], tools).catch(() => null),
   ]);
   const segments = foldSegments(pieces, counts);
   return {
