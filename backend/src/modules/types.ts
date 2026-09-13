@@ -3,6 +3,7 @@ import type { ImageBlock } from '../core/event-bus/events.types';
 import type { RecalledMemory } from '../domain/memory/memory.types';
 import type { TodoItem } from '../domain/todos/todo.repository';
 import type { ForumBlockInput, TaskPointer } from '../domain/forum/forum-recall.service';
+import type { BoardProjectPromptState } from '../domain/forum/forum-project-context';
 
 /**
  * The module system (`MODULES_PLAN.md`).
@@ -43,6 +44,8 @@ export interface PromptContext {
   forum: ForumBlockInput | null;
   /** Work items owned by or awaiting this agent, or null when the board module is off. */
   board: { tasks: TaskPointer[]; reviews: TaskPointer[] } | null;
+  /** The item this run manages (`BOARD_REFACTOR_PLAN.md` §8), or null for every other run. */
+  boardProject?: BoardProjectPromptState | null;
   images: ImagePromptState;
   /** Active `prompt` modes, already split by the placement each one declared. */
   modes: { system: string[]; user: string[] };

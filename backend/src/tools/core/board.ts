@@ -4,6 +4,8 @@ import { forumTaskRepository } from '../../domain/forum/forum-task.repository';
 import { forumPlanRepository } from '../../domain/forum/forum-plan.repository';
 import { forumPlanService } from '../../domain/forum/forum-plan.service';
 import { ForumRuleError } from '../../domain/forum/forum.service';
+import { forumProposalService } from '../../domain/forum/forum-proposal.service';
+import { describeOp } from '../../domain/forum/forum-project-context';
 import type { ForumAuthor } from '../../domain/forum/forum-author';
 import type { Tool, ToolResult } from '../types';
 
@@ -23,6 +25,8 @@ const log = createLogger('tool:board');
  */
 /** The `board` verbs that only read. `submit` / `review` / `block` / the planning verbs all write. */
 const BOARD_READ_ACTIONS = new Set(['my_tasks', 'read_task', 'list_plan']);
+/** What a manager may not do from its chat with the operator — it proposes instead. */
+const CHAT_REFUSED = new Set(['file_task', 'patch_task', 'finish_plan', 'submit', 'block', 'review']);
 
 export const board: Tool = {
   name: 'board',
@@ -56,12 +60,14 @@ export const board: Tool = {
           'patch_task',
           'list_plan',
           'finish_plan',
+          'propose',
         ],
         description:
           'my_tasks: what you own and what is waiting on your review. read_task: one task in full. ' +
           'submit: finish a task with a deliverable. block: park it, saying what you need. ' +
           'review: pass or fail a submitted task. file_task / patch_task / list_plan / finish_plan: ' +
-          'planning verbs.',
+          'planning verbs. propose: in a board item\'s chat with the operator, suggest changes for ' +
+          'them to apply — the only way to change the board from that conversation.',
       },
       task_id: { type: 'string', description: 'The task, for read_task / submit / block / review / patch_task.' },
       plan_id: {
@@ -108,6 +114,17 @@ export const board: Tool = {
       reasons: { type: 'string', description: 'For review with verdict "fail": exactly what is missing. Required.' },
       reason: { type: 'string', description: 'For block: one line on what you are waiting for.' },
       state: { type: 'string', description: 'For patch_task: a new state, when the plan needs one forced.' },
+      summary: { type: 'string', description: 'For propose: one sentence the operator reads above the changes.' },
+      changes: {
+        type: 'array',
+        description:
+          'For propose: every edit, in order. Each is an object with `op` ("add_task", "patch_task", ' +
+          '"cancel_task", "patch_plan") and `why` (one line). add_task: `ref` (e.g. "new1"), `goal`, ' +
+          '`acceptance`, `owner`, `reviewer`, `depends_on` (task ids or earlier refs). patch_task: ' +
+          '`task_id` plus only the fields that change. cancel_task: `task_id`. patch_plan: `name`, ' +
+          '`description`, `acceptance`.',
+        items: { type: 'object' },
+      },
     },
     required: ['action'],
   },
@@ -132,13 +149,58 @@ export const board: Tool = {
     const planId = async (): Promise<string | null> => {
       const given = str('plan_id');
       if (given) return given;
+      // A board item's manager run knows its item without asking (`BOARD_REFACTOR_PLAN.md` §6).
+      if (ctx.board?.planId) return ctx.board.planId;
       if (!ctx.sessionId) return null;
       const managing = await forumPlanRepository.findByManagerSession(ctx.sessionId);
       return managing ? String(managing._id) : null;
     };
 
+    // In the operator's chat with a manager the board is read-only: every change is a proposal the
+    // operator applies. Refused as a result, not thrown, so the model re-calls with `propose` in the
+    // same turn instead of telling the operator it did something it did not.
+    if (ctx.board?.mode === 'chat' && CHAT_REFUSED.has(action)) {
+      return {
+        result: {
+          ok: false,
+          error:
+            `\`${action}\` is not available in the chat with the operator — nothing here writes to the ` +
+            'board directly. Put the change in `board` `propose` (`summary` + `changes`) and the ' +
+            'operator applies it.',
+        },
+      };
+    }
+
     try {
       switch (action) {
+        case 'propose': {
+          if (ctx.board?.mode !== 'chat') {
+            return {
+              result: {
+                ok: false,
+                error: '`propose` is only for a board item\'s chat with the operator. Here, use file_task / patch_task.',
+              },
+            };
+          }
+          const changes = Array.isArray(args.changes) ? (args.changes as Record<string, unknown>[]) : [];
+          const proposal = await forumProposalService.propose({
+            planId: ctx.board.planId,
+            summary: str('summary'),
+            changes: changes.filter((c) => c && typeof c === 'object'),
+            sessionId: ctx.sessionId,
+          });
+          return {
+            result: {
+              ok: true,
+              proposal_id: String(proposal._id),
+              changes: proposal.ops.map((o) => describeOp(o)),
+              note:
+                'Shown to the operator as a checklist — nothing has changed yet. Tell them in a ' +
+                'sentence or two what you proposed and why, then end your turn.',
+            },
+          };
+        }
+
         case 'my_tasks': {
           if (!ctx.agentId) return { result: { ok: false, error: 'no agent identity on this run' } };
           const { owned, reviewing } = await forumTaskRepository.listForAgent(ctx.agentId);

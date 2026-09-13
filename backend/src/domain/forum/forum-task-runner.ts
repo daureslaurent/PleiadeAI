@@ -14,6 +14,7 @@ import { forumPlanRepository } from './forum-plan.repository';
 import { forumTaskService } from './forum-task.service';
 import type { ForumTaskDoc } from './forum-task.model';
 import type { ForumPlanDoc } from './forum-plan.model';
+import type { BoardRunContext } from './forum-project-context';
 
 const log = createLogger('forum-task-run');
 
@@ -258,10 +259,11 @@ export const forumTaskRunner = {
     agentId: string,
     text: string,
     inference: SubagentTarget = null,
+    opts: { board?: BoardRunContext; source?: 'board' } = {},
   ): Promise<void> {
     const ctx: EventContext = { sessionId, agentId, agentName, depth: 0 };
-    await sessionRepository.addMessage(sessionId, { role: 'user', text });
-    eventBus.emit('chat:user_message', { ctx, content: text });
+    await sessionRepository.addMessage(sessionId, { role: 'user', text, source: opts.source });
+    eventBus.emit('chat:user_message', { ctx, content: text, source: opts.source });
 
     const recorder = new TurnRecorder(sessionId, agentName);
     recorder.start();
@@ -279,6 +281,7 @@ export const forumTaskRunner = {
         userText: text,
         signal: controller.signal,
         inference,
+        board: opts.board,
       });
       const turn = recorder.build(result.text);
       await sessionRepository.addMessage(sessionId, {

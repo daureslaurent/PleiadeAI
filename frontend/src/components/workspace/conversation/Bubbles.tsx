@@ -1,5 +1,6 @@
 import {
   AgentAvatar,
+  BoardBrief,
   HistoryFold,
   InterviewerTag,
   LiveBody,
@@ -22,7 +23,9 @@ export function BubblesConversation(p: ConversationProps) {
       <HistoryFold {...p} />
 
       {p.shownTurns.map((t, i) =>
-        t.role === 'user' ? (
+        t.role === 'user' && t.source === 'board' ? (
+          <BoardBrief key={p.hiddenTurns + i} turn={t} />
+        ) : t.role === 'user' ? (
           <div key={p.hiddenTurns + i} className="flex animate-fade-up flex-col items-end pl-12">
             {p.generatedSession && <InterviewerTag />}
             <div

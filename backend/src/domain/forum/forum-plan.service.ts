@@ -6,9 +6,11 @@ import { eventBus } from '../../core/event-bus/EventBus';
 import { ForumRuleError, forumService } from './forum.service';
 import { forumPlanRepository } from './forum-plan.repository';
 import { forumTaskRepository } from './forum-task.repository';
+import { forumTaskService } from './forum-task.service';
 import { forumTaskRunner } from './forum-task-runner';
+import { liveRuns } from '../../transport/ws/live-runs';
 import { OPERATOR_AUTHOR, type ForumAuthor } from './forum-author';
-import type { ForumPlanDoc } from './forum-plan.model';
+import type { ForumPlanDoc, ForumPlanKind } from './forum-plan.model';
 import type { ForumTaskDoc } from './forum-task.model';
 
 const log = createLogger('forum-plan');
@@ -23,7 +25,14 @@ const log = createLogger('forum-plan');
  * is task documents the operator can read, edit and delete. Making it a built-in would buy nothing
  * and cost the operator the ability to retune or replace it.
  */
-export async function resolveManager(): Promise<ForumAuthor> {
+export async function resolveManager(agentId?: string | null): Promise<ForumAuthor> {
+  // A manager picked on the create form wins (`BOARD_REFACTOR_PLAN.md` §3); the fleet setting is
+  // its default, not a constraint.
+  if (agentId) {
+    const picked = await agentRepository.findById(agentId).catch(() => null);
+    if (!picked) throw new ForumRuleError('the agent picked as project manager does not exist', 404);
+    return { kind: 'agent', agent_id: String(picked._id), display_name: picked.name };
+  }
   const settings = await settingsService.get();
   const wanted = (settings.forum_project_manager_agent || 'project_manager').trim();
   const agent = await agentRepository.findByName(wanted);
@@ -119,49 +128,143 @@ function planBrief(plan: ForumPlanDoc, tasks: ForumTaskDoc[], escalation: string
 
 export const forumPlanService = {
   /**
-   * Open a project: a hub thread, a plan document, and — unless told otherwise — a manager turn to
-   * fill it with tasks.
+   * Open a board item: a hub thread, a plan document, its PM conversation — and then either its one
+   * task (a `task`) or a manager turn to fill the graph (a `project`).
    *
    * The plan starts `draft` and dispatches nothing. That is not ceremony: the manager is an LLM and
    * a bad plan dispatches exactly as confidently as a good one, so the operator reads the graph
-   * before anything spends a turn on it.
+   * before anything spends a turn on it. A `task` is filed straight from the form because the
+   * operator (or the analyser) has already written its contract — planning it would pay a manager
+   * turn to restate what is on the screen.
    */
   async create(input: {
     goal: string;
+    kind?: ForumPlanKind;
+    name?: string;
+    description?: string;
+    acceptance?: string[];
+    managerAgentId?: string | null;
+    owner?: string | null;
+    reviewer?: string | null;
     category?: string;
     author: ForumAuthor;
     turnsMax?: number;
   }): Promise<ForumPlanDoc> {
     const goal = input.goal.trim();
-    if (!goal) throw new ForumRuleError('a project needs a goal', 400);
+    if (!goal) throw new ForumRuleError('a board item needs a prompt — what you want done', 400);
+    const kind: ForumPlanKind = input.kind === 'task' ? 'task' : 'project';
+    const name = (input.name ?? '').trim() || (goal.length > 80 ? `${goal.slice(0, 77)}…` : goal);
+    const description = (input.description ?? '').trim();
+    const acceptance = (input.acceptance ?? []).map((a) => String(a).trim()).filter(Boolean);
+    if (kind === 'task') {
+      if (!input.owner?.trim()) throw new ForumRuleError('a task needs an owner — the agent that does it', 400);
+      if (!acceptance.length) {
+        throw new ForumRuleError('a task needs at least one acceptance criterion — what its reviewer checks', 400);
+      }
+    }
     const settings = await settingsService.get();
-    const manager = await resolveManager();
+    const manager = await resolveManager(input.managerAgentId);
 
     const { thread } = await forumService.createThread({
       category: input.category || 'general',
-      title: goal.length > 110 ? `${goal.slice(0, 107)}…` : goal,
-      body: [`**Project.** ${goal}`, '', `Planned by ${manager.display_name}. Tasks appear as threads under this one.`].join('\n'),
+      title: name.length > 110 ? `${name.slice(0, 107)}…` : name,
+      body: [
+        `**${kind === 'task' ? 'Task' : 'Project'}.** ${description || goal}`,
+        '',
+        description ? `Asked for: ${goal}` : '',
+        '',
+        `Managed by ${manager.display_name}. Tasks appear as threads under this one.`,
+      ]
+        .filter((l, i, all) => l !== '' || all[i - 1] !== '')
+        .join('\n'),
       author: input.author,
       byAgent: input.author.kind === 'agent',
     });
 
-    const plan = await forumPlanRepository.create({
+    let plan = await forumPlanRepository.create({
       hub_thread_id: thread._id,
+      kind,
+      name,
+      description,
+      acceptance,
       goal,
       manager,
       state: 'draft',
       turns_max: Math.max(1, input.turnsMax || settings.forum_plan_max_turns || 60),
       created_by: input.author,
     });
-    log.info({ planId: String(plan._id), goal, manager: manager.display_name }, 'project opened');
-    return plan;
+    plan = await this.ensureChatSession(plan);
+    log.info({ planId: String(plan._id), kind, name, manager: manager.display_name }, 'board item opened');
+
+    if (kind === 'task') {
+      try {
+        await forumTaskService.fileTask({
+          goal: description || name,
+          acceptance,
+          owner: input.owner,
+          reviewer: input.reviewer || null,
+          planId: String(plan._id),
+          detail: description ? `${description}\n\nAsked for: ${goal}` : goal,
+          author: input.author,
+          byAgent: input.author.kind === 'agent',
+        });
+      } catch (err) {
+        // The form was valid but the task was not (an unknown owner, owner = reviewer): take the
+        // empty item back out rather than leave a task with no task on the board.
+        await forumPlanRepository.remove(String(plan._id));
+        throw err;
+      }
+    } else {
+      await this.runManager(String(plan._id), '').catch((err) =>
+        log.error({ err: String(err), planId: String(plan._id) }, 'initial planning turn failed to start'),
+      );
+    }
+    return (await forumPlanRepository.findById(plan._id)) ?? plan;
+  },
+
+  /**
+   * The item's PM conversation, made on first need (`BOARD_REFACTOR_PLAN.md` §3). Plans from before
+   * the refactor have none until the page opens them, and a manager that has since been deleted
+   * leaves the old session pointing at nobody — the page then says so instead of crashing.
+   */
+  async ensureChatSession(plan: ForumPlanDoc): Promise<ForumPlanDoc> {
+    if (plan.chat_session_id) {
+      const existing = await sessionRepository.findById(String(plan.chat_session_id));
+      if (existing) return plan;
+    }
+    const agent = plan.manager.agent_id ? await agentRepository.findById(plan.manager.agent_id) : null;
+    if (!agent) return plan;
+    const session = await sessionRepository.create({
+      agentId: agent._id,
+      agentName: agent.name,
+      title: `PM: ${plan.name || plan.goal}`.slice(0, 120),
+      origin: 'board',
+      boardPlanId: plan._id,
+    });
+    eventBus.emit('conversation:session_created', {
+      sessionId: String(session._id),
+      agentId: String(agent._id),
+      agentName: agent.name,
+      title: session.title,
+      origin: 'board',
+    });
+    return (await forumPlanRepository.update(plan._id, { chat_session_id: session._id })) ?? plan;
   },
 
   /** Send the manager in to write (or rewrite) the graph. One turn, and it dispatches nothing itself. */
   async runManager(planId: string, escalation: string): Promise<{ sessionId: string } | null> {
-    const plan = await forumPlanRepository.findById(planId);
-    if (!plan) throw new ForumRuleError(`no such plan: "${planId}"`, 404);
-    if (plan.manager_session_id) return null;
+    const found = await forumPlanRepository.findById(planId);
+    if (!found) throw new ForumRuleError(`no such plan: "${planId}"`, 404);
+    if (found.manager_session_id) return null;
+    // Manager turns land in the item's PM conversation, so the chat is the project's whole history.
+    const plan = await this.ensureChatSession(found);
+    const chatSessionId = plan.chat_session_id ? String(plan.chat_session_id) : '';
+    // The operator is mid-conversation with this manager: a board turn racing it in the same session
+    // would interleave two turns' messages. The scheduler simply tries again next tick.
+    if (chatSessionId && liveRuns.has(chatSessionId)) {
+      log.info({ planId }, 'manager turn deferred — the operator is talking to the manager');
+      return null;
+    }
 
     const settings = await settingsService.get();
     if (plan.revision >= Math.max(1, settings.forum_plan_max_revisions ?? 6)) {
@@ -186,28 +289,18 @@ export const forumPlanService = {
     if (!agent) throw new ForumRuleError('the project manager agent no longer exists', 404);
 
     const tasks = await forumTaskRepository.listByPlan(plan._id);
-    const session = await sessionRepository.create({
-      agentId: agent._id,
-      agentName: agent.name,
-      title: tasks.length ? `Replan: ${plan.goal}` : `Plan: ${plan.goal}`,
-      origin: 'forum',
-      forumThreadId: plan.hub_thread_id,
-    });
+    const session = chatSessionId ? await sessionRepository.findById(chatSessionId) : null;
+    if (!session) throw new ForumRuleError('this item has no manager conversation', 409);
     const sessionId = String(session._id);
     const claimed = await forumPlanRepository.claimManager(plan._id, session._id as never);
     if (!claimed) return null;
 
-    eventBus.emit('conversation:session_created', {
-      sessionId,
-      agentId: String(agent._id),
-      agentName: agent.name,
-      title: session.title,
-      origin: 'forum',
-    });
-
     const text = planBrief(plan, tasks, escalation);
     void forumTaskRunner
-      .drive(sessionId, agent.name, String(agent._id), text)
+      .drive(sessionId, agent.name, String(agent._id), text, null, {
+        board: { planId: String(plan._id), mode: 'auto' },
+        source: 'board',
+      })
       .catch((err) => log.error({ err: String(err), planId }, 'manager turn failed'))
       .finally(async () => {
         await forumPlanRepository.releaseManager(plan._id);

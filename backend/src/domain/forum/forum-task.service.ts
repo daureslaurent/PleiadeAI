@@ -421,6 +421,11 @@ export function serialisePlan(plan: ForumPlanDoc): Record<string, unknown> {
   return {
     id: String(plan._id),
     hubThreadId: String(plan.hub_thread_id),
+    kind: plan.kind ?? 'project',
+    name: plan.name || plan.goal,
+    description: plan.description ?? '',
+    acceptance: plan.acceptance ?? [],
+    chatSessionId: plan.chat_session_id ? String(plan.chat_session_id) : null,
     goal: plan.goal,
     manager: plan.manager,
     state: plan.state,

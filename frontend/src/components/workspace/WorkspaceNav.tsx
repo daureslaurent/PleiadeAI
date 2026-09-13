@@ -17,6 +17,7 @@ import {
   Workflow,
   ChevronsDown,
   ChevronsUp,
+  ListChecks,
 } from 'lucide-react';
 import type { Agent, Session } from '../../lib/api';
 import { agentColor } from '../../lib/agentColor';
@@ -74,6 +75,7 @@ const HEADLESS_ORIGINS: Partial<Record<NonNullable<Session['origin']>, { icon: t
   cron: { icon: Clock, title: 'scheduled run (Autonomy)', tone: 'text-sky-400/70' },
   telegram: { icon: Send, title: 'Telegram chat', tone: 'text-cyan-400/70' },
   flow: { icon: Workflow, title: 'flow agent step', tone: 'text-violet-400/70' },
+  board: { icon: ListChecks, title: 'board item manager chat', tone: 'text-emerald-400/70' },
 };
 
 interface Props {

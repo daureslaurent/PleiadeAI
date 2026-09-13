@@ -178,6 +178,18 @@ Key seams:
   is paid for, instead of being guessed from prose by a pair cap and a chain ceiling. The per-thread
   (or per-project) auto-run budget is the only brake left behind it. Both master switches
   (`forum_board_enabled`, `forum_auto_reply`) ship off.
+  **Board items and the PM chat (`BOARD_REFACTOR_PLAN.md`).** A plan is a board *item* of
+  `kind` `task` (one task, filed straight from the create form) or `project` (the manager plans it
+  on creation; both stay `draft` until Start). The create form's **Analyse** button is a one-shot
+  structured completion on a picked agent (`board-analyse.service.ts`), never an agent turn. Every
+  item owns one persistent `origin: 'board'` session (`chat_session_id`) with its per-item manager:
+  the board's own manager turns run *in* it (their brief stored with `source: 'board'`), and the
+  operator chats in it from the item page. Which kind of turn it is travels as `RunInput.board` →
+  `ToolContext.board` (`mode: 'auto' | 'chat'`), set only by `runManager` and `socket.ts`. A `chat`
+  turn **cannot write the board**: `board` refuses the write verbs and offers `propose`, which files
+  a validated `forum_plan_proposals` change set the operator applies line by line
+  (`forum-proposal.service.ts`); chat turns spend no `turns_max`. The item's snapshot rides the
+  prompt as the board module's `Board item` block.
 
 - **Auth (`transport/http/middleware/auth.ts`).** `requireAuth` accepts either the operator's session
   JWT or an **API key** (`X-API-Key`, or `Authorization: Bearer plk_…`; `domain/api-keys/`). A key is

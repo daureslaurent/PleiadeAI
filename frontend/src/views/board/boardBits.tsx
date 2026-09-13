@@ -147,6 +147,11 @@ export function tallyStates(states: BoardTaskState[]): Record<BoardTaskState, nu
  * with a reason. This is the definition the "needs you" filter and the auto-expanded cards share, so
  * the count on the tab and the cards that open themselves can never disagree.
  */
-export function needsOperator(task: { state: BoardTaskState; reviewer: unknown | null }): boolean {
-  return task.state === 'blocked' || (task.state === 'review' && !task.reviewer);
+export function needsOperator(task: { state: BoardTaskState; reviewer: { kind?: string } | null }): boolean {
+  return task.state === 'blocked' || (task.state === 'review' && (!task.reviewer || task.reviewer.kind === 'operator'));
+}
+
+/** Whether the operator is the one who signs this task off — no reviewer, or the operator named. */
+export function operatorReviews(task: { reviewer: { kind?: string } | null }): boolean {
+  return !task.reviewer || task.reviewer.kind === 'operator';
 }

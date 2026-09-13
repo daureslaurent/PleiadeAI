@@ -5,19 +5,29 @@ import {
   ChevronDown,
   ListChecks,
   MessageSquareText,
+  MessagesSquare,
   Play,
   Radio,
   Sparkles,
   Square,
+  SquareCheckBig,
   Wand2,
 } from 'lucide-react';
-import { boardApi, endpointsApi, type BoardPlan, type BoardTask, type Endpoint } from '../../lib/api';
+import {
+  boardApi,
+  endpointsApi,
+  type BoardPlan,
+  type BoardProposal,
+  type BoardTask,
+  type Endpoint,
+} from '../../lib/api';
 import { Button, Callout, Chip, EmptyState, Section, Select, Spinner, Textarea } from '../../components/ui';
 import { useConfirm } from '../../components/ui';
 import {
   DeliverableChip,
   Detail,
   needsOperator,
+  operatorReviews,
   PlanStateBadge,
   ProgressTrack,
   tallyStates,
@@ -26,6 +36,18 @@ import {
   TaskStateBadge,
   TurnMeter,
 } from './boardBits';
+import { PmChatPanel } from './PmChatPanel';
+import { PROPOSAL_CHANGED_EVENT } from './ProposalCard';
+
+const CHAT_COLLAPSED_KEY = 'pleiades.board.chatCollapsed';
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(CHAT_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 /**
  * One project: its graph, and the two things only the operator can do to it.
@@ -56,6 +78,9 @@ export function PlanView() {
   const nav = useNavigate();
   const confirm = useConfirm();
   const [plan, setPlan] = useState<(BoardPlan & { tasks: BoardTask[] }) | null>(null);
+  const [proposal, setProposal] = useState<BoardProposal | null>(null);
+  const [chatCollapsed, setChatCollapsed] = useState(readCollapsed);
+  const [promptOpen, setPromptOpen] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -69,13 +94,33 @@ export function PlanView() {
       .plan(planId)
       .then(setPlan)
       .catch((err) => setError(String(err?.response?.data?.error ?? err)));
+    boardApi
+      .proposals(planId)
+      .then((list) => setProposal(list[0] ?? null))
+      .catch(() => {
+        // Proposals are an addition to the page, not a precondition for it.
+      });
   }, [planId]);
 
   useEffect(() => {
     load();
     const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
+    const onDecided = () => load();
+    window.addEventListener(PROPOSAL_CHANGED_EVENT, onDecided);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener(PROPOSAL_CHANGED_EVENT, onDecided);
+    };
   }, [load]);
+
+  const toggleChat = (collapsed: boolean) => {
+    setChatCollapsed(collapsed);
+    try {
+      localStorage.setItem(CHAT_COLLAPSED_KEY, collapsed ? '1' : '0');
+    } catch {
+      /* storage unavailable — the choice lasts this visit */
+    }
+  };
 
   // A task the board cannot move on its own is the reason the operator opened the page — so it is
   // already open when they get there, and everything else stays one line tall.
@@ -112,21 +157,32 @@ export function PlanView() {
   const byId = new Map(plan.tasks.map((t) => [t.id, t]));
   const attention = plan.tasks.filter(needsOperator).length;
   const running = plan.state === 'running';
+  const isTask = plan.kind === 'task';
+  // A task item with its one task: no filters and no graph to read, just the contract, open.
+  const single = isTask && plan.tasks.length === 1;
+  const noun = isTask ? 'task' : 'project';
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full overflow-y-auto lg:flex lg:overflow-hidden">
+      <div className="min-w-0 lg:flex-1 lg:overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl space-y-3 p-4">
         <div className="flex items-center gap-3">
           <Button icon={<ArrowLeft size={13} />} onClick={() => nav('/board')}>
-            Projects
+            Board
           </Button>
           <Link
             to={`/forum/t/${plan.hubThreadId}`}
             className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 transition-colors hover:text-slate-300"
           >
             <MessageSquareText size={11} />
-            project thread
+            {noun} thread
           </Link>
+          {chatCollapsed ? (
+            <Button className="ml-auto hidden lg:inline-flex" icon={<MessagesSquare size={13} />} onClick={() => toggleChat(false)}>
+              Chat with {plan.manager.display_name}
+              {proposal?.state === 'pending' ? <span className="h-1.5 w-1.5 rounded-full bg-accent" /> : null}
+            </Button>
+          ) : null}
         </div>
 
         {/* ── The project header. One block, read top to bottom: what it is, how far it got, what
@@ -134,12 +190,45 @@ export function PlanView() {
         <div className="glass-card rounded-2xl border hairline p-4">
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Project</div>
-              <h1 className="mt-1 text-base leading-snug text-slate-100">{plan.goal}</h1>
-              <div className="mt-1 text-[11px] text-slate-500">
+              <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                {isTask ? <SquareCheckBig size={11} /> : <ListChecks size={11} />}
+                {noun}
+              </div>
+              <h1 className="mt-1 text-base leading-snug text-slate-100">{plan.name || plan.goal}</h1>
+              {plan.description ? (
+                <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-300">{plan.description}</p>
+              ) : null}
+              <div className="mt-1.5 text-[11px] text-slate-500">
                 managed by {plan.manager.display_name}
                 {plan.revision > 0 ? ` · revision ${plan.revision}` : ''}
               </div>
+              {plan.acceptance.length ? (
+                <div className="mt-3">
+                  <Detail label="Done when">
+                    <ol className="space-y-1">
+                      {plan.acceptance.map((a, i) => (
+                        <li key={i} className="flex gap-2 leading-relaxed">
+                          <span className="mt-px shrink-0 font-mono text-[10px] text-slate-600">{i + 1}</span>
+                          <span className="min-w-0">{a}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </Detail>
+                </div>
+              ) : null}
+              {/* The operator's own words, kept verbatim — the manager replans against them. */}
+              <button
+                onClick={() => setPromptOpen((v) => !v)}
+                className="mt-3 inline-flex items-center gap-1 text-[11px] text-slate-500 transition-colors hover:text-slate-300"
+              >
+                <ChevronDown size={12} className={promptOpen ? '' : '-rotate-90'} />
+                Original request
+              </button>
+              {promptOpen ? (
+                <p className="mt-1.5 whitespace-pre-wrap rounded-lg hairline well px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+                  {plan.goal}
+                </p>
+              ) : null}
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2">
               <PlanStateBadge state={plan.state} />
@@ -147,7 +236,7 @@ export function PlanView() {
             </div>
           </div>
 
-          {plan.tasks.length ? (
+          {plan.tasks.length && !single ? (
             <div className="mt-4">
               <ProgressTrack counts={counts} total={plan.tasks.length} />
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
@@ -203,19 +292,21 @@ export function PlanView() {
                 Start
               </Button>
             )}
-            <Button
-              variant={plan.tasks.length ? 'ghost' : 'primary'}
-              icon={<Wand2 size={13} />}
-              loading={busy === 'plan'}
-              onClick={() => act('plan', () => boardApi.runManager(plan.id, plan.escalation))}
-            >
-              {plan.tasks.length ? 'Replan' : 'Plan it'}
-            </Button>
+            {!single ? (
+              <Button
+                variant={plan.tasks.length ? 'ghost' : 'primary'}
+                icon={<Wand2 size={13} />}
+                loading={busy === 'plan' || (!plan.tasks.length && plan.managerRunning)}
+                onClick={() => act('plan', () => boardApi.runManager(plan.id, plan.escalation))}
+              >
+                {plan.tasks.length ? 'Replan' : 'Plan it'}
+              </Button>
+            ) : null}
             <Button
               loading={busy === 'done'}
               onClick={() => act('done', () => boardApi.patchPlan(plan.id, { state: 'done' }))}
             >
-              Close project
+              Close {noun}
             </Button>
             <Button
               variant="danger"
@@ -223,7 +314,7 @@ export function PlanView() {
               onClick={async () => {
                 if (
                   await confirm({
-                    title: 'Delete this project?',
+                    title: `Delete this ${noun}?`,
                     body: 'Its tasks stop being dispatched. The threads and every deliverable posted on them stay on the forum.',
                     confirmLabel: 'Delete',
                   })
@@ -239,10 +330,10 @@ export function PlanView() {
         </div>
 
         <Section
-          title={`Tasks (${plan.tasks.length})`}
+          title={single ? 'Task' : `Tasks (${plan.tasks.length})`}
           icon={<ListChecks size={13} />}
           right={
-            plan.tasks.length ? (
+            plan.tasks.length && !single ? (
               <div className="flex items-center gap-1 rounded-lg raise-1 p-0.5">
                 {FILTERS.map((f) => {
                   const n = plan.tasks.filter(f.match).length;
@@ -272,8 +363,9 @@ export function PlanView() {
         >
           {!plan.tasks.length ? (
             <EmptyState icon={<ListChecks size={20} />}>
-              No tasks yet. Press <strong>Plan it</strong> — {plan.manager.display_name} breaks the goal
-              into tasks with owners and acceptance criteria, and you read them before starting.
+              {plan.managerRunning
+                ? `${plan.manager.display_name} is planning this ${noun} — follow along in the chat.`
+                : <>No tasks yet. Press <strong>Plan it</strong>, or ask {plan.manager.display_name} in the chat — it breaks the goal into tasks with owners and acceptance criteria, and you read them before starting.</>}
             </EmptyState>
           ) : null}
 
@@ -285,7 +377,7 @@ export function PlanView() {
             </EmptyState>
           ) : null}
 
-          {attention > 0 && filter !== 'attention' ? (
+          {attention > 0 && filter !== 'attention' && !single ? (
             <div className="mb-2">
               <Callout tone="warn">
                 {attention === 1 ? '1 task is' : `${attention} tasks are`} waiting on you — they are
@@ -304,7 +396,7 @@ export function PlanView() {
                 key={task.id}
                 task={task}
                 byId={byId}
-                open={open.has(task.id)}
+                open={single || open.has(task.id)}
                 busy={busy}
                 onToggle={() =>
                   setOpen((prev) => {
@@ -319,6 +411,27 @@ export function PlanView() {
           </div>
         </Section>
       </div>
+      </div>
+
+      {/* The manager's conversation. Docked right on a wide screen, under the board on a narrow one,
+          where it keeps a fixed height so the page — not the chat — is what scrolls. */}
+      <aside
+        className={`flex h-[75vh] min-h-0 flex-col border-t hairline lg:h-auto lg:w-[26rem] lg:shrink-0 lg:border-l lg:border-t-0 xl:w-[30rem] ${
+          chatCollapsed ? 'lg:hidden' : ''
+        }`}
+      >
+        <PmChatPanel
+          plan={plan}
+          tasks={plan.tasks}
+          proposal={proposal}
+          onProposalDecided={(p) => {
+            setProposal(p);
+            load();
+          }}
+          onTurnSettled={load}
+          onCollapse={() => toggleChat(true)}
+        />
+      </aside>
     </div>
   );
 }
@@ -384,7 +497,7 @@ function TaskCard({
                 {task.owner?.display_name ?? 'unowned'}
               </span>
               <span className="text-slate-600">→</span>
-              <span>{task.reviewer?.display_name ?? 'you'}</span>
+              <span>{task.reviewer?.display_name ?? 'manager'}</span>
               <span className="text-slate-600">·</span>
               <span className={task.acceptance.length ? '' : 'text-amber-400'}>
                 {task.acceptance.length || 'no'} criteria
@@ -508,7 +621,7 @@ function TaskCard({
             <div className="flex flex-wrap gap-2">
               {/* Only ever offered when it is actually the operator's move: a task in review with
                   no agent reviewer would otherwise sit there forever. */}
-              {task.state === 'review' && !task.reviewer ? (
+              {task.state === 'review' && operatorReviews(task) ? (
                 <>
                   <Button
                     variant="primary"

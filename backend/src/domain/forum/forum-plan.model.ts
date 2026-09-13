@@ -12,6 +12,14 @@ export const FORUM_PLAN_STATES = ['draft', 'running', 'blocked', 'done', 'cancel
 export type ForumPlanState = (typeof FORUM_PLAN_STATES)[number];
 
 /**
+ * What the operator opened (`BOARD_REFACTOR_PLAN.md`). A `task` is a plan holding exactly one task,
+ * filed straight from the create form — one model, so a small job gets the same page, PM chat,
+ * leash and review as a project instead of a second, thinner code path.
+ */
+export const FORUM_PLAN_KINDS = ['task', 'project'] as const;
+export type ForumPlanKind = (typeof FORUM_PLAN_KINDS)[number];
+
+/**
  * `forum_plans` — one project (spec `FORUM_WORKBOARD_PLAN.md` §3.2).
  *
  * The dependency graph lives on the tasks (`depends_on`); this document is the project's identity,
@@ -24,6 +32,19 @@ const ForumPlanSchema = new Schema(
   {
     /** The project's front page. Reuses the hub thread `FORUM_AUTORUN_PLAN.md` §E introduced. */
     hub_thread_id: { type: Schema.Types.ObjectId, ref: 'ForumThread', required: true, unique: true },
+    kind: { type: String, enum: FORUM_PLAN_KINDS, default: 'project', index: true },
+    /** Short title, suggested by the analyser or typed. The list and the hub thread show this. */
+    name: { type: String, default: '', trim: true },
+    /** What the item is, rewritten for a reader. `goal` keeps the operator's own words. */
+    description: { type: String, default: '' },
+    /** Item-level "done when". For a `task` these seed its single task's criteria. */
+    acceptance: { type: [String], default: [] },
+    /**
+     * The persistent conversation with this item's manager (`BOARD_REFACTOR_PLAN.md` §4). The
+     * operator's chat turns *and* the board's own planning turns land here, so it is the project's
+     * whole history. Null on plans older than the refactor until the page first opens them.
+     */
+    chat_session_id: { type: Schema.Types.ObjectId, ref: 'Session', default: null },
     /** What was asked for, verbatim where possible — the manager replans against this, not a paraphrase. */
     goal: { type: String, required: true },
     /** The agent that plans and replans. Called on exceptions only; it never dispatches anything. */

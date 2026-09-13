@@ -1,4 +1,5 @@
-import { ChevronDown, ChevronUp, Mic } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, ChevronRight, ChevronUp, ClipboardList, Mic } from 'lucide-react';
 import { Blocks, ThinkingRow, activityLabel } from '../Blocks';
 import { Collapsible } from '../Collapsible';
 import { agentColor, agentGlow, agentIcon, agentInitial } from '../../../lib/agentColor';
@@ -69,6 +70,37 @@ export function HistoryFold(p: ConversationProps) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * A brief the work board wrote into a PM conversation (`BOARD_REFACTOR_PLAN.md` §4) — "plan this",
+ * "replan because…". Drawn as one quiet system line rather than as a message from the operator, who
+ * never said it; the full brief is one click away for whoever wants to see what the manager was told.
+ */
+export function BoardBrief({ turn }: { turn: Extract<Turn, { role: 'user' }> }) {
+  const [open, setOpen] = useState(false);
+  const text = turn.blocks[0].text;
+  const headline = text.split('\n').find((l) => l.trim())?.replace(/[*`]/g, '') ?? 'Board brief';
+  return (
+    <div className="animate-fade-up">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 text-left text-[11px] text-slate-500 transition-colors hover:text-slate-300"
+      >
+        <span className="h-px w-4 shrink-0 raise-3" />
+        <ClipboardList size={12} className="shrink-0" />
+        <span className="shrink-0 font-medium uppercase tracking-wider">Board</span>
+        <span className="min-w-0 truncate">{headline}</span>
+        {open ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
+        <span className="h-px flex-1 raise-3" />
+      </button>
+      {open && (
+        <div className="mt-2 whitespace-pre-wrap break-words rounded-lg hairline well px-3 py-2 text-[11px] leading-relaxed text-slate-400">
+          {text}
+        </div>
+      )}
+    </div>
   );
 }
 

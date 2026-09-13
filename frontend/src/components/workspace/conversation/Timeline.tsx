@@ -1,4 +1,4 @@
-import { AgentAvatar, HistoryFold, LiveBody, TurnBody, isCollapsible, type ConversationProps } from './shared';
+import { AgentAvatar, BoardBrief, HistoryFold, LiveBody, TurnBody, isCollapsible, type ConversationProps } from './shared';
 import { User } from 'lucide-react';
 import { agentColor } from '../../../lib/agentColor';
 
@@ -24,7 +24,12 @@ export function TimelineConversation(p: ConversationProps) {
         {/* The spine. Inset to sit under the node markers' centres. */}
         <div className="absolute bottom-2 left-[11px] top-2 w-px raise-3" aria-hidden />
 
-        {p.shownTurns.map((t, i) => (
+        {p.shownTurns.map((t, i) =>
+          t.role === 'user' && t.source === 'board' ? (
+            <div key={p.hiddenTurns + i} className="mb-4">
+              <BoardBrief turn={t} />
+            </div>
+          ) : (
           <Node
             key={p.hiddenTurns + i}
             marker={

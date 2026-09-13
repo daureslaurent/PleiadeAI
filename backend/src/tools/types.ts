@@ -52,6 +52,11 @@ export interface ToolContext {
   askUser?: (question: string) => Promise<string>;
   /** LLM tool-call id for this invocation (correlates streamed output to the block). */
   callId?: string;
+  /**
+   * Set on a board item's manager run (`BOARD_REFACTOR_PLAN.md` §5). `chat` turns may only propose
+   * changes to the item; `auto` turns write the graph directly.
+   */
+  board?: { planId: string; mode: 'auto' | 'chat' };
   /** Emit incremental output while running (e.g. bash stdout) for live streaming to the UI. */
   emitOutput?: (chunk: string) => void;
   /**

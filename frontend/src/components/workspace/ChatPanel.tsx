@@ -20,7 +20,7 @@ import type { Agent } from '../../lib/api';
  * `Blocks` / `ToolCall` renderers adapt at any nesting depth without the layout passing anything
  * down.
  */
-function Conversation(props: ConversationProps) {
+export function Conversation(props: ConversationProps) {
   const layout = useActiveChatLayout();
   const View = CONVERSATION_VIEWS[layout.id];
   return (
@@ -141,7 +141,7 @@ function ContextMeter({ total, live }: { total: ContextUsage | null; live: Conte
  * Human-in-the-loop prompt: an agent called `ask_user` and its run is blocked until the operator
  * answers here. Rendered as a banner above the composer so the whole conversation stays visible.
  */
-function AskUserPrompt({
+export function AskUserPrompt({
   agent,
   question,
   onAnswer,

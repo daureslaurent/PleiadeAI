@@ -25,8 +25,8 @@ export function attachBridge(io: Server): void {
 
   // The interviewer's question, as a `user` turn. Also flips the session to "working": the target
   // agent starts its run the instant the question lands.
-  eventBus.on('chat:user_message', ({ ctx, content }) => {
-    io.to(ctx.sessionId).emit('chat:user', { sessionId: ctx.sessionId, text: content });
+  eventBus.on('chat:user_message', ({ ctx, content, source }) => {
+    io.to(ctx.sessionId).emit('chat:user', { sessionId: ctx.sessionId, text: content, source });
     io.to(ctx.sessionId).emit('chat:running', { sessionId: ctx.sessionId });
   });
 

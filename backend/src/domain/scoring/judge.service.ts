@@ -208,7 +208,7 @@ function toVerdict(jsonStr: string): JudgeVerdict | null {
  * closed block, a reply that opens `<think>` and is cut off by the token cap (nothing usable follows),
  * and a reply whose opening tag the server already ate so only the trailing `</think>` survives.
  */
-function stripReasoning(raw: string): string {
+export function stripReasoning(raw: string): string {
   let s = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
   const close = s.lastIndexOf('</think>');
   if (close !== -1) s = s.slice(close + '</think>'.length);
@@ -218,7 +218,7 @@ function stripReasoning(raw: string): string {
 }
 
 /** Every balanced `{...}` object in a string, in order (handles surrounding prose/fences). */
-function extractJsonObjects(s: string): string[] {
+export function extractJsonObjects(s: string): string[] {
   const out: string[] = [];
   let start = -1;
   let depth = 0;

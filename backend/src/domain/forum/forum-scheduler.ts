@@ -207,7 +207,7 @@ async function announceDone(plan: ForumPlanDoc): Promise<void> {
   const done = tasks.filter((t) => t.state === 'done').length;
   await notificationRepository
     .create({
-      title: `Project finished: ${plan.goal}`,
+      title: `${plan.kind === 'task' ? 'Task' : 'Project'} finished: ${plan.name || plan.goal}`,
       content:
         `${done} of ${tasks.length} tasks accepted, ${plan.turns_spent} agent turns spent of ` +
         `${plan.turns_max}. Every deliverable is on its task's thread.`,

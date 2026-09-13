@@ -95,6 +95,15 @@ export function attachSocket(httpServer: HttpServer): Server {
       const agent = await agentRepository.findByName(input.agentName);
       const lockKey = agent ? String(agent._id) : input.agentName;
 
+      // A message typed into a board item's PM conversation runs as that item's manager, in `chat`
+      // mode — it can read the project and propose changes, never write them
+      // (`BOARD_REFACTOR_PLAN.md` §5). Decided here from the stored session, never from the client.
+      const stored = input.sessionId ? await sessionRepository.findById(input.sessionId).catch(() => null) : null;
+      const board =
+        stored?.origin === 'board' && stored.board_plan_id
+          ? { planId: String(stored.board_plan_id), mode: 'chat' as const }
+          : undefined;
+
       const controller = new AbortController();
 
       // Mirror the turn on the backend so its rich blocks (tools + sub-agent hops) can be persisted
@@ -113,6 +122,7 @@ export function attachSocket(httpServer: HttpServer): Server {
           images: input.images,
           history: input.history,
           signal: controller.signal,
+          board,
         });
         // Only the client that is still here *and* still showing this conversation owns the live
         // buffer. One that navigated to another agent's session has thrown its buffer away, so

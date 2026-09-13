@@ -788,7 +788,7 @@ export const isolationsApi = {
       .then((r) => r.data),
 };
 
-export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow';
+export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'board';
 
 export interface Session {
   _id: string;
@@ -823,6 +823,8 @@ export interface StoredMessage {
   text: string;
   /** User only: data-URL images attached to the message. */
   images?: string[];
+  /** User only: `board` marks a brief the work board wrote into a PM conversation. */
+  source?: 'board';
   blocks?: unknown[];
   reasoning?: string;
   trace?: unknown[];
@@ -2190,7 +2192,7 @@ export interface LlamaCallRecord {
   turnId: string | null;
   /** Agent-run id (null for side-task calls) — links a record to its Conversation Quality score. */
   runId: string | null;
-  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge' | 'memory' | 'interview';
+  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge' | 'memory' | 'interview' | 'board-analyse';
   endpoint: string;
   model: string;
   sessionId: string | null;
@@ -3261,9 +3263,21 @@ export interface BoardTask {
   doneAt: string | null;
 }
 
+/** A board item is a single task or a whole project (`BOARD_REFACTOR_PLAN.md`). */
+export type BoardPlanKind = 'task' | 'project';
+
 export interface BoardPlan {
   id: string;
   hubThreadId: string;
+  kind: BoardPlanKind;
+  /** Short title — the analyser's suggestion or the operator's own. */
+  name: string;
+  description: string;
+  /** Item-level "done when". */
+  acceptance: string[];
+  /** The persistent conversation with this item's manager. */
+  chatSessionId: string | null;
+  /** The operator's original request, verbatim. */
   goal: string;
   manager: ForumAuthor;
   state: BoardPlanState;
@@ -3284,13 +3298,87 @@ export interface BoardPlan {
   taskCount?: number;
   doneCount?: number;
   blockedCount?: number;
+  reviewCount?: number;
+  doingCount?: number;
+  /** The manager has proposed changes nobody has decided on yet. */
+  pendingProposal?: boolean;
+  /** List only: something on this item only the operator can move. */
+  needsYou?: boolean;
+  /** List only, `kind: task`: its single task at a glance. */
+  task?: { state: BoardTaskState; owner: ForumAuthor | null; reviewer: ForumAuthor | null; inFlight: boolean } | null;
+  /** Detail only: the manager is mid-turn in its conversation. */
+  managerRunning?: boolean;
+}
+
+/** What the Analyse button fills the create form with. Suggestions — every field stays editable. */
+export interface BoardAnalysis {
+  kind: BoardPlanKind;
+  name: string;
+  description: string;
+  acceptance: string[];
+  owner: string;
+  reviewer: string;
+}
+
+export type BoardProposalOpKind = 'add_task' | 'patch_task' | 'cancel_task' | 'patch_plan';
+
+export interface BoardProposalOp {
+  opId: string;
+  op: BoardProposalOpKind;
+  /** `add_task`: the handle later ops use in `depends_on`. */
+  ref: string;
+  /** The task edited or cancelled — or, once applied, the task an `add_task` created. */
+  taskId: string;
+  args: {
+    goal?: string;
+    acceptance?: string[];
+    owner?: string;
+    reviewer?: string;
+    depends_on?: string[];
+    name?: string;
+    description?: string;
+  };
+  why: string;
+  status: 'pending' | 'applied' | 'rejected' | 'failed';
+  error: string;
+}
+
+export interface BoardProposal {
+  id: string;
+  planId: string;
+  sessionId: string | null;
+  summary: string;
+  state: 'pending' | 'applied' | 'partial' | 'rejected' | 'superseded';
+  createdAt: string;
+  decidedAt: string | null;
+  ops: BoardProposalOp[];
 }
 
 export const boardApi = {
   plans: () => api.get<BoardPlan[]>('/board/plans').then((r) => r.data),
   plan: (id: string) => api.get<BoardPlan & { tasks: BoardTask[] }>(`/board/plans/${id}`).then((r) => r.data),
-  createPlan: (body: { goal: string; category?: string; turnsMax?: number }) =>
-    api.post<BoardPlan>('/board/plans', body).then((r) => r.data),
+  createPlan: (body: {
+    goal: string;
+    kind?: BoardPlanKind;
+    name?: string;
+    description?: string;
+    acceptance?: string[];
+    managerAgentId?: string | null;
+    owner?: string | null;
+    reviewer?: string | null;
+    category?: string;
+    turnsMax?: number;
+  }) => api.post<BoardPlan>('/board/plans', body).then((r) => r.data),
+  /** Ask an agent to fill the create form from a prompt. Creates nothing. */
+  analyse: (body: { prompt: string; agentId: string; kind?: BoardPlanKind }) =>
+    api.post<BoardAnalysis>('/board/analyse', body).then((r) => r.data),
+  proposal: (id: string) => api.get<BoardProposal>(`/board/proposals/${id}`).then((r) => r.data),
+  proposals: (planId: string) =>
+    api.get<BoardProposal[]>(`/board/plans/${planId}/proposals`).then((r) => r.data),
+  /** Apply the ticked lines of a proposal; every pending line when `opIds` is omitted. */
+  applyProposal: (id: string, opIds?: string[]) =>
+    api.post<BoardProposal>(`/board/proposals/${id}/apply`, { opIds }).then((r) => r.data),
+  rejectProposal: (id: string) => api.post<BoardProposal>(`/board/proposals/${id}/reject`).then((r) => r.data),
   /** Send the manager in to write or rewrite the graph; answers with the session to watch. */
   runManager: (id: string, escalation?: string) =>
     api.post<{ sessionId: string }>(`/board/plans/${id}/plan`, { escalation }).then((r) => r.data),
@@ -3299,6 +3387,9 @@ export const boardApi = {
     patch: {
       state?: BoardPlanState;
       goal?: string;
+      name?: string;
+      description?: string;
+      acceptance?: string[];
       turnsMax?: number;
       // Empty strings clear the project's override and hand it back to the fleet setting.
       subagentEndpointId?: string;

@@ -409,7 +409,13 @@ export interface TurnScore {
 }
 
 export type Turn =
-  | { role: 'user'; blocks: [{ kind: 'text'; text: string }]; images?: string[] }
+  | {
+      role: 'user';
+      blocks: [{ kind: 'text'; text: string }];
+      images?: string[];
+      /** `board`: a brief the work board wrote into a PM conversation, drawn as a system line. */
+      source?: 'board';
+    }
   | {
       role: 'assistant';
       blocks: Block[];
@@ -1109,10 +1115,15 @@ export const useStream = create<StreamState>((set, get) => ({
     // A `user` turn this client did not send: the Conversation Generator's interviewer asking the
     // agent its next question. Locally-sent messages are appended by `send()`, so this only ever
     // fires for a generated conversation the operator happens to be watching.
-    socket.on('chat:user', ({ sessionId, text }: { sessionId: string; text: string }) => {
+    socket.on('chat:user', ({ sessionId, text, source }: { sessionId: string; text: string; source?: 'board' }) => {
       set((s) =>
         sessionId === s.activeSessionId
-          ? { turns: [...s.turns, { role: 'user' as const, blocks: [{ kind: 'text' as const, text }] }] }
+          ? {
+              turns: [
+                ...s.turns,
+                { role: 'user' as const, blocks: [{ kind: 'text' as const, text }], source: source === 'board' ? source : undefined },
+              ],
+            }
           : {},
       );
     });
@@ -1316,7 +1327,12 @@ export const useStream = create<StreamState>((set, get) => ({
 
     const turns: Turn[] = messages.map((m) =>
       m.role === 'user'
-        ? { role: 'user', blocks: [{ kind: 'text', text: m.text }], images: m.images?.length ? m.images : undefined }
+        ? {
+            role: 'user',
+            blocks: [{ kind: 'text', text: m.text }],
+            images: m.images?.length ? m.images : undefined,
+            source: m.source === 'board' ? 'board' : undefined,
+          }
         : {
             role: 'assistant',
             blocks: (m.blocks as Block[] | undefined) ?? [{ kind: 'text', text: m.text }],

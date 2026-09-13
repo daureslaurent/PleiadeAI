@@ -14,7 +14,7 @@ function deriveTitle(text: string): string {
  * — matched as `user`. Mention runs ride along with `user`: the operator started them deliberately
  * and will want to continue them, which is not true of a generated interview.
  */
-export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'all';
+export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'board' | 'all';
 
 function originFilter(agentId: string | Types.ObjectId, origin: SessionOrigin): Record<string, unknown> {
   const filter: Record<string, unknown> = { agent_id: agentId };
@@ -123,6 +123,8 @@ export const sessionRepository = {
     forumMentionId?: string | Types.ObjectId;
     /** Forum-origin only: this run answers a mention but starts a fresh summons chain. */
     forumChainReset?: boolean;
+    /** Board-origin only: the plan this conversation manages (`BOARD_REFACTOR_PLAN.md`). */
+    boardPlanId?: string | Types.ObjectId;
   }): Promise<SessionDoc> {
     return SessionModel.create({
       agent_id: input.agentId,
@@ -137,6 +139,7 @@ export const sessionRepository = {
       telegram_chat_id: input.telegramChatId ?? null,
       flow_id: input.flowId ?? null,
       flow_run_id: input.flowRunId ?? null,
+      board_plan_id: input.boardPlanId ?? null,
     });
   },
 
@@ -199,6 +202,7 @@ export const sessionRepository = {
       context_window?: number;
       turn_id?: string;
       run_id?: string;
+      source?: 'board';
     },
   ): Promise<MessageDoc> {
     const msg = await MessageModel.create({ session_id: sessionId, ...input });

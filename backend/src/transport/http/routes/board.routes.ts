@@ -12,6 +12,21 @@ import { forumPlanService } from '../../../domain/forum/forum-plan.service';
 import { forumScheduler } from '../../../domain/forum/forum-scheduler';
 import { OPERATOR_AUTHOR } from '../../../domain/forum/forum-author';
 import { FORUM_PLAN_STATES } from '../../../domain/forum/forum-plan.model';
+import type { ForumTaskDoc } from '../../../domain/forum/forum-task.model';
+import { forumProposalRepository } from '../../../domain/forum/forum-proposal.repository';
+import { forumProposalService, serialiseProposal } from '../../../domain/forum/forum-proposal.service';
+import { boardAnalyseService } from '../../../domain/forum/board-analyse.service';
+import { liveRuns } from '../../ws/live-runs';
+
+/**
+ * A task only the operator can move: stopped with a reason, or submitted with nobody but the operator
+ * to sign it off. Mirrors `needsOperator` in the board page, so the list's badge and the page agree.
+ */
+function waitsOnOperator(t: ForumTaskDoc): boolean {
+  return t.state === 'blocked' || (t.state === 'review' && (!t.reviewer || t.reviewer.kind === 'operator'));
+}
+
+const strList = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);
 
 const log = createLogger('http:board');
 
@@ -40,19 +55,43 @@ function fail(res: Parameters<Parameters<typeof boardRouter.get>[1]>[1], err: un
 // --- plans -----------------------------------------------------------------
 
 boardRouter.get('/plans', async (_req, res) => {
-  const plans = await forumPlanRepository.list();
+  const [plans, pending] = await Promise.all([forumPlanRepository.list(), forumProposalRepository.pendingPlanIds()]);
   const withCounts = await Promise.all(
     plans.map(async (plan) => {
       const tasks = await forumTaskRepository.listByPlan(plan._id);
+      const pendingProposal = pending.has(String(plan._id));
+      // A task item's card shows who has it, so it needs no second request either.
+      const only = plan.kind === 'task' && tasks.length === 1 ? tasks[0] : null;
       return {
         ...serialisePlan(plan),
         taskCount: tasks.length,
         doneCount: tasks.filter((t) => t.state === 'done').length,
         blockedCount: tasks.filter((t) => t.state === 'blocked').length,
+        reviewCount: tasks.filter((t) => t.state === 'review').length,
+        doingCount: tasks.filter((t) => t.state === 'doing').length,
+        pendingProposal,
+        needsYou: pendingProposal || plan.state === 'blocked' || tasks.some(waitsOnOperator),
+        task: only ? { state: only.state, owner: only.owner, reviewer: only.reviewer, inFlight: Boolean(only.dispatch?.session_id) } : null,
       };
     }),
   );
   res.json(withCounts);
+});
+
+/** Fill the create form from a prompt (`BOARD_REFACTOR_PLAN.md` §2). Suggestions only — nothing is created. */
+boardRouter.post('/analyse', async (req, res) => {
+  try {
+    const kind = req.body?.kind === 'task' || req.body?.kind === 'project' ? req.body.kind : undefined;
+    res.json(
+      await boardAnalyseService.analyse({
+        prompt: String(req.body?.prompt ?? ''),
+        agentId: String(req.body?.agentId ?? ''),
+        kind,
+      }),
+    );
+  } catch (err) {
+    fail(res, err);
+  }
 });
 
 boardRouter.get('/plans/:id', async (req, res) => {
@@ -61,14 +100,64 @@ boardRouter.get('/plans/:id', async (req, res) => {
     res.status(404).json({ error: 'no such project' });
     return;
   }
-  const tasks = await forumTaskRepository.listByPlan(plan._id);
-  res.json({ ...serialisePlan(plan), tasks: tasks.map(serialiseTask) });
+  // Plans from before the refactor get their PM conversation the first time they are opened.
+  const withChat = await forumPlanService.ensureChatSession(plan).catch(() => plan);
+  const [tasks, proposal] = await Promise.all([
+    forumTaskRepository.listByPlan(plan._id),
+    forumProposalRepository.latest(plan._id),
+  ]);
+  res.json({
+    ...serialisePlan(withChat),
+    tasks: tasks.map(serialiseTask),
+    pendingProposal: proposal?.state === 'pending',
+    // Whether the manager is mid-turn in its conversation, so the page can show the chat as busy.
+    managerRunning: Boolean(withChat.chat_session_id && liveRuns.has(String(withChat.chat_session_id))),
+  });
+});
+
+boardRouter.get('/plans/:id/proposals', async (req, res) => {
+  const proposals = await forumProposalRepository.listByPlan(req.params.id);
+  res.json(proposals.map(serialiseProposal));
+});
+
+boardRouter.get('/proposals/:id', async (req, res) => {
+  const proposal = await forumProposalRepository.findById(req.params.id);
+  if (!proposal) {
+    res.status(404).json({ error: 'no such proposal' });
+    return;
+  }
+  res.json(serialiseProposal(proposal));
+});
+
+/** Apply the ticked lines of a proposal (all of them when `opIds` is absent). */
+boardRouter.post('/proposals/:id/apply', async (req, res) => {
+  try {
+    const opIds = Array.isArray(req.body?.opIds) ? req.body.opIds.map(String) : null;
+    res.json(serialiseProposal(await forumProposalService.apply(req.params.id, opIds)));
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+boardRouter.post('/proposals/:id/reject', async (req, res) => {
+  try {
+    res.json(serialiseProposal(await forumProposalService.reject(req.params.id)));
+  } catch (err) {
+    fail(res, err);
+  }
 });
 
 boardRouter.post('/plans', async (req, res) => {
   try {
     const plan = await forumPlanService.create({
       goal: String(req.body?.goal ?? ''),
+      kind: req.body?.kind === 'task' ? 'task' : 'project',
+      name: req.body?.name ? String(req.body.name) : undefined,
+      description: req.body?.description ? String(req.body.description) : undefined,
+      acceptance: strList(req.body?.acceptance),
+      managerAgentId: req.body?.managerAgentId ? String(req.body.managerAgentId) : null,
+      owner: req.body?.owner ? String(req.body.owner) : null,
+      reviewer: req.body?.reviewer ? String(req.body.reviewer) : null,
       category: req.body?.category ? String(req.body.category) : undefined,
       turnsMax: req.body?.turnsMax ? Number(req.body.turnsMax) : undefined,
       author: OPERATOR_AUTHOR,
@@ -84,7 +173,9 @@ boardRouter.post('/plans/:id/plan', async (req, res) => {
   try {
     const started = await forumPlanService.runManager(req.params.id, String(req.body?.escalation ?? ''));
     if (!started) {
-      res.status(409).json({ error: 'the manager is already running on this project, or it is out of turns' });
+      res.status(409).json({
+        error: 'the manager is already busy on this item (planning, or in a chat turn), or it is out of turns',
+      });
       return;
     }
     res.status(202).json(started);
@@ -106,6 +197,9 @@ boardRouter.patch('/plans/:id', async (req, res) => {
     }
     const patch: Record<string, unknown> = {};
     if (req.body?.goal) patch.goal = String(req.body.goal);
+    if (typeof req.body?.name === 'string' && req.body.name.trim()) patch.name = req.body.name.trim();
+    if (typeof req.body?.description === 'string') patch.description = req.body.description.trim();
+    if (Array.isArray(req.body?.acceptance)) patch.acceptance = strList(req.body.acceptance);
     if (req.body?.turnsMax) patch.turns_max = Math.max(1, Number(req.body.turnsMax));
     // Subagent mode, per project. Empty strings are meaningful here — they clear the project's
     // override and hand it back to the fleet setting — so these test for presence, not truthiness.
@@ -128,6 +222,7 @@ boardRouter.patch('/plans/:id', async (req, res) => {
 
 boardRouter.delete('/plans/:id', async (req, res) => {
   const ok = await forumPlanRepository.remove(req.params.id);
+  if (ok) await forumProposalRepository.removeByPlan(req.params.id);
   res.status(ok ? 204 : 404).end();
 });
 

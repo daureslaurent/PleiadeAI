@@ -1,24 +1,33 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ListChecks, Plus, Sparkles } from 'lucide-react';
+import { ListChecks, MessageSquareDiff, Plus, Sparkles, SquareCheckBig } from 'lucide-react';
 import { boardApi, type BoardPlan } from '../../lib/api';
-import { Button, Callout, EmptyState, Field, Row, Section, Spinner, Textarea } from '../../components/ui';
-import { PlanStateBadge, ProgressTrack, TurnMeter } from './boardBits';
+import { Button, Callout, Chip, EmptyState, Row, Section, Spinner } from '../../components/ui';
+import { PlanStateBadge, ProgressTrack, TaskStateBadge, TurnMeter } from './boardBits';
+import { CreateItemPanel } from './CreateItemPanel';
 
 /**
- * The board's front page: every project, and what each one is waiting on.
+ * The board's front page: every task and project, and what each one is waiting on.
  *
- * It is a list of *projects* rather than of tasks on purpose. A flat task list is what the forum
- * already was — a stream where the thing that has stopped moving looks exactly like the thing that
- * finished — and the question an operator actually has is "is anything stuck?", which is a per
- * project answer. The three counts on each card exist to answer it without opening anything.
+ * One list rather than a section per kind (`BOARD_REFACTOR_PLAN.md`): the question an operator
+ * brings here is "is anything stuck?", and a task that needs a verdict is as urgent as a project
+ * that needs one. The filter narrows by kind when that is the question instead.
  */
+
+type Filter = 'all' | 'project' | 'task' | 'attention';
+
+const FILTERS: { id: Filter; label: string; match: (p: BoardPlan) => boolean }[] = [
+  { id: 'all', label: 'All', match: () => true },
+  { id: 'project', label: 'Projects', match: (p) => p.kind !== 'task' },
+  { id: 'task', label: 'Tasks', match: (p) => p.kind === 'task' },
+  { id: 'attention', label: 'Needs you', match: (p) => Boolean(p.needsYou) },
+];
+
 export function BoardView() {
   const nav = useNavigate();
   const [plans, setPlans] = useState<BoardPlan[] | null>(null);
   const [creating, setCreating] = useState(false);
-  const [goal, setGoal] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState<Filter>('all');
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
@@ -37,121 +46,164 @@ export function BoardView() {
     return () => clearInterval(t);
   }, [load]);
 
-  const create = async () => {
-    if (!goal.trim()) return;
-    setBusy(true);
-    setError('');
-    try {
-      const plan = await boardApi.createPlan({ goal: goal.trim() });
-      setGoal('');
-      setCreating(false);
-      // Straight to the project: the next thing to do is always to plan it, and that button is there.
-      nav(`/board/${plan.id}`);
-    } catch (err) {
-      setError(String((err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? err));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const shown = useMemo(() => {
+    const match = FILTERS.find((f) => f.id === filter)?.match ?? (() => true);
+    return (plans ?? []).filter(match);
+  }, [plans, filter]);
 
-  if (!plans) return <Spinner />;
+  if (!plans) return error ? <Callout tone="error">{error}</Callout> : <Spinner />;
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl space-y-4 p-4">
         <Section
-          title="Projects"
+          title="Board"
           icon={<ListChecks size={13} />}
           right={
             <Button variant="primary" icon={<Plus size={13} />} onClick={() => setCreating((v) => !v)}>
-              New project
+              New
             </Button>
           }
         >
           <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-            A goal, broken into tasks with owners and acceptance criteria. The board dispatches each
-            task when everything it waits on has been accepted — nobody has to remember to hand it on.
+            A task is one piece of work with an owner and a reviewer; a project is a goal its manager
+            breaks into tasks. The board dispatches each task once everything it waits on is accepted,
+            and every item has a chat with its manager.
           </p>
           {error ? <Callout tone="error">{error}</Callout> : null}
 
           {creating ? (
-            <div className="space-y-3 rounded-lg hairline p-3">
-              <Field
-                label="Goal"
-                hint="Say what you want to exist when this is finished, in the words you would use to a person. The manager turns it into tasks."
-              >
-                <Textarea rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
-              </Field>
-              <div className="flex gap-2">
-                <Button variant="primary" loading={busy} onClick={create}>
-                  Open project
-                </Button>
-                <Button onClick={() => setCreating(false)}>Cancel</Button>
-              </div>
+            <div className="mb-4">
+              <CreateItemPanel onCancel={() => setCreating(false)} />
+            </div>
+          ) : null}
+
+          {plans.length ? (
+            <div className="mb-3 flex flex-wrap items-center gap-1 rounded-lg raise-1 p-0.5 sm:w-fit">
+              {FILTERS.map((f) => {
+                const n = plans.filter(f.match).length;
+                const active = filter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => setFilter(f.id)}
+                    className={`rounded-md px-2 py-1 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+                      active ? 'raise-3 text-slate-100' : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    {f.label}
+                    <span
+                      className={`ml-1 tabular-nums ${f.id === 'attention' && n ? 'text-amber-400' : 'text-slate-500'}`}
+                    >
+                      {n}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           ) : null}
 
           {!plans.length && !creating ? (
             <EmptyState icon={<ListChecks size={20} />}>
-              No projects yet. Open one with a goal — the project manager agent breaks it into tasks,
-              and the board runs them.
+              Nothing on the board yet. Press <strong>New</strong>, describe what you want, and let an
+              agent fill in the rest.
+            </EmptyState>
+          ) : null}
+
+          {plans.length && !shown.length ? (
+            <EmptyState>
+              {filter === 'attention' ? 'Nothing is waiting on you.' : 'Nothing in this view.'}
             </EmptyState>
           ) : null}
 
           <div className="space-y-2">
-            {plans.map((plan) => {
-              const total = plan.taskCount ?? 0;
-              const done = plan.doneCount ?? 0;
-              const blocked = plan.blockedCount ?? 0;
-              return (
-                <Row key={plan.id} className="p-3" onClick={() => nav(`/board/${plan.id}`)}>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex items-start gap-2">
-                      <span className="min-w-0 flex-1 text-sm leading-snug text-slate-100">{plan.goal}</span>
-                      <PlanStateBadge state={plan.state} />
-                    </div>
-
-                    {/* The bar is the card's answer to "is this moving?", and the numbers under it
-                        are the exact version for whoever wants it. */}
-                    {total ? (
-                      <div className="space-y-1.5">
-                        <ProgressTrack
-                          counts={{ done, blocked, todo: Math.max(0, total - done - blocked), doing: 0, review: 0, cancelled: 0 }}
-                          total={total}
-                        />
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                          <span className="text-slate-400">
-                            {done}/{total} accepted
-                          </span>
-                          {blocked ? <span className="text-red-400">{blocked} blocked</span> : null}
-                          <span className="ml-auto">
-                            <TurnMeter spent={plan.turnsSpent} max={plan.turnsMax} />
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-amber-400">not planned yet — open it and press Plan it</div>
-                    )}
-
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                      <span>managed by {plan.manager.display_name}</span>
-                      {plan.revision > 0 ? <span>revision {plan.revision}</span> : null}
-                    </div>
-
-                    {/* The reason the scheduler gave up, verbatim. Without it, "needs you" is a colour. */}
-                    {plan.escalation ? (
-                      <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1.5 text-[11px] leading-relaxed text-amber-300">
-                        <Sparkles size={11} className="mt-0.5 shrink-0" />
-                        <span className="line-clamp-2 min-w-0">{plan.escalation}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                </Row>
-              );
-            })}
+            {shown.map((plan) => (
+              <ItemCard key={plan.id} plan={plan} onOpen={() => nav(`/board/${plan.id}`)} />
+            ))}
           </div>
         </Section>
       </div>
     </div>
+  );
+}
+
+function ItemCard({ plan, onOpen }: { plan: BoardPlan; onOpen: () => void }) {
+  const isTask = plan.kind === 'task';
+  const total = plan.taskCount ?? 0;
+  const done = plan.doneCount ?? 0;
+  const blocked = plan.blockedCount ?? 0;
+  const review = plan.reviewCount ?? 0;
+  const doing = plan.doingCount ?? 0;
+
+  return (
+    <Row className={`p-3 ${plan.needsYou ? 'border-amber-500/30' : ''}`} onClick={onOpen}>
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex items-start gap-2">
+          <Chip className="mt-0.5">
+            {isTask ? <SquareCheckBig size={10} /> : <ListChecks size={10} />}
+            {isTask ? 'task' : 'project'}
+          </Chip>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm leading-snug text-slate-100">{plan.name || plan.goal}</span>
+            {plan.description ? (
+              <span className="mt-0.5 line-clamp-2 block text-[11px] leading-relaxed text-slate-500">
+                {plan.description}
+              </span>
+            ) : null}
+          </span>
+          <span className="flex shrink-0 flex-col items-end gap-1">
+            <PlanStateBadge state={plan.state} />
+            {isTask && plan.task ? <TaskStateBadge state={plan.task.state} live={plan.task.inFlight} /> : null}
+          </span>
+        </div>
+
+        {isTask ? (
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-slate-500">
+            <span className={plan.task?.owner ? 'text-slate-400' : 'text-amber-400'}>
+              {plan.task?.owner?.display_name ?? 'unowned'}
+            </span>
+            <span className="text-slate-600">→</span>
+            <span>{plan.task?.reviewer?.display_name ?? plan.manager.display_name}</span>
+          </div>
+        ) : total ? (
+          <div className="space-y-1.5">
+            <ProgressTrack
+              counts={{ done, blocked, review, doing, todo: Math.max(0, total - done - blocked - review - doing), cancelled: 0 }}
+              total={total}
+            />
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+              <span className="text-slate-400">
+                {done}/{total} accepted
+              </span>
+              {blocked ? <span className="text-red-400">{blocked} blocked</span> : null}
+              {review ? <span className="text-accent">{review} in review</span> : null}
+              <span className="ml-auto">
+                <TurnMeter spent={plan.turnsSpent} max={plan.turnsMax} />
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-[11px] text-amber-400">no tasks yet — its manager is planning it, or open it to ask</div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+          <span>managed by {plan.manager.display_name}</span>
+          {plan.revision > 0 ? <span>revision {plan.revision}</span> : null}
+          {plan.pendingProposal ? (
+            <span className="inline-flex items-center gap-1 text-accent">
+              <MessageSquareDiff size={11} /> changes proposed
+            </span>
+          ) : null}
+        </div>
+
+        {/* The reason the scheduler gave up, verbatim. Without it, "needs you" is a colour. */}
+        {plan.escalation ? (
+          <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1.5 text-[11px] leading-relaxed text-amber-300">
+            <Sparkles size={11} className="mt-0.5 shrink-0" />
+            <span className="line-clamp-2 min-w-0">{plan.escalation}</span>
+          </div>
+        ) : null}
+      </div>
+    </Row>
   );
 }
