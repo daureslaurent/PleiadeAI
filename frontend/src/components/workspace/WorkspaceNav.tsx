@@ -12,12 +12,16 @@ import {
   GitBranch,
   Mic,
   Repeat2,
+  Clock,
+  Send,
+  Workflow,
   ChevronsDown,
   ChevronsUp,
 } from 'lucide-react';
 import type { Agent, Session } from '../../lib/api';
 import { agentColor } from '../../lib/agentColor';
 import { iconFor } from '../../lib/agentIcons';
+import { WorkingPin } from '../WorkingPin';
 import { usePrefs } from '../../store/prefs';
 
 /** Compact relative-time label (e.g. "3m", "2h", "Apr 5"). */
@@ -65,15 +69,12 @@ function groupByDate(sessions: Session[]): { label: string; items: Session[] }[]
   return BUCKETS.filter((b) => groups.has(b)).map((b) => ({ label: b, items: groups.get(b)! }));
 }
 
-/** Pulsing dot marking an agent that's currently executing (direct run or `ask_agent` delegation). */
-function WorkingPin() {
-  return (
-    <span className="relative flex h-2.5 w-2.5 shrink-0" title="working">
-      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
-    </span>
-  );
-}
+/** How a conversation started outside the Workspace is marked in the list. */
+const HEADLESS_ORIGINS: Partial<Record<NonNullable<Session['origin']>, { icon: typeof Clock; title: string; tone: string }>> = {
+  cron: { icon: Clock, title: 'scheduled run (Autonomy)', tone: 'text-sky-400/70' },
+  telegram: { icon: Send, title: 'Telegram chat', tone: 'text-cyan-400/70' },
+  flow: { icon: Workflow, title: 'flow agent step', tone: 'text-violet-400/70' },
+};
 
 interface Props {
   collapsed: boolean;
@@ -167,7 +168,10 @@ export function WorkspaceNav({
       // whose first turn came off the board and whose answer went back to it. The loop icon
       // says exactly that — this one came from somewhere and returned there.
       const fromForum = sn.origin === 'forum';
-      const SessionIcon = generated ? Mic : fromForum ? Repeat2 : MessageSquare;
+      // Turns nobody typed here — a scheduled run, a Telegram chat, a flow's agent node — are kept as
+      // conversations too, so the list is everything the agent did. Each wears where it came from.
+      const headless = sn.origin ? HEADLESS_ORIGINS[sn.origin] : undefined;
+      const SessionIcon = generated ? Mic : fromForum ? Repeat2 : (headless?.icon ?? MessageSquare);
       return (
         <div
           key={sn._id}
@@ -184,7 +188,7 @@ export function WorkspaceNav({
                 ? 'generated conversation (Interviewer)'
                 : fromForum
                   ? 'forum mention — answered back to the thread'
-                  : undefined
+                  : headless?.title
             }
           >
             <SessionIcon
@@ -196,7 +200,7 @@ export function WorkspaceNav({
                     ? 'text-fuchsia-400/70'
                     : fromForum
                       ? 'text-amber-400/70'
-                      : 'text-slate-500'
+                      : (headless?.tone ?? 'text-slate-500')
               }
             />
           </span>

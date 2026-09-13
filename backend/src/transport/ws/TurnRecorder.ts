@@ -225,6 +225,13 @@ export class TurnRecorder {
   constructor(
     private readonly sessionId: string,
     rootAgent: string,
+    /**
+     * For a run that executes under *another* session than the conversation it is recorded into — a
+     * flow's agent node runs under the flow run's session (so it reaches the run's artifacts) but is
+     * kept as a conversation of its own. Events are then read off `runSessionId`, and only those of
+     * `rootRunId` and the runs it opened count: a flow can run several agent nodes at once.
+     */
+    private readonly source: { runSessionId: string; rootRunId: string } | null = null,
   ) {
     // Seed the root frame (the directly-addressed agent), matching the frontend's `send`.
     this.frames.set('root', {
@@ -266,8 +273,12 @@ export class TurnRecorder {
   }
 
   /** Only events belonging to this run's session are ours (the bus is process-global). */
-  private mine(sessionId: string): boolean {
-    return sessionId === this.sessionId;
+  private mine(ctx: { sessionId: string; runId?: string }): boolean {
+    if (!this.source) return ctx.sessionId === this.sessionId;
+    if (ctx.sessionId !== this.source.runSessionId || !ctx.runId) return false;
+    if (ctx.runId === this.source.rootRunId) return true;
+    for (const f of this.frames.values()) if (f.runId === ctx.runId) return true;
+    return false;
   }
 
   private get top(): string {
@@ -295,7 +306,7 @@ export class TurnRecorder {
   }
 
   private handleChunk(p: StreamChunkPayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     const kind = p.isReasoning ? ('reasoning' as const) : ('text' as const);
     const frameId = this.frameFor(p.ctx.depth, p.ctx.runId);
     // Coalesce into this frame's own latest item when it is of the same kind. Parallel children
@@ -328,7 +339,7 @@ export class TurnRecorder {
   }
 
   private handleToolInvoke(p: ToolInvokePayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     this.items.push({
       kind: 'tool',
       frameId: this.frameFor(p.ctx.depth, p.ctx.runId),
@@ -343,13 +354,13 @@ export class TurnRecorder {
   }
 
   private handleToolOutput(p: ToolOutputChunkPayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     const it = this.toolItem(this.frameFor(p.ctx.depth, p.ctx.runId), p.callId);
     if (it) it.output += p.chunk;
   }
 
   private handleToolComplete(p: ToolCompletePayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     const it = this.toolItem(this.frameFor(p.ctx.depth, p.ctx.runId), p.callId);
     if (it) {
       it.status = p.status;
@@ -372,7 +383,7 @@ export class TurnRecorder {
   }
 
   private handleHop(p: AskAgentPayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     const parent = this.frameFor(p.ctx.depth, p.ctx.runId);
     const frameId = `f${this.seq++}`;
     this.frames.set(frameId, {
@@ -391,7 +402,7 @@ export class TurnRecorder {
   }
 
   private handleHopDone(p: AskAgentDonePayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     // Close the run that finished, wherever it sits: parallel children end in any order.
     const frameId = this.frameFor(p.depth, p.childRunId);
     const frame = this.frames.get(frameId);
@@ -406,7 +417,7 @@ export class TurnRecorder {
   }
 
   private handleContext(p: ContextUsagePayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     // Persist only the settled peak (`final`); the transient `live` readings are UI-only.
     if (p.phase === 'live') return;
     if (p.ctx.depth === 0) {
@@ -428,7 +439,7 @@ export class TurnRecorder {
    * The recall fires before the run's first token, so the top frame is already this agent's.
    */
   private handleMemory(p: MemoryRecallPayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     const frame = this.frames.get(this.frameFor(p.ctx.depth, p.ctx.runId));
     if (!frame) return;
     if (p.ctx.depth > 0 && frame.agent !== p.ctx.agentName) return;
@@ -441,7 +452,7 @@ export class TurnRecorder {
    * the tool itself and refetched over `GET /api/sessions/:id/todos`.
    */
   private handleTodo(p: TodoUpdatePayload): void {
-    if (!this.mine(p.ctx.sessionId)) return;
+    if (!this.mine(p.ctx)) return;
     const frame = this.frames.get(this.frameFor(p.ctx.depth, p.ctx.runId));
     if (!frame) return;
     if (p.ctx.depth > 0 && frame.agent !== p.ctx.agentName) return;

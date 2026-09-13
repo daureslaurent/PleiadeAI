@@ -14,7 +14,7 @@ function deriveTitle(text: string): string {
  * — matched as `user`. Mention runs ride along with `user`: the operator started them deliberately
  * and will want to continue them, which is not true of a generated interview.
  */
-export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'all';
+export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'all';
 
 function originFilter(agentId: string | Types.ObjectId, origin: SessionOrigin): Record<string, unknown> {
   const filter: Record<string, unknown> = { agent_id: agentId };
@@ -113,8 +113,12 @@ export const sessionRepository = {
     agentId: string | Types.ObjectId;
     agentName: string;
     title?: string;
-    origin?: 'user' | 'synthetic' | 'forum';
+    origin?: Exclude<SessionOrigin, 'all'>;
     generatorId?: string | Types.ObjectId;
+    scheduleId?: string;
+    telegramChatId?: number;
+    flowId?: string;
+    flowRunId?: string;
     forumThreadId?: string | Types.ObjectId;
     forumMentionId?: string | Types.ObjectId;
     /** Forum-origin only: this run answers a mention but starts a fresh summons chain. */
@@ -129,7 +133,18 @@ export const sessionRepository = {
       forum_thread_id: input.forumThreadId ?? null,
       forum_mention_id: input.forumMentionId ?? null,
       forum_chain_reset: input.forumChainReset ?? false,
+      schedule_id: input.scheduleId ?? null,
+      telegram_chat_id: input.telegramChatId ?? null,
+      flow_id: input.flowId ?? null,
+      flow_run_id: input.flowRunId ?? null,
     });
+  },
+
+  /** A Telegram chat's current conversation with one agent — the newest, since `/new` starts another. */
+  latestTelegram(chatId: number, agentId: string | Types.ObjectId): Promise<SessionDoc | null> {
+    return SessionModel.findOne({ origin: 'telegram', telegram_chat_id: chatId, agent_id: agentId })
+      .sort({ created_at: -1 })
+      .exec();
   },
 
   /**

@@ -4,7 +4,9 @@ import { createLogger } from '../config/logger';
 import { sessionLock } from '../core/session/SessionLock';
 import { agentRepository } from '../domain/agents/agent.repository';
 import type { AgentDoc } from '../domain/agents/agent.model';
-import { agentRunner, RunAbortedError } from '../orchestrator/AgentRunner';
+import { RunAbortedError } from '../orchestrator/AgentRunner';
+import { sessionRepository } from '../domain/sessions/session.repository';
+import { openHeadlessSession, runHeadlessTurn, titleFrom } from '../domain/sessions/headless-turn';
 import { resourceRepository } from '../domain/resources/resource.repository';
 import type { ImageBlock } from '../core/event-bus/events.types';
 import { chatSessions } from './session';
@@ -54,8 +56,27 @@ function attachedFile(
   return null;
 }
 
-/** One conversation per chat, so resources and handles accumulate across a chat's turns. */
-const sessionIdFor = (chatId: number): string => `telegram-${chatId}`;
+/**
+ * The chat's conversation with `agent`: the one it is in, else (after a restart) its newest one, else a
+ * new one — which is also what `/new` and an agent switch ask for. One conversation, so resources and
+ * handles accumulate across a chat's turns, and it lists in the agent's Workspace like any other.
+ */
+async function conversationFor(chatId: number, agent: AgentDoc, firstText: string): Promise<string> {
+  const chat = chatSessions.get(chatId);
+  if (chat.sessionId) return chat.sessionId;
+  const resumed = chat.fresh ? null : await sessionRepository.latestTelegram(chatId, agent._id);
+  chat.sessionId = resumed
+    ? String(resumed._id)
+    : await openHeadlessSession({
+        agentId: String(agent._id),
+        agentName: agent.name,
+        title: titleFrom('Telegram', firstText),
+        origin: 'telegram',
+        telegramChatId: chatId,
+      });
+  chat.fresh = false;
+  return chat.sessionId;
+}
 
 /**
  * Handles already in the session, so a reply can send only what the latest turn added. `null` means
@@ -84,7 +105,7 @@ const POLL_TIMEOUT_SEC = 30;
 
 /**
  * Interactive Telegram bot for the single operator. Long-polls the Bot API, routes commands and
- * inline-keyboard taps, and forwards free text to the selected agent through `agentRunner.run`
+ * inline-keyboard taps, and forwards free text to the selected agent through `runHeadlessTurn`
  * (headless, exactly like the cron path). Outbound completion alerts flow separately through
  * `alerts/telegram.service.ts`, which shares the same `TelegramClient`.
  */
@@ -203,8 +224,8 @@ class TelegramBot {
    *
    * Persisting rather than passing bytes straight through is what makes the media *usable*: it earns
    * an `img_N` / `blob_N` handle, so the agent can edit it, save it, or hand it to another agent, and
-   * it stays referenceable on later turns ("now make it blue"). Telegram sessions keep no message
-   * documents, so an un-persisted attachment would vanish the moment the turn ended.
+   * it stays referenceable on later turns ("now make it blue") — and it lands in the chat's
+   * conversation, so the Workspace shows the attachment beside the turn that used it.
    *
    * Returns the text to run the turn with, plus the image blocks a multimodal agent should see.
    */
@@ -238,9 +259,13 @@ class TelegramBot {
       file.file_name || `${kind.replace(/\s+/g, '_')}_${Date.now()}.${extensionFor(mime, downloaded.path)}`;
 
     const agent = await this.resolveAgent(chatSessions.get(chatId).agentName);
+    if (!agent) {
+      await telegramClient.sendMessage(chatId, 'No agents exist yet. Create one in the web UI first.');
+      return null;
+    }
     const stored = await resourceRepository.store({
-      sessionId: sessionIdFor(chatId),
-      agentId: agent ? String(agent._id) : '',
+      sessionId: await conversationFor(chatId, agent, caption || `a ${kind}`),
+      agentId: String(agent._id),
       bytes: downloaded.bytes,
       kind: isImage ? 'image' : 'blob',
       mime,
@@ -382,7 +407,7 @@ class TelegramBot {
     session.abort = abort;
     sessionLock.acquireUserSession(agentId);
 
-    const sessionId = sessionIdFor(chatId);
+    const sessionId = await conversationFor(chatId, agent, text);
     try {
       await telegramClient.sendChatAction(chatId, 'typing');
       // Keep the typing indicator alive across a long turn (Telegram clears it after ~5s).
@@ -399,22 +424,20 @@ class TelegramBot {
       let answer: string;
       try {
         answer = (
-          await agentRunner.run({
-            agentName: agent.name,
+          await runHeadlessTurn({
             sessionId,
-            depth: 0,
+            agentId,
+            agentName: agent.name,
             userText: text,
-            images,
-            history: session.history,
+            continueConversation: true,
             signal: abort.signal,
+            run: { images },
           })
         ).text;
       } finally {
         clearInterval(keepTyping);
       }
 
-      session.history.push({ role: 'user', content: text });
-      session.history.push({ role: 'assistant', content: answer });
       await telegramClient.sendMessage(chatId, answer);
       await this.sendNewResources(chatId, sessionId, before);
     } catch (err) {
@@ -518,9 +541,12 @@ class TelegramBot {
     const session = chatSessions.get(chatId);
     const agent = session.agentName ?? '_(default — none picked)_';
     const state = session.running ? '🟢 running' : '⚪ idle';
+    const turns = session.sessionId
+      ? Math.floor((await sessionRepository.countMessages(session.sessionId).catch(() => 0)) / 2)
+      : 0;
     await telegramClient.sendMessage(
       chatId,
-      `*Status*\nAgent: *${agent}*\nState: ${state}\nHistory: ${session.history.length / 2} turn(s)`,
+      `*Status*\nAgent: *${agent}*\nState: ${state}\nHistory: ${turns} turn(s)`,
     );
   }
 

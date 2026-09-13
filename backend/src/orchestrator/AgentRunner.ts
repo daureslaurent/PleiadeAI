@@ -3,6 +3,7 @@ import { createLogger } from '../config/logger';
 import { eventBus } from '../core/event-bus/EventBus';
 import type { EventContext, ImageBlock, SubagentTaskInfo, ToolBatchInfo } from '../core/event-bus/events.types';
 import { agentRepository } from '../domain/agents/agent.repository';
+import { activeRuns } from './active-runs';
 import { buildUserMessage, type ChatMessage } from '../domain/agents/jit-builder';
 import { assembleSystemMessage, assembleUserText } from '../modules/assemble';
 import { moduleStateFrom } from '../modules/state.service';
@@ -257,6 +258,16 @@ export class AgentRunner {
     const agent = await agentRepository.resolveByName(input.agentName);
     if (!agent) throw new Error(`agent "${input.agentName}" not found`);
 
+    // Marks the agent as working for every client, whatever started this run (`active-runs.ts`).
+    const endActivity = activeRuns.begin({ agentName: agent.name, sessionId: input.sessionId });
+    try {
+      return await this.runTurn(input, agent);
+    } finally {
+      endActivity();
+    }
+  }
+
+  private async runTurn(input: RunInput, agent: AgentDoc): Promise<RunResult> {
     // Two ids for the Conversation Quality Scorer:
     //  • `turnId` groups the whole user turn — minted by the depth-0 entry, propagated to every hop.
     //  • `runId` identifies THIS agent-run — the scored unit. Minted fresh per run (depth 0 and each

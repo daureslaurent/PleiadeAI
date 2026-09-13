@@ -1,10 +1,9 @@
 import { Agenda, type Job } from 'agenda';
 import { Types } from 'mongoose';
-import { randomUUID } from 'node:crypto';
 import { env } from '../config/env';
 import { createLogger } from '../config/logger';
 import { sessionLock } from '../core/session/SessionLock';
-import { agentRunner } from '../orchestrator/AgentRunner';
+import { openHeadlessSession, runHeadlessTurn, titleFrom } from '../domain/sessions/headless-turn';
 import { agentRepository } from '../domain/agents/agent.repository';
 import { flowRepository } from '../domain/flows/flow.repository';
 import { flowRunner } from '../flows/FlowRunner';
@@ -142,13 +141,17 @@ export async function setupAgenda(): Promise<Agenda> {
     const startedAt = new Date();
     let answer: string;
     try {
+      // Each run is its own conversation in the agent's Workspace list: it starts from fresh context,
+      // and the operator can open it to read the tool calls or carry on from where it ended.
+      const sessionId = await openHeadlessSession({
+        agentId,
+        agentName: agent.name,
+        title: titleFrom('Cron', prompt),
+        origin: 'cron',
+        scheduleId,
+      });
       answer = (
-        await agentRunner.run({
-          agentName,
-          sessionId: `cron-${randomUUID()}`,
-          depth: 0,
-          userText: prompt,
-        })
+        await runHeadlessTurn({ sessionId, agentId, agentName: agent.name, userText: prompt })
       ).text;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

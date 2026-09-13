@@ -27,8 +27,24 @@ const SessionSchema = new Schema(
      * It is a real conversation in every other respect — same tools, same streaming, same scoring —
      * which is the whole point of reusing sessions for it: the operator can keep talking after the
      * agent's answer has gone back to the thread.
+     *
+     * `cron`, `telegram` and `flow` mark a turn nobody typed in the Workspace — a scheduled run, a
+     * Telegram chat, a flow's agent node — kept as a conversation so the agent's list holds everything
+     * it did, not just what the operator said to it here (`headless-turn.ts`).
      */
-    origin: { type: String, enum: ['user', 'synthetic', 'forum'], default: 'user', index: true },
+    origin: {
+      type: String,
+      enum: ['user', 'synthetic', 'forum', 'cron', 'telegram', 'flow'],
+      default: 'user',
+      index: true,
+    },
+    /** Cron-origin only: the schedule (Agenda job id) whose run this was. */
+    schedule_id: { type: String, default: null },
+    /** Telegram-origin only: the chat, so a restarted backend picks the conversation back up. */
+    telegram_chat_id: { type: Number, default: null },
+    /** Flow-origin only: the flow and the run whose agent node produced this conversation. */
+    flow_id: { type: String, default: null },
+    flow_run_id: { type: String, default: null },
     /** Synthetic only: the `conversation_generators` row that produced this session. */
     generator_id: { type: Schema.Types.ObjectId, ref: 'ConversationGenerator', default: null, index: true },
     /**

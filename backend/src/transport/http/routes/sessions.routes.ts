@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { autoLoopRunner } from '../../../autonomy/AutoLoopRunner';
 import { autoLoopRepository } from '../../../domain/auto-loops/auto-loop.repository';
-import { sessionRepository } from '../../../domain/sessions/session.repository';
+import { sessionRepository, type SessionOrigin } from '../../../domain/sessions/session.repository';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { endpointService } from '../../../domain/endpoints/endpoint.service';
 import { todoRepository } from '../../../domain/todos/todo.repository';
@@ -9,10 +9,12 @@ import { todoRepository } from '../../../domain/todos/todo.repository';
 /** CRUD for conversation sessions + their message history (backs the Workspace). */
 export const sessionsRouter = Router();
 
+const NARROWABLE_ORIGINS = new Set<string>(['synthetic', 'forum', 'cron', 'telegram', 'flow', 'all']);
+
 /**
- * List sessions for an agent: `GET /api/sessions?agentId=…&origin=user|synthetic|all[&limit=&skip=]`.
- * `origin` defaults to `user` — the Workspace shows the operator's own chats, not the (potentially
- * thousands of) conversations produced by the Conversation Generator.
+ * List sessions for an agent: `GET /api/sessions?agentId=…&origin=user|synthetic|forum|cron|telegram|flow|all[&limit=&skip=]`.
+ * `origin` defaults to `user` — everything but the (potentially thousands of) conversations produced
+ * by the Conversation Generator; a single origin narrows to just that kind.
  *
  * Passing `limit` switches the response to the paged shape `{ sessions, total }`: the Workspace
  * navigator shows a handful of recent conversations per agent and pages the rest in on demand, and
@@ -26,7 +28,7 @@ sessionsRouter.get('/', async (req, res) => {
     return;
   }
   const raw = req.query.origin;
-  const origin = raw === 'synthetic' || raw === 'all' ? raw : 'user';
+  const origin: SessionOrigin = NARROWABLE_ORIGINS.has(String(raw)) ? (raw as SessionOrigin) : 'user';
 
   const limit = Number(req.query.limit);
   if (!Number.isFinite(limit) || limit <= 0) {

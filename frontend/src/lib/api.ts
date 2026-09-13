@@ -788,6 +788,8 @@ export const isolationsApi = {
       .then((r) => r.data),
 };
 
+export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow';
+
 export interface Session {
   _id: string;
   agent_id: string;
@@ -796,8 +798,12 @@ export interface Session {
   /**
    * `synthetic` → produced by the Conversation Generator; `forum` → spawned by the operator running
    * an @-mention (`FORUM_PLAN.md` §11.3), which is an ordinary conversation they can continue.
+   * `cron` / `telegram` / `flow` → a scheduled run, a Telegram chat, a flow's agent node.
    */
-  origin?: 'user' | 'synthetic' | 'forum';
+  origin?: SessionOrigin;
+  /** Flow-origin only: the flow and run whose agent node this was. */
+  flow_id?: string | null;
+  flow_run_id?: string | null;
   /** Forum-origin only: the thread the mention came from, so the Workspace can link back to it. */
   forum_thread_id?: string | null;
   forum_mention_id?: string | null;
@@ -890,7 +896,7 @@ export const sessionsApi = {
    * Sessions for one agent. `origin` defaults to `all` — the Workspace shows generated conversations
    * alongside the operator's own, marked as such (the Conversation Generator is meant to be read).
    */
-  listByAgent: (agentId: string, origin: 'user' | 'synthetic' | 'forum' | 'all' = 'all') =>
+  listByAgent: (agentId: string, origin: SessionOrigin | 'all' = 'all') =>
     api.get<Session[]>('/sessions', { params: { agentId, origin } }).then((r) => r.data),
   /**
    * A window of that same list plus the unwindowed `total` — what the Workspace navigator loads so
@@ -899,7 +905,7 @@ export const sessionsApi = {
    */
   pageByAgent: (
     agentId: string,
-    opts: { limit: number; skip?: number; origin?: 'user' | 'synthetic' | 'forum' | 'all' },
+    opts: { limit: number; skip?: number; origin?: SessionOrigin | 'all' },
   ) =>
     api
       .get<{ sessions: Session[]; total: number }>('/sessions', {

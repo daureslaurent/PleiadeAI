@@ -15,6 +15,8 @@ import {
   type ToolInfo,
 } from '../lib/api';
 import { MasterDetail, ListRow } from '../components/MasterDetail';
+import { WorkingPin } from '../components/WorkingPin';
+import { useStream, useWorkingAgentNames } from '../store/stream';
 import { AgentIsolationSelect } from './AgentIsolationSelect';
 import { AgentAndroidSelect } from './AgentAndroidSelect';
 import { AgentModelSelect } from './AgentModelSelect';
@@ -125,6 +127,12 @@ export function AgentsView() {
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
   const [suggesting, setSuggesting] = useState(false);
+
+  // The same "working" pin the Workspace shows, fed by the stream store's backend activity list.
+  const workingAgents = useWorkingAgentNames();
+  useEffect(() => {
+    useStream.getState().wire();
+  }, []);
 
   const isNew = draft && !draft._id;
   // Core tools come from the backend (`GET /tools`), never a hardcoded list, so newly-added core
@@ -312,7 +320,9 @@ export function AgentsView() {
       onNew={() => setDraft(blank())}
       list={agents.map((a) => (
         <ListRow key={a._id} active={draft?._id === a._id} onClick={() => select(a)}>
-          <AgentAvatar name={a.name} color={a.color} icon={a.icon} size={18} /> {a.name}
+          <AgentAvatar name={a.name} color={a.color} icon={a.icon} size={18} />
+          <span className="min-w-0 flex-1 truncate">{a.name}</span>
+          {workingAgents.has(a.name) && <WorkingPin />}
         </ListRow>
       ))}
     >

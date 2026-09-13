@@ -1,10 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Bug } from 'lucide-react';
-import { agentsApi, sessionsApi, type Agent, type Session } from '../lib/api';
+import { agentsApi, sessionsApi, type Agent, type Session, type SessionOrigin } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { registerAgentIdentities } from '../lib/agentColor';
-import { useStream } from '../store/stream';
+import { useStream, useWorkingAgentNames } from '../store/stream';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { usePrefs } from '../store/prefs';
 import { WorkspaceNav } from '../components/workspace/WorkspaceNav';
@@ -64,7 +64,7 @@ export function AgentWorkspace() {
   // conversation buttons land the operator in the turn they just started.
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const { wire, hydrate, clearActive, send, workingSessions, workingAgents, streaming } = useStream();
+  const { wire, hydrate, clearActive, send, workingSessions, serverActivity, streaming } = useStream();
 
   const pageSize = usePrefs((s) => s.sessionsPerAgent);
   // Read through a ref inside callbacks so changing the preference doesn't re-create them (and with
@@ -236,7 +236,7 @@ export function AgentWorkspace() {
       agentId: string;
       agentName: string;
       title: string;
-      origin: 'user' | 'synthetic' | 'forum';
+      origin: SessionOrigin;
     }) => {
       setSessionsByAgent((prev) => {
         const list = prev[s.agentId];
@@ -271,8 +271,14 @@ export function AgentWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageSize]);
 
-  // Refresh any expanded agent's session list when runs start/finish (new titles, reordering).
-  const workingCount = workingSessions.length;
+  // Working = what this client just sent (lit before the backend's run begins) ∪ what the backend
+  // says is running from anywhere else — a cron job, a forum wake, a board task, another agent.
+  const workingAgentNames = useWorkingAgentNames();
+  const workingSessionSet = new Set([...workingSessions, ...serverActivity.sessions]);
+
+  // Refresh any expanded agent's session list when runs start/finish (new titles, reordering, and a
+  // conversation a headless run just opened).
+  const workingCount = workingSessionSet.size;
   useEffect(() => {
     for (const id of expanded) void loadSessions(id, { keepLoaded: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -331,9 +337,6 @@ export function AgentWorkspace() {
     const sid = await ensureSession();
     send(activeAgent.name, text, sid, images);
   }
-
-  const workingAgentNames = new Set(Object.keys(workingAgents));
-  const workingSessionSet = new Set(workingSessions);
 
   // A generated conversation (Conversation Generator) reads as a normal chat, except the right-hand
   // speaker is the interviewer agent — never the operator.

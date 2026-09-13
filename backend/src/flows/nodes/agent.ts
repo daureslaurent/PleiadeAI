@@ -1,7 +1,7 @@
 import { createLogger } from '../../config/logger';
 import { sessionLock } from '../../core/session/SessionLock';
 import { agentRepository } from '../../domain/agents/agent.repository';
-import { agentRunner } from '../../orchestrator/AgentRunner';
+import { openHeadlessSession, runHeadlessTurn, titleFrom } from '../../domain/sessions/headless-turn';
 import type { ImageBlock } from '../../core/event-bus/events.types';
 import { asHandles, asText, handleValue, jsonValue, textValue, type FlowValue } from '../port-types';
 import type { FlowNodeContext, FlowNodeHandler, PortSpec } from '../types';
@@ -66,16 +66,30 @@ async function runAgent(
   }
 
   ctx.emitProgress({ phase: 'running', percent: null, message: `${agentName} is thinking` });
-  const result = await agentRunner.run({
-    agentName,
-    sessionId: ctx.sessionId,
-    depth: 0,
+  // The step is also kept as a conversation under the agent, so its Workspace list shows the flow work
+  // it did beside everything else. The run itself stays under the flow run's session — that is where
+  // the run's artifacts live and what the flow page is watching.
+  const sessionId = await openHeadlessSession({
+    agentId: String(agent._id),
+    agentName: agent.name,
+    title: titleFrom(`Flow ${ctx.flowName}`, userText),
+    origin: 'flow',
+    flowId: ctx.flowId,
+    flowRunId: ctx.runId,
+  });
+  const result = await runHeadlessTurn({
+    sessionId,
+    agentId: String(agent._id),
+    agentName: agent.name,
     userText,
-    images: images.length ? images : undefined,
+    runSessionId: ctx.sessionId,
     signal: ctx.signal,
-    // A flow is a pipeline, not a conversation: writing every intermediate step into the agent's
-    // long-term memory would flood its namespace with fragments of jobs it never really "had".
-    persistMemory: false,
+    run: {
+      images: images.length ? images : undefined,
+      // A flow is a pipeline, not a conversation: writing every intermediate step into the agent's
+      // long-term memory would flood its namespace with fragments of jobs it never really "had".
+      persistMemory: false,
+    },
   });
   return { text: result.text, images: result.images ?? [] };
 }

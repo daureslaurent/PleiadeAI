@@ -57,6 +57,12 @@ export function attachBridge(io: Server): void {
     io.emit('session:created', { sessionId, agentId, agentName, title, origin: origin ?? 'synthetic' });
   });
 
+  // Which agents are working. Broadcast, not room-scoped: the Workspace pins an agent that a cron
+  // job, a forum wake or another agent started, in a session this client has never opened.
+  eventBus.on('agent:activity', (snapshot) => {
+    io.emit('agent_activity', snapshot);
+  });
+
   eventBus.on('agent:stream_chunk', ({ ctx, content, isReasoning }) => {
     io.to(ctx.sessionId).emit('stream_chunk', {
       type: 'stream_chunk',

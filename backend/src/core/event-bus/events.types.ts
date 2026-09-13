@@ -596,7 +596,7 @@ export interface ConversationSessionCreatedPayload {
    * refetching the list. `synthetic` — the Conversation Generator; `forum` — a mention run
    * (`FORUM_PLAN.md` §11.3). Absent means synthetic, which is all this event carried before.
    */
-  origin?: 'synthetic' | 'forum';
+  origin?: 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow';
 }
 
 /**
@@ -813,6 +813,17 @@ export interface AutoLoopStatePayload {
   lastError?: string;
 }
 
+/**
+ * Which agents are running right now, from any entry point (`orchestrator/active-runs.ts`). The whole
+ * picture on every change, never a delta, so a client that missed one is correct again on the next.
+ */
+export interface AgentActivityPayload {
+  /** Agent name → runs in flight (parallel `task` children and concurrent sessions each count). */
+  agents: Record<string, number>;
+  /** Session ids with at least one run in flight. */
+  sessions: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Event name → payload map
 // ---------------------------------------------------------------------------
@@ -833,6 +844,7 @@ export interface EventMap {
   'tool:execution_complete': ToolCompletePayload;
   'agent:ask_agent': AskAgentPayload;
   'agent:ask_agent_done': AskAgentDonePayload;
+  'agent:activity': AgentActivityPayload;
   'agent:memory_recall': MemoryRecallPayload;
   'agent:todo_update': TodoUpdatePayload;
   'agent:context_usage': ContextUsagePayload;

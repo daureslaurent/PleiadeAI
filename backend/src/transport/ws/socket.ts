@@ -14,6 +14,7 @@ import { attachBridge } from './bridge';
 import { askUserBroker } from './AskUserBroker';
 import { TurnRecorder, type Block } from './TurnRecorder';
 import { liveRuns } from './live-runs';
+import { activeRuns } from '../../orchestrator/active-runs';
 
 const log = createLogger('ws');
 
@@ -67,6 +68,10 @@ export function attachSocket(httpServer: HttpServer): Server {
 
   io.on('connection', (socket: Socket) => {
     log.info({ id: socket.id }, 'client connected');
+    // Who is working, for a client that wired its listener after the connect (or just reconnected) —
+    // it would otherwise wait for the next run to start or end to learn it.
+    socket.on('agent_activity:get', () => socket.emit('agent_activity', activeRuns.snapshot()));
+    socket.emit('agent_activity', activeRuns.snapshot());
 
     // Sessions this connection has run, so pending `ask_user` prompts can be cancelled on disconnect.
     const sessions = new Set<string>();

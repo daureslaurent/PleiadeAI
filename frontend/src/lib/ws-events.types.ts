@@ -47,6 +47,17 @@ export interface SubagentTaskInfo {
   model: string;
 }
 
+/**
+ * Every agent run in flight on the backend, whoever started it (chat, cron, forum wake, board, flow,
+ * `ask_agent`…). Broadcast to every client as the whole picture on each change, and on connect.
+ */
+export interface AgentActivityEvent {
+  /** Agent name → runs in flight. */
+  agents: Record<string, number>;
+  /** Session ids with at least one run in flight. */
+  sessions: string[];
+}
+
 export interface AgentHopDoneEvent {
   type: 'agent_hop_done';
   /** Conversation (or flow run) this belongs to — route on it. */

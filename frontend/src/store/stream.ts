@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { getSocket } from '../lib/socket';
 import { sessionsApi, scoringApi, type PromptUsageBreakdown, type StoredMessage } from '../lib/api';
 import { useAuth } from './auth';
 import type {
+  AgentActivityEvent,
   AgentHopEvent,
   AgentHopDoneEvent,
   AskUserEvent,
@@ -520,14 +522,20 @@ interface StreamState {
   /** Seed the mirror from the REST read when the panel opens on an already-running loop. */
   setAutoLoop: (loop: AutoLoopEvent | null) => void;
   streaming: boolean;
-  /** Session ids with an in-flight agent run — drives the per-session "working" shimmer. */
-  workingSessions: string[];
   /**
-   * Reference-counted running agents *by name*. An agent is "working" when count > 0, whether it
-   * was messaged directly or invoked by another agent via `ask_agent`. Counting handles the same
-   * agent being busy across concurrent sessions/hops without a premature clear.
+   * Session ids this client started a turn in that has not ended yet. The optimistic half of the
+   * "working" shimmer: it lights the instant the operator sends, before the backend's run begins
+   * (the agent may still be queued behind a cron job's lock). `serverActivity` is the other half.
    */
+  workingSessions: string[];
+  /** Reference-counted agents *by name* this client addressed directly and whose turn is open. */
   workingAgents: Record<string, number>;
+  /**
+   * The backend's own list of runs in flight (`agent_activity`), from *any* entry point — cron, an
+   * auto loop, a forum wake, a board dispatch, a flow, another agent's `ask_agent`. The Workspace pins
+   * an agent when either this or `workingAgents` says it works.
+   */
+  serverActivity: AgentActivityEvent;
   /** sessionId → the directly-addressed agent, so `chat:done` can decrement the right one. */
   sessionAgent: Record<string, string>;
   wired: boolean;
@@ -607,6 +615,7 @@ export const useStream = create<StreamState>((set, get) => ({
   streaming: false,
   workingSessions: [],
   workingAgents: {},
+  serverActivity: { agents: {}, sessions: [] },
   sessionAgent: {},
   wired: false,
   turnTraceStart: 0,
@@ -925,11 +934,21 @@ export const useStream = create<StreamState>((set, get) => ({
       }));
     });
 
+    // Who is working, straight from the backend — the whole picture each time, so it just replaces.
+    // Sent on every (re)connect too, so a reload mid-run shows the pins without waiting for a change.
+    socket.on('agent_activity', (e: AgentActivityEvent) => {
+      set({ serverActivity: e });
+    });
+    // The on-connect snapshot is gone by the time a page wires the store after the socket opened, so
+    // ask for the current picture now — and again on every reconnect, since runs may have ended while
+    // the socket was down.
+    const askActivity = () => socket.emit('agent_activity:get');
+    socket.on('connect', askActivity);
+    if (socket.connected) askActivity();
+
     socket.on('agent_hop', (e: AgentHopEvent) => {
-      // The delegated agent is now working. That badge is global (it marks the agent, not the
-      // conversation), so it is bumped for every session — only the frame stack below, which
-      // describes the open turn, is gated on the session being on screen.
-      set((s) => ({ workingAgents: bumpAgent(s.workingAgents, e.to, +1) }));
+      // The delegated agent's "working" pin comes from `agent_activity`; only the frame stack below,
+      // which describes the open turn, cares about this hop — and only on screen.
       if (!onScreen(e.sessionId)) return;
       set((s) => {
         // Runs are a strict stack (a parent `ask_agent` awaits its child), so the new frame nests
@@ -967,7 +986,6 @@ export const useStream = create<StreamState>((set, get) => ({
     });
 
     socket.on('agent_hop_done', (e: AgentHopDoneEvent) => {
-      set((s) => ({ workingAgents: bumpAgent(s.workingAgents, e.to, -1) }));
       if (!onScreen(e.sessionId)) return;
       set((s) => {
         // Close the run that finished — by id, since parallel children end in any order — and stamp
@@ -1463,3 +1481,14 @@ export const useStream = create<StreamState>((set, get) => ({
     set({ pendingAsk: null });
   },
 }));
+
+/**
+ * Names of the agents running right now: the ones this client just messaged (lit before the backend's
+ * run begins) together with every run the backend reports — cron, forum, board, flow, Telegram,
+ * `ask_agent`. What the working pin reads, on the Workspace and on the Agents page alike.
+ */
+export function useWorkingAgentNames(): Set<string> {
+  const local = useStream((s) => s.workingAgents);
+  const server = useStream((s) => s.serverActivity.agents);
+  return useMemo(() => new Set([...Object.keys(local), ...Object.keys(server)]), [local, server]);
+}
