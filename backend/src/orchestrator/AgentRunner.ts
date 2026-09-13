@@ -13,6 +13,7 @@ import { forumRecall } from '../domain/forum/forum-recall.service';
 import { settingsService } from '../domain/settings/settings.service';
 import { llamaClient, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { scoringService } from '../domain/scoring/scoring.service';
+import { sizePrompt } from '../domain/llama-logs/usage-sizer';
 import { resolveInference, resolveFallbacks, type ResolvedInference } from '../inference/inference-resolver';
 import { runWithCaptureContext } from '../inference/capture-context';
 import { ReasoningParser } from './streaming/ReasoningParser';
@@ -589,6 +590,47 @@ export class AgentRunner {
 
     const messages: ChatMessage[] = [systemMessage, ...(input.history ?? []), userMessage];
 
+    /**
+     * Live **Usage**: weigh the prompt this run is actually sending and stream the breakdown to the
+     * debugger's Usage tab (`agent:prompt_usage`), instead of leaving the panel to poll Mongo for a
+     * capture that is written fire-and-forget *after* the turn.
+     *
+     * Only the user-facing run reports. A `task` child or an `ask_agent` hop has its own window and
+     * its own toolset, and sizing every one of them would point a tokenize storm at the inference
+     * host to redraw a panel that shows one conversation.
+     *
+     * Never awaited, and never more than one pass in flight: a sizing round trip that fell behind a
+     * fast tool loop would otherwise queue up behind itself and keep re-sending stale bars.
+     */
+    const reportsUsage = input.depth === 0 && !input.task && !input.caller;
+    let sizingPrompt: Promise<void> = Promise.resolve();
+    let sizingBusy = false;
+    const reportPromptUsage = (
+      sent: ChatMessage[],
+      phase: 'live' | 'final',
+      knownTotal: number | null,
+    ): void => {
+      if (!reportsUsage) return;
+      // A `live` reading is superseded by the next pass anyway, so drop it rather than queue it; the
+      // `final` one is the window the next turn starts from and always gets its turn.
+      if (sizingBusy && phase === 'live') return;
+      sizingBusy = true;
+      sizingPrompt = sizingPrompt
+        .then(async () => {
+          const breakdown = await sizePrompt(inference, sent, toolSchemas, knownTotal);
+          eventBus.emit('agent:prompt_usage', { ctx, phase, breakdown });
+        })
+        .catch((err) => {
+          log.debug(
+            { agent: agent.name, err: err instanceof Error ? err.message : String(err) },
+            'prompt usage sizing failed',
+          );
+        })
+        .finally(() => {
+          sizingBusy = false;
+        });
+    };
+
     // Isolation: when the agent is assigned an isolation profile (resolved above), lazily bring up
     // its container on first tool use and reuse the executor for the rest of the turn (memoised so
     // parallel tool calls share one boot). No assignment → tools run on the backend as before.
@@ -663,6 +705,11 @@ export class AgentRunner {
           phase: 'live',
         });
       }
+      // ...and the same size broken down by *what spent it*. Snapshot `messages` first: the loop is
+      // about to push this pass's assistant turn onto the very array we're sizing. The server's own
+      // `promptTokens` is the exact templated total for exactly these messages, so pass it in rather
+      // than paying for a second `/apply-template` round trip to re-measure what we already know.
+      reportPromptUsage(messages.slice(), 'live', usage?.promptTokens ?? null);
 
       // The app relies on native function-calling, but a misconfigured server / unreliable model can
       // narrate a call as prose (e.g. `[ask_user] …`) with no native `tool_calls`. When that happens,
@@ -851,6 +898,10 @@ export class AgentRunner {
         phase: 'final',
       });
     }
+    // The settled breakdown. `messages` now carries the closing assistant turn, which no pass ever
+    // *sent* — so this is the window the next turn starts from, and `lastUsage` (which measured the
+    // prompt without it) is not its total. Measure it, and leave it standing between turns.
+    reportPromptUsage(messages.slice(), 'final', null);
 
     // Distil the exchange into long-term memory: the agent's own model rewrites what just happened
     // into zero or more standalone souvenirs (see docs/memory-souvenirs.md), instead of the raw

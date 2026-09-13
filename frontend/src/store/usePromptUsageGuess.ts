@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useStream } from './stream';
+import { tailChars, useStream } from './stream';
 import type { PromptUsageBreakdown, PromptUsageModuleGroup, PromptUsageSegment } from '../lib/api';
 
 /** Cheap, no-tokenizer estimate — good enough to move a bar smoothly, not to bill anyone. */
@@ -60,19 +60,25 @@ function deriveModuleGroups(
 }
 
 /**
- * A live, best-effort re-estimate of `baseline` (the last *exact*, fetched breakdown) while a turn
- * is streaming — so the Usage tab's bar can move every render instead of sitting frozen until the
- * turn settles and the real tokenizer pass lands.
+ * A live, best-effort re-estimate of `baseline` (the last *exact* breakdown) while a turn is
+ * streaming — so the Usage tab's bar moves every render instead of stepping once per inference pass.
  *
- * Everything already in `baseline` (the system/tools/prior-conversation cost) is treated as static
- * except for one correction: once the turn's first `context_usage` `live` reading arrives, it carries
- * the *exact* prompt-token count for "baseline + this turn's new user message" (not the still-
- * streaming completion), so that portion is scaled to match it exactly rather than trusted as a raw
- * guess. Only the actively-growing tail — assistant text, tool output, reasoning — stays a pure
- * chars/4 heuristic, since nothing tokenizes it until the turn ends.
+ * **What `baseline` is decides what has to be added to it**, and the store says which it is:
  *
- * Returns `null` outside an active turn, or before any baseline has ever been fetched — the caller
- * falls back to the real `baseline` in both cases.
+ * - A **mid-turn** baseline (`promptUsagePhase === 'live'`) is the prompt a pass of *this* turn
+ *   actually sent. It already contains the user message and every tool result fed back so far, so
+ *   the only thing missing is what has streamed since — which is exactly what `mark`, the tail's
+ *   size when that breakdown arrived, lets us isolate. Adding the whole tail here would bill this
+ *   turn's tool output twice.
+ * - A **pre-turn** baseline (a settled `final` reading, or a fetched capture; `mark` is null) knows
+ *   nothing about this turn: both the new user message and the entire tail are added.
+ *
+ * Either way the *sent* portion is then snapped to the run's own exact `context_usage` reading, so
+ * only the still-growing tail is ever a chars/4 heuristic — nothing tokenizes a completion until the
+ * turn ends.
+ *
+ * Returns `null` outside an active turn, or before any baseline exists — the caller falls back to
+ * the real `baseline` in both cases.
  */
 export function useLiveUsageGuess(
   baseline: PromptUsageBreakdown | null,
@@ -81,6 +87,7 @@ export function useLiveUsageGuess(
   const liveItems = useStream((s) => s.liveItems);
   const turns = useStream((s) => s.turns);
   const liveContext = useStream((s) => s.liveContext);
+  const mark = useStream((s) => s.promptUsageMark);
 
   return useMemo(() => {
     if (!streaming || !baseline) return null;
@@ -88,10 +95,12 @@ export function useLiveUsageGuess(
     const segments = baseline.segments.map((s) => ({ ...s }));
     const moduleOrder = baseline.moduleGroups.map((g) => g.moduleId);
 
-    // The turn's new user message — not yet in `baseline`, which was fetched before this turn began.
-    const lastTurn = turns.at(-1);
-    const newUserChars = lastTurn?.role === 'user' ? (lastTurn.blocks[0]?.text.length ?? 0) : 0;
-    bumpSegment(segments, 'user', 'User', 'conversation', 'history', estTokens(newUserChars));
+    // The turn's new user message — present already in a mid-turn baseline, missing from a pre-turn one.
+    if (!mark) {
+      const lastTurn = turns.at(-1);
+      const newUserChars = lastTurn?.role === 'user' ? (lastTurn.blocks[0]?.text.length ?? 0) : 0;
+      bumpSegment(segments, 'user', 'User', 'conversation', 'history', estTokens(newUserChars));
+    }
 
     // Snap the "sent so far" portion to the exact live reading, once one exists.
     const sentSoFar = segments.reduce((a, s) => a + (s.tokens ?? 0), 0);
@@ -100,16 +109,12 @@ export function useLiveUsageGuess(
       for (const s of segments) if (s.tokens !== null) s.tokens = Math.round(s.tokens * scale);
     }
 
-    // The still-streaming completion tail — pure heuristic, nothing to anchor it to yet.
-    let assistantChars = 0;
-    let toolChars = 0;
-    let reasoningChars = 0;
-    for (const it of liveItems) {
-      if (it.frameId !== 'root') continue;
-      if (it.kind === 'text') assistantChars += it.text.length;
-      else if (it.kind === 'reasoning') reasoningChars += it.text.length;
-      else if (it.kind === 'tool') toolChars += it.output.length + (it.argsText?.length ?? 0);
-    }
+    // The still-streaming tail — whatever has arrived since the baseline was taken. Clamped at zero:
+    // a frame the store dropped could otherwise make a delta negative and eat a real row.
+    const tail = tailChars(liveItems);
+    const assistantChars = Math.max(0, tail.assistant - (mark?.assistant ?? 0));
+    const toolChars = Math.max(0, tail.tool - (mark?.tool ?? 0));
+    const reasoningChars = Math.max(0, tail.reasoning - (mark?.reasoning ?? 0));
     bumpSegment(segments, 'assistant', 'Assistant', 'conversation', 'history', estTokens(assistantChars));
     bumpSegment(
       segments,
@@ -130,5 +135,5 @@ export function useLiveUsageGuess(
       contextWindow: liveContext?.contextWindow ?? baseline.contextWindow,
       modules: baseline.modules,
     };
-  }, [streaming, baseline, liveItems, turns, liveContext]);
+  }, [streaming, baseline, liveItems, turns, liveContext, mark]);
 }

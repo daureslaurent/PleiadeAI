@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { getSocket } from '../lib/socket';
-import { sessionsApi, scoringApi, type StoredMessage } from '../lib/api';
+import { sessionsApi, scoringApi, type PromptUsageBreakdown, type StoredMessage } from '../lib/api';
 import { useAuth } from './auth';
 import type {
   AgentHopEvent,
   AgentHopDoneEvent,
   AskUserEvent,
   ContextUsageEvent,
+  PromptUsageEvent,
   StreamChunkEvent,
   SystemAlertEvent,
   ToolEndEvent,
@@ -429,6 +430,25 @@ export interface TraceEntry {
   depth?: number;
 }
 
+/** Characters of this turn's streamed tail, by role — the live estimator's unit of work. */
+export interface TailChars {
+  assistant: number;
+  tool: number;
+  reasoning: number;
+}
+
+/** Size the turn's tail so far. Root frame only: a sub-agent's tokens are its own bubble's story. */
+export function tailChars(items: LiveItem[]): TailChars {
+  const out: TailChars = { assistant: 0, tool: 0, reasoning: 0 };
+  for (const it of items) {
+    if (it.frameId !== 'root') continue;
+    if (it.kind === 'text') out.assistant += it.text.length;
+    else if (it.kind === 'reasoning') out.reasoning += it.text.length;
+    else if (it.kind === 'tool') out.tool += it.output.length + (it.argsText?.length ?? 0);
+  }
+  return out;
+}
+
 interface StreamState {
   /** Session currently rendered in the chat panel. */
   activeSessionId: string | null;
@@ -449,6 +469,28 @@ interface StreamState {
    * ghost tick (which sits at `contextUsage`, the prior total).
    */
   liveContext: ContextUsage | null;
+  /**
+   * The live breakdown of *what* is spending this session's window — the Usage tab's backing data,
+   * pushed by the run itself (`prompt_usage`) once per inference pass and once when the turn
+   * settles. The panel used to have to poll Mongo for a capture written after the turn; this arrives
+   * while the turn is still running, from the prompt that was actually sent.
+   */
+  promptUsage: PromptUsageBreakdown | null;
+  /**
+   * Whether `promptUsage` is a mid-turn reading (`live`, superseded by the next pass) or the settled
+   * window the next turn starts from (`final`). Null when nothing has been reported this session.
+   */
+  promptUsagePhase: 'live' | 'final' | null;
+  /**
+   * How much of the turn's streamed tail was *already inside* `promptUsage` when it arrived.
+   *
+   * A `live` breakdown is the prompt of a pass that has already run, so it contains this turn's user
+   * message and every tool result the earlier passes fed back — everything the live estimator would
+   * otherwise add on top a second time. Recording the tail's size at arrival lets the estimator add
+   * only what has streamed *since*. Null for a pre-turn baseline (a `final` reading, or a fetched
+   * capture), where the whole tail is genuinely missing and must be estimated in full.
+   */
+  promptUsageMark: TailChars | null;
   /**
    * The session agent's working checklist (`todowrite`), driving the pinned task panel. A sub-agent's
    * list is *not* here — it rides its own bubble via `LiveFrame.todos`, so a delegate's plan can
@@ -554,6 +596,9 @@ export const useStream = create<StreamState>((set, get) => ({
   trace: [],
   contextUsage: null,
   liveContext: null,
+  promptUsage: null,
+  promptUsagePhase: null,
+  promptUsageMark: null,
   todos: [],
   pendingAsk: null,
   lastVisualAct: null,
@@ -988,6 +1033,21 @@ export const useStream = create<StreamState>((set, get) => ({
       });
     });
 
+    // The window's *composition*, straight from the run that assembled the prompt. Superseding a
+    // `live` reading with the next pass's is the whole point — each one is the prompt as actually
+    // sent — so this simply replaces. A `final` reading is not replaced by a stale `live` one: the
+    // runner emits them in order, and a turn that ends leaves its settled breakdown standing.
+    socket.on('prompt_usage', (e: PromptUsageEvent) => {
+      if (e.sessionId !== get().activeSessionId) return;
+      set((s) => ({
+        promptUsage: e.breakdown,
+        promptUsagePhase: e.phase,
+        // A pass's prompt already contains the tail up to this moment; a settled turn's breakdown
+        // contains all of it and is the *next* turn's starting point, so it marks nothing.
+        promptUsageMark: e.phase === 'live' ? tailChars(s.liveItems) : null,
+      }));
+    });
+
     socket.on('context_usage', (e: ContextUsageEvent) => {
       // Only reflect the on-screen session; background runs update their own persisted messages.
       if (e.sessionId !== get().activeSessionId) return;
@@ -1163,6 +1223,9 @@ export const useStream = create<StreamState>((set, get) => ({
           // Safety net: the `final` context reading normally clears this just before `chat:done`;
           // drop it here too so a stopped/errored turn never leaves the amber overlay stuck.
           liveContext: null,
+          // Same reasoning: a turn that was stopped mid-pass never sent its `final` breakdown, and a
+          // watermark left over from it would be measured against the *next* turn's empty tail.
+          promptUsageMark: null,
         });
 
         // `persisted` → the backend already saved this turn (client was absent at completion); don't
@@ -1298,6 +1361,11 @@ export const useStream = create<StreamState>((set, get) => ({
           ? { promptTokens: lastCtx.context_tokens, contextWindow: lastCtx.context_window ?? 0 }
           : null,
       liveContext: null,
+      // Another conversation's breakdown is not a stale view of this one, it's the wrong answer.
+      // The Usage panel refetches the opened session's last captured call to fill the gap.
+      promptUsage: null,
+      promptUsagePhase: null,
+      promptUsageMark: null,
       todos: [],
       liveItems: [],
       liveFrames: {},
@@ -1323,6 +1391,9 @@ export const useStream = create<StreamState>((set, get) => ({
       trace: [],
       contextUsage: null,
       liveContext: null,
+      promptUsage: null,
+      promptUsagePhase: null,
+      promptUsageMark: null,
       liveItems: [],
       liveFrames: {},
       frameStack: ['root'],

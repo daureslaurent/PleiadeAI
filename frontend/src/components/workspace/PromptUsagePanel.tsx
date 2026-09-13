@@ -11,11 +11,8 @@ interface Props {
   agent: Agent | null;
 }
 
-/** Backoff between attempts at reading a capture that is written fire-and-forget after the turn. */
-const POLL_WAITS = [0, 400, 1000, 2000, 4000, 8000];
-
 /**
- * **Usage** — where this agent's context window actually goes.
+ * **Usage** — where this conversation's context window actually goes.
  *
  * The Prompt tab replays the conversation message by message; this one asks the question that
  * message list can't answer: *which part of the agent's configuration is eating the window*. The
@@ -23,116 +20,97 @@ const POLL_WAITS = [0, 400, 1000, 2000, 4000, 8000];
  * schemas (billed on every call, present in no message) and folds the conversation into role rows —
  * a 15%-of-window `AGENTS.md` is visible as a thing you could go and shorten.
  *
- * **Two sources, and the panel never has neither.** The exact breakdown comes from re-sizing the
- * session's latest *captured* inference call; the headline meter comes from the `context_usage`
- * events the run already streams (`store/stream.ts`), which are exact prompt-token counts from the
- * server and need no fetch at all. So a turn in flight moves the meter from its first reading —
- * including on a session's very first turn, where there is no capture to fetch yet and the panel
- * used to sit on "no inference call captured".
+ * **The breakdown is pushed, not polled.** The run that assembles the prompt sizes it and emits
+ * `prompt_usage` (`store/stream.ts`): once per inference pass, carrying the prompt *as sent*, and
+ * once when the turn settles. So a long tool loop redraws this panel as it grows, and nothing here
+ * waits on the fire-and-forget capture write that used to be the only source — which is what made
+ * the tab sit on "no inference call captured" through an entire turn.
  *
- * **Nothing here is gated on the turn being over.** The fetch is triggered by *anything* that says
- * the session moved — mount, session change, a settled `context_usage`, a new turn, the streaming
- * flag dropping — and each trigger retries from scratch, so one failed read (or one stale
- * `streaming` flag) can't wedge the tab until a reload. It is a short *poll*, not a single fetch: a
- * capture is persisted fire-and-forget off `llama:call_end`, so the instant streaming stops the
- * just-finished call is usually not in Mongo yet.
+ * **The fetch is the cold-start path only.** Opening a session that hasn't run a turn in this tab's
+ * lifetime has no pushed reading to show, so the panel sizes that session's last *captured* call
+ * once — over the same backend sizer the live path runs, so the two can't disagree about the rows.
+ * It re-arms whenever the session changes, and the refresh button re-runs it on demand.
+ *
+ * **Between exact readings the bar still moves.** While tokens are streaming, `useLiveUsageGuess`
+ * re-estimates the growing tail (assistant text, tool output, reasoning) on top of the last exact
+ * breakdown, so the bar climbs every render rather than stepping once per tool call.
  *
  * **It never clears.** A fetch that fails or comes back empty leaves the last good breakdown up
- * (flagged stale) rather than blanking — a call that ended is still the truest thing we know about
- * this window, and an empty panel is strictly less informative than a second-old one.
+ * (flagged stale) rather than blanking — a window that was measured a second ago is still the truest
+ * thing we know, and an empty panel is strictly less informative.
  */
 export function PromptUsagePanel({ sessionId, agent }: Props) {
   const streaming = useStream((s) => s.streaming);
   // The run's own readings: `liveContext` is this turn's climbing prompt total, `contextUsage` the
-  // settled one. Either lets the meter render with no capture in hand at all.
+  // settled one. Either lets the meter render with no breakdown in hand at all.
   const liveContext = useStream((s) => s.liveContext);
   const settledContext = useStream((s) => s.contextUsage);
-  // Any of these changing means "the session moved, go look for a newer capture".
-  const turnCount = useStream((s) => s.turns.length);
+  // The pushed breakdown — the primary source. Present from the first pass of the first turn.
+  const pushed = useStream((s) => s.promptUsage);
+  const pushedPhase = useStream((s) => s.promptUsagePhase);
 
   const [call, setCall] = useState<LlamaCallRecord | null>(null);
-  const [usage, setUsage] = useState<PromptUsageBreakdown | null>(null);
+  const [fetched, setFetched] = useState<PromptUsageBreakdown | null>(null);
   const [loading, setLoading] = useState(false);
   const [stale, setStale] = useState(false);
 
-  /** The call currently on screen — read by the poll without making it a render dependency. */
-  const shownIdRef = useRef<string | null>(null);
   /** Bumped on every session change so a slow read can't paint the previous conversation's window. */
   const genRef = useRef(0);
 
-  /**
-   * Fetch the session's latest capture and size it. Returns whether it found one *newer* than
-   * `knownId`, which is what lets the post-turn poll stop as soon as the new record lands.
-   */
-  const load = useCallback(
-    async (knownId?: string | null): Promise<boolean> => {
-      if (!sessionId) return false;
-      const gen = genRef.current;
-      setLoading(true);
-      try {
-        const rows = await llmDebugApi.bySession(sessionId, 12);
-        // The last pass carries the fullest context — that's the window the next turn starts from.
-        const latest = rows.at(-1) ?? null;
-        if (!latest || (knownId !== undefined && latest.id === knownId)) return false;
-        const breakdown = await llmDebugApi.usageBreakdown(
-          latest.request.messages ?? [],
-          latest.tools ?? undefined,
-          agent?._id ?? null,
-        );
-        // The operator switched conversation while this was in flight: drop it on the floor rather
-        // than paint another session's window over theirs.
-        if (gen !== genRef.current) return false;
-        shownIdRef.current = latest.id;
-        setCall(latest);
-        setUsage(breakdown);
-        setStale(false);
-        return true;
-      } catch {
-        // Keep whatever is on screen; the next trigger (or the refresh button) tries again.
-        if (gen === genRef.current) setStale(true);
-        return false;
-      } finally {
-        if (gen === genRef.current) setLoading(false);
+  /** Size the session's most recent captured call — the cold-start / manual-refresh path. */
+  const load = useCallback(async (): Promise<void> => {
+    if (!sessionId) return;
+    const gen = genRef.current;
+    setLoading(true);
+    try {
+      const rows = await llmDebugApi.bySession(sessionId, 12);
+      // The last pass carries the fullest context — that's the window the next turn starts from.
+      const latest = rows.at(-1) ?? null;
+      if (!latest) {
+        if (gen === genRef.current) setStale(false);
+        return;
       }
-    },
-    [sessionId, agent?._id],
-  );
+      const breakdown = await llmDebugApi.usageBreakdown(
+        latest.request.messages ?? [],
+        latest.tools ?? undefined,
+        agent?._id ?? null,
+      );
+      // The operator switched conversation while this was in flight: drop it on the floor rather
+      // than paint another session's window over theirs.
+      if (gen !== genRef.current) return;
+      setCall(latest);
+      setFetched(breakdown);
+      setStale(false);
+    } catch {
+      // Keep whatever is on screen; the refresh button (or the next turn's push) tries again.
+      if (gen === genRef.current) setStale(true);
+    } finally {
+      if (gen === genRef.current) setLoading(false);
+    }
+  }, [sessionId, agent?._id]);
 
   // Switching sessions is the one time the panel must forget: another conversation's window is not
-  // a stale view of this one, it's the wrong answer.
+  // a stale view of this one, it's the wrong answer. (`promptUsage` is cleared by the store itself.)
   useEffect(() => {
     genRef.current += 1;
-    shownIdRef.current = null;
     setCall(null);
-    setUsage(null);
+    setFetched(null);
     setStale(false);
   }, [sessionId]);
 
-  // The read, on every signal that the session moved — deliberately *not* gated on `streaming`.
-  // Mounting mid-turn still fetches: the last completed call is exactly the baseline the live
-  // estimate re-scales, so opening the tab during a turn shows a moving bar instead of nothing.
-  // The widening poll covers the capture being written fire-and-forget after the stream ends.
+  // Cold start only. A session whose run is already pushing readings needs no fetch at all — and
+  // firing one mid-turn would spend a tokenize pass to produce something older than what's on screen.
   useEffect(() => {
-    if (!sessionId) return;
-    let cancelled = false;
-    const known = shownIdRef.current;
-    void (async () => {
-      for (const wait of POLL_WAITS) {
-        if (wait) await new Promise((r) => setTimeout(r, wait));
-        if (cancelled) return;
-        if (await load(known)) return;
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // `settledContext` identity changes once per finished turn — the earliest reliable "this turn
-    // produced a call" signal, and it arrives even if the `streaming` flag never flips back.
-  }, [sessionId, load, streaming, turnCount, settledContext]);
+    if (!sessionId || pushed) return;
+    void load();
+  }, [sessionId, pushed, load]);
 
-  const guess = useLiveUsageGuess(usage, streaming);
+  // The pushed breakdown wins: it is this turn's actual prompt, where the fetched one is the last
+  // call that happened to be captured.
+  const exact = pushed ?? fetched;
+  const guess = useLiveUsageGuess(exact, streaming);
   const isGuess = streaming && guess !== null;
-  const shown = isGuess ? guess : usage;
+  const shown = isGuess ? guess : exact;
 
   // The meter prefers the run's own exact reading while a turn is live, then the sized breakdown,
   // then the capture's reported prompt tokens.
@@ -150,16 +128,23 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
     () => (shown ? shown.moduleGroups.length + shown.segments.filter((s) => s.kind !== 'module').length : 0),
     [shown],
   );
+  // What the numbers on screen are: a between-render estimate, the run's own mid-turn reading, or
+  // the settled window. Said out loud so nobody reads an estimate as a measurement.
+  const sourceLabel = isGuess
+    ? 'estimated'
+    : streaming || pushedPhase === 'live'
+      ? 'live'
+      : null;
 
-  // Empty only when there is genuinely nothing to say: no capture, no breakdown, no reading from the
-  // live run, and no read in flight. A finished call stays on screen; a live turn shows its meter.
+  // Empty only when there is genuinely nothing to say: no breakdown, no reading from the live run,
+  // no capture, and no read in flight. A finished turn stays on screen; a live one shows its meter.
   if (!sessionId || (!call && !shown && !reading && !loading)) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
         <PieChart size={26} className="text-slate-600" />
         <p className="text-xs text-slate-500">
           {sessionId
-            ? 'No inference call captured yet. Send a message to see where the context goes.'
+            ? 'Nothing sent to the model yet. Send a message to see where the context goes.'
             : 'Pick a session to see where its context goes.'}
         </p>
       </div>
@@ -179,16 +164,10 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
               / {windowSize.toLocaleString()} tok
             </span>
           )}
-          {isGuess && (
+          {sourceLabel && (
             <span className="flex items-center gap-1 font-mono text-[10px] text-slate-500">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-              estimated
-            </span>
-          )}
-          {!isGuess && streaming && reading && (
-            <span className="flex items-center gap-1 font-mono text-[10px] text-slate-500">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-              live
+              {sourceLabel}
             </span>
           )}
           <span
@@ -200,7 +179,7 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
           </span>
           <button
             onClick={() => void load()}
-            title={stale ? "Couldn't size the last call — retry" : 'Recompute'}
+            title={stale ? "Couldn't size the last call — retry" : 'Re-read the last captured call'}
             className={`rounded p-1 transition-colors hover:raise-2 hover:text-slate-300 ${
               stale ? 'text-amber-400' : 'text-slate-500'
             }`}
@@ -222,15 +201,15 @@ export function PromptUsagePanel({ sessionId, agent }: Props) {
       </div>
 
       {/* Detail: every module and category, its tokens and share — expand a module for its blocks.
-          Kept up while a refresh or the post-turn poll runs: a list that blanks on every attempt is
-          worse than one that's a second stale, and the spinner already says a read is in flight. */}
+          Kept up while a refresh runs: a list that blanks on every attempt is worse than one that's
+          a second stale, and the spinner already says a read is in flight. */}
       {shown ? (
         <UsageDetailList breakdown={shown} />
       ) : (
         <p className="px-3 py-3 text-[11px] text-slate-500">
           {loading
             ? 'Sizing the last call…'
-            : 'Breakdown appears once this turn’s call is captured — the meter above is the run’s own reading.'}
+            : 'The breakdown appears with this turn’s first inference pass — the meter above is the run’s own reading.'}
         </p>
       )}
     </div>

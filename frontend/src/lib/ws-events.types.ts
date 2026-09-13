@@ -1,3 +1,5 @@
+import type { PromptUsageBreakdown } from './api';
+
 /**
  * Mirror of the backend WebSocket payload schema (§6 of IMPLEMENTATION_PLAN.md).
  * Keep in lockstep with `backend/src/transport/ws/bridge.ts`.
@@ -356,6 +358,26 @@ export interface TodoUpdateEvent {
   runId?: string;
   callId: string;
   items: TodoItem[];
+}
+
+/**
+ * **Where the window went**, sized from the prompt the run actually sent — the debugger's Usage tab,
+ * live. `context_usage` says how *much* of the window is spent; this says *on what*: the system
+ * assembly cut back into its modules, the tool schemas (billed every call, present in no message),
+ * and the conversation folded into role rows.
+ *
+ * One per inference pass (`live` — the prompt as sent, so a long tool loop redraws the bar as it
+ * grows) plus one when the turn settles (`final` — including the closing assistant message, i.e.
+ * the window the *next* turn starts from). Only the session's user-facing run emits it; a sub-agent
+ * hop or a `task` child has its own window and is not what this panel shows.
+ */
+export interface PromptUsageEvent {
+  type: 'prompt_usage';
+  sessionId: string;
+  agent: string;
+  runId?: string;
+  phase: 'live' | 'final';
+  breakdown: PromptUsageBreakdown;
 }
 
 /**

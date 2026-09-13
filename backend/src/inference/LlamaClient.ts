@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import { createLogger } from '../config/logger';
 import { settingsService } from '../domain/settings/settings.service';
@@ -18,6 +18,36 @@ import type {
 } from '../core/event-bus/events.types';
 
 const log = createLogger('llama-client');
+
+/**
+ * Memo for `/tokenize` counts, keyed by endpoint + model + a hash of the text.
+ *
+ * The Usage tab is now sized **once per inference pass** rather than once per operator click
+ * (`AgentRunner` emits `agent:prompt_usage` live), and a long session's prompt is dozens of pieces.
+ * But a pass re-sends almost exactly what the previous pass sent: the whole system assembly, the
+ * tool schemas and every prior message are byte-identical, so only the pieces the turn just added
+ * are genuinely new. Memoizing turns a per-pass sizing from ~40 remote round trips into ~2.
+ *
+ * Keyed on the text's hash rather than the text so a 100 KB tool result costs 40 bytes of key, and
+ * capped FIFO (a `Map` iterates in insertion order) so a long-running backend can't grow it without
+ * bound. Only successful counts are stored — a failed read must stay retryable.
+ */
+const TOKEN_COUNT_CACHE = new Map<string, number>();
+const TOKEN_COUNT_CACHE_MAX = 5000;
+
+function tokenCacheKey(target: ResolvedInference, content: string): string {
+  const hash = createHash('sha1').update(content).digest('base64url');
+  return `${target.url}|${target.model}|${content.length}|${hash}`;
+}
+
+function rememberTokenCount(key: string, count: number): void {
+  if (TOKEN_COUNT_CACHE.has(key)) TOKEN_COUNT_CACHE.delete(key);
+  TOKEN_COUNT_CACHE.set(key, count);
+  if (TOKEN_COUNT_CACHE.size > TOKEN_COUNT_CACHE_MAX) {
+    const oldest = TOKEN_COUNT_CACHE.keys().next().value;
+    if (oldest !== undefined) TOKEN_COUNT_CACHE.delete(oldest);
+  }
+}
 
 /**
  * The same conversation with every image part replaced by a text placeholder, or the array itself
@@ -450,6 +480,9 @@ export class LlamaClient {
     };
     const count = async (content: string): Promise<number | null> => {
       if (!content) return 0;
+      const key = tokenCacheKey(target, content);
+      const memo = TOKEN_COUNT_CACHE.get(key);
+      if (memo !== undefined) return memo;
       try {
         const res = await fetch(`${base}/tokenize`, {
           method: 'POST',
@@ -458,7 +491,9 @@ export class LlamaClient {
         });
         if (!res.ok) return null;
         const { tokens } = (await res.json()) as { tokens?: unknown[] };
-        return Array.isArray(tokens) ? tokens.length : null;
+        if (!Array.isArray(tokens)) return null;
+        rememberTokenCount(key, tokens.length);
+        return tokens.length;
       } catch {
         return null;
       }

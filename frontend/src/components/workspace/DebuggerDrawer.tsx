@@ -1,6 +1,6 @@
-import { useState } from 'react';
 import { Bug, X, Box, Database, PieChart } from 'lucide-react';
 import { useStream } from '../../store/stream';
+import { usePersistentState } from '../../hooks/usePersistentState';
 import type { Agent } from '../../lib/api';
 import { IsolationPanel } from './IsolationPanel';
 import { DataPanel } from './DataPanel';
@@ -18,6 +18,11 @@ interface Props {
 
 type Tab = 'trace' | 'usage' | 'isolation' | 'data';
 
+const TABS: Tab[] = ['trace', 'usage', 'isolation', 'data'];
+
+/** Which tab was last open, across reloads — the drawer's own open/closed state already persists. */
+const TAB_KEY = 'workspace:debuggerTab';
+
 /**
  * Right drawer with four tabs: **Trace** (the live + persisted execution trace for the active
  * session — tool calls, cross-agent hops, `<think>` reasoning, alerts), **Usage** (where the
@@ -27,7 +32,11 @@ type Tab = 'trace' | 'usage' | 'isolation' | 'data';
  */
 export function DebuggerDrawer({ onClose, agent, sessionId, hideTrace = false }: Props) {
   const streaming = useStream((s) => s.streaming);
-  const [tab, setTab] = useState<Tab>(hideTrace ? 'usage' : 'trace');
+  const [stored, setTab] = usePersistentState<Tab>(TAB_KEY, 'trace');
+  // Guard the restored value: an unknown id (an older/newer build wrote it) and `trace` under a
+  // layout that docks the trace itself both have to land somewhere real, or the drawer opens on a
+  // tab with no button to leave it by.
+  const tab: Tab = !TABS.includes(stored) || (hideTrace && stored === 'trace') ? 'usage' : stored;
 
   return (
     <aside className="glass flex w-96 shrink-0 flex-col border-l">
@@ -63,8 +72,6 @@ export function DebuggerDrawer({ onClose, agent, sessionId, hideTrace = false }:
       ) : tab === 'data' ? (
         <DataPanel />
       ) : tab === 'usage' ? (
-        <PromptUsagePanel sessionId={sessionId} agent={agent} />
-      ) : hideTrace ? (
         <PromptUsagePanel sessionId={sessionId} agent={agent} />
       ) : (
         <TraceColumn active={tab === 'trace'} />

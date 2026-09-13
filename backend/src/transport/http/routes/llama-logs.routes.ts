@@ -6,13 +6,8 @@ import { agentRepository } from '../../../domain/agents/agent.repository';
 import { resolveInference } from '../../../inference/inference-resolver';
 import { llamaClient } from '../../../inference/LlamaClient';
 import type { ChatMessage } from '../../../domain/agents/jit-builder';
-import {
-  foldSegments,
-  groupByModule,
-  messageText,
-  planUsagePieces,
-  promptModules,
-} from '../../../domain/llama-logs/prompt-usage';
+import { messageText } from '../../../domain/llama-logs/prompt-usage';
+import { sizePrompt } from '../../../domain/llama-logs/usage-sizer';
 import type { LlamaRequestCapture } from '../../../core/event-bus/events.types';
 
 /** LLM Debug page — raw llama call inspector + DB size readout + archive purge. */
@@ -138,32 +133,9 @@ llamaLogsRouter.post('/usage-breakdown', async (req, res) => {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const agent = body.agentId ? await agentRepository.findById(body.agentId) : null;
   const target = await resolveInference(agent ?? {});
-  if (!messages.length) {
-    res.json({
-      segments: [],
-      moduleGroups: [],
-      sum: 0,
-      total: 0,
-      contextWindow: target.contextWindow,
-      modules: [],
-    });
-    return;
-  }
-
-  const pieces = planUsagePieces(messages, body.tools);
-  const [counts, total] = await Promise.all([
-    llamaClient.tokenizeTexts(target, pieces.map((p) => p.text)),
-    llamaClient.tokenizeMessages(target, messages as ChatMessage[]).catch(() => null),
-  ]);
-  const segments = foldSegments(pieces, counts);
-  res.json({
-    segments,
-    moduleGroups: groupByModule(segments),
-    sum: segments.reduce((a, s) => a + (s.tokens ?? 0), 0),
-    total,
-    contextWindow: target.contextWindow,
-    modules: promptModules(messages),
-  });
+  // Same sizer the live path runs (`AgentRunner` → `agent:prompt_usage`), so a breakdown fetched for
+  // a captured call and one streamed mid-turn can never disagree about what the rows are.
+  res.json(await sizePrompt(target, messages, body.tools));
 });
 
 /** Full archive detail for one call (raw chunks + full images). */

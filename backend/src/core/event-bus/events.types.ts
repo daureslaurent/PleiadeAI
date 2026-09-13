@@ -9,6 +9,8 @@
  * compile-time safety with zero runtime dependency.
  */
 
+import type { PromptUsageBreakdown } from '../../domain/llama-logs/prompt-usage';
+
 /** Correlates every event belonging to one user turn / one agent run. */
 export interface EventContext {
   /** Unique id for a single user-initiated turn (spans hops, tools, streaming). */
@@ -405,6 +407,26 @@ export interface ContextUsagePayload {
    * that persists). Only `final` is persisted.
    */
   phase: 'live' | 'final';
+}
+
+/**
+ * **Where this run's context window is going, sized from the prompt that was actually sent.**
+ *
+ * `ContextUsagePayload` answers *how much* of the window is spent; this answers *on what* — the
+ * system assembly cut back into its modules, the tool schemas, and the conversation folded into
+ * role rows. It is emitted per inference pass (`live`, carrying the server's own exact prompt-token
+ * total for those messages) and once when the turn settles (`final`, measured, and including the
+ * closing assistant message — the window the *next* turn starts from).
+ *
+ * Only the user-facing run emits: a `task` child or an `ask_agent` hop has its own window, and
+ * sizing every one of them would fire a tokenize storm at the inference host for a panel that shows
+ * one conversation. Computed fire-and-forget — a sizing pass must never delay a token.
+ */
+export interface PromptUsagePayload {
+  ctx: EventContext;
+  /** `live` = the prompt as sent on this pass; `final` = the settled window after the turn. */
+  phase: 'live' | 'final';
+  breakdown: PromptUsageBreakdown;
 }
 
 export interface AskUserPayload {
@@ -814,6 +836,7 @@ export interface EventMap {
   'agent:memory_recall': MemoryRecallPayload;
   'agent:todo_update': TodoUpdatePayload;
   'agent:context_usage': ContextUsagePayload;
+  'agent:prompt_usage': PromptUsagePayload;
   'agent:turn_truncated': TurnTruncatedPayload;
   'agent:ask_user': AskUserPayload;
   'system:alert': SystemAlertPayload;

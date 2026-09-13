@@ -267,6 +267,20 @@ export function attachBridge(io: Server): void {
     });
   });
 
+  // The same window, broken down by what spent it — the debugger's **Usage** tab, live. Only the
+  // user-facing run emits it (see `PromptUsagePayload`), so no depth routing is needed here; the
+  // client still gets `runId` so a reading can't be painted onto a session that has moved on.
+  eventBus.on('agent:prompt_usage', ({ ctx, phase, breakdown }) => {
+    io.to(ctx.sessionId).emit('prompt_usage', {
+      type: 'prompt_usage',
+      sessionId: ctx.sessionId,
+      agent: ctx.agentName,
+      runId: ctx.runId,
+      phase,
+      breakdown,
+    });
+  });
+
   eventBus.on('agent:turn_truncated', ({ ctx }) => {
     io.to(ctx.sessionId).emit('truncated', {
       type: 'truncated',
