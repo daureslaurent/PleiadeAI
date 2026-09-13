@@ -12,6 +12,11 @@ export interface StreamChunkEvent {
   /** Conversation (or flow run) this belongs to — route on it. */
   sessionId: string;
   agent: string;
+  /**
+   * The agent-run that produced it. Depth can't tell two parallel subagents apart, so the store
+   * routes to a bubble by this id (`SUBAGENT_PLAN.md` §1). Absent only from older backends.
+   */
+  runId?: string;
   content: string;
   is_reasoning: boolean;
 }
@@ -26,6 +31,18 @@ export interface AgentHopEvent {
   query: string;
   /** The invoked sub-agent's run id — tags its bubble so its own quality score can attach. */
   childRunId: string;
+  /** The caller's run — the frame the new bubble opens under. */
+  parentRunId?: string;
+  /** Set for a `task` subagent: the caller's tool call, whose card the bubble nests inside. */
+  callId?: string;
+  task?: SubagentTaskInfo;
+}
+
+/** A `task` subagent's label, mode, and the model it runs on. */
+export interface SubagentTaskInfo {
+  description: string;
+  mode: 'explore' | 'work';
+  model: string;
 }
 
 export interface AgentHopDoneEvent {
@@ -36,6 +53,8 @@ export interface AgentHopDoneEvent {
   to: string;
   depth: number;
   status: 'success' | 'error';
+  /** Which run finished — parallel children end in any order. */
+  childRunId?: string;
 }
 
 /**
@@ -49,6 +68,7 @@ export type ToolCallStreamEvent = {
   /** Conversation (or flow run) this belongs to — route on it. */
   sessionId: string;
   agent: string;
+  runId?: string;
 } & (
   | {
       phase: 'delta';
@@ -81,6 +101,7 @@ export interface ToolStartEvent {
   /** Conversation (or flow run) this belongs to — route on it. */
   sessionId: string;
   agent: string;
+  runId?: string;
   callId: string;
   tool: string;
   args: Record<string, unknown>;
@@ -91,6 +112,7 @@ export interface ToolOutputEvent {
   type: 'tool_output';
   /** Conversation (or flow run) this belongs to — route on it. */
   sessionId: string;
+  runId?: string;
   callId: string;
   chunk: string;
 }
@@ -100,6 +122,7 @@ export interface ToolEndEvent {
   /** Conversation (or flow run) this belongs to — route on it. */
   sessionId: string;
   agent: string;
+  runId?: string;
   callId: string;
   tool: string;
   status: 'success' | 'error';
@@ -330,6 +353,7 @@ export interface TodoUpdateEvent {
   agent: string;
   agentId: string;
   depth: number;
+  runId?: string;
   callId: string;
   items: TodoItem[];
 }
@@ -344,6 +368,7 @@ export interface ContextUsageEvent {
   sessionId: string;
   agent: string;
   depth: number;
+  runId?: string;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;

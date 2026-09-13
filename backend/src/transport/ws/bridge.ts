@@ -62,6 +62,8 @@ export function attachBridge(io: Server): void {
       type: 'stream_chunk',
       sessionId: ctx.sessionId,
       agent: ctx.agentName,
+      // Which run wrote it — the only thing that tells two parallel subagents' tokens apart.
+      runId: ctx.runId,
       content,
       is_reasoning: isReasoning,
     });
@@ -76,6 +78,10 @@ export function attachBridge(io: Server): void {
       depth: payload.depth,
       query: payload.query,
       childRunId: payload.childRunId,
+      // The caller's run, so the bubble opens under the right parent even when several are open.
+      parentRunId: payload.ctx.runId,
+      callId: payload.callId,
+      task: payload.task,
     });
   });
 
@@ -87,6 +93,7 @@ export function attachBridge(io: Server): void {
       to: payload.to,
       depth: payload.depth,
       status: payload.status,
+      childRunId: payload.childRunId,
     });
   });
 
@@ -97,6 +104,7 @@ export function attachBridge(io: Server): void {
       type: 'tool_call_stream',
       sessionId: payload.ctx.sessionId,
       agent: payload.ctx.agentName,
+      runId: payload.ctx.runId,
       ...(payload.phase === 'reset'
         ? { phase: 'reset' as const }
         : {
@@ -114,6 +122,7 @@ export function attachBridge(io: Server): void {
       type: 'tool_start',
       sessionId: ctx.sessionId,
       agent: ctx.agentName,
+      runId: ctx.runId,
       callId,
       tool,
       args,
@@ -126,6 +135,7 @@ export function attachBridge(io: Server): void {
     io.to(ctx.sessionId).emit('tool_output', {
       type: 'tool_output',
       sessionId: ctx.sessionId,
+      runId: ctx.runId,
       callId,
       chunk,
     });
@@ -191,6 +201,7 @@ export function attachBridge(io: Server): void {
         type: 'tool_end',
         sessionId: ctx.sessionId,
         agent: ctx.agentName,
+        runId: ctx.runId,
         callId,
         tool,
         status,
@@ -219,6 +230,7 @@ export function attachBridge(io: Server): void {
       agent: ctx.agentName,
       agentId: ctx.agentId,
       depth: ctx.depth,
+      runId: ctx.runId,
       callId,
       items,
     });
@@ -246,6 +258,7 @@ export function attachBridge(io: Server): void {
       // sub-agent's reading to its own bubble.
       agent: ctx.agentName,
       depth: ctx.depth,
+      runId: ctx.runId,
       promptTokens,
       completionTokens,
       totalTokens,

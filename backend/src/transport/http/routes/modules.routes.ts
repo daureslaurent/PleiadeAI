@@ -7,6 +7,7 @@ import {
   listModules,
   setModuleEnabled,
   setModuleOverrides,
+  setModuleSubagentEnabled,
   upsertCustomModule,
 } from '../../../modules/admin.service';
 import { previewPrompt } from '../../../modules/preview';
@@ -53,14 +54,18 @@ modulesRouter.get('/', async (_req, res) => {
 modulesRouter.put('/:id', async (req, res) => {
   try {
     if (req.body?.enabled !== undefined) await setModuleEnabled(req.params.id, Boolean(req.body.enabled));
+    // The subagent profile (`SUBAGENT_PLAN.md` §3): whether the module also applies in a `task` child.
+    if (req.body?.subagent !== undefined) {
+      await setModuleSubagentEnabled(req.params.id, Boolean(req.body.subagent));
+    }
     if (req.body?.overrides && typeof req.body.overrides === 'object') {
       await setModuleOverrides(req.params.id, req.body.overrides as Record<string, string | null>);
     }
   } catch (err) {
     return fail(res, err);
   }
-  const { modules } = await listModules();
-  res.json(modules.find((m) => m.id === req.params.id) ?? null);
+  const { modules, custom } = await listModules();
+  res.json(modules.find((m) => m.id === req.params.id) ?? custom.find((m) => m.id === req.params.id) ?? null);
 });
 
 /** Create or update an operator-authored module. */
@@ -95,5 +100,7 @@ modulesRouter.post('/preview', async (req, res) => {
   }
   const settings = await settingsService.get();
   const state = moduleStateFrom(settings as unknown as Record<string, unknown>);
-  res.json(previewPrompt(state, agent, settings.agents_md));
+  // `scope: 'subagent'` previews what a `task` child of this agent is given instead.
+  const scope = req.body?.scope === 'subagent' ? 'subagent' : 'turn';
+  res.json(previewPrompt(state, agent, settings.agents_md, scope));
 });

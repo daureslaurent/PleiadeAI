@@ -14,7 +14,7 @@ import { environmentModule, parallelToolsModule, sessionModule, toolUseModule } 
 import { modesModule } from './definitions/modes';
 import { agentsMdModule, houseRulesModule, parametersModule } from './definitions/operator';
 import { memoryModule, notebookModule, todoModule } from './definitions/self';
-import { autoLoopModule, boardModule, forumModule, orchestrationModule } from './definitions/work';
+import { autoLoopModule, boardModule, forumModule, orchestrationModule, subagentsModule } from './definitions/work';
 import type { BlockPlacement, PromptBlock, PromptModule } from './types';
 
 /**
@@ -39,6 +39,7 @@ export const MODULES: PromptModule[] = [
   memoryModule,
   // work
   orchestrationModule,
+  subagentsModule,
   boardModule,
   forumModule,
   autoLoopModule,
@@ -64,6 +65,11 @@ export function moduleById(id: string): PromptModule | undefined {
 /** Whether a module ships on. Only the board ships off, for the reason its definition gives. */
 export function moduleDefaultEnabled(m: PromptModule): boolean {
   return m.defaultEnabled !== false;
+}
+
+/** Whether a module applies inside `task` subagent runs until the operator says otherwise. */
+export function moduleSubagentDefault(m: PromptModule): boolean {
+  return m.subagentDefault !== false;
 }
 
 const OWNER_BY_TOOL = new Map<string, PromptModule>();

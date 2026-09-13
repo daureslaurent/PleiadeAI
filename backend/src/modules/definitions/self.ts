@@ -110,6 +110,9 @@ export const todoModule: PromptModule = {
   name: 'Task list',
   description: "The agent's session checklist, re-injected each turn so a step is never dropped.",
   group: 'self',
+  // A subagent does one narrow job and hands back a report: its checklist is the parent's, and
+  // `todowrite` is withheld from it regardless.
+  subagentDefault: false,
   tools: ['todowrite'],
   blocks: [
     {
@@ -126,6 +129,9 @@ export const memoryModule: PromptModule = {
   name: 'Memory',
   description: 'Auto-recall from the vector vault, and the tools to write and retire a memory.',
   group: 'self',
+  // A subagent does one narrow job and hands back a report: an embedding and a recall per child buys
+  // souvenirs of unrelated chats, and the child's exchange is never distilled back anyway.
+  subagentDefault: false,
   tools: ['remember', 'forget'],
   settingsKeys: ['memory_distill_enabled', 'memory_max_tokens'],
   blocks: [

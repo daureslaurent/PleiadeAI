@@ -100,6 +100,8 @@ agentsRouter.patch('/:id', async (req, res) => {
   if ('isolation_id' in body && !body.isolation_id) body.isolation_id = null;
   // Same for the optional inference endpoint (empty → null = use the fleet default endpoint).
   if ('endpoint_id' in body && !body.endpoint_id) body.endpoint_id = null;
+  // …and the subagent endpoint (empty → null = inherit the fleet's subagent default).
+  if ('subagent_endpoint_id' in body && !body.subagent_endpoint_id) body.subagent_endpoint_id = null;
   // …and the Android device link (empty → null = not an Android agent). Without this an empty-string
   // id from a form reset would fail Mongoose's ObjectId cast instead of clearing the link.
   if ('android_device_id' in body && !body.android_device_id) body.android_device_id = null;

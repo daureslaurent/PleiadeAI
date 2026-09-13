@@ -21,6 +21,7 @@ import type {
   TodoUpdateEvent,
   TodoItem,
   RecalledMemory,
+  SubagentTaskInfo,
   VisionEvent,
   MediaGenEvent,
   ToolProgressEvent,
@@ -147,13 +148,20 @@ export type Block =
       /** Wall-clock start (epoch ms) and duration — the two numbers the batch's waterfall needs. */
       startedAt?: number;
       durationMs?: number;
+      /**
+       * The subagent a `task` call ran. It lives inside the call's card rather than beside it, so the
+       * cards of a parallel batch stay adjacent and the batch still draws as one group.
+       */
+      subagent?: AgentBlock;
     }
-  /**
+  | AgentBlock;
+
+/**
    * A delegated sub-agent run (`ask_agent`). Rendered as a nested, color-coded bubble at the exact
    * point in the parent's stream where the hop occurred; `children` is the sub-agent's own block
    * tree (recursively, so agent→agent→agent nests visually).
    */
-  | {
+export type AgentBlock = {
       kind: 'agent';
       agent: string;
       from: string;
@@ -173,6 +181,8 @@ export type Block =
       memories?: RecalledMemory[];
       /** This sub-agent's own task list, rendered inside its bubble rather than the pinned panel. */
       todos?: TodoItem[];
+      /** Set for a `task` subagent: its label, mode and model. */
+      task?: SubagentTaskInfo;
       children: Block[];
     };
 
@@ -207,8 +217,11 @@ type LiveItem =
       startedAt?: number;
       durationMs?: number;
     }
-  /** Placeholder marking where a child agent frame was spawned within this frame's stream. */
-  | { kind: 'agent'; id: string; frameId: string; refFrameId: string };
+  /**
+   * Placeholder marking where a child agent frame was spawned within this frame's stream. `callId` is
+   * set for a `task` subagent, whose bubble folds into that call's card instead.
+   */
+  | { kind: 'agent'; id: string; frameId: string; refFrameId: string; callId?: string };
 
 /** One agent invocation in the live call tree (`root` = the directly-addressed agent, depth 0). */
 interface LiveFrame {
@@ -229,6 +242,7 @@ interface LiveFrame {
   memories?: RecalledMemory[];
   /** The checklist this sub-agent wrote during its run, if any. */
   todos?: TodoItem[];
+  task?: SubagentTaskInfo;
 }
 
 /**
@@ -259,6 +273,11 @@ export function buildBlocks(
   frames: Record<string, LiveFrame>,
 ): Block[] {
   const out: Block[] = [];
+  // A `task` hop names the call that spawned it; that bubble renders inside the call's card.
+  const nested = new Map<string, string>();
+  for (const it of items) {
+    if (it.frameId === frameId && it.kind === 'agent' && it.callId) nested.set(it.callId, it.refFrameId);
+  }
   for (const it of items) {
     if (it.frameId !== frameId) continue;
     if (it.kind === 'text') {
@@ -283,28 +302,70 @@ export function buildBlocks(
         batch: it.batch,
         startedAt: it.startedAt,
         durationMs: it.durationMs,
+        ...(nested.has(it.callId) ? { subagent: agentBlock(nested.get(it.callId)!, items, frames) } : {}),
       });
     } else {
-      const f = frames[it.refFrameId];
-      if (!f) continue;
-      out.push({
-        kind: 'agent',
-        agent: f.agent,
-        from: f.from,
-        depth: f.depth,
-        query: f.query,
-        status: f.status,
-        durationMs: f.durationMs,
-        promptTokens: f.promptTokens,
-        contextWindow: f.contextWindow,
-        runId: f.runId,
-        memories: f.memories,
-        todos: f.todos,
-        children: buildBlocks(it.refFrameId, items, frames),
-      });
+      // Already folded into its call's card above.
+      if (it.callId && items.some((t) => t.kind === 'tool' && t.frameId === frameId && t.callId === it.callId)) {
+        continue;
+      }
+      const block = agentBlock(it.refFrameId, items, frames);
+      if (block) out.push(block);
     }
   }
   return out;
+}
+
+/** One sub-agent frame as its bubble, with its own log folded in as children. */
+function agentBlock(
+  refFrameId: string,
+  items: LiveItem[],
+  frames: Record<string, LiveFrame>,
+): AgentBlock | undefined {
+  const f = frames[refFrameId];
+  if (!f) return undefined;
+  return {
+    kind: 'agent',
+    agent: f.agent,
+    from: f.from,
+    depth: f.depth,
+    query: f.query,
+    status: f.status,
+    durationMs: f.durationMs,
+    promptTokens: f.promptTokens,
+    contextWindow: f.contextWindow,
+    runId: f.runId,
+    memories: f.memories,
+    todos: f.todos,
+    task: f.task,
+    children: buildBlocks(refFrameId, items, frames),
+  };
+}
+
+/**
+ * The frame an event belongs to (`SUBAGENT_PLAN.md` §1). Depth 0 is the root; a deeper event finds
+ * the frame its run opened. The stack top is only a fallback for an event with no run id — with a
+ * parallel batch of subagents open, "the top" is just whichever bubble happened to open last.
+ */
+function frameFor(
+  s: { frameStack: string[]; liveFrames: Record<string, LiveFrame> },
+  depth: number | undefined,
+  runId: string | undefined,
+): string {
+  if (depth === 0) return 'root';
+  if (runId) {
+    for (const f of Object.values(s.liveFrames)) if (f.runId === runId) return f.id;
+    // Every delegated run opens its frame (`agent_hop`) before it emits anything, so a run id no
+    // frame claims is the root run's own — the client only learns that id on `chat:done`.
+    return 'root';
+  }
+  return s.frameStack[s.frameStack.length - 1] ?? 'root';
+}
+
+/** Index of the most recent item a frame wrote, or -1. */
+function lastIndexOfFrame(items: LiveItem[], frameId: string): number {
+  for (let i = items.length - 1; i >= 0; i--) if (items[i]!.frameId === frameId) return i;
+  return -1;
 }
 
 /**
@@ -315,6 +376,13 @@ export function buildBlocks(
 function attachScoreToBubble(blocks: Block[], runId: string, score: TurnScore): { blocks: Block[]; changed: boolean } {
   let changed = false;
   const next = blocks.map((b) => {
+    // A `task` subagent's bubble lives inside its call's block rather than beside it.
+    if (b.kind === 'tool' && b.subagent) {
+      const inner = attachScoreToBubble([b.subagent], runId, score);
+      if (!inner.changed) return b;
+      changed = true;
+      return { ...b, subagent: inner.blocks[0] as AgentBlock };
+    }
     if (b.kind !== 'agent') return b;
     if (b.runId === runId) {
       changed = true;
@@ -528,15 +596,17 @@ export const useStream = create<StreamState>((set, get) => ({
     socket.on('stream_chunk', (e: StreamChunkEvent) => {
       if (!onScreen(e.sessionId)) return;
       set((s) => {
-        const top = s.frameStack[s.frameStack.length - 1] ?? 'root';
+        const top = frameFor(s, undefined, e.runId);
         const items = [...s.liveItems];
-        const last = items[items.length - 1];
-        // Reasoning and output are both frame-scoped: coalesce consecutive chunks of the *same*
-        // kind from the *same* frame into one item (a frame boundary or a kind switch starts a new
-        // one), so each agent/subagent gets its own thinking block + answer without bleeding.
+        // Reasoning and output are both frame-scoped: coalesce a chunk into its *own frame's* latest
+        // item when that is of the same kind (a kind switch, or a tool/hop in between, starts a new
+        // one). Looking back past other frames matters once subagents run in parallel — their
+        // chunks interleave in this flat log, and the log's last item is usually a sibling's.
         const kind = e.is_reasoning ? ('reasoning' as const) : ('text' as const);
-        if (last && last.kind === kind && last.frameId === top) {
-          items[items.length - 1] = { ...last, text: last.text + e.content };
+        const at = lastIndexOfFrame(items, top);
+        const last = at >= 0 ? items[at] : undefined;
+        if (last && last.kind === kind) {
+          items[at] = { ...last, text: last.text + e.content };
         } else {
           items.push({ kind, id: nextId(), frameId: top, text: e.content });
         }
@@ -553,7 +623,7 @@ export const useStream = create<StreamState>((set, get) => ({
         } else {
           // `depth` marks sub-agent nesting, so only carry it when the thinking belongs to a
           // delegated frame — tagging every top-level span "depth 0" is just noise.
-          const depth = s.frameStack.length - 1;
+          const depth = top === 'root' ? 0 : (s.liveFrames[top]?.depth ?? 0);
           trace.push({ kind: 'reasoning', label: '<think>', detail: e.content, ...(depth > 0 ? { depth } : {}) });
         }
         // The flat string stays as the turn's whole-thinking projection (persisted `reasoning`).
@@ -568,9 +638,12 @@ export const useStream = create<StreamState>((set, get) => ({
     socket.on('tool_call_stream', (e: ToolCallStreamEvent) => {
       if (!onScreen(e.sessionId)) return;
       set((s) => {
-        const top = s.frameStack[s.frameStack.length - 1] ?? 'root';
+        const top = frameFor(s, undefined, e.runId);
         if (e.phase === 'reset') {
-          const items = s.liveItems.filter((it) => !(it.kind === 'tool' && it.status === 'drafting'));
+          // Only this run's drafts: a parallel sibling may be mid-way through writing its own call.
+          const items = s.liveItems.filter(
+            (it) => !(it.kind === 'tool' && it.status === 'drafting' && it.frameId === top),
+          );
           return items.length === s.liveItems.length ? {} : { liveItems: items };
         }
         // Key on the server's call id once it exists; until then the fragment index is all we have to
@@ -612,7 +685,7 @@ export const useStream = create<StreamState>((set, get) => ({
     socket.on('tool_start', (e: ToolStartEvent) => {
       if (!onScreen(e.sessionId)) return;
       set((s) => {
-        const top = s.frameStack[s.frameStack.length - 1] ?? 'root';
+        const top = frameFor(s, undefined, e.runId);
         // Settle the draft this call was streamed as, so the block keeps its place in the turn (and
         // the reader keeps their scroll position). Match on the call id when the server issued one,
         // else on the tool name — calls are drafted and executed in the same order.
@@ -663,11 +736,16 @@ export const useStream = create<StreamState>((set, get) => ({
 
     socket.on('tool_output', (e: ToolOutputEvent) => {
       if (!onScreen(e.sessionId)) return;
-      set((s) => ({
-        liveItems: s.liveItems.map((it) =>
-          it.kind === 'tool' && it.callId === e.callId ? { ...it, output: it.output + e.chunk } : it,
-        ),
-      }));
+      set((s) => {
+        const frameId = frameFor(s, undefined, e.runId);
+        return {
+          liveItems: s.liveItems.map((it) =>
+            it.kind === 'tool' && it.frameId === frameId && it.callId === e.callId
+              ? { ...it, output: it.output + e.chunk }
+              : it,
+          ),
+        };
+      });
     });
 
     // Vision analysis of a visual_screenshot: attach the thumbnail + Q&A to its tool block.
@@ -776,7 +854,8 @@ export const useStream = create<StreamState>((set, get) => ({
       if (!onScreen(e.sessionId)) return;
       set((s) => ({
         liveItems: s.liveItems.map((it) =>
-          it.kind === 'tool' && it.callId === e.callId
+          // Call ids are only unique within one run, so match inside the run's own frame.
+          it.kind === 'tool' && it.callId === e.callId && it.frameId === frameFor(s, undefined, e.runId)
             ? {
                 ...it,
                 status: e.status,
@@ -811,7 +890,8 @@ export const useStream = create<StreamState>((set, get) => ({
         // Runs are a strict stack (a parent `ask_agent` awaits its child), so the new frame nests
         // under whichever frame is currently streaming. Drop a placeholder in the parent's log to
         // pin the sub-agent bubble at the exact spot the hop happened.
-        const parent = s.frameStack[s.frameStack.length - 1] ?? 'root';
+        // The caller's frame, found by its run — several may be open when subagents run in parallel.
+        const parent = frameFor(s, e.parentRunId ? undefined : e.depth - 1, e.parentRunId);
         const frameId = `f${itemSeq++}`;
         return {
           liveFrames: {
@@ -825,11 +905,12 @@ export const useStream = create<StreamState>((set, get) => ({
               status: 'running',
               startedAt: Date.now(),
               runId: e.childRunId,
+              task: e.task,
             },
           },
           liveItems: [
             ...s.liveItems,
-            { kind: 'agent', id: nextId(), frameId: parent, refFrameId: frameId },
+            { kind: 'agent', id: nextId(), frameId: parent, refFrameId: frameId, callId: e.callId },
           ],
           frameStack: [...s.frameStack, frameId],
           trace: [
@@ -844,19 +925,18 @@ export const useStream = create<StreamState>((set, get) => ({
       set((s) => ({ workingAgents: bumpAgent(s.workingAgents, e.to, -1) }));
       if (!onScreen(e.sessionId)) return;
       set((s) => {
-        const top = s.frameStack[s.frameStack.length - 1];
-        const frame = top ? s.liveFrames[top] : undefined;
-        // Close the top frame (pop the stack) and stamp its outcome + duration for the summary chip.
-        const liveFrames =
-          top && frame
-            ? {
-                ...s.liveFrames,
-                [top]: { ...frame, status: e.status, durationMs: Date.now() - frame.startedAt },
-              }
-            : s.liveFrames;
+        // Close the run that finished — by id, since parallel children end in any order — and stamp
+        // its outcome + duration for the summary chip.
+        const id = frameFor(s, undefined, e.childRunId);
+        const frame = id !== 'root' ? s.liveFrames[id] : undefined;
+        if (!frame) return {};
+        const at = s.frameStack.lastIndexOf(id);
         return {
-          liveFrames,
-          frameStack: top && top !== 'root' ? s.frameStack.slice(0, -1) : s.frameStack,
+          liveFrames: {
+            ...s.liveFrames,
+            [id]: { ...frame, status: e.status, durationMs: Date.now() - frame.startedAt },
+          },
+          frameStack: at >= 0 ? [...s.frameStack.slice(0, at), ...s.frameStack.slice(at + 1)] : s.frameStack,
         };
       });
     });
@@ -883,10 +963,9 @@ export const useStream = create<StreamState>((set, get) => ({
     socket.on('memory_recall', (e: MemoryRecallEvent) => {
       if (e.sessionId !== get().activeSessionId) return;
       set((s) => {
-        const frameId = e.depth === 0 ? 'root' : s.frameStack[s.frameStack.length - 1];
-        const frame = frameId ? s.liveFrames[frameId] : undefined;
-        // A sub-agent's recall lands just before its first token, so the top frame is still its own.
-        if (!frameId || !frame || (e.depth > 0 && frame.agent !== e.agent)) return {};
+        const frameId = frameFor(s, e.depth, e.runId);
+        const frame = s.liveFrames[frameId];
+        if (!frame || (e.depth > 0 && frame.agent !== e.agent)) return {};
         return { liveFrames: { ...s.liveFrames, [frameId]: { ...frame, memories: e.memories } } };
       });
     });
@@ -901,11 +980,10 @@ export const useStream = create<StreamState>((set, get) => ({
         return;
       }
       set((s) => {
-        const frameId = s.frameStack[s.frameStack.length - 1];
-        const frame = frameId ? s.liveFrames[frameId] : undefined;
-        // A sub-agent writes while its own frame is the open one; if the stack has already moved on,
-        // drop the update rather than attributing a plan to the wrong agent.
-        if (!frameId || !frame || frame.agent !== e.agent) return {};
+        const frameId = frameFor(s, e.depth, e.runId);
+        const frame = s.liveFrames[frameId];
+        // Drop an update no open frame claims rather than attribute a plan to the wrong agent.
+        if (!frame || frame.agent !== e.agent) return {};
         return { liveFrames: { ...s.liveFrames, [frameId]: { ...frame, todos: e.items } } };
       });
     });
@@ -924,9 +1002,9 @@ export const useStream = create<StreamState>((set, get) => ({
       // A delegated sub-agent: attribute its usage to its own live frame. Its run reports just
       // before `agent_hop_done` pops the stack, so the top frame is still this sub-agent's.
       set((s) => {
-        const top = s.frameStack[s.frameStack.length - 1];
-        const frame = top ? s.liveFrames[top] : undefined;
-        if (!top || !frame || frame.agent !== e.agent) return {};
+        const top = frameFor(s, e.depth, e.runId);
+        const frame = s.liveFrames[top];
+        if (!frame || frame.agent !== e.agent) return {};
         return {
           liveFrames: {
             ...s.liveFrames,

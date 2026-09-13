@@ -89,6 +89,11 @@ export interface EffectiveSettings {
   tool_parallel_enabled: boolean;
   /** How many calls of a batch may be in flight at once; `0` means unlimited. */
   tool_parallel_max: number;
+  /** Fleet default endpoint + model for `task` subagents (`SUBAGENT_PLAN.md`); '' = the agent's own. */
+  subagent_endpoint_id: string;
+  subagent_model: string;
+  /** Most characters one subagent report may be. */
+  subagent_report_max_chars: number;
   /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
   max_tool_iterations: number;
   /** Ceiling on `ask_agent` delegation depth (depth 0 = the directly-addressed agent). */
@@ -101,6 +106,8 @@ export interface EffectiveSettings {
    * by `AgentRunner`, which is why they ride on the same document the turn already fetches.
    */
   modules_disabled: string[];
+  /** Subagent-profile ids flipped away from each module's `subagentDefault`. */
+  modules_disabled_subagent: string[];
   module_overrides: Record<string, Record<string, string>>;
   modules_custom: CustomModule[];
   /**
@@ -251,10 +258,14 @@ export const settingsService = {
       scoring_max_tokens: doc?.scoring_max_tokens ?? 1024,
       tool_parallel_enabled: doc?.tool_parallel_enabled ?? true,
       tool_parallel_max: doc?.tool_parallel_max ?? 4,
+      subagent_endpoint_id: doc?.subagent_endpoint_id ?? '',
+      subagent_model: doc?.subagent_model ?? '',
+      subagent_report_max_chars: doc?.subagent_report_max_chars ?? 6000,
       max_tool_iterations: doc?.max_tool_iterations ?? 50,
       max_agent_hops: doc?.max_agent_hops ?? env.MAX_AGENT_HOPS,
       agents_md: doc?.agents_md ?? '',
       modules_disabled: (doc?.modules_disabled as string[] | undefined) ?? [],
+      modules_disabled_subagent: (doc?.modules_disabled_subagent as string[] | undefined) ?? [],
       module_overrides:
         (doc?.module_overrides as Record<string, Record<string, string>> | undefined) ?? {},
       modules_custom: (doc?.modules_custom as CustomModule[] | undefined) ?? [],

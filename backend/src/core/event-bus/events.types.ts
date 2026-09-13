@@ -18,6 +18,13 @@ export interface EventContext {
   agentName: string;
   /** Cross-agent hop depth for this event (0 = the directly addressed agent). */
   depth: number;
+  /**
+   * The agent-run producing this event. Depth alone can't say *which* run when several sub-agents
+   * are open at once (a parallel batch of `task` calls), so the recorder and the chat route every
+   * event to its bubble by this id rather than to the top of a frame stack (`SUBAGENT_PLAN.md` §1).
+   * Optional: contexts built outside `AgentRunner` (flows, side tasks) have no run.
+   */
+  runId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +173,20 @@ export interface AskAgentPayload {
   query: string;
   /** The invoked sub-agent's run id — so the UI can tag its bubble and attach its own score. */
   childRunId: string;
+  /**
+   * The caller's tool call that spawned this run, when it was a `task`. The chat nests the bubble
+   * inside that call's card instead of beside it, which keeps a parallel batch's cards adjacent.
+   */
+  callId?: string;
+  /** Present when this hop is a `task` subagent of the caller itself (`SUBAGENT_PLAN.md`). */
+  task?: SubagentTaskInfo;
+}
+
+/** What the chat shows about a `task` child: its label, its mode and the model it runs on. */
+export interface SubagentTaskInfo {
+  description: string;
+  mode: 'explore' | 'work';
+  model: string;
 }
 
 export interface AskAgentDonePayload {
@@ -174,6 +195,8 @@ export interface AskAgentDonePayload {
   to: string;
   depth: number;
   status: 'success' | 'error';
+  /** Which run finished — parallel children end in any order, so the stack top is not an answer. */
+  childRunId: string;
 }
 
 export interface ToolOutputChunkPayload {

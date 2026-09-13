@@ -7,7 +7,7 @@ import type { PromptContext, PromptModule } from '../types';
  * hallucinate dates), its own identity, its role, and where its tools execute. Computed fresh on
  * every prompt rebuild so the timestamp is always current for the turn.
  */
-export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date()): string {
+export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date(), isTask = false): string {
   const iso = now.toISOString();
   // Human-readable UTC rendering (deterministic across hosts, no server-locale surprises).
   const human = new Intl.DateTimeFormat('en-GB', {
@@ -20,7 +20,11 @@ export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date()):
     timeZone: 'UTC',
     timeZoneName: 'short',
   }).format(now);
-  const role = agent.subagent ? 'subagent (reachable via `ask_agent`)' : 'top-level orchestrator';
+  const role = isTask
+    ? 'subagent task — a fresh copy of yourself, started by your own run to do one piece of its work'
+    : agent.subagent
+      ? 'subagent (reachable via `ask_agent`)'
+      : 'top-level orchestrator';
   const execution = agent.isolation_id
     ? 'tools run inside your dedicated isolated container'
     : 'tools run on the backend host';
@@ -67,7 +71,7 @@ export const environmentModule: PromptModule = {
       title: 'Environment',
       placement: 'system_head',
       order: 10,
-      render: (ctx: PromptContext) => renderEnvironmentBlock(ctx.agent, ctx.now),
+      render: (ctx: PromptContext) => renderEnvironmentBlock(ctx.agent, ctx.now, !!ctx.task),
     },
   ],
 };

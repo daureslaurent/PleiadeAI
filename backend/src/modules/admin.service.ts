@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { SettingsModel } from '../domain/settings/settings.model';
-import { MODULES, moduleById, moduleDefaultEnabled } from './registry';
+import { MODULES, moduleById, moduleDefaultEnabled, moduleSubagentDefault } from './registry';
 import { moduleStateFrom } from './state.service';
 import { CUSTOM_MODULE_PREFIX, isCustomModuleId, type BlockPlacement, type CustomModule } from './types';
 
@@ -56,6 +56,35 @@ export async function setModuleEnabled(id: string, enabled: boolean): Promise<vo
   if (id === 'board') set.forum_board_enabled = enabled;
 
   await SettingsModel.updateOne({ key: 'global' }, { $set: set }, { upsert: true });
+}
+
+/**
+ * Put a module in or out of the subagent profile (`SUBAGENT_PLAN.md` §3) — whether it also applies
+ * inside a `task` child run. Stored as ids flipped away from `subagentDefault`, like
+ * `modules_disabled`. A mandatory module has no profile switch: a child needs its clock and its
+ * tool-calling contract as much as any run. Custom modules take the switch too (default in).
+ */
+export async function setModuleSubagentEnabled(id: string, enabled: boolean): Promise<void> {
+  const mod = moduleById(id);
+  const current = await doc();
+  if (!mod) {
+    const custom = ((current.modules_custom as CustomModule[] | undefined) ?? []).some((m) => m.id === id);
+    if (!isCustomModuleId(id) || !custom) throw new ModuleError(`unknown module '${id}'`, 404);
+  }
+  if (mod?.mandatory) {
+    throw new ModuleError(`'${mod.name}' always applies to subagent runs`, 409);
+  }
+
+  const flipped = new Set(((current.modules_disabled_subagent as string[] | undefined) ?? []).filter(Boolean));
+  const def = mod ? moduleSubagentDefault(mod) : true;
+  if (enabled === def) flipped.delete(id);
+  else flipped.add(id);
+
+  await SettingsModel.updateOne(
+    { key: 'global' },
+    { $set: { modules_disabled_subagent: [...flipped] } },
+    { upsert: true },
+  );
 }
 
 /**
@@ -156,6 +185,8 @@ export async function listModules() {
       mandatory: m.mandatory === true,
       defaultEnabled: moduleDefaultEnabled(m),
       enabled: state.enabled(m.id),
+      subagentDefault: m.mandatory === true || moduleSubagentDefault(m),
+      subagentEnabled: state.inSubagentProfile(m.id),
       tools: m.tools ?? [],
       settingsKeys: m.settingsKeys ?? [],
       blocks: (m.blocks ?? []).map((b) => ({
@@ -166,6 +197,6 @@ export async function listModules() {
         override: state.override(m.id, b.title) ?? null,
       })),
     })),
-    custom: state.custom,
+    custom: state.custom.map((c) => ({ ...c, subagentEnabled: state.inSubagentProfile(c.id) })),
   };
 }

@@ -118,6 +118,13 @@ const AgentSchema = new Schema(
     endpoint_id: { type: Schema.Types.ObjectId, ref: 'Endpoint', default: null },
     model: { type: String, default: '' },
     /**
+     * The endpoint + model this agent's `task` subagents run on (`SUBAGENT_PLAN.md`), overriding the
+     * fleet's `settings.subagent_*`. Both empty → the fleet default, and failing that the agent's own
+     * model. Typically a smaller, longer-context model than `model`: children read, the parent judges.
+     */
+    subagent_endpoint_id: { type: Schema.Types.ObjectId, ref: 'Endpoint', default: null },
+    subagent_model: { type: String, default: '' },
+    /**
      * Max tool-call rounds the agent may take in a single turn before the run is cut off (see
      * `AgentRunner`'s tool loop). `null` → the global default. Agents that drive long multi-step
      * flows — notably the visual/desktop agents that burn ~2 rounds per screenshot→act cycle — want

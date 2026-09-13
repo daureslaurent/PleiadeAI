@@ -158,6 +158,19 @@ const SettingsSchema = new Schema(
      * that doesn't enjoy three simultaneous commands.
      */
     tool_parallel_max: { type: Number, default: 4 },
+    /**
+     * **Subagents** (`SUBAGENT_PLAN.md`): the fleet default endpoint + model a `task` child runs on.
+     * An agent may override both (`agents.subagent_*`); empty everywhere means a child runs on its
+     * agent's own model. How many children overlap is that endpoint's `parallel_slots`.
+     */
+    subagent_endpoint_id: { type: String, default: '' },
+    subagent_model: { type: String, default: '' },
+    /**
+     * Ceiling on one subagent report, in characters. The runner also shrinks it to what the parent's
+     * remaining context can hold across the whole batch, so this is the most a report may ever be,
+     * not what it always gets.
+     */
+    subagent_report_max_chars: { type: Number, default: 6000 },
     // Fleet default for the per-turn tool-round ceiling. An agent may override it with its own
     // `max_tool_iterations`; when the agent leaves that blank this value applies. Guards tool loops.
     max_tool_iterations: { type: Number, default: 50 },
@@ -238,6 +251,12 @@ const SettingsSchema = new Schema(
      * ignore the list entirely — the route refuses to write them into it.
      */
     modules_disabled: { type: [String], default: [] },
+    /**
+     * The subagent profile (`SUBAGENT_PLAN.md` §3): ids whose "applies in subagent runs" state the
+     * operator flipped away from the module's `subagentDefault`. Same flipped-from-default shape as
+     * `modules_disabled`, for the same reason.
+     */
+    modules_disabled_subagent: { type: [String], default: [] },
     /**
      * `{ [moduleId]: { [blockTitle]: text } }` — the operator's replacement wording for a block.
      * Only blocks that are pure static text declare themselves `overridable`; a block that renders

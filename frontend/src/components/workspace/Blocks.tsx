@@ -67,7 +67,21 @@ export function Blocks({
   return (
     <>
       {rendered.map((entry, i) => {
-        if (Array.isArray(entry)) return <ToolBatch key={entry[0]!.callId} blocks={entry} />;
+        if (Array.isArray(entry)) {
+          // A batch of `task` calls keeps its one group card, and each subagent's bubble follows it
+          // in the order the calls were issued — they stream side by side, so they read as a set.
+          const subs = entry.filter((t) => t.subagent);
+          return subs.length ? (
+            <div key={entry[0]!.callId}>
+              <ToolBatch blocks={entry} />
+              {subs.map((t) => (
+                <SubAgentBubble key={t.callId} block={t.subagent!} />
+              ))}
+            </div>
+          ) : (
+            <ToolBatch key={entry[0]!.callId} blocks={entry} />
+          );
+        }
         const b = entry;
         if (b.kind === 'text') {
           // Streaming caret on the trailing live prose block, so the reader sees where text lands.
@@ -91,7 +105,16 @@ export function Blocks({
             <ThinkingLine key={i} text={b.text} active={active} />
           );
         }
-        if (b.kind === 'tool') return <ToolCall key={b.callId} block={b} />;
+        if (b.kind === 'tool') {
+          if (!b.subagent) return <ToolCall key={b.callId} block={b} />;
+          // A `task` call: the card carries the brief and the report, the bubble the child's work.
+          return (
+            <div key={b.callId}>
+              <ToolCall block={b} />
+              <SubAgentBubble block={b.subagent} />
+            </div>
+          );
+        }
         return <SubAgentBubble key={i} block={b} />;
       })}
     </>
@@ -195,6 +218,13 @@ function fmtTokens(n: number): string {
 export function activityLabel(blocks: Block[]): string | null {
   const last = blocks[blocks.length - 1];
   if (last?.kind === 'agent' && last.status === 'running') return null;
+  // Waiting on `task` subagents: each running bubble shows its own row. The calls of a batch are
+  // adjacent, so look back through the trailing run of tool blocks rather than only the last one.
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i]!;
+    if (b.kind !== 'tool') break;
+    if (b.subagent?.status === 'running') return null;
+  }
   // The thinking block shows its own live spinner/header, so no separate activity row is needed.
   if (last?.kind === 'reasoning') return null;
   // A call still being written shows its own live header, same as the thinking block.
@@ -284,6 +314,16 @@ function SubAgentBubble({ block }: { block: AgentBlock }) {
             {block.agent}
           </span>
         </span>
+        {/* A `task` subagent says which kind and on which model — a smaller model's report is one to
+            check before relying on it. */}
+        {block.task && (
+          <span
+            className="shrink-0 rounded px-1 py-px font-mono text-[10px] text-slate-400 ring-1 ring-hairline"
+            title={`${block.task.mode === 'explore' ? 'Read-only task' : 'Work task — may change things'} on ${block.task.model}`}
+          >
+            {block.task.mode} · {block.task.model}
+          </span>
+        )}
         {/* Delegated task preview — keeps the collapsed chip informative. */}
         <span className="min-w-0 flex-1 truncate text-[11px] italic text-slate-500">
           {block.query}

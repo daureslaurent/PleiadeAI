@@ -28,6 +28,24 @@ export interface ToolContext {
    */
   askParent?: (question: string) => Promise<string>;
   /**
+   * Run a `task` subagent — a fresh-context copy of the calling agent — and resolve with its report
+   * (`SUBAGENT_PLAN.md`). Present only on a run that may spawn one: never inside a subagent itself,
+   * and not once the hop guard has no depth left.
+   */
+  invokeTask?: (input: {
+    description: string;
+    prompt: string;
+    mode: 'explore' | 'work';
+  }) => Promise<{
+    /** The model the subagent ran on. */
+    model: string;
+    report: string;
+    /** The report was cut to fit the caller's remaining context. */
+    truncated: boolean;
+    /** The subagent ran out of tool rounds before it finished. */
+    cut_off: boolean;
+  }>;
+  /**
    * Ask the human operator a question and block until they reply in the UI (opencode-style).
    * Available to every agent regardless of depth. Rejects on timeout or if the session ends.
    */

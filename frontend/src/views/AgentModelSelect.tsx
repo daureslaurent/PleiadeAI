@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Cpu } from 'lucide-react';
+import { AlertTriangle, Cpu, GitFork } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { agentsApi, endpointsApi, endpointVision, settingsApi, type Endpoint, type InferenceSettings } from '../lib/api';
 
@@ -7,19 +7,33 @@ import { agentsApi, endpointsApi, endpointVision, settingsApi, type Endpoint, ty
  * Assigns an agent's inference target: which endpoint + model it runs on (or the fleet default
  * when left unset). Changes apply immediately (like the isolation selector). Endpoints and their
  * discovered models are managed on the Settings page.
+ *
+ * With `role="subagent"` it edits where the agent's `task` subagents run instead
+ * (`subagent_endpoint_id` / `subagent_model`, `SUBAGENT_PLAN.md`). Unset there inherits the fleet's
+ * subagent default, and failing that the agent's own endpoint + model — which is what the empty
+ * options then say, along with how many children that endpoint runs at once.
  */
 export function AgentModelSelect({
   agentId,
   endpointId,
   model,
   visual = false,
+  role = 'agent',
+  agentEndpointId = null,
+  agentModel = '',
 }: {
   agentId: string;
   endpointId: string | null;
   model: string;
   /** Whether this agent is visual (isolation image has the visual layer) — drives the vision warning. */
   visual?: boolean;
+  /** Which of the agent's two targets this edits: its own turns, or its `task` subagents. */
+  role?: 'agent' | 'subagent';
+  /** `role="subagent"` only: the agent's own target, which an unset subagent target falls back to. */
+  agentEndpointId?: string | null;
+  agentModel?: string;
 }) {
+  const isSub = role === 'subagent';
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [settings, setSettings] = useState<InferenceSettings | null>(null);
   const [selectedEp, setSelectedEp] = useState<string>(endpointId ?? '');
@@ -40,7 +54,15 @@ export function AgentModelSelect({
   async function apply(next: { endpoint_id?: string | null; model?: string }) {
     setBusy(true);
     try {
-      await agentsApi.update(agentId, next);
+      await agentsApi.update(
+        agentId,
+        isSub
+          ? {
+              ...('endpoint_id' in next ? { subagent_endpoint_id: next.endpoint_id } : {}),
+              ...('model' in next ? { subagent_model: next.model } : {}),
+            }
+          : next,
+      );
     } finally {
       setBusy(false);
     }
@@ -58,12 +80,23 @@ export function AgentModelSelect({
   }
 
   const active = endpoints.find((e) => e._id === selectedEp);
-  const defaultEp = endpoints.find((e) => e.is_default);
-  // The endpoint whose models/default apply: the chosen one, or the fleet default when unset.
+  const fleetDefaultEp = endpoints.find((e) => e.is_default);
+  // What an unset target falls back to. For the agent's own turns that is the fleet default endpoint.
+  // For its subagents it is the fleet's subagent default when one is set, else the agent's own target
+  // — the same order the runner resolves in.
+  const fleetSubEp = settings?.subagent_endpoint_id
+    ? endpoints.find((e) => e._id === settings.subagent_endpoint_id)
+    : undefined;
+  const agentEp = agentEndpointId ? endpoints.find((e) => e._id === agentEndpointId) : fleetDefaultEp;
+  const inheritsFleetSub = Boolean(settings?.subagent_endpoint_id || settings?.subagent_model);
+  const defaultEp = isSub ? (inheritsFleetSub ? (fleetSubEp ?? agentEp) : agentEp) : fleetDefaultEp;
+  // The endpoint whose models/default apply: the chosen one, or the fallback when unset.
   const effectiveEp = active ?? defaultEp;
   const models = effectiveEp?.models ?? [];
   // What "Default model" resolves to on the effective endpoint (its default, else first model).
-  const resolvedDefault = effectiveEp?.default_model || models[0] || '';
+  const inheritedModel = isSub && !active ? (inheritsFleetSub ? settings?.subagent_model : agentModel) : '';
+  const resolvedDefault = inheritedModel || effectiveEp?.default_model || models[0] || '';
+  const defaultLabel = isSub ? (inheritsFleetSub ? 'Fleet subagent default' : "Agent's own") : 'Default';
 
   // A visual agent interprets screenshots via the *global* Vision endpoint (Settings), not its own
   // model — so warn only when that global endpoint is unset or not marked vision-capable. The agent's
@@ -79,7 +112,7 @@ export function AgentModelSelect({
       <div className="flex flex-col gap-3 sm:flex-row">
         <label className="flex-1">
           <div className="mb-1 flex items-center gap-1.5 text-xs text-slate-400">
-            <Cpu size={13} /> Endpoint
+            {isSub ? <GitFork size={13} /> : <Cpu size={13} />} {isSub ? 'Subagent endpoint' : 'Endpoint'}
           </div>
           <select
             value={selectedEp}
@@ -88,7 +121,8 @@ export function AgentModelSelect({
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
           >
             <option value="">
-              Default{defaultEp ? ` — ${defaultEp.name}` : ''}
+              {defaultLabel}
+              {defaultEp ? ` — ${defaultEp.name}` : ''}
             </option>
             {endpoints.map((e) => (
               <option key={e._id} value={e._id}>
@@ -100,7 +134,7 @@ export function AgentModelSelect({
         </label>
 
         <label className="flex-1">
-          <div className="mb-1 text-xs text-slate-400">Model</div>
+          <div className="mb-1 text-xs text-slate-400">{isSub ? 'Subagent model' : 'Model'}</div>
           <select
             value={selectedModel}
             disabled={busy}
@@ -108,7 +142,8 @@ export function AgentModelSelect({
             className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
           >
             <option value="">
-              Default{resolvedDefault ? ` — ${resolvedDefault}` : ' model'}
+              {defaultLabel}
+              {resolvedDefault ? ` — ${resolvedDefault}` : ' model'}
             </option>
             {models.map((m) => (
               <option key={m} value={m}>
@@ -142,8 +177,26 @@ export function AgentModelSelect({
         </div>
       )}
 
+      {isSub && effectiveEp && (
+        <p className="text-xs text-slate-400">
+          {(effectiveEp.parallel_slots ?? 1) > 1
+            ? `Up to ${effectiveEp.parallel_slots} explore subagents run at once on ${effectiveEp.name}`
+            : `Subagents run one after another on ${effectiveEp.name}`}{' '}
+          — its Parallel streams, set on the Connections page.
+        </p>
+      )}
+
       <p className="text-xs text-slate-500">
-        Leave both on <span className="text-slate-400">Default</span> to use the fleet default. Add
+        {isSub ? (
+          <>
+            Where this agent's <code>task</code> subagents run. Leave both unset to inherit the fleet
+            subagent model (Settings → Fleet), or this agent's own model when there is none. Add
+          </>
+        ) : (
+          <>
+            Leave both on <span className="text-slate-400">Default</span> to use the fleet default. Add
+          </>
+        )}
         endpoints and refresh their models on the{' '}
         <Link to="/settings" className="text-accent hover:underline">
           Settings

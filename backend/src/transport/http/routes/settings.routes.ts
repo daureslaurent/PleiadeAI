@@ -130,6 +130,14 @@ settingsRouter.put('/', async (req, res) => {
   if (b.tool_parallel_enabled !== undefined) patch.tool_parallel_enabled = Boolean(b.tool_parallel_enabled);
   if (b.tool_parallel_max !== undefined)
     patch.tool_parallel_max = Math.max(0, Math.trunc(Number(b.tool_parallel_max) || 0));
+  // Subagents (`SUBAGENT_PLAN.md` §4). An empty endpoint/model is "the agent's own", not an error.
+  if (typeof b.subagent_endpoint_id === 'string') patch.subagent_endpoint_id = b.subagent_endpoint_id.trim();
+  if (typeof b.subagent_model === 'string') patch.subagent_model = b.subagent_model.trim();
+  if (b.subagent_report_max_chars !== undefined)
+    patch.subagent_report_max_chars = Math.min(
+      50_000,
+      Math.max(500, Math.trunc(Number(b.subagent_report_max_chars) || 6000)),
+    );
   // Per-turn tool-round ceiling; at least 1 round.
   if (b.max_tool_iterations !== undefined)
     patch.max_tool_iterations = Math.max(1, Number(b.max_tool_iterations) || 50);
@@ -166,6 +174,14 @@ settingsRouter.put('/', async (req, res) => {
   if (Array.isArray(b.modules_disabled)) {
     patch.modules_disabled = (b.modules_disabled as unknown[]).filter((id): id is string => {
       if (typeof id !== 'string') return false;
+      const mod = moduleById(id);
+      return !!mod && mod.mandatory !== true;
+    });
+  }
+  if (Array.isArray(b.modules_disabled_subagent)) {
+    patch.modules_disabled_subagent = (b.modules_disabled_subagent as unknown[]).filter((id): id is string => {
+      if (typeof id !== 'string') return false;
+      if (isCustomModuleId(id)) return true;
       const mod = moduleById(id);
       return !!mod && mod.mandatory !== true;
     });

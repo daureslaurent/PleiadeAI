@@ -21,6 +21,13 @@ export const MODULE_GROUPS = ['core', 'operator', 'self', 'work', 'capabilities'
 export type ModuleGroup = (typeof MODULE_GROUPS)[number];
 
 /**
+ * Which kind of run a prompt is being assembled for. `turn` is every ordinary run; `subagent` is a
+ * `task` child (`SUBAGENT_PLAN.md` §3), which applies the operator's subagent profile on top of the
+ * ordinary switches — so a small model's child prompt can drop memory, the forum and the rest.
+ */
+export type ModuleScope = 'turn' | 'subagent';
+
+/**
  * Everything a block may render from. Prepared once per turn by `AgentRunner`: modules render, they
  * never fetch. The runner is also the only place that knows a module is *off* early enough to skip
  * the query behind it — which is the real saving, not the tokens.
@@ -41,8 +48,34 @@ export interface PromptContext {
   modes: { system: string[]; user: string[] };
   /** How this instance executes a batch of tool calls — what the batching block may promise. */
   toolParallel: { enabled: boolean; max: number };
+  /** Set when this run *is* a `task` subagent: what the child-contract block renders from. */
+  task?: TaskPromptState | null;
+  /** Set when this run may start `task` subagents: what the parent-guidance block renders from. */
+  subagents?: SubagentsPromptState | null;
   /** Injected so the environment block is deterministic under test. */
   now?: Date;
+}
+
+/** A `task` child's own brief framing (`SUBAGENT_PLAN.md` §3). */
+export interface TaskPromptState {
+  mode: 'explore' | 'work';
+  description: string;
+  /** The size the report is cut to — the child is told, so it writes to fit. */
+  reportMaxChars: number;
+  /** The agent whose run started this one (the same agent, one level up). */
+  parentName: string;
+}
+
+/** What a parent needs to be told about the subagents it can start. */
+export interface SubagentsPromptState {
+  /** How many `explore` tasks run at once: the subagent endpoint's slots, capped by the fleet. */
+  slots: number;
+  /** Whether a batch overlaps at all (`tool_parallel_enabled`). */
+  parallel: boolean;
+  /** The model the children run on. */
+  model: string;
+  /** True when the children run on a different model than the parent. */
+  differentModel: boolean;
 }
 
 /** What the image note needs to know: what the agent can see, and what is reachable by handle. */
@@ -103,6 +136,12 @@ export interface PromptModule {
   mandatory?: boolean;
   /** Ships off, the operator opts in. Defaults to true. */
   defaultEnabled?: boolean;
+  /**
+   * Whether the module also applies inside a `task` subagent run, until the operator says otherwise
+   * (`SUBAGENT_PLAN.md` §3). Defaults to true. Off for what a child doing one narrow job has no use
+   * for — its memory silo, the forum, the board — so a small model's prompt starts lean.
+   */
+  subagentDefault?: boolean;
   /** Core tools this module owns. Disabling the module drops them from every agent's toolset. */
   tools?: string[];
   /** Existing settings keys the module's detail view surfaces. No data migration — see §6. */

@@ -1,7 +1,7 @@
 import type { AgentDoc } from '../domain/agents/agent.model';
 import { assembleSystemMessage, assembleUserSuffix } from './assemble';
 import type { ModuleState } from './state.service';
-import type { PromptContext } from './types';
+import type { ModuleScope, PromptContext } from './types';
 
 /**
  * A `PromptContext` for the settings page's preview pane.
@@ -12,7 +12,7 @@ import type { PromptContext } from './types';
  * and a block rendered from an empty result would show as absent, which reads as "this module does
  * nothing" rather than "there was nothing to recall just now".
  */
-export function previewContext(agent: AgentDoc, houseRules: string): PromptContext {
+export function previewContext(agent: AgentDoc, houseRules: string, scope: ModuleScope = 'turn'): PromptContext {
   return {
     agent,
     houseRules,
@@ -54,15 +54,32 @@ export function previewContext(agent: AgentDoc, houseRules: string): PromptConte
     // The preview shows the block in its on-shape; the wording it takes from the live setting is a
     // sentence, and reading the settings doc to render a preview is exactly what this avoids.
     toolParallel: { enabled: true, max: 4 },
+    // A subagent preview renders the child's contract; an ordinary one, the parent's guidance.
+    task:
+      scope === 'subagent'
+        ? {
+            mode: 'explore',
+            description: '(sample) map the auth middleware',
+            reportMaxChars: 6000,
+            parentName: agent.name,
+          }
+        : null,
+    subagents:
+      scope === 'subagent' ? null : { slots: 2, parallel: true, model: '(sample) small-model', differentModel: true },
   };
 }
 
 /** The assembled prompt for one agent under the current switches, system and user halves both. */
-export function previewPrompt(state: ModuleState, agent: AgentDoc, houseRules: string) {
-  const ctx = previewContext(agent, houseRules);
-  const system = assembleSystemMessage(state, ctx);
+export function previewPrompt(
+  state: ModuleState,
+  agent: AgentDoc,
+  houseRules: string,
+  scope: ModuleScope = 'turn',
+) {
+  const ctx = previewContext(agent, houseRules, scope);
+  const system = assembleSystemMessage(state, ctx, scope);
   return {
     system: typeof system.content === 'string' ? system.content : '',
-    userSuffix: assembleUserSuffix(state, ctx),
+    userSuffix: assembleUserSuffix(state, ctx, scope),
   };
 }

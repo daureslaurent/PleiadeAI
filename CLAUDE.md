@@ -62,6 +62,20 @@ Key seams:
   and runs each group with a concurrency cap. Each call buffers its own messages and the buffers are
   spliced back in *emission* order, so the transcript is identical to the sequential one; the chat
   draws such a group as one card with a waterfall bar per call.
+- **Subagents (`tools/core/task.ts`, spec `SUBAGENT_PLAN.md`).** `task` hands a self-contained brief
+  to a **fresh-context copy of the calling agent** and returns only its report. That keeps the reading
+  out of the parent's context, so a big small-window model can direct a small long-context one. The
+  child runs on the agent's `subagent_endpoint_id/model`, else the fleet's `settings.subagent_*`, else
+  the agent's own model. `explore` children are read-only (toolset narrowed by `mayRead`, each call
+  re-checked by `isParallelSafe`) and parallel-safe. `work` children run alone. How many run at once is
+  the **subagent endpoint's `parallel_slots`**: a per-run `Semaphore` held for a child's whole run,
+  reserved in emission order, so 1 slot means strictly one child after another. Reports are capped by
+  `reportBudget` from the parent's remaining `n_ctx`. Children never hold `task`/`ask_agent`/
+  `annuaire`/`ask_parent`/`ask_user`/`todowrite`/`loop_done`, and they assemble their prompt in module
+  scope `subagent`: each module has an "In subagent runs" switch (`modules_disabled_subagent`,
+  default from `subagentDefault`). Because several runs stream at once, **live events are routed by
+  `ctx.runId`, never by a frame stack**, in both `TurnRecorder` and the chat store. A task bubble nests
+  inside its tool block (`tool.subagent`).
 - **Tools vs Skills.** Core tools live in `tools/core/` and are registered statically in
   `tools/registry.ts`. Skills are user-authored TS/Python stored in MongoDB and wrapped as tools at
   resolve time. `resolveTools()` binds core names directly and looks the rest up as skills; disabled

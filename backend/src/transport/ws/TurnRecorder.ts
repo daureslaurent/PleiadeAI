@@ -8,6 +8,7 @@ import type {
   TodoItemPayload,
   RecalledMemory,
   StreamChunkPayload,
+  SubagentTaskInfo,
   ToolBatchInfo,
   ToolCompletePayload,
   ToolInvokePayload,
@@ -24,7 +25,12 @@ import type {
  * an identical `Block[]` tree + debugger trace, so the backend can persist the full turn itself.
  *
  * Kept deliberately in lockstep with the frontend reducer: same block shapes, same coalescing, same
- * frame-stack nesting — so a turn saved here and one saved by the client hydrate identically.
+ * nesting — so a turn saved here and one saved by the client hydrate identically.
+ *
+ * Events are routed to their frame **by run id** (`ctx.runId`), not to the top of a stack: a parallel
+ * batch of `task` subagents keeps several frames open at once, and the stack top is then whichever
+ * one happened to open last (`SUBAGENT_PLAN.md` §1). The stack survives only as the fallback for an
+ * event that carries no run id.
  */
 
 export type Block =
@@ -44,8 +50,13 @@ export type Block =
       /** Wall-clock start + duration, so a rehydrated turn can still draw the batch's waterfall. */
       startedAt?: number;
       durationMs?: number;
+      /** The subagent a `task` call ran — nested in the call's card rather than beside it. */
+      subagent?: AgentBlock;
     }
-  | {
+  | AgentBlock;
+
+/** A delegated run's bubble: an `ask_agent` hop, or a `task` subagent. */
+export type AgentBlock = {
       kind: 'agent';
       agent: string;
       from: string;
@@ -61,6 +72,8 @@ export type Block =
       memories?: RecalledMemory[];
       /** The checklist this sub-agent wrote during its run, if any. */
       todos?: TodoItemPayload[];
+      /** Set when this is a `task` subagent: its label, mode and model. */
+      task?: SubagentTaskInfo;
       children: Block[];
     };
 
@@ -90,7 +103,7 @@ type LiveItem =
       startedAt?: number;
       durationMs?: number;
     }
-  | { kind: 'agent'; frameId: string; refFrameId: string };
+  | { kind: 'agent'; frameId: string; refFrameId: string; callId?: string };
 
 interface Frame {
   agent: string;
@@ -108,6 +121,7 @@ interface Frame {
   memories?: RecalledMemory[];
   /** The checklist this frame's agent wrote (`todowrite`), so a mid-turn reload keeps its bubble. */
   todos?: TodoItemPayload[];
+  task?: SubagentTaskInfo;
 }
 
 /** Pull a human-readable output string out of a tool result (mirrors the frontend helper). */
@@ -147,7 +161,7 @@ type SnapshotItem =
       startedAt?: number;
       durationMs?: number;
     }
-  | { kind: 'agent'; id: string; frameId: string; refFrameId: string };
+  | { kind: 'agent'; id: string; frameId: string; refFrameId: string; callId?: string };
 
 /**
  * Point-in-time mirror of the in-flight turn, shaped so a (re)connecting client can drop it straight
@@ -174,6 +188,7 @@ export interface TurnSnapshot {
       contextWindow?: number;
       runId?: string;
       memories?: RecalledMemory[];
+      task?: SubagentTaskInfo;
     }
   >;
   frameStack: string[];
@@ -259,14 +274,38 @@ export class TurnRecorder {
     return this.frameStack[this.frameStack.length - 1] ?? 'root';
   }
 
+  /**
+   * The frame an event belongs to. Depth 0 is always the root; a deeper event finds the frame whose
+   * run produced it. Only an event with no run id falls back to the most recently opened frame.
+   */
+  private frameFor(depth: number, runId: string | undefined): string {
+    if (depth === 0) return 'root';
+    if (runId) {
+      for (const [id, f] of this.frames) if (f.runId === runId) return id;
+    }
+    return this.top;
+  }
+
+  /** The tool item for a call in its own frame. Call ids are only unique per run, not per turn. */
+  private toolItem(frameId: string, callId: string): Extract<LiveItem, { kind: 'tool' }> | undefined {
+    return this.items.find(
+      (it): it is Extract<LiveItem, { kind: 'tool' }> =>
+        it.kind === 'tool' && it.frameId === frameId && it.callId === callId,
+    );
+  }
+
   private handleChunk(p: StreamChunkPayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
     const kind = p.isReasoning ? ('reasoning' as const) : ('text' as const);
-    const last = this.items[this.items.length - 1];
-    if (last && last.kind === kind && last.frameId === this.top) {
+    const frameId = this.frameFor(p.ctx.depth, p.ctx.runId);
+    // Coalesce into this frame's own latest item when it is of the same kind. Parallel children
+    // interleave in the flat log, so the log's last item is usually a sibling's — looking back to this
+    // frame's last item keeps each bubble's prose in one piece.
+    const last = this.lastItemOf(frameId);
+    if (last && (last.kind === 'text' || last.kind === 'reasoning') && last.kind === kind) {
       last.text += p.content;
     } else {
-      this.items.push({ kind, frameId: this.top, text: p.content });
+      this.items.push({ kind, frameId, text: p.content });
     }
     if (!p.isReasoning) return;
     this.reasoning += p.content;
@@ -292,7 +331,7 @@ export class TurnRecorder {
     if (!this.mine(p.ctx.sessionId)) return;
     this.items.push({
       kind: 'tool',
-      frameId: this.top,
+      frameId: this.frameFor(p.ctx.depth, p.ctx.runId),
       callId: p.callId,
       tool: p.tool,
       args: p.args,
@@ -305,25 +344,23 @@ export class TurnRecorder {
 
   private handleToolOutput(p: ToolOutputChunkPayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
-    for (const it of this.items) {
-      if (it.kind === 'tool' && it.callId === p.callId) it.output += p.chunk;
-    }
+    const it = this.toolItem(this.frameFor(p.ctx.depth, p.ctx.runId), p.callId);
+    if (it) it.output += p.chunk;
   }
 
   private handleToolComplete(p: ToolCompletePayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
-    for (const it of this.items) {
-      if (it.kind === 'tool' && it.callId === p.callId) {
-        it.status = p.status;
-        it.result = p.result;
-        it.output = it.output || resultToOutput(p.result);
-        it.startedAt = p.startedAt;
-        it.durationMs = p.durationMs;
-        if (p.batch) it.batch = p.batch;
-        const pics = p.images?.filter((img) => img.kind !== 'blob' && img.dataUrl);
-        if (pics?.length) {
-          it.images = pics.map((img) => ({ id: img.id, dataUrl: img.dataUrl! }));
-        }
+    const it = this.toolItem(this.frameFor(p.ctx.depth, p.ctx.runId), p.callId);
+    if (it) {
+      it.status = p.status;
+      it.result = p.result;
+      it.output = it.output || resultToOutput(p.result);
+      it.startedAt = p.startedAt;
+      it.durationMs = p.durationMs;
+      if (p.batch) it.batch = p.batch;
+      const pics = p.images?.filter((img) => img.kind !== 'blob' && img.dataUrl);
+      if (pics?.length) {
+        it.images = pics.map((img) => ({ id: img.id, dataUrl: img.dataUrl! }));
       }
     }
     this.trace.push({
@@ -336,7 +373,7 @@ export class TurnRecorder {
 
   private handleHop(p: AskAgentPayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
-    const parent = this.top;
+    const parent = this.frameFor(p.ctx.depth, p.ctx.runId);
     const frameId = `f${this.seq++}`;
     this.frames.set(frameId, {
       agent: p.to,
@@ -346,21 +383,26 @@ export class TurnRecorder {
       status: 'running',
       startedAt: Date.now(),
       runId: p.childRunId,
+      task: p.task,
     });
-    this.items.push({ kind: 'agent', frameId: parent, refFrameId: frameId });
+    this.items.push({ kind: 'agent', frameId: parent, refFrameId: frameId, callId: p.callId });
     this.frameStack.push(frameId);
     this.trace.push({ kind: 'hop', label: `${p.from} → ${p.to}`, detail: p.query, depth: p.depth });
   }
 
   private handleHopDone(p: AskAgentDonePayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
-    const top = this.top;
-    const frame = this.frames.get(top);
+    // Close the run that finished, wherever it sits: parallel children end in any order.
+    const frameId = this.frameFor(p.depth, p.childRunId);
+    const frame = this.frames.get(frameId);
     if (frame) {
       frame.status = p.status;
       frame.durationMs = Date.now() - frame.startedAt;
     }
-    if (top !== 'root') this.frameStack.pop();
+    if (frameId !== 'root') {
+      const at = this.frameStack.lastIndexOf(frameId);
+      if (at >= 0) this.frameStack.splice(at, 1);
+    }
   }
 
   private handleContext(p: ContextUsagePayload): void {
@@ -373,7 +415,7 @@ export class TurnRecorder {
       return;
     }
     // A sub-agent's usage: attribute it to its own (still-open) frame, matching the frontend.
-    const frame = this.frames.get(this.top);
+    const frame = this.frames.get(this.frameFor(p.ctx.depth, p.ctx.runId));
     if (frame && frame.agent === p.ctx.agentName) {
       frame.promptTokens = p.promptTokens;
       frame.contextWindow = p.contextWindow;
@@ -387,7 +429,7 @@ export class TurnRecorder {
    */
   private handleMemory(p: MemoryRecallPayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
-    const frame = p.ctx.depth === 0 ? this.frames.get('root') : this.frames.get(this.top);
+    const frame = this.frames.get(this.frameFor(p.ctx.depth, p.ctx.runId));
     if (!frame) return;
     if (p.ctx.depth > 0 && frame.agent !== p.ctx.agentName) return;
     frame.memories = p.memories;
@@ -400,15 +442,29 @@ export class TurnRecorder {
    */
   private handleTodo(p: TodoUpdatePayload): void {
     if (!this.mine(p.ctx.sessionId)) return;
-    const frame = p.ctx.depth === 0 ? this.frames.get('root') : this.frames.get(this.top);
+    const frame = this.frames.get(this.frameFor(p.ctx.depth, p.ctx.runId));
     if (!frame) return;
     if (p.ctx.depth > 0 && frame.agent !== p.ctx.agentName) return;
     frame.todos = p.items;
   }
 
+  /** The most recent item a frame wrote — what a new chunk from that frame may coalesce into. */
+  private lastItemOf(frameId: string): LiveItem | undefined {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      if (this.items[i]!.frameId === frameId) return this.items[i];
+    }
+    return undefined;
+  }
+
   /** Fold the flat log for `frameId` into the nested Block tree (mirrors the frontend `buildBlocks`). */
   private buildBlocks(frameId: string): Block[] {
     const out: Block[] = [];
+    // A `task` hop names the call that spawned it, and its bubble renders inside that call's card —
+    // a sibling bubble would sit between the cards of a parallel batch and split it apart.
+    const nested = new Map<string, string>();
+    for (const it of this.items) {
+      if (it.frameId === frameId && it.kind === 'agent' && it.callId) nested.set(it.callId, it.refFrameId);
+    }
     for (const it of this.items) {
       if (it.frameId !== frameId) continue;
       if (it.kind === 'text') out.push({ kind: 'text', text: it.text });
@@ -426,28 +482,38 @@ export class TurnRecorder {
           batch: it.batch,
           startedAt: it.startedAt,
           durationMs: it.durationMs,
+          ...(nested.has(it.callId) ? { subagent: this.agentBlock(nested.get(it.callId)!) } : {}),
         });
       } else {
-        const f = this.frames.get(it.refFrameId);
-        if (!f) continue;
-        out.push({
-          kind: 'agent',
-          agent: f.agent,
-          from: f.from,
-          depth: f.depth,
-          query: f.query,
-          status: f.status,
-          durationMs: f.durationMs,
-          promptTokens: f.promptTokens,
-          contextWindow: f.contextWindow,
-          runId: f.runId,
-          memories: f.memories,
-          todos: f.todos,
-          children: this.buildBlocks(it.refFrameId),
-        });
+        // Already nested inside its call's card above.
+        if (it.callId && this.toolItem(frameId, it.callId)) continue;
+        const block = this.agentBlock(it.refFrameId);
+        if (block) out.push(block);
       }
     }
     return out;
+  }
+
+  /** One sub-agent frame as its bubble, its own log folded in as children. */
+  private agentBlock(refFrameId: string): AgentBlock | undefined {
+    const f = this.frames.get(refFrameId);
+    if (!f) return undefined;
+    return {
+      kind: 'agent',
+      agent: f.agent,
+      from: f.from,
+      depth: f.depth,
+      query: f.query,
+      status: f.status,
+      durationMs: f.durationMs,
+      promptTokens: f.promptTokens,
+      contextWindow: f.contextWindow,
+      runId: f.runId,
+      memories: f.memories,
+      todos: f.todos,
+      task: f.task,
+      children: this.buildBlocks(refFrameId),
+    };
   }
 
   /**
@@ -477,7 +543,7 @@ export class TurnRecorder {
           startedAt: it.startedAt,
           durationMs: it.durationMs,
         };
-      return { kind: 'agent', id, frameId: it.frameId, refFrameId: it.refFrameId };
+      return { kind: 'agent', id, frameId: it.frameId, refFrameId: it.refFrameId, callId: it.callId };
     });
     const frames: TurnSnapshot['frames'] = {};
     for (const [id, f] of this.frames) frames[id] = { id, ...f };

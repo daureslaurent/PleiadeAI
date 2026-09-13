@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AtSign, Box, Cpu, FileLock2, Lock, Mail, NotebookPen, Play, Save, Smartphone, Sparkles, Trash2, Loader2, X } from 'lucide-react';
+import { AtSign, Box, Cpu, FileLock2, GitFork, Lock, Mail, NotebookPen, Play, Save, Smartphone, Sparkles, Trash2, Loader2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
   agentsApi,
@@ -65,6 +65,9 @@ interface Draft {
   isolation_volume_mode: 'individual' | 'shared';
   endpoint_id: string | null;
   model: string;
+  /** Where this agent's `task` subagents run. Edited in place by its picker, never sent on Save. */
+  subagent_endpoint_id: string | null;
+  subagent_model: string;
   /** Max tool round-trips per turn (`null` = global default). Empty input in the form → null. */
   max_tool_iterations: number | null;
   color: number | null;
@@ -99,6 +102,8 @@ const blank = (): Draft => ({
   isolation_volume_mode: 'individual',
   endpoint_id: null,
   model: '',
+  subagent_endpoint_id: null,
+  subagent_model: '',
   max_tool_iterations: null,
   color: null,
   icon: '',
@@ -174,6 +179,8 @@ export function AgentsView() {
       isolation_volume_mode: a.isolation_volume_mode ?? 'individual',
       endpoint_id: a.endpoint_id ?? null,
       model: a.model ?? '',
+      subagent_endpoint_id: a.subagent_endpoint_id ?? null,
+      subagent_model: a.subagent_model ?? '',
       max_tool_iterations: a.max_tool_iterations ?? null,
       color: a.color ?? null,
       icon: a.icon ?? '',
@@ -724,6 +731,23 @@ export function AgentsView() {
                 endpointId={draft.endpoint_id}
                 model={draft.model}
                 visual={draft.visual}
+              />
+
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <GitFork size={13} /> Subagents
+                  <span className="normal-case text-slate-600">
+                    — endpoint &amp; model this agent's <code>task</code> subagents run on
+                  </span>
+                </span>
+              </FieldLabel>
+              <AgentModelSelect
+                agentId={draft._id}
+                role="subagent"
+                endpointId={draft.subagent_endpoint_id}
+                model={draft.subagent_model}
+                agentEndpointId={draft.endpoint_id}
+                agentModel={draft.model}
               />
 
               <FieldLabel>

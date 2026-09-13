@@ -1,4 +1,4 @@
-import { AtSign, ChevronsRight, FileLock2, Gauge, ListChecks, Sparkles } from 'lucide-react';
+import { AtSign, ChevronsRight, FileLock2, Gauge, GitFork, ListChecks, Sparkles } from 'lucide-react';
 import { Section } from '../../../components/ui';
 import { FinetuneServersManager } from '../managers/FinetuneServersManager';
 import {
@@ -48,6 +48,34 @@ export function FleetPanel() {
             label="Calls in flight at once"
             hint="0 means unlimited — the whole safe run starts together. A small number is the throttle for an isolated container that does not enjoy several simultaneous commands; it never changes what runs, only how much of it runs at the same moment."
             min={0}
+          />
+        </div>
+      </Section>
+
+      <Section title="Subagents" icon={<GitFork size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          An agent can hand a self-contained piece of its own work to a <code>task</code> subagent —
+          a fresh copy of itself with an empty context — and gets back only a short report. The
+          reading stays out of the parent's context, so a big model with a small window can direct
+          a smaller, long-context one. Independent <em>explore</em> tasks run together: as many as the
+          subagent endpoint's <strong>Parallel streams</strong> (Connections page) allow, and one
+          after another when that is 1. A <em>work</em> task, which may change things, always runs
+          alone. The prompt side is the Subagents module; which other modules a child also gets is
+          its "In subagent runs" switch on the Modules page.
+        </p>
+        <div className="space-y-4">
+          <EndpointModelPicker
+            endpointField="subagent_endpoint_id"
+            modelField="subagent_model"
+            label="Subagent model"
+            noneLabel="Each agent's own model"
+            hint="Where task subagents run, unless an agent picks its own on the Agents page. A smaller model with a long context suits them: children read and report, the parent judges. Its endpoint's Parallel streams is how many children run at once."
+          />
+          <SettingNumber
+            field="subagent_report_max_chars"
+            label="Longest report (characters)"
+            hint="The most one subagent report may be. Each report is also shrunk to what the parent's remaining context can hold across every task in the same reply, so a small-window parent never overflows when several reports land together."
+            min={500}
           />
         </div>
       </Section>

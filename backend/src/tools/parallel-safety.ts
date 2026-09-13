@@ -49,3 +49,15 @@ export function isParallelSafe(tool: Tool | undefined, args: Record<string, unkn
   if (typeof tool.parallelSafe === 'boolean') return tool.parallelSafe;
   return UNDECLARED_READ_ONLY.has(tool.name);
 }
+
+/**
+ * Whether a tool can *ever* be a read — what an `explore` subagent's toolset is narrowed to
+ * (`SUBAGENT_PLAN.md` §2). A predicate tool qualifies because some of its verbs read (`forum`'s
+ * `read_thread`); the call itself is still checked with {@link isParallelSafe} before it runs, which
+ * is what refuses that same tool's `post_thread`.
+ */
+export function mayRead(tool: Tool): boolean {
+  if (typeof tool.parallelSafe === 'function') return true;
+  if (typeof tool.parallelSafe === 'boolean') return tool.parallelSafe;
+  return UNDECLARED_READ_ONLY.has(tool.name);
+}

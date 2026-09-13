@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../domain/agents/jit-builder';
 import { blocksAt } from './registry';
 import type { ModuleState } from './state.service';
-import type { BlockPlacement, PromptContext } from './types';
+import type { BlockPlacement, ModuleScope, PromptContext } from './types';
 
 /**
  * Assemble a turn's prompt out of the enabled modules (`MODULES_PLAN.md` §7).
@@ -16,11 +16,16 @@ import type { BlockPlacement, PromptContext } from './types';
  * outranking the instructions it was given; `system_suffix` is the conversation's modes, which
  * outrank both and therefore come last.
  */
-function renderPlacement(state: ModuleState, ctx: PromptContext, placement: BlockPlacement): string[] {
+function renderPlacement(
+  state: ModuleState,
+  ctx: PromptContext,
+  placement: BlockPlacement,
+  scope: ModuleScope,
+): string[] {
   const out: { order: number; text: string }[] = [];
 
   for (const { module, block } of blocksAt(placement)) {
-    if (!state.enabled(module.id)) continue;
+    if (!state.enabled(module.id, scope)) continue;
     const override = block.overridable ? state.override(module.id, block.title) : undefined;
     const text = override ?? block.render(ctx);
     if (text && text.trim()) out.push({ order: block.order, text: text.trim() });
@@ -29,7 +34,7 @@ function renderPlacement(state: ModuleState, ctx: PromptContext, placement: Bloc
   // Operator-authored modules are ordinary blocks at the same placement — they interleave by
   // `order` rather than being bolted on at the end, which is what makes "put this before the
   // notebook" expressible at all.
-  for (const custom of state.customAt(placement)) {
+  for (const custom of state.customAt(placement, scope)) {
     const body = custom.text.trim();
     const needsHeading = placement !== 'user_suffix' && !body.startsWith('## ');
     out.push({ order: custom.order, text: needsHeading ? `## ${custom.name}\n${body}` : body });
@@ -43,9 +48,16 @@ function renderPlacement(state: ModuleState, ctx: PromptContext, placement: Bloc
  * (including the GGUFs we serve) enforce "System message must be at the beginning" and hard-fail on
  * one, which is why memory recall and the forum block are blocks here rather than messages.
  */
-export function assembleSystemMessage(state: ModuleState, ctx: PromptContext): ChatMessage {
-  const head = renderPlacement(state, ctx, 'system_head');
-  const tail = [...renderPlacement(state, ctx, 'system_tail'), ...renderPlacement(state, ctx, 'system_suffix')];
+export function assembleSystemMessage(
+  state: ModuleState,
+  ctx: PromptContext,
+  scope: ModuleScope = 'turn',
+): ChatMessage {
+  const head = renderPlacement(state, ctx, 'system_head', scope);
+  const tail = [
+    ...renderPlacement(state, ctx, 'system_tail', scope),
+    ...renderPlacement(state, ctx, 'system_suffix', scope),
+  ];
   const authored = (ctx.agent.system_prompt ?? '').trim();
 
   const parts = [head.join('\n\n'), authored, tail.join('\n\n')];
@@ -57,12 +69,17 @@ export function assembleSystemMessage(state: ModuleState, ctx: PromptContext): C
  * image note, and the modes whose placement is `user_suffix` (the only position llama.cpp chat
  * templates honour a control token like `/no_think` in).
  */
-export function assembleUserSuffix(state: ModuleState, ctx: PromptContext): string {
-  return renderPlacement(state, ctx, 'user_suffix').join('\n\n');
+export function assembleUserSuffix(state: ModuleState, ctx: PromptContext, scope: ModuleScope = 'turn'): string {
+  return renderPlacement(state, ctx, 'user_suffix', scope).join('\n\n');
 }
 
 /** The operator's text with that suffix attached, or unchanged when nothing was appended. */
-export function assembleUserText(state: ModuleState, ctx: PromptContext, baseText: string): string {
-  const suffix = assembleUserSuffix(state, ctx);
+export function assembleUserText(
+  state: ModuleState,
+  ctx: PromptContext,
+  baseText: string,
+  scope: ModuleScope = 'turn',
+): string {
+  const suffix = assembleUserSuffix(state, ctx, scope);
   return suffix ? [baseText, suffix].filter(Boolean).join('\n\n') : baseText;
 }

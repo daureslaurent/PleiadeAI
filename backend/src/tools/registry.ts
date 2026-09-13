@@ -3,6 +3,7 @@ import { skillRepository } from '../domain/skills/skill.repository';
 import { toolConfigService } from '../domain/tools/tool-config.service';
 import { resolveModuleState, toolsDisabledByModules } from '../modules/state.service';
 import { toolOwner } from '../modules/registry';
+import type { ModuleScope } from '../modules/types';
 import { skillRunner } from './sandbox/SkillRunner';
 import { setAgentParameter } from './core/setAgentParameter';
 import { updateNotebook } from './core/updateNotebook';
@@ -12,6 +13,7 @@ import { remember } from './core/remember';
 import { forget } from './core/forget';
 import { askAgent } from './core/askAgent';
 import { askParent } from './core/askParent';
+import { task } from './core/task';
 import { askUser } from './core/askUser';
 import { annuaire } from './core/annuaire';
 import { bash } from './core/bash';
@@ -100,6 +102,8 @@ const CORE_TOOLS: Record<string, Tool> = {
   [forget.name]: forget,
   [askAgent.name]: askAgent,
   [askParent.name]: askParent,
+  // Subagents (`SUBAGENT_PLAN.md`) — auto-granted to every run that may spawn one (see AgentRunner).
+  [task.name]: task,
   [askUser.name]: askUser,
   [annuaire.name]: annuaire,
   [bash.name]: bash,
@@ -171,12 +175,13 @@ const CORE_TOOLS: Record<string, Tool> = {
  * and the image note with it — and the per-tool flag stays as the fine one. A tool no module claims
  * is governed by the per-tool flag alone.
  */
-export async function resolveTools(toolsAllowed: string[]): Promise<Tool[]> {
+export async function resolveTools(toolsAllowed: string[], scope: ModuleScope = 'turn'): Promise<Tool[]> {
   const resolved: Tool[] = [];
   const skillNames: string[] = [];
   const [disabled, byModule] = await Promise.all([
     toolConfigService.disabledNames(),
-    resolveModuleState().then(toolsDisabledByModules),
+    // A subagent run also drops the tools of every module its profile leaves out.
+    resolveModuleState().then((state) => toolsDisabledByModules(state, scope)),
   ]);
 
   for (const name of toolsAllowed) {

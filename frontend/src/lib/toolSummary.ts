@@ -1,4 +1,5 @@
 import {
+  GitFork,
   AudioLines,
   BookUser,
   Brain,
@@ -239,6 +240,12 @@ export function describeTool(
     }
     case 'visual_click': {
       return { Icon: MousePointerClick, value: quote(str(args.target), 44), title: str(args.target) };
+    }
+    case 'task': {
+      // A subagent: its label and mode. The brief itself is one click away in the full arguments.
+      const label = str(args.description) || quote(str(args.prompt), 44);
+      const mode = str(args.mode) === 'work' ? 'work' : 'explore';
+      return { Icon: GitFork, value: `${label} · ${mode}`, title: str(args.prompt) };
     }
     case 'ask_agent':
     case 'annuaire': {

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../config/logger';
 import { eventBus } from '../core/event-bus/EventBus';
-import type { EventContext, ImageBlock, ToolBatchInfo } from '../core/event-bus/events.types';
+import type { EventContext, ImageBlock, SubagentTaskInfo, ToolBatchInfo } from '../core/event-bus/events.types';
 import { agentRepository } from '../domain/agents/agent.repository';
 import { buildUserMessage, type ChatMessage } from '../domain/agents/jit-builder';
 import { assembleSystemMessage, assembleUserText } from '../modules/assemble';
 import { moduleStateFrom } from '../modules/state.service';
-import type { AutoLoopPromptState, PromptContext } from '../modules/types';
+import type { AutoLoopPromptState, ModuleScope, PromptContext, SubagentsPromptState } from '../modules/types';
 import { agentMemory, embedRecallQuery } from '../domain/memory/agent-memory.service';
 import { memoryDistiller } from '../domain/memory/memory-distiller';
 import { forumRecall } from '../domain/forum/forum-recall.service';
@@ -37,7 +37,10 @@ import { askParent } from '../tools/core/askParent';
 import { askUser } from '../tools/core/askUser';
 import { askUserBroker } from '../transport/ws/AskUserBroker';
 import type { Tool, ToolContext } from '../tools/types';
-import { isParallelSafe } from '../tools/parallel-safety';
+import { isParallelSafe, mayRead } from '../tools/parallel-safety';
+import { task } from '../tools/core/task';
+import type { AgentDoc } from '../domain/agents/agent.model';
+import type { EffectiveSettings } from '../domain/settings/settings.service';
 import { hopGuard } from './HopGuard';
 import { TurnImagePool } from './TurnImagePool';
 import {
@@ -171,6 +174,46 @@ export interface RunInput {
    * specialist was configured with the model it needs. Same rule the picked inference modes follow.
    */
   inference?: { endpointId?: string | null; model?: string } | null;
+  /**
+   * Set when this run is a `task` subagent of its caller — a fresh-context copy of the same agent
+   * (`SUBAGENT_PLAN.md` §2), set only by `makeTaskInvoker`. It is what narrows the run: no delegation
+   * tools and no operator back-channel, read-only tools in `explore`, and the subagent module profile
+   * instead of the ordinary switches.
+   */
+  task?: { mode: 'explore' | 'work'; description: string; reportMaxChars: number; parentName: string };
+}
+
+/**
+ * The tools a `task` subagent never holds. Delegation (`task`, `ask_agent`, `annuaire`, `ask_parent`)
+ * because a child is one level deep by construction; `ask_user` because several children asking the
+ * operator at once is a queue of modals nobody ordered, and a child is told to assume and report;
+ * `todowrite` because the checklist is keyed on the agent + session and would overwrite the parent's;
+ * `loop_done` because only the loop's own turns may end the loop.
+ */
+const TASK_WITHHELD_TOOLS = new Set([
+  task.name,
+  askAgent.name,
+  annuaire.name,
+  askParent.name,
+  askUser.name,
+  todoWrite.name,
+  loopDone.name,
+]);
+
+/**
+ * One parent run's subagent machinery, resolved once per run that holds `task`: where the children
+ * run, and the limiter that decides how many run at once.
+ */
+interface SubagentRuntime {
+  /** What a child passes as its `RunInput.inference`, or null to run on the agent's own model. */
+  override: { endpointId?: string | null; model?: string } | null;
+  model: string;
+  differentModel: boolean;
+  /** How many children may be running at once. */
+  slots: number;
+  limiter: Semaphore;
+  /** Most characters one report may be before the per-batch context budget narrows it further. */
+  reportMaxChars: number;
 }
 
 /**
@@ -195,6 +238,8 @@ export interface RunResult {
   turnId: string;
   /** This agent-run's id (the scored unit) — the depth-0 run id links the top-level turn's score. */
   runId: string;
+  /** The run exhausted its tool rounds before the model gave a final answer. */
+  truncated: boolean;
 }
 
 /**
@@ -211,13 +256,6 @@ export class AgentRunner {
     const agent = await agentRepository.resolveByName(input.agentName);
     if (!agent) throw new Error(`agent "${input.agentName}" not found`);
 
-    const ctx: EventContext = {
-      sessionId: input.sessionId,
-      agentId: String(agent._id),
-      agentName: agent.name,
-      depth: input.depth,
-    };
-
     // Two ids for the Conversation Quality Scorer:
     //  • `turnId` groups the whole user turn — minted by the depth-0 entry, propagated to every hop.
     //  • `runId` identifies THIS agent-run — the scored unit. Minted fresh per run (depth 0 and each
@@ -225,6 +263,15 @@ export class AgentRunner {
     //    conversation instead of being folded into the parent's score.
     const turnId = input.turnId ?? randomUUID();
     const runId = input.runId ?? randomUUID();
+
+    const ctx: EventContext = {
+      sessionId: input.sessionId,
+      agentId: String(agent._id),
+      agentName: agent.name,
+      depth: input.depth,
+      // Every event this run emits names it, so parallel subagents land in their own bubbles.
+      runId,
+    };
 
     // Resolve the images this turn can work with. Attachments live only for the turn they're sent on
     // (history is text-only), so a follow-up like "forward the last image to X" would otherwise have
@@ -246,8 +293,12 @@ export class AgentRunner {
     // — writable to a file (`write from_handle`), forwardable, listable in the Data tab. Their bytes are
     // re-read from the resource store on demand, never re-fed into context. Only the top-level run seeds
     // history; a sub-agent works on exactly what its parent forwarded (same session, same handles).
+    // A `task` child is seeded too: it is the same agent working in the same session, and its brief
+    // may name a handle (`blob_3`) the parent was holding.
     const priorResources =
-      input.depth === 0 && !input.caller ? await this.priorResourceBlocks(input.sessionId) : [];
+      (input.depth === 0 && !input.caller) || input.task
+        ? await this.priorResourceBlocks(input.sessionId)
+        : [];
     // The turn's live resource pool: seeded with prior handles (so counters continue the session
     // sequence and old handles resolve), then this turn's attachments/forwards, then grown by any
     // resource a tool/skill acquires. Shared by reference across every tool call so a resource acquired
@@ -308,7 +359,9 @@ export class AgentRunner {
     // Top-level agents orchestrate, so they always get the delegation tools even if the operator
     // didn't tick them in `tools_allowed` (a subagent honours its explicit list as before). The
     // global kill-switch in resolveTools still wins if either tool is disabled fleet-wide.
-    const orchestrationTools = agent.subagent
+    // A `task` child is never an orchestrator, whatever its agent is: it was handed one job.
+    const isTask = !!input.task;
+    const orchestrationTools = agent.subagent || isTask
       ? [...agent.tools_allowed, ...visualTools, ...androidTools, ...imageTools]
       : [
           ...agent.tools_allowed,
@@ -322,6 +375,10 @@ export class AgentRunner {
     // turns out to be wrong is recalled forever alongside its own correction, and the model is handed
     // the contradiction with no way to resolve it. Granted with `remember`, never on its own.
     const memoryTools = agent.tools_allowed.includes(remember.name) ? [forget.name] : [];
+    // Subagents (`SUBAGENT_PLAN.md`): every run that may still spawn one holds `task` — the module
+    // switch and the Tools page gate it in `resolveTools`, like `data` and `guide`. Not a child (one
+    // level deep by construction), and not a run with no hop depth left to give it.
+    const taskTools = !isTask && (await hopGuard.canHop(input.depth + 1)) ? [task.name] : [];
     // Every agent can reach the operator via `ask_user`; only a delegated run (has a caller) gets
     // `ask_parent` to bounce a question back up. Every agent also gets `data` so it can see, save,
     // and store the session's shared resource pool — that's how a delegate reaches a blob/image its
@@ -334,10 +391,13 @@ export class AgentRunner {
         data.name,
         guide.name,
         todoWrite.name,
+        ...taskTools,
         ...(input.autoLoop ? [loopDone.name] : []),
         ...(input.caller ? [askParent.name] : []),
       ]),
     ].filter(
+      (name) => !(isTask && TASK_WITHHELD_TOOLS.has(name)),
+    ).filter(
       // A multimodal agent never gets `analyze_image` — not even if the operator ticked it in
       // `tools_allowed`. It sees the pixels itself; the tool would only route them through the
       // Vision endpoint's model and hand back a worse, second-hand description.
@@ -345,7 +405,12 @@ export class AgentRunner {
         !(inference.supportsVision && name === analyzeImage.name) &&
         !(screenMode === 'modal' && name === visualClick.name),
     );
-    const tools = await resolveTools(effectiveTools);
+    // A child applies the subagent module profile on top of the ordinary switches — to its tools here
+    // and to its prompt blocks below — so a module left out of the profile costs a child nothing.
+    const scope: ModuleScope = isTask ? 'subagent' : 'turn';
+    const resolved = await resolveTools(effectiveTools, scope);
+    // An `explore` child keeps only the tools that can read; each call is checked again before it runs.
+    const tools = input.task?.mode === 'explore' ? resolved.filter(mayRead) : resolved;
     const toolMap = new Map(tools.map((t) => [t.name, t]));
     const toolSchemas: ToolSchema[] = tools.map((t) => ({
       name: t.name,
@@ -367,12 +432,12 @@ export class AgentRunner {
     // absent rather than padded with noise. Best-effort: an embeddings outage yields none.
     // One embedding, two searches: memory and the forum index are both queried with this vector, so
     // it is computed when *either* module is on and skipped entirely when neither is.
-    const wantsMemory = mods.enabled('memory');
-    const hasForum = mods.enabled('forum') && tools.some((t) => t.name === forum.name);
+    const wantsMemory = mods.enabled('memory', scope);
+    const hasForum = mods.enabled('forum', scope) && tools.some((t) => t.name === forum.name);
     // The board half is gated separately from the forum half: an agent may hold one without the
     // other, and a task line telling it to `submit` with a tool it does not have is worse than no
     // line. `FORUM_WORKBOARD_PLAN.md` §8.
-    const hasBoard = mods.enabled('board') && tools.some((t) => t.name === board.name);
+    const hasBoard = mods.enabled('board', scope) && tools.some((t) => t.name === board.name);
 
     const recallQuery = buildRecallQuery(input);
     const recallVector = wantsMemory || hasForum ? await embedRecallQuery(recallQuery) : null;
@@ -434,7 +499,13 @@ export class AgentRunner {
     // The agent's own checklist rides into the prompt too. Read per turn (not cached with the agent
     // doc) because `todowrite` mutates it mid-turn — and because an item left `in_progress` when the
     // last turn ended is exactly what that block exists to put back in front of the model.
-    const todos = mods.enabled('todo') ? await todoRepository.get(ctx.sessionId, ctx.agentId) : [];
+    const todos = mods.enabled('todo', scope) ? await todoRepository.get(ctx.sessionId, ctx.agentId) : [];
+
+    // Where this run's `task` children would run and how many at once — resolved only for a run that
+    // actually holds the tool, since it costs an endpoint lookup.
+    const subagents = toolMap.has(task.name)
+      ? await this.subagentRuntime(agent, settings, inference)
+      : null;
 
     /**
      * Everything the enabled modules render from. Modules render, they never fetch — which is why
@@ -474,9 +545,18 @@ export class AgentRunner {
         enabled: settings.tool_parallel_enabled !== false,
         max: Math.max(0, Math.trunc(Number(settings.tool_parallel_max ?? 4))),
       },
+      task: input.task ?? null,
+      subagents: subagents
+        ? ({
+            slots: subagents.slots,
+            parallel: settings.tool_parallel_enabled !== false,
+            model: subagents.model,
+            differentModel: subagents.differentModel,
+          } satisfies SubagentsPromptState)
+        : null,
     };
 
-    const systemMessage = assembleSystemMessage(mods, promptCtx);
+    const systemMessage = assembleSystemMessage(mods, promptCtx, scope);
 
     // The user turn: the operator's own words plus whatever the enabled modules append — the image
     // note that makes an attachment reachable, and any mode whose placement is `user_suffix` (the
@@ -487,8 +567,9 @@ export class AgentRunner {
       mods,
       { ...promptCtx, modes: { system: promptCtx.modes.system, user: [] } },
       input.userText,
+      scope,
     );
-    const modedUserText = assembleUserText(mods, promptCtx, input.userText);
+    const modedUserText = assembleUserText(mods, promptCtx, input.userText, scope);
     const userMessage = buildUserMessage(
       modedUserText,
       inference.supportsVision ? attachedImages : undefined,
@@ -659,6 +740,9 @@ export class AgentRunner {
       const parallelEnabled = settings.tool_parallel_enabled !== false;
       const parallelMax = Math.max(0, Math.trunc(Number(settings.tool_parallel_max ?? 4)));
       const groups = planToolGroups(toolCalls, toolMap, parallelEnabled);
+      // Every `task` call in this reply shares the parent's remaining context, so each report's share
+      // shrinks with how many were asked for together.
+      const taskCount = toolCalls.filter((c) => c.name === task.name).length;
 
       for (const group of groups) {
         // A group of one is a plain serial call, whatever its tool declares — no batch to report.
@@ -702,6 +786,19 @@ export class AgentRunner {
             frames: liveFrames,
             persistMemory: input.persistMemory !== false,
             batch: batchId ? { id: batchId, index: i, size: group.length } : undefined,
+            readOnly: input.task?.mode === 'explore',
+            subagents: subagents
+              ? {
+                  runtime: subagents,
+                  agentName: agent.name,
+                  reportMaxChars: reportBudget(
+                    subagents.reportMaxChars,
+                    inference.contextWindow,
+                    lastUsage?.promptTokens ?? 0,
+                    taskCount,
+                  ),
+                }
+              : undefined,
           });
           // executeToolCall already appended the tool message (and any following image message) to
           // the sink in the correct order; here we only cache its content for the duplicate short-circuit.
@@ -788,7 +885,7 @@ export class AgentRunner {
 
     const fullText = [...interimTexts, finalText.trim()].filter(Boolean).join('\n\n');
 
-    return { text: finalText, fullText, images: handBack, turnId, runId };
+    return { text: finalText, fullText, images: handBack, turnId, runId, truncated: !finishedCleanly };
   }
 
   /**
@@ -977,6 +1074,10 @@ export class AgentRunner {
       persistMemory: boolean;
       /** Set when this call is one of several running concurrently; echoed to the UI on both events. */
       batch?: ToolBatchInfo;
+      /** An `explore` subagent: a call that is not a read is refused instead of executed. */
+      readOnly?: boolean;
+      /** This run may start `task` subagents: where they run, and this call's report budget. */
+      subagents?: { runtime: SubagentRuntime; agentName: string; reportMaxChars: number };
     },
   ): Promise<ChatMessage> {
     let args: Record<string, unknown> = {};
@@ -994,9 +1095,34 @@ export class AgentRunner {
       batch: delegation.batch,
     });
 
-    const tool = toolMap.get(call.name);
     const startedAt = Date.now();
 
+    // Take this call's place in the subagent queue *now*, before the first await below: calls of one
+    // batch reach this line in the order the model issued them, and nothing after it is ordered. A
+    // `task` that waits for a slot then starts in emission order instead of whichever call's setup
+    // happened to resolve first. Released when the call ends, whether or not a child ever ran.
+    const taskSlot =
+      delegation.subagents && call.name === task.name ? delegation.subagents.runtime.limiter.acquire(delegation.signal) : null;
+    try {
+      return await this.runToolCall(call, toolMap, args, startedAt, ctx, messages, resolveExec, delegation, taskSlot);
+    } finally {
+      taskSlot?.then((release) => release()).catch(() => undefined);
+    }
+  }
+
+  /** The body of {@link executeToolCall}, once the call holds its place in any subagent queue. */
+  private async runToolCall(
+    call: { id: string; name: string; argsJson: string },
+    toolMap: Map<string, Tool>,
+    args: Record<string, unknown>,
+    startedAt: number,
+    ctx: EventContext,
+    messages: ChatMessage[],
+    resolveExec: (() => Promise<AgentExecutor>) | null,
+    delegation: Parameters<AgentRunner['executeToolCall']>[5],
+    taskSlot: Promise<() => void> | null,
+  ): Promise<ChatMessage> {
+    const tool = toolMap.get(call.name);
     if (!tool) {
       const result = { ok: false, error: `unknown tool: ${call.name}` };
       eventBus.emit('tool:execution_complete', {
@@ -1009,7 +1135,36 @@ export class AgentRunner {
         startedAt,
         batch: delegation.batch,
       });
-      return { role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) };
+      // Appended like every other result: an assistant tool_call with no answer is malformed chat, and
+      // a model that never sees the error simply issues the same call again.
+      const unknown: ChatMessage = { role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) };
+      messages.push(unknown);
+      return unknown;
+    }
+
+    // An `explore` subagent was promised read-only tools. Its toolset is already narrowed to tools that
+    // *can* read, but verb-style tools read or write by argument — so the call itself is checked here,
+    // before any container boots or any side effect can happen.
+    if (delegation.readOnly && !isParallelSafe(tool, args)) {
+      const result = {
+        ok: false,
+        error:
+          `read-only task: \`${call.name}\` with these arguments would change something, and this ` +
+          'subagent is an explore task. Report what should be changed instead of changing it.',
+      };
+      eventBus.emit('tool:execution_complete', {
+        ctx,
+        callId: call.id,
+        tool: call.name,
+        status: 'error',
+        result,
+        durationMs: 0,
+        startedAt,
+        batch: delegation.batch,
+      });
+      const refused: ChatMessage = { role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) };
+      messages.push(refused);
+      return refused;
     }
 
     // Bring up the isolated container (memoised) if this agent runs isolated. A failure here
@@ -1046,6 +1201,10 @@ export class AgentRunner {
             )
           : undefined,
       askUser: (question) => askUserBroker.ask(ctx, question),
+      invokeTask:
+        canSpawn && delegation.subagents
+          ? this.makeTaskInvoker(ctx, delegation.subagents, call.id, delegation.turnId, delegation.signal, taskSlot)
+          : undefined,
       callId: call.id,
       emitOutput: (chunk) =>
         eventBus.emit('tool:output_chunk', { ctx, callId: call.id, chunk }),
@@ -1201,6 +1360,92 @@ export class AgentRunner {
   }
 
   /**
+   * Resolve where this run's `task` children run and how many may run at once (`SUBAGENT_PLAN.md` §2).
+   *
+   * The model is the agent's own subagent override if it set one, else the fleet default, else
+   * nothing — the child then runs on the agent's own model. Concurrency is that endpoint's Parallel
+   * streams, because that is how many turns the box can actually stream; the fleet's
+   * `tool_parallel_*` settings can only narrow it. One slot means strictly one child after another.
+   */
+  private async subagentRuntime(
+    agent: AgentDoc,
+    settings: EffectiveSettings,
+    parent: ResolvedInference,
+  ): Promise<SubagentRuntime> {
+    const own = agent.subagent_endpoint_id || agent.subagent_model;
+    const endpointId = own ? agent.subagent_endpoint_id : settings.subagent_endpoint_id;
+    const model = own ? agent.subagent_model : settings.subagent_model;
+    const override =
+      endpointId || model
+        ? { endpointId: endpointId ? String(endpointId) : null, model: model || undefined }
+        : null;
+    const child = override ? await resolveInference(agent, [], [], override) : parent;
+
+    const parallel = settings.tool_parallel_enabled !== false;
+    const fleetMax = Math.max(0, Math.trunc(Number(settings.tool_parallel_max ?? 4)));
+    const slots = parallel ? Math.max(1, Math.min(child.parallelSlots, fleetMax > 0 ? fleetMax : Infinity)) : 1;
+
+    return {
+      override,
+      model: child.model,
+      differentModel: child.model !== parent.model || child.url !== parent.url,
+      slots,
+      limiter: new Semaphore(slots),
+      reportMaxChars: Math.max(500, Math.trunc(Number(settings.subagent_report_max_chars ?? 6000))),
+    };
+  }
+
+  /**
+   * Build the `task` dispatcher for one tool call: run a fresh-context copy of the calling agent on
+   * the brief, and hand back its report cut to fit.
+   *
+   * The limiter is held for the child's *whole* run, not per inference call. The endpoint gate would
+   * already stop two streams sharing a slot, but a child spends most of its wall clock between
+   * streams, in tools — per-call metering would interleave the children round by round, where one
+   * slot is meant to mean one child after another.
+   */
+  private makeTaskInvoker(
+    parentCtx: EventContext,
+    subagents: { runtime: SubagentRuntime; agentName: string; reportMaxChars: number },
+    callId: string,
+    turnId: string,
+    signal: AbortSignal | undefined,
+    /** The place this call already took in the queue; absent only if the caller reserved none. */
+    slot: Promise<() => void> | null,
+  ): NonNullable<ToolContext['invokeTask']> {
+    const { runtime, agentName, reportMaxChars } = subagents;
+    return async ({ description, prompt, mode }) => {
+      // Release is idempotent, so letting the child go here and again when the call ends is safe —
+      // and letting it go here frees the slot before the parent's tool bookkeeping finishes.
+      const release = await (slot ?? runtime.limiter.acquire(signal));
+      try {
+        if (signal?.aborted) throw new RunAbortedError();
+        const info: SubagentTaskInfo = { description, mode, model: runtime.model };
+        const answer = await this.hop(
+          parentCtx,
+          agentName,
+          description,
+          { userText: prompt, signal, turnId, persistMemory: false },
+          {
+            inference: runtime.override,
+            task: { mode, description, reportMaxChars, parentName: agentName },
+            callId,
+            info,
+          },
+        );
+        const full = answer.text.trim();
+        const truncated = full.length > reportMaxChars;
+        const report = truncated
+          ? `${full.slice(0, reportMaxChars).trimEnd()}\n\n[…report truncated at ${reportMaxChars} characters]`
+          : full || '(the subagent returned no report)';
+        return { model: runtime.model, report, truncated, cut_off: answer.truncated };
+      } finally {
+        release();
+      }
+    };
+  }
+
+  /**
    * Build the `ask_parent` dispatcher for a delegated run: re-runs the caller as a fresh turn seeded
    * with its original conversation and a framed question, so it answers with full context. The caller
    * gets no `caller` of its own here → it can't ask *its* parent while answering (no infinite ladder).
@@ -1242,6 +1487,16 @@ export class AgentRunner {
       RunInput,
       'userText' | 'history' | 'caller' | 'signal' | 'images' | 'turnId' | 'persistMemory'
     >,
+    /**
+     * Only for a `task` subagent. Kept out of `run`'s allowlist on purpose: an `ask_agent` hop must
+     * never carry an inference override or a task framing into the specialist it asks.
+     */
+    subagent?: {
+      inference: RunInput['inference'];
+      task: NonNullable<RunInput['task']>;
+      callId: string;
+      info: SubagentTaskInfo;
+    },
   ): Promise<RunResult> {
     const childDepth = fromCtx.depth + 1;
     if (!(await hopGuard.canHop(childDepth))) {
@@ -1261,6 +1516,7 @@ export class AgentRunner {
       depth: childDepth,
       query,
       childRunId,
+      ...(subagent ? { callId: subagent.callId, task: subagent.info } : {}),
     });
     try {
       const answer = await this.run({
@@ -1269,6 +1525,7 @@ export class AgentRunner {
         depth: childDepth,
         runId: childRunId,
         ...run,
+        ...(subagent ? { inference: subagent.inference, task: subagent.task } : {}),
       });
       eventBus.emit('agent:ask_agent_done', {
         ctx: fromCtx,
@@ -1276,6 +1533,7 @@ export class AgentRunner {
         to: targetAgentName,
         depth: childDepth,
         status: 'success',
+        childRunId,
       });
       // A hop hands back everything the delegate said, not just its closing message: an agent that
       // writes its answer alongside a final `todowrite`/`remember` would otherwise return only the
@@ -1289,6 +1547,7 @@ export class AgentRunner {
         to: targetAgentName,
         depth: childDepth,
         status: 'error',
+        childRunId,
       });
       throw err;
     }
@@ -1369,6 +1628,63 @@ async function runWithConcurrency<T>(
     for (let i = next++; i < items.length; i = next++) await task(items[i]!, i);
   });
   await Promise.all(workers);
+}
+
+/**
+ * The report budget for one `task` call, in characters (`SUBAGENT_PLAN.md` §2).
+ *
+ * Half of what the parent's context has left, shared across every task in the same reply, at a
+ * conservative 3.5 characters per token — so N reports landing together can't overflow a parent
+ * with a small window. Never above the fleet ceiling, and never below a floor that still fits a
+ * useful finding: a report cut to nothing is worse than a slightly tight context.
+ */
+function reportBudget(ceiling: number, contextWindow: number, usedTokens: number, tasks: number): number {
+  const FLOOR = 1500;
+  if (!contextWindow || contextWindow <= 0) return ceiling;
+  const freeTokens = Math.max(0, contextWindow - usedTokens);
+  const share = Math.floor(((freeTokens * 0.5) / Math.max(1, tasks)) * 3.5);
+  return Math.max(Math.min(FLOOR, ceiling), Math.min(ceiling, share));
+}
+
+/**
+ * A counting semaphore: at most `permits` holders at once, the rest wait in arrival order. Used to
+ * cap a parent's concurrent subagents at its endpoint's slots. A waiter whose run is stopped leaves
+ * the queue instead of starting a child nobody wants.
+ */
+class Semaphore {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly permits: number) {}
+
+  async acquire(signal?: AbortSignal): Promise<() => void> {
+    if (this.active >= this.permits) {
+      await new Promise<void>((resolve, reject) => {
+        const wake = () => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          const at = this.waiters.indexOf(wake);
+          if (at >= 0) this.waiters.splice(at, 1);
+          reject(new RunAbortedError());
+        };
+        this.waiters.push(wake);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    } else {
+      this.active++;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      // Hand the permit straight to the next waiter, so `active` never dips and lets a newcomer cut in.
+      const next = this.waiters.shift();
+      if (next) next();
+      else this.active--;
+    };
+  }
 }
 
 /** A call's arguments as an object, for the parallel-safety predicate. Unparseable args → `{}`. */

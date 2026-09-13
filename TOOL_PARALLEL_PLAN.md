@@ -110,3 +110,13 @@ prompt. Both keys are listed on the module's row (`settingsKeys`).
 `parallelSafe: true` lives in `UNDECLARED_READ_ONLY` in `tools/parallel-safety.ts` instead of on the
 tools themselves. `sudo chown -R $USER:$USER` on those files, then move each declaration onto its
 tool and delete the set.
+
+## Addendum — parallel subagents and run-id routing (`SUBAGENT_PLAN.md`)
+
+`task` calls in `explore` mode declare themselves parallel-safe, so a batch of them overlaps. That
+broke an assumption the chat and `TurnRecorder` had held since `ask_agent` shipped: that sub-agent
+runs form a strict stack, so every event belongs to the top frame. Every wire event now carries
+`runId` (from `EventContext.runId`), `agent_hop` carries `parentRunId` and `callId`, and
+`agent_hop_done` carries `childRunId`. Both reducers route by those ids and fall back to the stack only
+for events without one. A `tool_call_stream` `reset` now clears only its own run's drafts.
+`ask_agent` itself is still serial.

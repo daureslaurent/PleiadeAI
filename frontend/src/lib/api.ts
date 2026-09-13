@@ -364,6 +364,12 @@ export interface Agent {
   endpoint_id: string | null;
   /** Chosen model on that endpoint ('' = endpoint's first model, then the global default). */
   model: string;
+  /**
+   * Where this agent's `task` subagents run (`SUBAGENT_PLAN.md`). null + '' → the fleet's
+   * `subagent_*` default, and failing that the agent's own model.
+   */
+  subagent_endpoint_id?: string | null;
+  subagent_model?: string;
   /** Max tool round-trips per turn before the run is cut off (`null` = global default). */
   max_tool_iterations: number | null;
   /** Operator-chosen identity hue (HSL, 0–360). `null` = unset → deterministic name-hash color. */
@@ -458,6 +464,8 @@ export const agentsApi = {
         | 'isolation_volume_mode'
         | 'endpoint_id'
         | 'model'
+        | 'subagent_endpoint_id'
+        | 'subagent_model'
         | 'max_tool_iterations'
         | 'color'
         | 'icon'
@@ -1082,6 +1090,10 @@ export interface ModuleInfo {
   /** Whether it ships on. Only the board ships off. */
   defaultEnabled: boolean;
   enabled: boolean;
+  /** Whether it applies inside a `task` subagent run unless the operator says otherwise. */
+  subagentDefault: boolean;
+  /** The subagent profile: whether it applies inside a `task` subagent run (when it is on). */
+  subagentEnabled: boolean;
   tools: ModuleTool[];
   /** Settings keys this module's detail view points at — they live on their own panels. */
   settingsKeys: string[];
@@ -1097,7 +1109,12 @@ export interface CustomModule {
   placement: BlockPlacement;
   order: number;
   enabled: boolean;
+  /** Whether it also applies inside a `task` subagent run. Read-only here; set via `update`. */
+  subagentEnabled?: boolean;
 }
+
+/** Which run a preview is assembled for: an ordinary turn, or a `task` subagent child. */
+export type ModuleScope = 'turn' | 'subagent';
 
 export interface ModulePreview {
   /** The assembled system message, fences and all. */
@@ -1109,13 +1126,16 @@ export interface ModulePreview {
 export const modulesApi = {
   list: () =>
     api.get<{ modules: ModuleInfo[]; custom: CustomModule[] }>('/modules').then((r) => r.data),
-  update: (id: string, patch: { enabled?: boolean; overrides?: Record<string, string | null> }) =>
+  update: (
+    id: string,
+    patch: { enabled?: boolean; subagent?: boolean; overrides?: Record<string, string | null> },
+  ) =>
     api.put<ModuleInfo>(`/modules/${encodeURIComponent(id)}`, patch).then((r) => r.data),
   saveCustom: (m: Partial<CustomModule>) =>
     api.post<CustomModule>('/modules/custom', m).then((r) => r.data),
   removeCustom: (id: string) => api.delete(`/modules/custom/${encodeURIComponent(id)}`),
-  preview: (agentId: string) =>
-    api.post<ModulePreview>('/modules/preview', { agentId }).then((r) => r.data),
+  preview: (agentId: string, scope: ModuleScope = 'turn') =>
+    api.post<ModulePreview>('/modules/preview', { agentId, scope }).then((r) => r.data),
 };
 
 // --- Media generation (ComfyUI) -------------------------------------------------------------
@@ -1783,6 +1803,11 @@ export interface InferenceSettings {
   tool_parallel_enabled: boolean;
   /** How many calls of a batch may be in flight together; `0` is unlimited. */
   tool_parallel_max: number;
+  /** Fleet default endpoint + model for `task` subagents; '' → each agent's own model. */
+  subagent_endpoint_id: string;
+  subagent_model: string;
+  /** Most characters one subagent report may be (shrunk further to fit the parent's context). */
+  subagent_report_max_chars: number;
   /** Fleet default per-turn tool-round ceiling; an agent's own `max_tool_iterations` overrides it. */
   max_tool_iterations: number;
   /** Ceiling on `ask_agent` delegation depth (depth 0 = the directly-addressed agent). Clamped 1–10. */

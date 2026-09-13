@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  GitFork,
   Lock,
   Pencil,
   Plus,
@@ -22,6 +23,7 @@ import {
   type ModuleGroup,
   type ModuleInfo,
   type ModulePreview,
+  type ModuleScope,
 } from '../../lib/api';
 import {
   Button,
@@ -76,6 +78,8 @@ export function ModulesSettings() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentId, setAgentId] = useState('');
   const [preview, setPreview] = useState<ModulePreview | null>(null);
+  // Which run the preview assembles: an ordinary turn, or what a `task` subagent of the agent gets.
+  const [scope, setScope] = useState<ModuleScope>('turn');
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<CustomModule | null>(null);
@@ -105,13 +109,13 @@ export function ModulesSettings() {
     if (!agentId) return;
     let alive = true;
     modulesApi
-      .preview(agentId)
+      .preview(agentId, scope)
       .then((p) => alive && setPreview(p))
       .catch(() => alive && setPreview(null));
     return () => {
       alive = false;
     };
-  }, [agentId, modules, custom]);
+  }, [agentId, scope, modules, custom]);
 
   const groups = useMemo(() => {
     if (!modules) return [];
@@ -129,6 +133,18 @@ export function ModulesSettings() {
     } catch (err) {
       const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
       setError(message ?? `Could not switch ${m.name} ${enabled ? 'on' : 'off'}.`);
+    }
+  }
+
+  /** Put a module (built-in or custom) in or out of the subagent profile. */
+  async function toggleSubagent(id: string, name: string, subagent: boolean) {
+    setError(null);
+    try {
+      await modulesApi.update(id, { subagent });
+      await load();
+    } catch (err) {
+      const message = (err as { response?: { data?: { error?: string } } }).response?.data?.error;
+      setError(message ?? `Could not change whether ${name} applies to subagent runs.`);
     }
   }
 
@@ -198,6 +214,7 @@ export function ModulesSettings() {
                       open={open === m.id}
                       onOpen={() => setOpen(open === m.id ? null : m.id)}
                       onToggle={(v) => toggle(m, v)}
+                      onToggleSubagent={(v) => toggleSubagent(m.id, m.name, v)}
                       onOverride={(title, text) => saveOverride(m, title, text)}
                     />
                   ))}
@@ -259,6 +276,11 @@ export function ModulesSettings() {
                     >
                       <Trash2 size={13} />
                     </button>
+                    <SubagentChip
+                      checked={m.subagentEnabled !== false}
+                      disabled={!m.enabled}
+                      onChange={(v) => toggleSubagent(m.id, m.name, v)}
+                    />
                     <div className="mt-0.5">
                       <Toggle
                         checked={m.enabled}
@@ -276,7 +298,11 @@ export function ModulesSettings() {
             agentId={agentId}
             onAgent={setAgentId}
             preview={preview}
-            blocks={modules.filter((m) => m.enabled).reduce((n, m) => n + m.blocks.length, 0)}
+            scope={scope}
+            onScope={setScope}
+            blocks={modules
+              .filter((m) => m.enabled && (scope === 'turn' || m.subagentEnabled))
+              .reduce((n, m) => n + m.blocks.length, 0)}
           />
         </div>
 
@@ -298,12 +324,14 @@ function ModuleRow({
   open,
   onOpen,
   onToggle,
+  onToggleSubagent,
   onOverride,
 }: {
   module: ModuleInfo;
   open: boolean;
   onOpen: () => void;
   onToggle: (enabled: boolean) => void;
+  onToggleSubagent: (enabled: boolean) => void;
   onOverride: (title: string, text: string | null) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -329,6 +357,12 @@ function ModuleRow({
           </div>
           <div className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{m.description}</div>
         </div>
+        <SubagentChip
+          checked={m.subagentEnabled}
+          disabled={m.mandatory || !m.enabled}
+          locked={m.mandatory}
+          onChange={onToggleSubagent}
+        />
         <div className="mt-0.5">
           <Toggle checked={m.enabled} disabled={m.mandatory} onChange={onToggle} />
         </div>
@@ -443,18 +477,62 @@ function ModuleRow({
   );
 }
 
+/**
+ * The subagent-profile switch on a row (`SUBAGENT_PLAN.md` §3): whether the module also applies
+ * inside a `task` subagent run. Narrows only — a module that is off is off in a child too, so the
+ * chip is inert until the row's own switch is on.
+ */
+function SubagentChip({
+  checked,
+  disabled,
+  locked = false,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  locked?: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const title = locked
+    ? 'Always applies to subagent runs.'
+    : disabled
+      ? 'Switched off — so it is off in subagent runs too.'
+      : checked
+        ? 'Applies in subagent runs. Click to leave it out of what a task subagent is given.'
+        : 'Left out of subagent runs. Click to give it to task subagents too.';
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] ring-1 ring-hairline transition-colors disabled:cursor-default ${
+        checked && !(disabled && !locked)
+          ? 'text-accent hover:text-slate-100'
+          : 'text-slate-600 line-through hover:text-slate-400'
+      }`}
+    >
+      <GitFork size={10} /> subagents
+    </button>
+  );
+}
+
 /** The assembled prompt for one agent, under the switches as they currently stand. */
 function PreviewPane({
   agents,
   agentId,
   onAgent,
   preview,
+  scope,
+  onScope,
   blocks,
 }: {
   agents: Agent[];
   agentId: string;
   onAgent: (id: string) => void;
   preview: ModulePreview | null;
+  scope: ModuleScope;
+  onScope: (scope: ModuleScope) => void;
   blocks: number;
 }) {
   return (
@@ -473,7 +551,28 @@ function PreviewPane({
           ))}
         </Select>
       </Field>
+      <div className="flex gap-1 rounded-lg p-0.5 ring-1 ring-hairline">
+        {(
+          [
+            ['turn', 'Its own turn'],
+            ['subagent', 'Its subagent'],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onScope(value)}
+            className={`flex-1 rounded-md px-2 py-1 text-[11px] transition-colors ${
+              scope === value ? 'raise-1 text-slate-100' : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <p className="text-[10px] leading-relaxed text-slate-500">
+        {scope === 'subagent' &&
+          'What a task subagent of this agent is given: only the modules marked "subagents", plus its task contract. '}
         The real charter, parameters and house rules. Anything that would cost a retrieval — recalled
         memories, forum pointers, board items — is sample text, so flipping a switch costs nothing.
       </p>
