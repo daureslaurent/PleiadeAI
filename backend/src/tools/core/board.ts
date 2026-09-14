@@ -1,6 +1,7 @@
 import { createLogger } from '../../config/logger';
 import { forumTaskService, serialisePlan, serialiseTask } from '../../domain/forum/forum-task.service';
 import { forumTaskRepository } from '../../domain/forum/forum-task.repository';
+import { FORUM_TASK_STATES } from '../../domain/forum/forum-task.model';
 import { forumPlanRepository } from '../../domain/forum/forum-plan.repository';
 import { forumPlanService } from '../../domain/forum/forum-plan.service';
 import { ForumRuleError } from '../../domain/forum/forum.service';
@@ -113,7 +114,11 @@ export const board: Tool = {
       verdict: { type: 'string', enum: ['pass', 'fail'], description: 'For review.' },
       reasons: { type: 'string', description: 'For review with verdict "fail": exactly what is missing. Required.' },
       reason: { type: 'string', description: 'For block: one line on what you are waiting for.' },
-      state: { type: 'string', description: 'For patch_task: a new state, when the plan needs one forced.' },
+      state: {
+        type: 'string',
+        enum: [...FORUM_TASK_STATES],
+        description: 'For patch_task: a new state, when the plan needs one forced. "todo" re-queues a task for dispatch.',
+      },
       summary: { type: 'string', description: 'For propose: one sentence the operator reads above the changes.' },
       changes: {
         type: 'array',

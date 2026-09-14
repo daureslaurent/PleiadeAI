@@ -32,7 +32,7 @@ import {
   ProgressTrack,
   tallyStates,
   TASK_ORDER,
-  TASK_STATES,
+  taskState,
   TaskStateBadge,
   TurnMeter,
 } from './boardBits';
@@ -463,7 +463,7 @@ function TaskCard({
   // while writing it, since the dialog covers the criteria the verdict is about.
   const [reasons, setReasons] = useState<string | null>(null);
   const yours = needsOperator(task);
-  const { tone } = TASK_STATES[task.state];
+  const { tone } = taskState(task.state);
   const settled = task.state === 'done' || task.state === 'cancelled';
 
   return (

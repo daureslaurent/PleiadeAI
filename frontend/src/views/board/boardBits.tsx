@@ -29,8 +29,17 @@ export const PLAN_STATES: Record<BoardPlanState, { label: string; tone: Tone }> 
   cancelled: { label: 'cancelled', tone: 'idle' },
 };
 
+/**
+ * A task state's presentation, surviving a state the map doesn't know. The server has written one
+ * before (`in_progress`, from a manager's `patch_task`), and a lookup miss took the whole board page
+ * down with it — an odd badge is the right failure, a blank page is not.
+ */
+export function taskState(state: string): (typeof TASK_STATES)[BoardTaskState] {
+  return TASK_STATES[state as BoardTaskState] ?? { label: state || 'unknown', tone: 'idle', Icon: CircleDashed };
+}
+
 export function TaskStateBadge({ state, live }: { state: BoardTaskState; live?: boolean }) {
-  const { label, tone, Icon } = TASK_STATES[state];
+  const { label, tone, Icon } = taskState(state);
   return (
     <StatusBadge tone={tone}>
       {/* Spin only while a turn is genuinely running — never animate something idle. */}

@@ -9,7 +9,7 @@ import { forumThreadRepository } from './forum-thread.repository';
 import { forumPostRepository } from './forum-post.repository';
 import { OPERATOR_AUTHOR, type ForumAuthor } from './forum-author';
 import { loadRoster } from './forum-roster';
-import { FORUM_DELIVERABLE_KINDS, type ForumTaskDoc, type ForumDeliverableKind } from './forum-task.model';
+import { FORUM_DELIVERABLE_KINDS, FORUM_TASK_STATES, type ForumTaskDoc, type ForumDeliverableKind } from './forum-task.model';
 import type { ForumPlanDoc } from './forum-plan.model';
 
 const log = createLogger('forum-task');
@@ -329,7 +329,16 @@ export const forumTaskService = {
     }
     if (body.owner !== undefined) set.owner = await resolveAuthor(body.owner as string, 'owner');
     if (body.reviewer !== undefined) set.reviewer = await resolveAuthor(body.reviewer as string, 'reviewer');
-    if (typeof body.state === 'string') set.state = body.state;
+    if (typeof body.state === 'string') {
+      // `findByIdAndUpdate` skips the schema enum, and a manager fluent in the forum's `work_state`
+      // vocabulary will write `in_progress` here — a state nothing dispatches and the board can't draw.
+      if (!(FORUM_TASK_STATES as readonly string[]).includes(body.state)) {
+        throw new ForumRuleError(
+          `"${body.state}" is not a task state — use one of: ${FORUM_TASK_STATES.join(', ')}`,
+        );
+      }
+      set.state = body.state;
+    }
     if (Array.isArray(body.dependsOn)) {
       const deps = await forumTaskRepository.findMany(body.dependsOn as string[]);
       await assertNoCycle(taskId, deps.map((d) => d._id));
