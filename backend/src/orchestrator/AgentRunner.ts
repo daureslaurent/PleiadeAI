@@ -99,6 +99,15 @@ function evictFrame(message: ChatMessage, handles: string): void {
  */
 const MAX_NARRATION_RETRIES = 1;
 
+/**
+ * How many times an *identical* tool call (same name + args) may actually execute within one turn
+ * before the duplicate short-circuit answers it from cache instead of re-running. A single-repeat
+ * gate stranded agents that legitimately re-run the same command — a `bash` scan re-run, a status
+ * poll, a retry after a transient failure. Four executions leave room for those while the tool-round
+ * cap still ends a genuine loop.
+ */
+const DUPLICATE_TOOL_CALL_LIMIT = 4;
+
 /** Strip leaked `[tool_name]` narration brackets from a final answer so they never reach the user. */
 function stripNarratedBrackets(text: string, toolNames: Iterable<string>): string {
   let out = text;
@@ -691,11 +700,14 @@ export class AgentRunner {
         : inference.maxToolIterations;
     let finishedCleanly = false;
 
-    // Results of tool calls already run this turn, keyed by name+args. If the model re-issues an
-    // *identical* call (a common failure mode that shows up as a sub-agent "repeating itself" — the
-    // same `ask_agent` fired every iteration), we short-circuit with the earlier result instead of
-    // re-running the tool. Combined with the tool-round cap this breaks the repeat loop.
-    const toolResultCache = new Map<string, string>();
+    // Results of tool calls already run this turn, keyed by name+args, with how many times each has
+    // actually executed. If the model re-issues an *identical* call (a common failure mode that shows
+    // up as a sub-agent "repeating itself" — the same `ask_agent` fired every iteration), we let it
+    // through up to `DUPLICATE_TOOL_CALL_LIMIT` executions and only then short-circuit with the
+    // earlier result. A single-repeat gate was too tight: re-running the same `bash` (a scan, a
+    // status check, a retry after a transient failure) is legitimate work, not a loop. Combined with
+    // the tool-round cap this still breaks a genuine repeat loop, just a few iterations later.
+    const toolResultCache = new Map<string, { content: string; count: number }>();
 
     // Live screen frames (desktop/device screenshots) currently holding pixels in `messages`, oldest
     // first. `executeToolCall` trims this to the capturing tool's `frameKeep` budget so a GUI turn
@@ -834,12 +846,14 @@ export class AgentRunner {
           const sink = sinks[i]!;
           const cacheKey = `${call.name}${call.argsJson}`;
           // An observation tool is exempt: re-reading a screen after acting on it is the loop, not a
-          // repeat (see `OBSERVATION_TOOL_NAMES`).
+          // repeat (see `OBSERVATION_TOOL_NAMES`). Everything else is allowed to actually run up to
+          // `DUPLICATE_TOOL_CALL_LIMIT` times before we short-circuit — one legitimate re-run (retry,
+          // re-scan, re-check) must not be mistaken for a loop.
           const cached = OBSERVATION_TOOL_NAMES.has(call.name) ? undefined : toolResultCache.get(cacheKey);
-          if (cached !== undefined) {
+          if (cached !== undefined && cached.count >= DUPLICATE_TOOL_CALL_LIMIT) {
             log.warn(
-              { agent: agent.name, tool: call.name },
-              'duplicate tool call short-circuited (identical args already executed this turn)',
+              { agent: agent.name, tool: call.name, ran: cached.count },
+              'duplicate tool call short-circuited (identical args already ran the maximum times this turn)',
             );
             sink.push({
               role: 'tool',
@@ -847,8 +861,8 @@ export class AgentRunner {
               content: JSON.stringify({
                 ok: false,
                 error:
-                  'Duplicate call: this exact tool and arguments already ran this turn. Do not repeat it — use the previous result and continue.',
-                previous_result: safeParse(cached),
+                  `Duplicate call: this exact tool and arguments already ran ${cached.count} times this turn. Do not repeat it — use the previous result and continue.`,
+                previous_result: safeParse(cached.content),
               }),
             });
             return;
@@ -879,8 +893,12 @@ export class AgentRunner {
               : undefined,
           });
           // executeToolCall already appended the tool message (and any following image message) to
-          // the sink in the correct order; here we only cache its content for the duplicate short-circuit.
-          if (typeof toolMsg.content === 'string') toolResultCache.set(cacheKey, toolMsg.content);
+          // the sink in the correct order; here we only cache its content and bump the run count for
+          // the duplicate short-circuit.
+          if (typeof toolMsg.content === 'string') {
+            const prior = toolResultCache.get(cacheKey);
+            toolResultCache.set(cacheKey, { content: toolMsg.content, count: (prior?.count ?? 0) + 1 });
+          }
         };
 
         if (batchId) {
@@ -1675,8 +1693,9 @@ type PlannedCall = { id: string; name: string; argsJson: string };
  *
  * - **Order across groups is preserved.** A write between two reads splits them, so the reads never
  *   jump over it — the model asked for `read, write, read` and gets exactly that sequence.
- * - **A repeat closes the group.** The duplicate short-circuit answers the second identical call
- *   from a cache the first one fills, which only works if the first has already finished.
+ * - **A repeat closes the group.** The duplicate short-circuit counts identical calls against a
+ *   cache the first one fills, which only works if the first has already finished — so two identical
+ *   calls never run concurrently.
  */
 function planToolGroups(
   calls: PlannedCall[],
