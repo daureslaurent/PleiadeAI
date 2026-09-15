@@ -4,7 +4,8 @@
 # Every other service (mongo, qdrant, embeddings, searxng, llama-fallback, backend, frontend) is
 # reachable ONLY on the internal `pleiades_net` bridge, never from the public internet. Caddy routes
 # /api + /socket.io + /health to the backend and everything else to the SPA. Secrets come from a
-# gitignored `.env` (see .env.example) — none are hardcoded here.
+# gitignored `.env` (see .env.example) — none are hardcoded here. The one other bind is `forgejo`'s
+# LOOPBACK-only port (127.0.0.1), which host-network agent containers need to reach git.
 #
 # STARTUP ORDERING: services declare healthchecks and the backend/caddy use `depends_on:
 # condition: service_healthy` so nothing starts talking to a dependency before it is actually ready
@@ -152,6 +153,50 @@ services:
       - pleiades_net
 
   # ----------------------------------------
+  # 3b. INTERNAL GIT (Forgejo — the fleet's code store, GIT_SERVER_PLAN.md)
+  # ----------------------------------------
+  # HTTP-only Forgejo on SQLite. Three ways in, and no public one:
+  #   - the backend drives its REST API over `pleiades_net` (http://forgejo:3000);
+  #   - isolated agent containers reach it over `pleiades_git_net`, an `internal` network holding
+  #     nothing else — so an agent attached to it can reach git and still not mongo or the backend;
+  #   - host-network agents share the host's netns, so they use a LOOPBACK-only bind (127.0.0.1).
+  # Its web UI is never routed through caddy: the Pleiades Git page is the operator's view. The
+  # backend creates the admin account, the org and the fleet team at boot, and only when
+  # GIT_ADMIN_PASSWORD is set — leave it empty and the git feature is simply off.
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:16-rootless
+    container_name: pleiades_forgejo
+    restart: unless-stopped
+    environment:
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
+      FORGEJO__server__DISABLE_SSH: "true"
+      FORGEJO__server__OFFLINE_MODE: "true"
+      FORGEJO__server__ROOT_URL: http://forgejo:3000/
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__repository__DEFAULT_BRANCH: main
+      FORGEJO__migrations__ALLOW_LOCALNETWORKS: "false"
+    volumes:
+      # The rootless image keeps repos, the SQLite DB *and* app.ini under /var/lib/gitea.
+      - pleiades_forgejo_data:/var/lib/gitea
+    ports:
+      # Loopback only — for `host`-network agent containers. Never a bare "3300:3000".
+      - "127.0.0.1:${GIT_HOST_PORT:-3300}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+    networks:
+      pleiades_net:
+      pleiades_git_net:
+        ipv4_address: 172.31.250.10
+
+  # ----------------------------------------
   # 4. PLEIADES APPLICATION SERVICES (internal only — reached via the caddy edge)
   # ----------------------------------------
   backend:
@@ -198,6 +243,11 @@ services:
       # Host self-update bridge: the backend drops trigger files here; a host systemd watcher
       # (tools/updater) sees them and runs update_run.sh / check_run.sh. See UPDATE_SYSTEM_PLAN.md.
       UPDATE_TRIGGER_DIR: /app/.update
+      # Internal git (Forgejo). Empty password → the git feature is off. The network/IP/port values
+      # must match the `forgejo` service and `pleiades_git_net` below.
+      GIT_SERVER_URL: http://forgejo:3000
+      GIT_ADMIN_PASSWORD: ${GIT_ADMIN_PASSWORD:-}
+      GIT_HOST_URL: http://127.0.0.1:${GIT_HOST_PORT:-3300}
     volumes:
       # Per-agent isolation: the backend builds/runs each isolated agent's container on the HOST
       # Docker daemon via this socket (Docker-out-of-Docker). SECURITY: this grants the backend
@@ -229,6 +279,8 @@ services:
       embeddings:
         condition: service_started
       searxng:
+        condition: service_started
+      forgejo:
         condition: service_started
     logging: *default-logging
     networks:
@@ -293,7 +345,18 @@ volumes:
   pleiades_fallback_models:
   pleiades_caddy_data:
   pleiades_caddy_config:
+  pleiades_forgejo_data:
 
 networks:
   pleiades_net:
     driver: bridge
+  # Agent ↔ git only. A fixed `name` (no compose project prefix) because the backend attaches agent
+  # containers to it by name; `internal` so it never becomes anyone's route to the internet; a fixed
+  # subnet because a `vpn` profile's gluetun must whitelist it and can't resolve docker names.
+  pleiades_git_net:
+    name: pleiades_git_net
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24

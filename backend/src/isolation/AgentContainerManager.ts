@@ -55,6 +55,9 @@ import { agentRepository } from '../domain/agents/agent.repository';
 import { isolationRepository } from '../domain/isolations/isolation.repository';
 import { androidDeviceRepository } from '../domain/android-devices/android-device.repository';
 import { deviceSerial } from '../domain/android-devices/android-device.model';
+import { gitAccessFor } from '../domain/git/git-access';
+import { gitIdentityService } from '../domain/git/git-identity.service';
+import { plantGitCredentials } from '../domain/git/git-credentials';
 
 const log = createLogger('agent-container');
 
@@ -701,7 +704,10 @@ class AgentContainerManager {
     }
 
     this.resetIdle(agentId, iso.idle_timeout_ms);
-    if (!remote) return new AgentExecutor(agentId, container);
+    if (!remote) {
+      await this.ensureGit(agentId, iso, container);
+      return new AgentExecutor(agentId, container);
+    }
 
     // Preflight the hop and plant the skill harnesses on the remote. Any failure throws
     // IsolationNotReadyError → tools surface it and never fall back to executing in the container.
@@ -712,6 +718,51 @@ class AgentContainerManager {
       remote,
       Math.floor((iso.idle_timeout_ms || env.AGENT_CONTAINER_IDLE_MS) / 1000),
     );
+  }
+
+  /**
+   * Give the container its route to the internal git server and the agent's own credentials
+   * (GIT_SERVER_PLAN.md §1–2). Runs on every ensure because both steps are idempotent and cheap when
+   * nothing changed, which is also what repairs a container created before git existed or a rotated
+   * token. Never throws: git is one capability among many, and a git outage must not cost the agent
+   * its shell. The account/token step is capped so a slow git server can't stall the turn — it
+   * finishes in the background and lands on the next ensure.
+   */
+  private async ensureGit(agentId: string, iso: IsolationProfile, container: string): Promise<void> {
+    const access = gitAccessFor(iso);
+    if (!access.available) return;
+    try {
+      if (access.wiring === 'network') {
+        const nets = await dockerService.networks(container);
+        if (!nets.includes(env.GIT_AGENT_NETWORK)) {
+          if (await dockerService.networkExists(env.GIT_AGENT_NETWORK)) {
+            await dockerService.networkConnect(env.GIT_AGENT_NETWORK, container);
+            log.info({ agentId, container }, 'attached agent container to the git network');
+          } else {
+            log.warn({ network: env.GIT_AGENT_NETWORK }, 'git network does not exist — is the forgejo service up?');
+          }
+        }
+      }
+
+      const provision = (async () => {
+        const agent = await agentRepository.findById(agentId);
+        if (!agent) return;
+        await gitIdentityService.ensure(agent);
+        const creds = await gitIdentityService.credentials(agentId);
+        if (creds) await plantGitCredentials(container, creds, access.url, agent.name);
+      })();
+      const settled = await Promise.race([
+        provision.then(
+          () => true,
+          () => true,
+        ),
+        new Promise<false>((r) => setTimeout(() => r(false), 15_000)),
+      ]);
+      if (!settled) log.warn({ agentId }, 'git provisioning is slow — continuing the turn without waiting');
+      provision.catch((err) => log.warn({ agentId, err: String(err) }, 'git provisioning failed'));
+    } catch (err) {
+      log.warn({ agentId, err: String(err) }, 'git network wiring failed');
+    }
   }
 
   /** The profile is in `ssh` mode — its remote target must be fully configured to execute anything. */
@@ -800,12 +851,23 @@ class AgentContainerManager {
   private async ensureGluetun(isoId: string): Promise<{ name: string; recreated: boolean }> {
     const name = isoGluetunName(isoId);
 
+    // With git on, the tunnel's netns must also hold a leg on the git network. That leg can only be
+    // added before gluetun starts (its firewall is built from the interfaces present at boot), so a
+    // running gluetun without it is recreated once — the path below already handles the agents
+    // pinned to the old namespace.
+    const wantGit = gitAccessFor({ network: 'vpn' }).available && (await dockerService.networkExists(env.GIT_AGENT_NETWORK));
+
     if ((await dockerService.containerState(name)) === 'running') {
-      try {
-        await dockerService.waitHealthy(name, env.AGENT_VPN_HEALTH_TIMEOUT_MS);
-        return { name, recreated: false };
-      } catch (err) {
-        log.warn({ isoId, err: String(err) }, 'gluetun unhealthy — recreating');
+      const missingGit = wantGit && !(await dockerService.networks(name)).includes(env.GIT_AGENT_NETWORK);
+      if (missingGit) {
+        log.info({ isoId }, 'gluetun has no git network leg — recreating it');
+      } else {
+        try {
+          await dockerService.waitHealthy(name, env.AGENT_VPN_HEALTH_TIMEOUT_MS);
+          return { name, recreated: false };
+        } catch (err) {
+          log.warn({ isoId, err: String(err) }, 'gluetun unhealthy — recreating');
+        }
       }
     }
 
@@ -825,6 +887,11 @@ class AgentContainerManager {
       envArgs: gluetunEnvArgs(cfg),
       isolationId: isoId,
     });
+    if (wantGit) {
+      await dockerService
+        .networkConnect(env.GIT_AGENT_NETWORK, name)
+        .catch((err) => log.warn({ isoId, err: String(err) }, 'could not attach gluetun to the git network'));
+    }
     await dockerService.startContainer(name);
     try {
       await dockerService.waitHealthy(name, env.AGENT_VPN_HEALTH_TIMEOUT_MS);

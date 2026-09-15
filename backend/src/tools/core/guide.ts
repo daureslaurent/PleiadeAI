@@ -456,6 +456,25 @@ to \`/workspace\`. Bytes cross safely (base64), so \`write\`/\`read\` handle bin
 use \`write from_handle\` to drop a resource blob onto disk. The cwd persists across calls; env vars
 don't. When isolation is enabled but not ready, these tools error instead of touching the backend.`,
   },
+  git: {
+    title: 'Working with the internal git server',
+    blurb: 'Clone, branch, commit and push on the fleet\'s shared git server.',
+    tools: ['git_repos'],
+    body: `# Internal git
+
+The fleet shares one git server. Your account and credentials are already configured inside your
+container — plain \`git\` works, and you never handle a token. Your \`## Git\` prompt block has the URL.
+
+1. Find the repo: \`git_repos({action:"list"})\` (clone URL + your permission), or
+   \`git_repos({action:"create", repo:"name", description:"…"})\` for new work.
+2. \`git clone <clone url>\` under /workspace (once — later turns \`git pull\` in the existing clone).
+3. On a shared repo, branch first: \`git switch -c <what-you-are-doing>\`.
+4. Commit small, each message saying *why*; \`git push\` when a piece is done (upstream is set on first push).
+5. \`git_repos({action:"info", repo})\` shows branches and recent commits without cloning.
+
+Permissions: \`read\` repos clone and pull only — a push is refused (403); ask the operator for write.
+Never force-push \`main\`, never commit secrets, and don't rewrite history others have pulled.`,
+  },
   visual: {
     title: 'Driving the visual desktop',
     blurb: 'Screenshot → reason → act loop for GUI control.',

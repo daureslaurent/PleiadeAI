@@ -63,6 +63,9 @@ import { settingsService } from './domain/settings/settings.service';
 import { telegramBot } from './telegram/TelegramBot';
 import { applyTelegramConfig } from './telegram/telegram-config';
 import { telegramRouter } from './transport/http/routes/telegram.routes';
+import { gitRouter } from './transport/http/routes/git.routes';
+import { gitEnabled } from './domain/git/forgejo.client';
+import { ensureGitServer } from './domain/git/git-bootstrap';
 
 /**
  * Composition root. Boot order matters: Mongo must connect before Agenda (which stores jobs in
@@ -110,6 +113,12 @@ async function main(): Promise<void> {
   // Install any shipped API presets this instance has never been offered (API_TOOL_PLAN.md §8).
   // Additive and remembered, so an operator's deletions stick while a new release's presets arrive.
   void installBuiltins().catch((err) => rootLogger.warn({ err }, 'built-in API install failed'));
+
+  // Internal git (GIT_SERVER_PLAN.md §2): admin account, org and fleet team, so the first agent turn
+  // or page load finds the server ready. Memoised and retried on the next use if it fails here.
+  if (gitEnabled()) {
+    void ensureGitServer().catch((err) => rootLogger.warn({ err: String(err) }, 'git server bootstrap failed'));
+  }
 
   const app = express();
   // Don't advertise Express in the `X-Powered-By` header (Caddy also strips it at the edge). Removes a
@@ -160,6 +169,7 @@ async function main(): Promise<void> {
   // can't carry an Authorization header, so the token rides in the query string on this router.
   app.use('/api/forum', allowQueryToken, requireAuth, forumRouter);
   app.use('/api/board', requireAuth, boardRouter);
+  app.use('/api/git', requireAuth, gitRouter);
   // The live media flux carries its own signed, flow-scoped token in the URL (STREAMING_PLAN.md §3),
   // so its router is mounted openly ahead of the authed one — the same shape as the OAuth callback
   // below. Everything else about streams stays header-authenticated.

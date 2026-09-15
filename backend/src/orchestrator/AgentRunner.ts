@@ -53,6 +53,10 @@ import {
   type IsolationProfile,
 } from '../isolation/AgentContainerManager';
 import { isolationRepository } from '../domain/isolations/isolation.repository';
+import { gitAccessFor } from '../domain/git/git-access';
+import { gitPromptState } from '../domain/git/git-prompt';
+import { gitRepos } from '../tools/core/gitRepos';
+import { bash } from '../tools/core/bash';
 import { imageRepository } from '../domain/images/image.repository';
 import { sessionRepository } from '../domain/sessions/session.repository';
 import { resourceRepository } from '../domain/resources/resource.repository';
@@ -427,6 +431,9 @@ export class AgentRunner {
         // A board item's manager holds `board` whatever its `tools_allowed` says: the conversation
         // exists to plan that item, and a PM that cannot read its own project cannot answer for it.
         ...(input.board ? [board.name] : []),
+        // An isolated agent with a shell holds `git_repos` whenever its container can reach the internal
+        // git server (GIT_SERVER_PLAN.md §4): the repo catalogue is what makes `git clone` mean something.
+        ...(agent.tools_allowed.includes(bash.name) && gitAccessFor(iso).available ? [gitRepos.name] : []),
       ]),
     ].filter(
       (name) => !(isTask && TASK_WITHHELD_TOOLS.has(name)),
@@ -546,6 +553,12 @@ export class AgentRunner {
       ? await this.subagentRuntime(agent, settings, inference)
       : null;
 
+    // The internal git server as this agent sees it — only for an agent that could act on it.
+    const git =
+      mods.enabled('git', scope) && (toolMap.has(bash.name) || toolMap.has(gitRepos.name))
+        ? await gitPromptState(agent, iso)
+        : null;
+
     /**
      * Everything the enabled modules render from. Modules render, they never fetch — which is why
      * every query above could be skipped by its own switch before we got here.
@@ -586,6 +599,8 @@ export class AgentRunner {
         max: Math.max(0, Math.trunc(Number(settings.tool_parallel_max ?? 4))),
       },
       task: input.task ?? null,
+      isolationNetwork: iso ? iso.network || null : null,
+      git,
       subagents: subagents
         ? ({
             slots: subagents.slots,

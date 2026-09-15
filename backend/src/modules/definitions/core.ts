@@ -7,7 +7,12 @@ import type { PromptContext, PromptModule } from '../types';
  * hallucinate dates), its own identity, its role, and where its tools execute. Computed fresh on
  * every prompt rebuild so the timestamp is always current for the turn.
  */
-export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date(), isTask = false): string {
+export function renderEnvironmentBlock(
+  agent: AgentDoc,
+  now: Date = new Date(),
+  isTask = false,
+  isolationNetwork: string | null = null,
+): string {
   const iso = now.toISOString();
   // Human-readable UTC rendering (deterministic across hosts, no server-locale surprises).
   const human = new Intl.DateTimeFormat('en-GB', {
@@ -25,8 +30,10 @@ export function renderEnvironmentBlock(agent: AgentDoc, now: Date = new Date(), 
     : agent.subagent
       ? 'subagent (reachable via `ask_agent`)'
       : 'top-level orchestrator';
+  // The network mode decides what the container can reach (the internet, the git server, a remote
+  // host), so it is named — the Git block's "unreachable" reasons refer to it.
   const execution = agent.isolation_id
-    ? 'tools run inside your dedicated isolated container'
+    ? `tools run inside your dedicated isolated container${isolationNetwork ? ` (network: ${isolationNetwork})` : ''}`
     : 'tools run on the backend host';
   return (
     '## Environment\n' +
@@ -71,7 +78,8 @@ export const environmentModule: PromptModule = {
       title: 'Environment',
       placement: 'system_head',
       order: 10,
-      render: (ctx: PromptContext) => renderEnvironmentBlock(ctx.agent, ctx.now, !!ctx.task),
+      render: (ctx: PromptContext) =>
+        renderEnvironmentBlock(ctx.agent, ctx.now, !!ctx.task, ctx.isolationNetwork ?? null),
     },
   ],
 };

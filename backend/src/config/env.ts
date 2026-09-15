@@ -124,6 +124,24 @@ const EnvSchema = z.object({
   // healthcheck before throwing IsolationNotReadyError (kill-switch: no traffic leaks meanwhile).
   GLUETUN_IMAGE: z.string().default('qmcgaw/gluetun:latest'),
   AGENT_VPN_HEALTH_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+
+  // Internal git server (Forgejo, GIT_SERVER_PLAN.md). GIT_ADMIN_PASSWORD empty = feature off.
+  // GIT_SERVER_URL is how the *backend* reaches the API; agents get a URL per isolation network mode
+  // (domain/git/git-access.ts): the git network hostname, GIT_FORGEJO_IP for `vpn` (gluetun's DNS
+  // can't resolve docker names), and GIT_HOST_URL for `host`. The network/subnet/IP must match
+  // `pleiades_git_net` and the `forgejo` service in docker-compose.yml.
+  GIT_SERVER_URL: z.string().url('GIT_SERVER_URL must be a valid URL').default('http://forgejo:3000'),
+  GIT_ADMIN_USER: z.string().regex(/^[A-Za-z0-9_.-]+$/, 'GIT_ADMIN_USER must be a plain name').default('pleiades-admin'),
+  GIT_ADMIN_PASSWORD: z.string().optional(),
+  GIT_ORG: z.string().regex(/^[A-Za-z0-9_.-]+$/, 'GIT_ORG must be a plain name').default('pleiades'),
+  GIT_CONTAINER: z.string().default('pleiades_forgejo'),
+  GIT_AGENT_NETWORK: z.string().default('pleiades_git_net'),
+  GIT_AGENT_HOST: z.string().default('forgejo'),
+  // Forgejo's port *inside* the git network (the container port, not the loopback bind).
+  GIT_AGENT_PORT: z.coerce.number().int().positive().default(3000),
+  GIT_FORGEJO_IP: z.string().default('172.31.250.10'),
+  GIT_HOST_URL: z.string().url('GIT_HOST_URL must be a valid URL').default('http://127.0.0.1:3300'),
+
   // How often the backend polls remote fine-tune servers for tracked-job progress (loss curve +
   // status). Only non-terminal jobs are polled, so this is idle when nothing is training.
   FINETUNE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),

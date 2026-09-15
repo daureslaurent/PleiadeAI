@@ -118,6 +118,34 @@ class DockerService {
     return res.stdout.trim() || null;
   }
 
+  /** Names of the user-defined/default networks this container is attached to (`[]` if unknown). */
+  async networks(container: string): Promise<string[]> {
+    const res = await this.run(['inspect', '-f', '{{json .NetworkSettings.Networks}}', container]);
+    if (res.exitCode !== 0) return [];
+    try {
+      return Object.keys((JSON.parse(res.stdout) as Record<string, unknown> | null) ?? {});
+    } catch {
+      return [];
+    }
+  }
+
+  /** Does this docker network exist? */
+  async networkExists(network: string): Promise<boolean> {
+    const res = await this.run(['network', 'inspect', '-f', '{{.Name}}', network]);
+    return res.exitCode === 0;
+  }
+
+  /**
+   * Attach a container (created or running) to an additional network. Idempotent: "already exists
+   * in network" is treated as success, so callers can re-assert attachment on every ensure.
+   */
+  async networkConnect(network: string, container: string): Promise<void> {
+    const res = await this.run(['network', 'connect', network, container]);
+    if (res.exitCode !== 0 && !/already exists/i.test(res.stderr)) {
+      throw new Error(`docker network connect failed: ${res.stderr.trim()}`);
+    }
+  }
+
   /**
    * Container healthcheck status (`starting`/`healthy`/`unhealthy`) or `null` when the container
    * doesn't exist or defines no HEALTHCHECK. The `if` guard emits an empty string for images without

@@ -33,6 +33,7 @@ import { editImage, generateImage, generateSound, generateVideo } from './core/m
 import { api, apiMan } from './core/api';
 import { data } from './core/data';
 import { runFlow } from './core/runFlow';
+import { gitRepos } from './core/gitRepos';
 import { board } from './core/board';
 import { forum } from './core/forum';
 import { forumAdmin } from './core/forumAdmin';
@@ -132,6 +133,8 @@ const CORE_TOOLS: Record<string, Tool> = {
   // Operator-authored pipelines (FLOWS_PLAN.md). Opt-in per agent: a flow can spend real GPU time,
   // so an agent gets to fire one only when the operator says so.
   [runFlow.name]: runFlow,
+  // Internal git server (GIT_SERVER_PLAN.md) — auto-granted to isolated agents with a shell (see AgentRunner).
+  [gitRepos.name]: gitRepos,
   // Operator-configured HTTP APIs (API_TOOL_PLAN.md): `api_man` is the catalogue, `api` the caller.
   // Opt-in per agent via tools_allowed — an API entry can carry a real credential.
   [apiMan.name]: apiMan,
@@ -278,6 +281,7 @@ const CATEGORY_BY_TOOL: Record<string, ToolCategory> = {
   grep: 'files',
   patch: 'files',
   bash: 'shell',
+  git_repos: 'shell',
   generate_image: 'media',
   generate_video: 'media',
   generate_sound: 'media',

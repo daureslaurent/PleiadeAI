@@ -149,6 +149,21 @@ Key seams:
   `prompt-usage.ts` derives its block titles from the registry, so the debugger's context breakdown
   can't drift from what was actually sent.
 
+- **Internal git (`domain/git/`, spec `GIT_SERVER_PLAN.md`).** A Forgejo service in compose. Only the
+  backend holds admin credentials (`GIT_ADMIN_PASSWORD`; empty = feature off), and drives the API through
+  `forgejo.client.ts`. Every agent gets its own account (`git_identities`, token AES-encrypted). Isolated
+  containers reach Forgejo over `pleiades_git_net`, an `internal` network with nothing else on it, so an
+  agent reaches git and still not mongo. **`gitAccessFor(iso)` is the one table** deciding the route per
+  network mode:
+  - `bridge`: the container is attached to the git network;
+  - `host`: Forgejo's loopback bind;
+  - `vpn`: gluetun is attached before it starts, and the agent uses the fixed IP;
+  - `none`/`ssh`/no isolation: unreachable.
+
+  The container manager wires the network and plants `~/.git-credentials`, and the `git` module tells the
+  agent its URL, account and repos, so the prompt can't promise a route that doesn't exist. Repos live in
+  one org. Fleet read = the repo's membership in the `fleet` team; write = a collaborator grant. The
+  backend creates repos (the `git_repos` tool and the `/git` page), so agent tokens never need org rights.
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.
   Embeddings failures degrade gracefully (memory just skipped).

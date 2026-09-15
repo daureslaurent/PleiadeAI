@@ -5,6 +5,7 @@ import {
   desktopModule,
   filesModule,
   flowsModule,
+  gitModule,
   mailModule,
   shellModule,
   visualsModule,
@@ -54,6 +55,7 @@ export const MODULES: PromptModule[] = [
   mailModule,
   desktopModule,
   androidModule,
+  gitModule,
 ];
 
 const BY_ID = new Map(MODULES.map((m) => [m.id, m]));
