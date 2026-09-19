@@ -54,18 +54,6 @@ export function previewContext(agent: AgentDoc, houseRules: string, scope: Modul
     // The preview shows the block in its on-shape; the wording it takes from the live setting is a
     // sentence, and reading the settings doc to render a preview is exactly what this avoids.
     toolParallel: { enabled: true, max: 4 },
-    isolationNetwork: agent.isolation_id ? '(sample) bridge' : null,
-    git: {
-      available: true,
-      url: 'http://forgejo:3000',
-      org: 'pleiades',
-      username: '(sample) agent-name-a1b2c3',
-      repos: [
-        { name: '(sample) shared-lib', permission: 'write' },
-        { name: '(sample) docs', permission: 'read' },
-      ],
-      more: 0,
-    },
     // A subagent preview renders the child's contract; an ordinary one, the parent's guidance.
     task:
       scope === 'subagent'

@@ -7,8 +7,6 @@ import { agentContainerRouter } from './agent-container.routes';
 import { suggestAgentIdentity } from '../../../domain/agents/identity-suggester';
 import { createLogger } from '../../../config/logger';
 import { invalidateRoster } from '../../../domain/forum/forum-mention.service';
-import { gitEnabled } from '../../../domain/git/forgejo.client';
-import { gitIdentityService } from '../../../domain/git/git-identity.service';
 
 const log = createLogger('agents-routes');
 
@@ -126,11 +124,6 @@ agentsRouter.patch('/:id', async (req, res) => {
   // A rename changes what `@…` resolves to, and the mention toggle lives on this same body.
   invalidateRoster();
 
-  // The git account's username never changes; its display name follows the agent's.
-  if (typeof body.name === 'string' && before?.name !== agent.name && gitEnabled()) {
-    void gitIdentityService.syncName(agent).catch(() => undefined);
-  }
-
   res.json(agent);
 });
 
@@ -205,11 +198,5 @@ agentsRouter.delete('/:id', async (req, res) => {
   void agentContainerManager
     .teardownAgent(String(agent._id), { removeVolume: true })
     .catch((err) => log.warn({ id: String(agent._id), err: String(err) }, 'isolation teardown on delete failed'));
-  // Its git account goes too; the commits it made keep their author name and email.
-  if (gitEnabled()) {
-    void gitIdentityService
-      .remove(String(agent._id))
-      .catch((err) => log.warn({ id: String(agent._id), err: String(err) }, 'git account removal on delete failed'));
-  }
   res.status(204).end();
 });

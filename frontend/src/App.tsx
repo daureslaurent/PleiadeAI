@@ -21,7 +21,6 @@ import { MentionsView } from './views/forum/MentionsView';
 import { ThreadView } from './views/forum/ThreadView';
 import { FilesView } from './views/FilesView';
 import { IsolationsView } from './views/IsolationsView';
-import { GitView } from './views/git/GitView';
 import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
 import { MonitorView } from './views/MonitorView';
@@ -139,9 +138,6 @@ export default function App() {
           <Route path="/files" element={<FilesView />} />
           <Route path="/images" element={<ImagesView />} />
           <Route path="/isolation" element={<IsolationsView />} />
-          <Route path="/git" element={<GitView />} />
-          <Route path="/git/r/:repo" element={<GitView />} />
-          <Route path="/git/:section" element={<GitView />} />
           <Route path="/memory" element={<MemoryVault />} />
           <Route path="/monitor" element={<MonitorView />} />
           <Route path="/autonomy" element={<AutonomyView />} />

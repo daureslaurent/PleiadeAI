@@ -55,28 +55,9 @@ export interface PromptContext {
   task?: TaskPromptState | null;
   /** Set when this run may start `task` subagents: what the parent-guidance block renders from. */
   subagents?: SubagentsPromptState | null;
-  /** The agent's isolation network mode (`bridge`, `vpn`…), or null when it runs on the backend. */
-  isolationNetwork?: string | null;
-  /** What the Git block renders from (`GIT_SERVER_PLAN.md` §4), or null when the module is off / no shell. */
-  git?: GitPromptState | null;
   /** Injected so the environment block is deterministic under test. */
   now?: Date;
 }
-
-/** The agent's view of the internal git server for this turn. */
-export type GitPromptState =
-  | {
-      available: true;
-      url: string;
-      org: string;
-      username: string;
-      /** The most recently updated repos it can reach, capped; `more` counts the rest. */
-      repos: Array<{ name: string; permission: 'read' | 'write' }>;
-      more: number;
-      /** The server answered the account but not the repo list in time. */
-      reposUnavailable?: boolean;
-    }
-  | { available: false; reason: string };
 
 /** A `task` child's own brief framing (`SUBAGENT_PLAN.md` §3). */
 export interface TaskPromptState {

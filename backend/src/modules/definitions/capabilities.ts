@@ -1,4 +1,4 @@
-import type { GitPromptState, ImagePromptState, PromptContext, PromptModule } from '../types';
+import type { ImagePromptState, PromptContext, PromptModule } from '../types';
 
 /**
  * Tell the model, in the user turn, what images it can act on and how — otherwise it has no reliable
@@ -169,53 +169,5 @@ export const androidModule: PromptModule = {
     'android_shell',
     'android_logcat',
     'android_file',
-  ],
-};
-
-/**
- * The internal git server (`GIT_SERVER_PLAN.md` §4). What the agent cannot find out by itself: that
- * the server exists, the URL *its* network mode reaches it on, which account it pushes as, and which
- * repos it can already touch — plus the three habits that keep a shared server usable. When git is
- * unreachable from where the agent runs, one line says why, so it stops rather than trying `git clone`
- * against a hostname that will never resolve.
- */
-export function renderGitBlock(git: GitPromptState | null | undefined): string | null {
-  if (!git) return null;
-  if (!git.available) {
-    return `## Git\nThe fleet has an internal git server, but you cannot reach it: ${git.reason}.`;
-  }
-  const base = `${git.url}/${git.org}`;
-  const repoLine = git.reposUnavailable
-    ? 'Repos you can reach: the list did not load this turn — use `git_repos list`.'
-    : git.repos.length === 0
-      ? 'You cannot reach any repo yet. Create one with `git_repos create`.'
-      : `Repos you can reach: ${git.repos.map((r) => `${r.name} (${r.permission})`).join(', ')}` +
-        (git.more > 0 ? `, and ${git.more} more — use \`git_repos list\`.` : '.');
-  return (
-    '## Git\n' +
-    `The fleet shares an internal git server. You are \`${git.username}\`, and your credentials are already ` +
-    'configured in your environment — never ask for, print or commit a token.\n' +
-    `- Clone: \`git clone ${base}/<repo>.git\` (clone under /workspace)\n` +
-    `- ${repoLine}\n` +
-    '- `git_repos info` shows a repo\'s branches and recent commits; `git_repos create` makes a new repo, ' +
-    'which the rest of the fleet can read.\n' +
-    'Commit small, with messages that say why. Work on a branch when the repo is shared, push when a piece ' +
-    'is done, and never force-push `main`.'
-  );
-}
-
-export const gitModule: PromptModule = {
-  id: 'git',
-  name: 'Git',
-  description: 'The internal git server: where the agent clones from, which account it pushes as, its repos.',
-  group: 'capabilities',
-  tools: ['git_repos'],
-  blocks: [
-    {
-      title: 'Git',
-      placement: 'system_tail',
-      order: 140,
-      render: (ctx: PromptContext) => renderGitBlock(ctx.git),
-    },
   ],
 };

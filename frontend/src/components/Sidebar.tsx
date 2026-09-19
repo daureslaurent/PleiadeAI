@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, GitBranch, ListChecks, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
+import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, ListChecks, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useAuth } from '../store/auth';
@@ -48,8 +48,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/images', label: 'Images', icon: Package },
       { to: '/isolation', label: 'Isolation', icon: Box },
-      // The fleet's internal git server (GIT_SERVER_PLAN.md), reached from isolated containers.
-      { to: '/git', label: 'Git', icon: GitBranch },
       { to: '/monitor', label: 'Monitor', icon: MonitorDot },
       { to: '/memory', label: 'Memory Vault', icon: Database },
       { to: '/autonomy', label: 'Autonomy', icon: Bot },
