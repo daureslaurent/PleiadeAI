@@ -7,6 +7,7 @@ import type { FlowDoc, FlowEdge, FlowNode } from '../../../domain/flows/flow.mod
 import type { FlowRunDoc } from '../../../domain/flows/flow-run.model';
 import { flowRunner } from '../../../flows/FlowRunner';
 import { flowApprovalBroker } from '../../../flows/FlowApprovalBroker';
+import { flowTimerScheduler } from '../../../flows/TimerScheduler';
 import { allHandlers, inputPorts, outputPorts } from '../../../flows/nodes';
 import { validateFlow, isRunnable } from '../../../flows/validate';
 import { PORT_TYPES } from '../../../flows/port-types';
@@ -158,6 +159,17 @@ flowsRouter.put('/:id', async (req, res) => {
   if (Array.isArray(req.body?.edges)) patch.edges = req.body.edges;
 
   const doc = await flowRepository.update(req.params.id, patch);
+
+  // Re-arming on enable is the other half of the tick's suspend (see `TimerScheduler.tick`): a
+  // disabled flow's timer stands itself down on its next tick, and `timer_armed` stays set so the
+  // operator's "this radio is on air" intent survives. Without this, re-enabling would leave it
+  // silent until the next restart.
+  if (doc && patch.enabled === true && (doc as FlowDoc & { timer_armed?: boolean }).timer_armed) {
+    await flowTimerScheduler
+      .arm(String(doc._id), { persist: false })
+      .catch((err) => log.error({ err, flow: doc.name }, 're-arming the flow timer on enable failed'));
+  }
+
   res.json(doc ? detail(doc) : { error: 'flow not found' });
 });
 

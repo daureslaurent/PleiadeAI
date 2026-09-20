@@ -42,7 +42,7 @@ export async function runMigrations(): Promise<void> {
 
   config.set({ ...baseConfig, migrationsDir });
 
-  const { db, client } = await database.connect();
+  const { db, client } = await connectWithRetry();
   try {
     const changelog = db.collection(changelogName);
 
@@ -87,4 +87,29 @@ async function baseline(changelog: Collection, files: string[]): Promise<void> {
   if (files.length === 0) return;
   const now = new Date();
   await changelog.insertMany(files.map((fileName) => ({ fileName, appliedAt: now })));
+}
+
+/**
+ * Connect to Mongo, retrying briefly.
+ *
+ * Migrations are the *first* thing boot does (see `index.ts`), and compose only gates the backend on
+ * Mongo's healthcheck — which is a TCP probe, so it goes green the moment mongod binds its socket
+ * rather than when it will answer a command. That gap is normally microseconds and occasionally is
+ * not, and losing it aborts boot outright. Retrying a few times costs nothing and removes the race
+ * without making the healthcheck expensive again.
+ */
+async function connectWithRetry(attempts = 10, delayMs = 1_000): Promise<Awaited<ReturnType<typeof database.connect>>> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await database.connect();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < attempts) {
+        log.warn({ attempt, attempts }, 'mongo not ready for migrations yet — retrying');
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastErr;
 }

@@ -31,11 +31,22 @@ services:
     image: mongo:7.0
     container_name: pleiades_mongo
     restart: unless-stopped
+    # Pin the WiredTiger cache. Left alone, mongod sizes it at ~50% of the RAM it *believes* it has,
+    # and under a nested hypervisor (LXC/VM) that is the host's total rather than this container's
+    # share — an 11 GB cache budget inside a 4 GiB box, which ends as an OOM kill rather than as
+    # paging. Explicit is the only safe answer; raise it in `.env` on a box with room to spare.
+    command: ["mongod", "--wiredTigerCacheSizeGB", "${MONGO_CACHE_GB:-1}"]
     volumes:
       - pleiades_mongo_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 10s
+      # A bare TCP probe, like qdrant's below. The obvious check — `mongosh --eval ping` — costs
+      # **312 ms of CPU per run** (measured): mongosh is a full Node.js application, so at the old
+      # 10s interval it burned ~3% of a core around the clock on an otherwise idle box, and opened
+      # ~5 connections each time for mongod to accept and reap. This costs ~0.8 ms.
+      # It reports "listening" rather than "answering"; `db/migrate.ts` retries its connect to cover
+      # the gap, since migrations are the first thing the backend does.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/27017"]
+      interval: 15s
       timeout: 5s
       retries: 5
       start_period: 20s

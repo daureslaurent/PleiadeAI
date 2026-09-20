@@ -35,7 +35,11 @@ export class FlowTimerScheduler {
   /** Re-arm every flow that was armed when the process stopped. Called once at boot. */
   async restore(): Promise<void> {
     const flows = await flowRepository.list().catch(() => [] as FlowDoc[]);
-    const pending = flows.filter((f) => (f as FlowDoc & { timer_armed?: boolean }).timer_armed);
+    // `enabled` as well as `timer_armed`: a disabled flow would otherwise arm here only for its
+    // first tick to stand it straight back down, which is a pointless query and a confusing log line.
+    const pending = flows.filter(
+      (f) => (f as FlowDoc & { timer_armed?: boolean }).timer_armed && f.enabled,
+    );
     for (const flow of pending) {
       await this.arm(String(flow._id), { persist: false }).catch((err) =>
         log.error({ err, flow: flow.name }, 'failed to restore a flow timer'),
@@ -122,7 +126,16 @@ export class FlowTimerScheduler {
       return;
     }
     if (!flow.enabled) {
-      log.info({ flow: flow.name }, 'timer tick skipped — the flow is disabled');
+      // Stand the timer down rather than skipping forever. A disabled flow used to keep its
+      // interval armed for the life of the process, so every tick spent a `findById` round trip and
+      // an info-level log line to decide to do nothing — on a 10s radio that is ~8.6k wasted queries
+      // and log lines a day, indefinitely, on a box the operator believes is idle.
+      //
+      // Only the in-memory timer goes: `timer_armed` stays set, so this is suspension rather than
+      // disarming, and re-enabling the flow re-arms it (see `flows.routes.ts`), as does a restart.
+      log.info({ flow: flow.name }, 'timer suspended — the flow is disabled');
+      clearInterval(entry.timer);
+      this.armed.delete(flowId);
       return;
     }
 
