@@ -2626,6 +2626,180 @@ export interface ClearSummary {
   total: number;
 }
 
+// --- Instance migration (whole-server move; backend `domain/migration/`) ---
+
+/** A census of everything an instance holds — the evidence behind "nothing is missing". */
+export interface MigrationFingerprint {
+  taken_at: string;
+  mongo: {
+    collections: Record<string, number>;
+    gridfs_bytes: Record<string, number>;
+    total_documents: number;
+  };
+  qdrant: { collections: Record<string, number>; total_points: number };
+}
+
+/** One built or uploaded `.plmig` archive sitting in the backup volume. */
+export interface InstanceArchive {
+  id: string;
+  filename: string;
+  bytes: number;
+  created_at: string;
+  origin: 'export' | 'upload';
+  sha256?: string;
+  fingerprint?: MigrationFingerprint;
+  verified_at?: string;
+  note?: string;
+}
+
+export interface MigrationJob {
+  id: string;
+  kind: 'export' | 'preflight' | 'restore';
+  status: 'running' | 'done' | 'error';
+  phase: string;
+  done: number;
+  total: number;
+  started_at: string;
+  ended_at?: string;
+  warnings: string[];
+  error?: string;
+  result?: unknown;
+}
+
+export interface MigrationOverview {
+  fingerprint: MigrationFingerprint;
+  estimate_bytes: number;
+  free_bytes: number | null;
+  archives: InstanceArchive[];
+  job: MigrationJob | null;
+  maintenance: { active: boolean; reason: string };
+  enc_key_fingerprint: string;
+  upload_chunk_max_bytes: number;
+}
+
+export interface EnvDiffRow {
+  name: string;
+  secret: boolean;
+  status: 'same' | 'differs' | 'only_source' | 'only_target';
+  source_value: string;
+  target_value: string;
+}
+
+export interface PreflightReport {
+  archive_id: string;
+  manifest: {
+    type: string;
+    version: number;
+    exported_at: string;
+    source: { app_version?: string; node: string; enc_key_fingerprint: string };
+    options: { includeEnv: boolean; excludeInferenceLogs: boolean; excludeMedia: boolean };
+    collections: { name: string; documents: number }[];
+    qdrant: { name: string; points: number }[];
+  };
+  source_fingerprint: MigrationFingerprint;
+  target_fingerprint: MigrationFingerprint;
+  env: { present: boolean; rows: EnvDiffRow[] };
+  secret_warnings: string[];
+  enc_keys: { source: string; target: string };
+  warnings: string[];
+  verified: boolean;
+}
+
+export interface RestoreReport {
+  collections_restored: number;
+  documents_restored: number;
+  qdrant_collections_restored: number;
+  qdrant_points_restored: number;
+  secrets: { rewrapped: number; unreadable: number; warnings: string[] };
+  verification: { matches: boolean; differences: string[] };
+  warnings: string[];
+  restart_requested: boolean;
+}
+
+export interface ExportRequest {
+  passphrase: string;
+  includeEnv: boolean;
+  excludeInferenceLogs: boolean;
+  excludeMedia: boolean;
+  label?: string;
+}
+
+export const migrationApi = {
+  overview: () => api.get<MigrationOverview>('/migration/overview').then((r) => r.data),
+  job: () => api.get<{ job: MigrationJob | null }>('/migration/job').then((r) => r.data.job),
+  clearJob: () => api.delete('/migration/job').then(() => undefined),
+  archives: () => api.get<{ archives: InstanceArchive[] }>('/migration/archives').then((r) => r.data.archives),
+
+  startExport: (req: ExportRequest) =>
+    api.post<{ job: MigrationJob }>('/migration/export', req).then((r) => r.data.job),
+
+  /**
+   * A plain authenticated URL rather than a fetched Blob: the archive is measured in gigabytes, and
+   * holding one in browser memory to hand it to `URL.createObjectURL` would take the tab down. The
+   * token rides as a query parameter because `<a download>` cannot carry a header (same reason the
+   * resources route accepts one — see `middleware/query-token.ts`).
+   */
+  downloadUrl: (id: string) =>
+    `${API_BASE}/api/migration/archives/${id}/download?token=${encodeURIComponent(localStorage.getItem('pleiades_token') ?? '')}`,
+
+  remove: (id: string) => api.delete(`/migration/archives/${id}`).then(() => undefined),
+
+  startPreflight: (id: string, passphrase: string) =>
+    api.post<{ job: MigrationJob }>(`/migration/archives/${id}/preflight`, { passphrase }).then((r) => r.data.job),
+
+  startRestore: (id: string, passphrase: string) =>
+    api
+      .post<{ job: MigrationJob }>(`/migration/archives/${id}/restore`, { passphrase, confirm: 'REPLACE' })
+      .then((r) => r.data.job),
+
+  restart: () => api.post<{ requested: boolean; detail: string }>('/migration/restart').then((r) => r.data),
+  leaveMaintenance: () => api.post('/migration/leave-maintenance').then(() => undefined),
+
+  /**
+   * Resumable chunked upload. The server is the authority on how many bytes it has, so every chunk
+   * states the offset it believes it is writing at and a mismatch is refused rather than appended —
+   * a silently misaligned archive would only be discovered by the restore, hours later.
+   */
+  async upload(
+    file: File,
+    onProgress: (sent: number, total: number) => void,
+    signal?: AbortSignal,
+  ): Promise<InstanceArchive> {
+    const { data: created } = await api.post<{ upload_id: string; chunk_max_bytes: number }>('/migration/uploads');
+    const uploadId = created.upload_id;
+    const chunkSize = Math.min(created.chunk_max_bytes, 16 * 1024 * 1024);
+
+    let sent = 0;
+    while (sent < file.size) {
+      if (signal?.aborted) throw new Error('upload cancelled');
+      const slice = file.slice(sent, Math.min(sent + chunkSize, file.size));
+      try {
+        const { data } = await api.put<{ received: number }>(`/migration/uploads/${uploadId}`, slice, {
+          params: { offset: sent },
+          headers: { 'Content-Type': 'application/octet-stream' },
+          signal,
+        });
+        sent = data.received;
+      } catch (err) {
+        // An offset mismatch means the two sides disagree about what arrived — adopt the server's
+        // count and retry from there, which is also how a resumed upload finds its place.
+        const received = (err as { response?: { status?: number; data?: { received?: number } } })?.response;
+        if (received?.status === 409 && typeof received.data?.received === 'number') {
+          sent = received.data.received;
+          continue;
+        }
+        throw err;
+      }
+      onProgress(sent, file.size);
+    }
+
+    const { data } = await api.post<{ archive: InstanceArchive }>(`/migration/uploads/${uploadId}/complete`, {
+      note: file.name,
+    });
+    return data.archive;
+  },
+};
+
 export const maintenanceApi = {
   counts: () => api.get<DataCounts>('/maintenance/data-counts').then((r) => r.data),
   /** A restorable dump of the selected categories, for the "download a backup first" option. */

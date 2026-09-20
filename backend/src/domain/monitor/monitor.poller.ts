@@ -194,6 +194,18 @@ export const monitorPoller = {
     void tick();
   },
 
+  /**
+   * Stop polling. Used by maintenance mode (`domain/migration/maintenance-mode.ts`): a poller that
+   * keeps writing snapshots into a collection an instance restore has just dropped would leave rows
+   * the post-restore census cannot account for.
+   */
+  stop(): void {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+    log.info('monitor poller stopped');
+  },
+
   /** Newest state for every enabled target, ordered by name — exactly what the fleet grid renders. */
   live(): MonitorLive[] {
     return [...state.values()].map((s) => s.live).sort((a, b) => a.name.localeCompare(b.name));

@@ -109,6 +109,13 @@ const EnvSchema = z.object({
   // tools/updater/install-updater.sh. Override for non-Docker / custom layouts.
   UPDATE_TRIGGER_DIR: z.string().default('/app/.update'),
 
+  // Whole-instance migration archives (INSTANCE_MIGRATION_PLAN.md). A named volume rather than the
+  // container's writable layer: these files are GB-scale copies of the entire instance.
+  BACKUP_DIR: z.string().default('/app/backups'),
+  // Chunk ceiling for a resumable archive upload. Sized so a chunk is a cheap retry unit on a slow
+  // link while still being far larger than the per-request overhead.
+  BACKUP_UPLOAD_CHUNK_MAX_BYTES: z.coerce.number().int().positive().default(64 * 1024 * 1024),
+
   // Per-agent Docker isolation. The backend talks to the host daemon via the mounted
   // /var/run/docker.sock using the `docker` CLI. These are defaults for new agents' containers
   // (each agent can override cpus/memory/network/idle in its Isolation panel).

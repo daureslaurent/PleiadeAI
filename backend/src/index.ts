@@ -57,6 +57,12 @@ import { allowQueryToken } from './transport/http/middleware/query-token';
 import { transferRouter } from './transport/http/routes/transfer.routes';
 import { hostRouter } from './transport/http/routes/host.routes';
 import { maintenanceRouter } from './transport/http/routes/maintenance.routes';
+import { migrationRouter } from './transport/http/routes/migration.routes';
+import {
+  maintenanceGuard,
+  registerSocketServer,
+} from './domain/migration/maintenance-mode';
+import { ensureDirs as ensureBackupDirs, pruneArchives } from './domain/migration/storage';
 import { mailRouter, mailOauthCallbackRouter } from './transport/http/routes/mail.routes';
 import { scheduleUpdateCheck } from './host';
 import { settingsService } from './domain/settings/settings.service';
@@ -69,11 +75,18 @@ import { telegramRouter } from './transport/http/routes/telegram.routes';
  * it) and before any route serves traffic; the HTTP server and socket.io share one listener.
  */
 async function main(): Promise<void> {
-  await connectMongo();
-
   // Apply pending MongoDB migrations before serving, so an app update / restart never runs new code
   // against an un-migrated schema. Idempotent; aborts boot on failure (see runMigrations).
+  //
+  // Ahead of `connectMongo`, and that ordering is load-bearing on a **pristine** database — which is
+  // precisely what a freshly provisioned server has. Mongoose builds its schema indexes in the
+  // background as soon as it connects, so connecting first sets off a race: `autoIndex` creates
+  // `conversation_scores.turn_id` non-unique, the migration then asks for the same name as unique,
+  // Mongo refuses, and boot aborts. migrate-mongo opens its own connection, so nothing here needs
+  // Mongoose to be up yet.
   await runMigrations();
+
+  await connectMongo();
 
   // Bring the scoring collection's indexes in line with the per-run model even if a migration was
   // missed: a leftover UNIQUE turn_id index silently drops every sub-agent run's score.
@@ -123,6 +136,12 @@ async function main(): Promise<void> {
 
   app.get('/health', (_req, res) => res.json({ ok: true }));
 
+  // While an instance restore is replacing the database underneath us, every surface but the
+  // migration routes answers 503 — a request served against a half-restored fleet is worse than a
+  // request refused. `/health` stays open on purpose: a failing healthcheck would have Docker
+  // restart the backend mid-restore, which is the one thing this mode exists to prevent.
+  app.use(maintenanceGuard);
+
   // Public auth, then everything else behind the auth guard (session JWT, or a read-only API key).
   app.use('/api/auth', authRouter);
   // Key management is operator-only: a leaked API key must not be able to mint or revoke keys.
@@ -169,6 +188,9 @@ async function main(): Promise<void> {
   app.use('/api/monitor', requireAuth, monitorRouter);
   app.use('/api/host', requireAuth, hostRouter);
   app.use('/api/maintenance', requireAuth, maintenanceRouter);
+  // Whole-instance export/import (INSTANCE_MIGRATION_PLAN.md). `allowQueryToken` is what lets the
+  // archive download be a plain <a href>: at several GB it cannot be fetched into a Blob first.
+  app.use('/api/migration', allowQueryToken, requireAuth, migrationRouter);
   // The Gmail OAuth callback is a browser redirect *from Google* — it can't carry a JWT, so it is
   // mounted openly (before the authed router grabs the prefix) and guarded by its signed state token.
   app.use('/api/mail/oauth/callback', mailOauthCallbackRouter);
@@ -181,7 +203,8 @@ async function main(): Promise<void> {
   installAsyncErrorHandling(app);
 
   const httpServer = http.createServer(app);
-  attachSocket(httpServer);
+  // Handed to maintenance mode so a restore can drop every live socket before it starts.
+  registerSocketServer(attachSocket(httpServer));
   attachVisualProxy(httpServer);
   attachAndroidProxy(httpServer);
   await setupAgenda();
@@ -212,6 +235,12 @@ async function main(): Promise<void> {
       if (s.update_enabled) scheduleUpdateCheck(s.update_check_interval_hours);
     })
     .catch((err) => rootLogger.error({ err }, 'failed to schedule update check'));
+
+  // The backup volume holds whole-instance archives; create it and trim anything older than the
+  // retention window before the first export button is pressed.
+  ensureBackupDirs()
+    .then(() => pruneArchives())
+    .catch((err) => rootLogger.warn({ err }, 'backup directory unavailable — instance export will fail'));
 
   httpServer.listen(env.PORT, () => {
     rootLogger.info({ port: env.PORT }, 'pleiades backend listening');

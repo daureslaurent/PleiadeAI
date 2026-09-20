@@ -127,6 +127,17 @@ class EndpointHealth {
     void this.pollOnce();
   }
 
+  /**
+   * Stop the poller. Used by maintenance mode (`domain/migration/maintenance-mode.ts`) so a probe
+   * sweep cannot write into the `endpoints` collection midway through an instance restore.
+   */
+  stop(): void {
+    if (!this.timer) return;
+    clearInterval(this.timer);
+    this.timer = null;
+    log.info('endpoint health poller stopped');
+  }
+
   /** (Re)create the interval timer at the currently-configured poll interval. */
   private arm(): void {
     if (this.timer) clearInterval(this.timer);

@@ -6,6 +6,7 @@ import {
   Palette,
   Puzzle,
   MonitorDot,
+  ArrowLeftRight,
   Webhook,
   RefreshCcwDot,
   Server,
@@ -102,6 +103,14 @@ export const CATEGORIES: SettingsCategory[] = [
     blurb: 'Pull the latest master and rebuild the stack.',
     contains: ['Update checks', 'Deployed version'],
     icon: RefreshCcwDot,
+  },
+  {
+    slug: 'migration',
+    title: 'Instance migration',
+    blurb: 'Move this whole instance to another server, or replace it with one.',
+    contains: ['Export archive', 'Import & replace', 'Verification'],
+    icon: ArrowLeftRight,
+    tone: 'danger',
   },
   {
     slug: 'access',

@@ -224,6 +224,82 @@ class QdrantService {
     log.warn({ namespace, count }, 'qdrant namespace wiped');
     return count;
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // Whole-instance migration (`domain/migration/`, spec INSTANCE_MIGRATION_PLAN.md).
+  //
+  // These are the only methods here that are not namespace-scoped, on purpose: a server move has to
+  // carry *every* collection — each agent's silo plus the shared `forum_index` — and it must
+  // enumerate them rather than be handed a list, so a release that adds a collection still moves.
+  // `exportNamespace` above stays as it is: it buffers a whole namespace, which is fine for the
+  // Memory Vault's one-agent dump and wrong for an instance that may hold millions of points.
+  // ---------------------------------------------------------------------------------------------
+
+  /** Every collection Qdrant currently holds. */
+  async listCollections(): Promise<string[]> {
+    const res = await this.client.getCollections();
+    return res.collections.map((c) => c.name).sort();
+  }
+
+  /** Exact point count + the creation params needed to rebuild the collection identically. */
+  async collectionSpec(name: string): Promise<{ points: number; params: Record<string, unknown> } | null> {
+    const { exists } = await this.client.collectionExists(name);
+    if (!exists) return null;
+    const info = await this.client.getCollection(name);
+    const { count } = await this.client.count(name, { exact: true });
+    return { points: count, params: (info.config?.params ?? {}) as Record<string, unknown> };
+  }
+
+  /** Page through a collection, handing each page to `onPage`. Never holds more than one page. */
+  async scrollPages(
+    name: string,
+    onPage: (points: Array<Record<string, unknown>>) => Promise<void>,
+    pageSize = 256,
+  ): Promise<void> {
+    let offset: string | number | undefined | null;
+    do {
+      const res = await this.client.scroll(name, {
+        limit: pageSize,
+        with_payload: true,
+        with_vector: true,
+        offset: offset ?? undefined,
+      });
+      if (res.points.length > 0) {
+        await onPage(
+          res.points.map((p) => ({ id: p.id, vector: p.vector ?? [], payload: p.payload ?? {} })),
+        );
+      }
+      offset = res.next_page_offset as string | number | null | undefined;
+    } while (offset !== null && offset !== undefined);
+  }
+
+  /**
+   * Drop and recreate a collection with the source's exact params, ready to receive its points.
+   * Recreating (rather than upserting into whatever is there) is what makes an import a *replacement*
+   * — a leftover point from the target's own history would otherwise survive the move invisibly.
+   */
+  async recreateCollection(name: string, params: Record<string, unknown>): Promise<void> {
+    const { exists } = await this.client.collectionExists(name);
+    if (exists) await this.client.deleteCollection(name);
+    await retryTransient(() =>
+      this.client.createCollection(name, params as Parameters<QdrantClient['createCollection']>[1]),
+    );
+  }
+
+  /** Bulk-load a page of points exactly as they were dumped (ids and vectors preserved). */
+  async restorePoints(name: string, points: Array<Record<string, unknown>>): Promise<void> {
+    if (points.length === 0) return;
+    await retryTransient(() =>
+      // The upsert argument is a union (point list vs column batch); the cast picks the list form.
+      this.client.upsert(name, { wait: true, points } as unknown as Parameters<QdrantClient['upsert']>[1]),
+    );
+  }
+
+  /** Remove a collection outright (migration wipe of a target that has its own leftovers). */
+  async dropCollection(name: string): Promise<void> {
+    const { exists } = await this.client.collectionExists(name);
+    if (exists) await this.client.deleteCollection(name);
+  }
 }
 
 export const qdrantService = new QdrantService();

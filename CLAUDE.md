@@ -191,6 +191,27 @@ Key seams:
   (`forum-proposal.service.ts`); chat turns spend no `turns_max`. The item's snapshot rides the
   prompt as the board module's `Board item` block.
 
+- **Instance migration (`domain/migration/`, spec `INSTANCE_MIGRATION_PLAN.md`).** Moving the whole
+  instance to another server, from the UI: Settings → Instance migration builds one encrypted
+  `.plmig` archive, you download it, drop it on the new box, and it replaces that instance. Distinct
+  from `transfer.routes.ts`/`clone.service.ts`, which merge *agents* into a foreign fleet by name and
+  strip every credential — correct for merging, useless for a move. What makes it whole is that the
+  collection list is enumerated from `db.listCollections()` at run time rather than maintained by
+  hand, so a release that adds a collection still moves; GridFS rides along as the ordinary
+  `.files`/`.chunks` collections, and documents are raw **BSON** (exact types, no base64 inflation on
+  255 KB chunk docs). Reads go through the **native driver**, never Mongoose — every credential field
+  is `select: false`, so a Mongoose read would omit exactly the rows that must not be lost. The
+  env-key-encrypted fields (`isolations.ssh_private_key_enc`, `api_sources.secret_enc`, …) are
+  **re-wrapped**: decrypted with the local `ISOLATION_ENC_KEY` and re-encrypted under the operator's
+  passphrase, then re-wrapped again under the target's own key — which is what lets the new server run
+  on a completely fresh `.env`. The archive streams in both directions (§4: gzip inside per-frame
+  AES-256-GCM, entries chunked because a collection's length isn't knowable up front) and uploads
+  resumably by byte offset. Import is preflight-then-restore: the preflight reads the *entire* archive
+  before anything is dropped, so a bad passphrase or truncated upload is a refusal rather than a
+  half-restored database; restore then quiesces everything that writes on a schedule
+  (`maintenance-mode.ts`), replaces Mongo + Qdrant, replays indexes, releases inherited Agenda locks,
+  diffs a census against the source's, and restarts the container through the docker socket.
+
 - **Auth (`transport/http/middleware/auth.ts`).** `requireAuth` accepts either the operator's session
   JWT or an **API key** (`X-API-Key`, or `Authorization: Bearer plk_…`; `domain/api-keys/`). A key is
   **read-only by default**: non-`GET`/`HEAD` methods are refused unless the key carries a matching

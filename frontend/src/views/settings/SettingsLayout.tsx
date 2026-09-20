@@ -13,6 +13,7 @@ import { MonitorPanel } from './panels/MonitorPanel';
 import { InterfacePanel } from './panels/InterfacePanel';
 import { SystemPanel } from './panels/SystemPanel';
 import { AccessPanel } from './panels/AccessPanel';
+import { MigrationPanel } from './panels/MigrationPanel';
 
 /**
  * `/settings` layout route. Owns the settings doc for the whole section (see `context.tsx`) and
@@ -36,6 +37,7 @@ const PANELS: Record<string, () => ReactNode> = {
   interface: InterfacePanel,
   system: SystemPanel,
   access: AccessPanel,
+  migration: MigrationPanel,
 };
 
 /** `/settings/:category` — one page per card. An unknown slug falls back to the index. */

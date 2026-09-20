@@ -1,4 +1,5 @@
 import { DatabaseBackup, KeyRound, ShieldAlert } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { GlassCard, Section } from '../../../components/ui';
 import { ApiKeysManager } from '../managers/ApiKeysManager';
 import { BackupTransfer } from '../managers/BackupTransfer';
@@ -20,7 +21,12 @@ export function AccessPanel() {
       <Section title="Backup & transfer" icon={<DatabaseBackup size={13} />}>
         <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
           Export agents + isolations (and Qdrant memory) to a file, or import a config onto this
-          instance.
+          instance. Secrets are stripped and ids are re-minted, so this is for lifting agents into
+          another fleet — to move the <em>whole</em> server, use{' '}
+          <Link to="/settings/migration" className="text-accent hover:underline">
+            Instance migration
+          </Link>
+          .
         </p>
         <BackupTransfer />
       </Section>

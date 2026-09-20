@@ -210,6 +210,11 @@ services:
       # systemd watcher (tools/updater) sees it and runs update_run.sh. Bind-mounted so the
       # trigger reaches the host and status.json/update.log flow back to the backend.
       - ./.update:/app/.update
+      # Whole-instance migration archives (INSTANCE_MIGRATION_PLAN.md). A named volume, not the
+      # container's writable layer: each archive is a GB-scale copy of the entire instance, and an
+      # overlay2 layer that size survives neither an image rebuild nor a sane disk-usage story.
+      # Keeping it out of the image is also what lets an interrupted download simply be retried.
+      - pleiades_backup_data:/app/backups
     healthcheck:
       test:
         - CMD
@@ -293,6 +298,9 @@ services:
 volumes:
   pleiades_mongo_data:
   pleiades_qdrant_data:
+  # Built and uploaded instance archives (Settings → Instance migration). Survives `compose down`,
+  # so an export stays downloadable across a restart of the stack it describes.
+  pleiades_backup_data:
   pleiades_embeddings_models:
   # Kept even while the `fallback` profile is off, so re-enabling it doesn't re-download the GGUF.
   pleiades_fallback_models:
