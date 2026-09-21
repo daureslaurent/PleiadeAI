@@ -337,6 +337,55 @@ GitLab commit, where the fleet token, webhook secret and SSH key were **not** re
 have arrived on a moved instance as ciphertext under a key that no longer existed. That is exactly
 the silent failure `secrets.ts` exists to prevent: the rows look present and every call fails.
 
+## 12. What production taught us (2026-09-21)
+
+The first real run on `git.lda-dev.com` produced two complaints — "the agent says it reviewed and
+commented, but there is nothing on GitLab" and "devops never saw the pipeline errors". Reading the
+transcripts (`scripts/prod.mjs session_messages`) and the activity feed settled both, and neither
+was what it looked like.
+
+**The comment was real.** `gitlab_mr({action:"comment"})` returned `ok: true` and the activity feed
+records it — Nova, MR `!4`, 03:37:10. It posted as **`nova`**, the agent's own provisioned account,
+on the *merge request*, not on the issue. Nothing was lost; it was somewhere other than where it was
+looked for.
+
+**The pipeline failure was invisible, and that was our bug.** Every pipeline on the project failed
+instantly with `duration: null` and **zero jobs**, because `.gitlab-ci.yml` did not validate. The
+check brief said, in full: *"The default branch is red. The latest pipeline on `main` failed. Read
+the failing job log with `gitlab_ci({action:"job_log"})`…"* — naming no pipeline id, no job id, and
+pointing at a log that could not exist. The agent guessed `pipeline_id: 400` (twice, 404 each time),
+then walked ids 11, 10 and 4 looking for something to read. The actual reason lived in the
+pipeline's `yaml_errors`, which `slimPipeline` dropped on the floor.
+
+Five fixes, in order of how much they mattered:
+
+| Fix | Why |
+|---|---|
+| `slimPipeline` carries **`yaml_errors`** | It is the only explanation of a pipeline that never started, and it was being discarded. The list endpoint omits it, so a red pipeline is now re-fetched by id |
+| The brief names the **pipeline id and each `job_id`** | An agent cannot navigate from "it is red" to a log; it guessed, and 404'd |
+| The brief handles **no jobs** as its own case | Quotes the YAML error and says there is no log to read, instead of instructing a read that cannot succeed |
+| `gitlab_ci({action:"lint"})` | `POST /ci/lint` validates a config **before** it is committed. The entire ninety-minute loop was invalid YAML committed, pipeline red, guess, commit again |
+| `gitlab_ci({action:"jobs"})` explains an **empty list** | Zero jobs read as "nothing failed" when it means "nothing ran" |
+
+**Transient upstream failures are retried — reads only.** The transcripts are full of
+`GitLab returned 502`, each one becoming a narrated dead end. Reads now retry three times with
+backoff. Writes deliberately do **not**: a 502 on a POST can mean the write landed and the response
+was lost, so retrying would open a second merge request. They fail with an error that says exactly
+that and tells the agent to look before repeating it.
+
+**The read-only boundary is now enforced, not requested.** §10 shipped the project check with
+"change nothing" stated in the prompt and flagged that it was prompt-level only. Production answered
+within a day: told four times to make no changes, the agent posted a comment. `AgentRunner` gained a
+`readOnly` run flag that reuses the `explore` subagent machinery — the toolset is narrowed by
+`mayRead`, and any call whose *arguments* would write is refused before it executes. The sentence in
+the brief stays, because being told why beats being refused without a reason.
+
+**Not fixed here, and worth knowing.** Several turns show the model emitting tool calls as plain
+text — a single `[gitlab_commit]`, and once a run of six, `[edit][gitlab_commit][forum][gitlab_ci][gitlab_ci][forum]`.
+Those never executed, and the agent's prose described them as done. `AgentRunner` recovers a *bare*
+single leaked call; a concatenated batch is not recovered. That is a model/runner issue rather than
+a GitLab one, and it is the other half of "said it did it, nothing happened".
+
 ## 8. Security notes
 
 - The token is `select: false`, `_enc$`-suffixed (so `redact.ts` scrubs it), decrypted only in the

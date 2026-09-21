@@ -157,6 +157,8 @@ export async function startGitlabTurn(input: {
   brief: string;
   /** Inbox line when the turn finishes. */
   notify: string;
+  /** Refuse any call that would change something — what a *review* means (`GITLAB_PLAN.md` §12). */
+  readOnly?: boolean;
 }): Promise<{ sessionId: string; done: Promise<void> }> {
   const session = await sessionRepository.create({
     agentId: input.agentId,
@@ -196,6 +198,7 @@ export async function startGitlabTurn(input: {
         depth: 0,
         userText: input.brief,
         signal: controller.signal,
+        readOnly: input.readOnly === true,
       });
       const turn = recorder.build(result.text);
       await sessionRepository.addMessage(sessionId, {

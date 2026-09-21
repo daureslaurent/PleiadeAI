@@ -2049,7 +2049,15 @@ export interface GitLabProjectCheck {
   unassigned: GitLabIssue[];
   stale: { issue: GitLabIssue; days: number }[];
   merge_requests: { mr: GitLabMergeRequest; why: string[] }[];
-  pipeline: { status: string; url: string; ref: string; failed_jobs: string[] } | null;
+  pipeline: {
+    id: number;
+    status: string;
+    url: string;
+    ref: string;
+    failed_jobs: { name: string; id: number }[];
+    /** Set when the CI config did not validate — the pipeline produced no jobs at all. */
+    yaml_errors: string | null;
+  } | null;
   quiet: boolean;
   checked_at: string;
 }

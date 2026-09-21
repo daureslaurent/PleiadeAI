@@ -28,7 +28,15 @@ export interface ProjectCheck {
   unassigned: ReturnType<typeof slimIssue>[];
   stale: { issue: ReturnType<typeof slimIssue>; days: number }[];
   merge_requests: { mr: ReturnType<typeof slimMergeRequest>; why: string[] }[];
-  pipeline: { status: string; url: string; ref: string; failed_jobs: string[] } | null;
+  pipeline: {
+    id: number;
+    status: string;
+    url: string;
+    ref: string;
+    failed_jobs: { name: string; id: number }[];
+    /** Set when the config did not validate — the pipeline never produced a job. */
+    yaml_errors: string | null;
+  } | null;
   /** Nothing in any of the four buckets. */
   quiet: boolean;
   checked_at: string;
@@ -84,19 +92,38 @@ export async function checkProject(ref: string): Promise<ProjectCheck> {
   let pipeline: ProjectCheck['pipeline'] = null;
   const head = pipelines[0];
   if (head && head.status === 'failed') {
-    // Only for a red pipeline, and only the names: the logs are what the agent fetches if it decides
-    // the failure is worth chasing, and pulling four of them here would cost more than the check.
-    let failedJobs: string[] = [];
+    // Only for a red pipeline, and only the names + ids: the logs are what the agent fetches if it
+    // decides the failure is worth chasing, and pulling four of them here would cost more than the
+    // whole check.
+    let failedJobs: { name: string; id: number }[] = [];
     try {
       const jobs = await request<Record<string, any>[]>(`projects/${id}/pipelines/${head.id}/jobs`, {
         conn,
         query: { scope: 'failed', per_page: 20 },
       });
-      failedJobs = jobs.map((j) => `${j.name} (job ${j.id})`);
+      failedJobs = jobs.map((j) => ({ name: String(j.name), id: Number(j.id) }));
     } catch {
       /* a project with restricted CI still reports the pipeline itself */
     }
-    pipeline = { status: head.status, url: head.web_url, ref: head.ref, failed_jobs: failedJobs };
+    // The list endpoint omits `yaml_errors`, and that field is the entire explanation when a
+    // pipeline failed with no jobs — so the pipeline is re-fetched by id rather than trusted from
+    // the listing. Without it the brief could only say "it is red" and point at a log that does
+    // not exist, which is exactly what it did in production.
+    let yamlErrors: string | null = null;
+    try {
+      const full = await request<Record<string, any>>(`projects/${id}/pipelines/${head.id}`, { conn });
+      yamlErrors = full.yaml_errors ?? null;
+    } catch {
+      /* the listing's fields are enough to report that it is red */
+    }
+    pipeline = {
+      id: Number(head.id),
+      status: head.status,
+      url: head.web_url,
+      ref: head.ref,
+      failed_jobs: failedJobs,
+      yaml_errors: yamlErrors,
+    };
   }
 
   const check: ProjectCheck = {
@@ -130,10 +157,10 @@ export async function checkProject(ref: string): Promise<ProjectCheck> {
  * discover the state of the project first spends five tool rounds re-deriving something we can
  * fetch in four parallel GETs, and it will discover a slightly different set each time.
  *
- * And it is told, plainly and twice, to change nothing. That instruction is the current authority
- * boundary (§10) — the agent holds the write tools, because it holds them in every run, so the rule
- * is stated rather than enforced. If it should be enforced, that is a toolset restriction on this
- * run, not a stronger sentence here.
+ * It is also told to change nothing — but that is now the *second* line of defence, not the only
+ * one. Production settled the question (§12): an agent told four times to make no changes posted a
+ * merge-request comment anyway, so the run itself is started read-only and a write is refused before
+ * it executes. The sentence stays because being told why beats being refused without a reason.
  */
 export function checkBrief(check: ProjectCheck): string {
   const lines: string[] = [
@@ -182,15 +209,35 @@ export function checkBrief(check: ProjectCheck): string {
   }
 
   if (check.pipeline) {
-    lines.push(
-      `**The default branch is red.** The latest pipeline on \`${check.pipeline.ref}\` failed` +
-        (check.pipeline.failed_jobs.length
-          ? `: ${check.pipeline.failed_jobs.join(', ')}.`
-          : '.'),
-      'Read the failing job log with `gitlab_ci({action:"job_log"})` before you say anything about ' +
-        'the cause — a runner timeout and a broken test look identical from here.',
-      '',
-    );
+    const p = check.pipeline;
+    lines.push(`**The default branch is red.** Pipeline \`${p.id}\` on \`${p.ref}\` failed.`);
+    if (p.yaml_errors) {
+      // The config never validated, so there is no job and no log. Saying "read the failing job's
+      // log" here is what sent an agent guessing pipeline ids in production — give it the actual
+      // error instead, and the tool that prevents a repeat.
+      lines.push(
+        '',
+        `It produced **no jobs at all**: the CI config is invalid — \`${p.yaml_errors}\`.`,
+        'There is no job log to read. The fix is in `.gitlab-ci.yml`; validate any correction with ' +
+          '`gitlab_ci({action:"lint"})` before it is committed.',
+      );
+    } else if (p.failed_jobs.length) {
+      lines.push(
+        '',
+        'Failed jobs — read one with `gitlab_ci({action:"job_log", job_id: <id>})` before you say ' +
+          'anything about the cause, because a runner timeout and a broken test look identical ' +
+          'from here:',
+        ...p.failed_jobs.map((j) => `- ${j.name} — \`job_id: ${j.id}\``),
+      );
+    } else {
+      lines.push(
+        '',
+        'It produced **no jobs**, and GitLab reports no config error — so either no rule matched ' +
+          `this ref or no runner picked it up. Check the project's runners; ` +
+          `\`gitlab_ci({action:"pipeline", pipeline_id: ${p.id}})\` has the detail.`,
+      );
+    }
+    lines.push('');
   }
 
   lines.push(

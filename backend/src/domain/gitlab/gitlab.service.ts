@@ -123,7 +123,7 @@ function buildUrl(conn: GitLabConnection, path: string, query?: Record<string, u
  * GitLab's error bodies are inconsistent — `{message}` as a string, as an object of field errors, or
  * `{error}`. An agent handed `[object Object]` cannot correct itself, so they are flattened here.
  */
-function explain(status: number, body: string): string {
+function explain(status: number, body: string, method = 'GET'): string {
   let detail = body.slice(0, 500);
   try {
     const parsed = JSON.parse(body);
@@ -140,12 +140,39 @@ function explain(status: number, body: string): string {
   if (status === 401) return `GitLab rejected the token (401): ${detail}`;
   if (status === 403) return `the bot account is not allowed to do this (403): ${detail}`;
   if (status === 404) {
-    return `not found (404) — wrong path, or the bot account cannot see it: ${detail}`;
+    return `not found (404) — wrong path, or this account cannot see it: ${detail}`;
+  }
+  if (TRANSIENT.has(status)) {
+    const base = `GitLab is not responding (${status}) — it may be restarting or overloaded`;
+    // A failed *write* is genuinely ambiguous, and an agent that assumes it failed will happily
+    // retry and open a second merge request. Say what is actually known.
+    return method === 'GET'
+      ? `${base}. Retried and still failing; try again shortly.`
+      : `${base}. This was a write, so it may or may not have gone through — CHECK before repeating ` +
+        `it (list the branch, the MR or the issue), otherwise you risk doing it twice.`;
   }
   return `GitLab returned ${status}: ${detail}`;
 }
 
-/** One authenticated call. `paginate` walks `X-Next-Page` for list endpoints. */
+/** Upstream hiccups worth one more try: a restarting or overloaded GitLab, not a refusal. */
+const TRANSIENT = new Set([502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One authenticated call. `paginate` walks `X-Next-Page` for list endpoints.
+ *
+ * **Reads retry, writes do not.** A self-hosted GitLab restarting under its own CI load answers 502
+ * for a few seconds at a time, and production transcripts show whole agent turns lost to it — a
+ * dozen reads failing in a row, each one narrated as a finding. Retrying a GET costs a second and
+ * removes that entirely.
+ *
+ * A POST is a different question: a 502 can mean the write landed and the *response* was lost, so
+ * retrying would open a second merge request or push a second commit. Those surface the failure
+ * instead, with an error that says the write may have gone through — the agent can look, which is
+ * exactly what a human would do.
+ */
 export async function request<T = unknown>(path: string, opts: RequestOptions = {}): Promise<T> {
   const conn = opts.conn ?? (await connection());
   const method = opts.method ?? 'GET';
@@ -165,12 +192,20 @@ export async function request<T = unknown>(path: string, opts: RequestOptions = 
     ...(opts.paginate ? { per_page: Math.min(100, opts.paginate) } : {}),
   });
 
+  const idempotent = method === 'GET';
   for (let page = 1; ; page += 1) {
-    const res = await fetch(url, { method, headers, body: payload });
-    const text = await res.text();
+    let res!: Response;
+    let text = '';
+    for (let attempt = 1; ; attempt += 1) {
+      res = await fetch(url, { method, headers, body: payload });
+      text = await res.text();
+      if (res.ok || !TRANSIENT.has(res.status) || !idempotent || attempt >= MAX_ATTEMPTS) break;
+      log.warn({ path, status: res.status, attempt }, 'gitlab is unavailable — retrying');
+      await sleep(attempt * 750);
+    }
     if (!res.ok) {
       log.warn({ path, status: res.status, method }, 'gitlab call failed');
-      throw new GitLabError(explain(res.status, text), res.status);
+      throw new GitLabError(explain(res.status, text, method), res.status);
     }
     if (opts.raw) return text as T;
     const parsed = text ? JSON.parse(text) : null;
@@ -267,6 +302,18 @@ export function slimPipeline(p: Record<string, any>): Record<string, unknown> {
     created_at: p.created_at,
     updated_at: p.updated_at,
     duration: p.duration ?? null,
+    /**
+     * Why a pipeline never started.
+     *
+     * A `.gitlab-ci.yml` that does not validate produces a pipeline that is `failed` with **no jobs
+     * and a null duration** — so every "read the failing job's log" path finds nothing, and the one
+     * place the actual reason exists is this field. Dropping it (as this function first did) is what
+     * left an agent staring at a red pipeline it could not explain, guessing pipeline ids.
+     *
+     * Only the single-pipeline endpoint returns it; a list omits it, which is why `gitlab_ci` and
+     * the project check both fetch the pipeline itself when one is red.
+     */
+    yaml_errors: p.yaml_errors ?? null,
   };
 }
 

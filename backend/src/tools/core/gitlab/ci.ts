@@ -1,5 +1,5 @@
 import { createLogger } from '../../../config/logger';
-import { GitLabError, request, slimPipeline } from '../../../domain/gitlab/gitlab.service';
+import { GitLabError, request, seg, slimPipeline } from '../../../domain/gitlab/gitlab.service';
 import {
   PROJECT_PARAM,
   actionParam,
@@ -17,7 +17,17 @@ const log = createLogger('tool:gitlab');
 /** Default lines of a job log fed back. A failed Node build's log is ~400 KB; the end is the part that matters. */
 const DEFAULT_LOG_LINES = 200;
 
-const CI_ACTIONS = ['pipelines', 'pipeline', 'jobs', 'job_log', 'run', 'retry', 'cancel', 'variables'];
+const CI_ACTIONS = [
+  'pipelines',
+  'pipeline',
+  'jobs',
+  'job_log',
+  'lint',
+  'run',
+  'retry',
+  'cancel',
+  'variables',
+];
 
 /**
  * `gitlab_ci` — watch the pipelines, and read why one failed.
@@ -38,8 +48,10 @@ export const gitlabCi: Tool = {
     '`pipeline` (`pipeline_id`) → one, with its jobs and their statuses. `jobs` (`pipeline_id`, ' +
     'optional `scope: failed`) → the jobs. `job_log` (`job_id`, optional `lines`) → a job\'s output, ' +
     'tailed to the last 200 lines by default — this is how you find out why a build failed. ' +
-    '`run` (`ref`, optional `variables`) → trigger a pipeline. `retry` / `cancel` (`pipeline_id` or ' +
-    '`job_id`). `variables` → the project\'s CI variables (values are hidden by GitLab for masked ones). ' +
+    '`lint` (`content`, or nothing to check the committed `.gitlab-ci.yml`) → validate a CI config ' +
+    'BEFORE you commit it; an invalid one produces a pipeline that fails instantly with no jobs at ' +
+    'all. `run` (`ref`, optional `variables`) → trigger a pipeline. `retry` / `cancel` (`pipeline_id` ' +
+    'or `job_id`). `variables` → the project\'s CI variables (masked values are hidden by GitLab). ' +
     'Always read the failing job\'s log before retrying anything: a retry runs the same code again.',
   parameters: {
     type: 'object',
@@ -55,6 +67,12 @@ export const gitlabCi: Tool = {
       },
       scope: { type: 'string', description: '`jobs`: e.g. "failed" to see only the jobs that broke.' },
       lines: { type: 'number', description: '`job_log`: how many trailing lines (default 200, max 2000).' },
+      content: {
+        type: 'string',
+        description:
+          '`lint`: the `.gitlab-ci.yml` text to validate. Omit to validate the one already committed ' +
+          'on the default branch.',
+      },
       variables: {
         type: 'object',
         description: '`run`: CI variables for this run, as {NAME: value}.',
@@ -93,7 +111,7 @@ export const gitlabCi: Tool = {
               paginate: 100,
             }),
           ]);
-          return { pipeline: slimPipeline(p), jobs: jobs.map(slimJob) };
+          return { pipeline: slimPipeline(p), jobs: jobs.map(slimJob), ...noJobsNote(p, jobs.length) };
         }
 
         case 'jobs': {
@@ -102,7 +120,42 @@ export const gitlabCi: Tool = {
             `projects/${id}/pipelines/${pipelineId}/jobs`,
             { conn, paginate: 100, query: { scope: args.scope } },
           );
+          // An empty list is the single most misleading answer this tool can give: it reads as
+          // "nothing failed" when it usually means the pipeline never started. Fetch the pipeline
+          // and say which it is.
+          if (!rows.length) {
+            const p = await request<Record<string, any>>(`projects/${id}/pipelines/${pipelineId}`, { conn });
+            return { count: 0, jobs: [], pipeline: slimPipeline(p), ...noJobsNote(p, 0) };
+          }
           return { count: rows.length, jobs: rows.map(slimJob) };
+        }
+
+        case 'lint': {
+          const content = typeof args.content === 'string' ? args.content : null;
+          // No content given: validate what is committed, by reading it first. An agent asking "is
+          // my config valid" almost always means the one in the repo.
+          const yaml =
+            content ??
+            (await request<string>(`projects/${id}/repository/files/${seg('.gitlab-ci.yml')}/raw`, {
+              conn,
+              raw: true,
+            }));
+          const res = await request<Record<string, any>>(`projects/${id}/ci/lint`, {
+            conn,
+            method: 'POST',
+            body: { content: yaml, dry_run: false },
+          });
+          return {
+            valid: res.valid === true,
+            errors: res.errors ?? [],
+            warnings: res.warnings ?? [],
+            jobs: (res.jobs ?? []).map((j: any) => j.name ?? j),
+            checked: content ? 'the content you passed' : 'the committed .gitlab-ci.yml',
+            hint: res.valid
+              ? undefined
+              : 'Fix these before committing — an invalid config produces a pipeline that fails ' +
+                'instantly with no jobs, which looks identical to a broken build.',
+          };
         }
 
         case 'job_log': {
@@ -181,6 +234,32 @@ export const gitlabCi: Tool = {
     });
   },
 };
+
+/**
+ * Explain a pipeline that produced no jobs.
+ *
+ * This is the case that cost a production afternoon: four pipelines `failed` with `duration: null`
+ * and zero jobs, because the `.gitlab-ci.yml` did not validate. Every "read the failing job's log"
+ * instruction finds nothing to read, and the reason lives in `yaml_errors` — which nothing surfaced.
+ */
+function noJobsNote(pipeline: Record<string, any>, jobCount: number): Record<string, unknown> {
+  if (jobCount > 0) return {};
+  if (pipeline.yaml_errors) {
+    return {
+      never_started: true,
+      reason:
+        `This pipeline produced no jobs because the CI config is invalid: ${pipeline.yaml_errors}. ` +
+        'There is no job log to read — fix the config and validate it with ' +
+        '`gitlab_ci({action:"lint"})` before committing again.',
+    };
+  }
+  return {
+    never_started: true,
+    reason:
+      'This pipeline has no jobs. Either no rule matched this ref, or no runner picked it up — ' +
+      'check the project’s runners. There is no job log to read.',
+  };
+}
 
 function slimJob(j: Record<string, any>): Record<string, unknown> {
   return {

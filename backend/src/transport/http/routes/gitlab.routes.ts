@@ -367,6 +367,9 @@ gitlabRouter.post('/projects/:project/check', async (req, res) => {
       title: `GitLab · check ${check.project}`,
       brief: checkBrief(check),
       notify: `${agent.name} reviewed ${check.project}`,
+      // The brief says "change nothing" and production showed that is not enough — an agent told
+      // four times not to comment posted a merge-request comment anyway. The toolset enforces it.
+      readOnly: true,
     });
     log.info({ project: check.project, agent: agent.name, session: sessionId }, 'project check started');
     res.json({ sessionId, agent: agent.name, check });

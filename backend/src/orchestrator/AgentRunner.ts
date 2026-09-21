@@ -197,6 +197,16 @@ export interface RunInput {
    * instead of the ordinary switches.
    */
   task?: { mode: 'explore' | 'work'; description: string; reportMaxChars: number; parentName: string };
+  /**
+   * Run this turn read-only: the toolset keeps only tools that *can* read, and any call whose
+   * arguments would change something is refused before it executes — the same two-stage guard an
+   * `explore` subagent gets.
+   *
+   * Exists because a promise made in a prompt is not a guarantee. The GitLab project check told its
+   * agent four times to change nothing and the agent posted a merge-request comment anyway
+   * (`GITLAB_PLAN.md` §12); a run that is *defined* as a review should not be able to write at all.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -452,7 +462,8 @@ export class AgentRunner {
     const scope: ModuleScope = isTask ? 'subagent' : 'turn';
     const resolved = await resolveTools(effectiveTools, scope);
     // An `explore` child keeps only the tools that can read; each call is checked again before it runs.
-    const tools = input.task?.mode === 'explore' ? resolved.filter(mayRead) : resolved;
+    const readOnlyRun = input.readOnly === true || input.task?.mode === 'explore';
+    const tools = readOnlyRun ? resolved.filter(mayRead) : resolved;
     const toolMap = new Map(tools.map((t) => [t.name, t]));
     const toolSchemas: ToolSchema[] = tools.map((t) => ({
       name: t.name,
@@ -886,7 +897,7 @@ export class AgentRunner {
             frames: liveFrames,
             persistMemory: input.persistMemory !== false,
             batch: batchId ? { id: batchId, index: i, size: group.length } : undefined,
-            readOnly: input.task?.mode === 'explore',
+            readOnly: readOnlyRun,
             subagents: subagents
               ? {
                   runtime: subagents,
@@ -1261,8 +1272,8 @@ export class AgentRunner {
       const result = {
         ok: false,
         error:
-          `read-only task: \`${call.name}\` with these arguments would change something, and this ` +
-          'subagent is an explore task. Report what should be changed instead of changing it.',
+          `read-only run: \`${call.name}\` with these arguments would change something, and this ` +
+          'turn is a review. Report what should be changed instead of changing it.',
       };
       eventBus.emit('tool:execution_complete', {
         ctx,
