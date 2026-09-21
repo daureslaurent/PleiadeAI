@@ -175,8 +175,14 @@ Key seams:
   agent *could* open an issue and not be shown the four comments on it. `gitlab-read-guard.ts` then
   refuses a comment/close/approve/merge on an item the **turn** has not read (keyed on the
   `ctx.turnId` added for it), the way `post-contract.ts` refuses a malformed post — prompt-level
-  instruction already lost this argument in §12. GitLab 19's "work item" is a UI/URL rename, not an
-  API change; only epics (Premium) moved to GraphQL.
+  instruction already lost this argument in §12. GitLab 19's "work item" is a UI/URL rename for the
+  *endpoints* but **not for the vocabulary** (§15): a to-do or event about an issue arrives with
+  `target_type: "WorkItem"`, which matched nothing and silently woke nobody, so `targetKind()`
+  folds every issue-shaped type onto `Issue` and the webhook router accepts `object_kind:
+  'work_item'`. That bug hid because an unmatched row was consumed by the cursor without a word —
+  hence `unmatched` on the poll report and `GET /api/gitlab/poll/inspect`, a read-only view of what
+  GitLab is actually sending versus what is armed, and **Catch up** (rewind the to-do cursors;
+  pending *is* the backlog) as distinct from **Re-baseline** (start from now).
 
 - **Modules (`modules/`, spec `MODULES_PLAN.md`).** The prompt is assembled from a **register** of
   modules rather than a hard-coded list of renderers. A module owns three things at once: the prompt

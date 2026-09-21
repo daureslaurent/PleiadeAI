@@ -589,3 +589,68 @@ therefore out of scope here.
 So nothing moved. What changed is that the prompt module now *says* so — an agent that reads "work
 item" in the interface and has a tool called `gitlab_issue` will otherwise go looking for the tool
 it does not have.
+
+## 15. `WorkItem` — the rename that was not only cosmetic (2026-09-21)
+
+§14 checked the 19.4 instance and concluded that "work item" was a UI and URL rename with no API
+consequence. That was right about the *endpoints* and wrong about the *vocabulary*, and the
+difference cost a working feature: an issue assigned to an agent woke nobody.
+
+### 15.1 What the instance said
+
+Diagnosed from outside, with a read-only API key against production:
+
+| Signal | Value |
+|---|---|
+| `GET /api/gitlab/connection` | polling on, 5 minutes, `issue_assigned` armed, a default agent set |
+| `GET /api/gitlab/poll` | last tick 14:21:40, five identities read, the project read, **`found: 0`**, `skipped: []`, `errors: []` |
+| `GET /api/gitlab/issues` | `#11`, created **and** assigned to `architect` at 14:18:15 by `admin_git` — a different account, so GitLab does raise a to-do |
+
+`found` is counted *before* routing, and `skipped` collects everything that matched but reached no
+agent. Both empty means the failure was earlier than either: nothing **matched**. And the same issue
+was missed twice, once as a to-do (`issue_assigned`) and once as a project event (`issue_opened`),
+which rules out anything token- or routing-shaped and leaves exactly one common cause — the
+`target_type`.
+
+### 15.2 The cause
+
+GitLab 19 migrated issues onto the work item model, and a to-do or an event about an issue now
+arrives with `target_type: "WorkItem"`. GitLab carries this as a defect of its own
+(`gitlab-org/gitlab#374954`, *"TODOs APIs failing when todo's target_type is WorkItem"*) because the
+REST API never gained a `WorkItem` entity to go with it. Our matchers compared against `"Issue"`, so
+they matched nothing.
+
+`targetKind()` now normalises: `MergeRequest` stays itself and **everything else issue-shaped**
+(`Issue`, `WorkItem`, `Task`, `Incident`, `TestCase`, …) becomes `Issue`. Normalising rather than
+enumerating is the point — they all live at `/issues/:iid` in the REST API and share the `iid`, and
+the next type GitLab adds should not need a release here. The webhook router gained the same
+treatment for `object_kind: 'work_item'`, which GitLab 19 emits beside `issue`.
+
+### 15.3 The part that made it a day-long bug instead of a five-minute one
+
+An unmatched to-do was **consumed by the cursor and never mentioned**. That was deliberate — it is
+what stops arming a kind later from replaying a year of history — but it made a stale matcher
+indistinguishable from a quiet instance: the tick reported `found: 0` and no error, forever, and
+nothing anywhere said "I read four to-dos and understood none of them."
+
+Two things fix that shape of failure rather than this instance of it:
+
+- **`unmatched` on the report**, aggregated by shape: `4 × assigned on WorkItem (todo)`. One line,
+  and the bug is visible in the settings page and in the tick's own output.
+- **`GET /api/gitlab/poll/inspect`**, a read-only route returning what GitLab is actually sending —
+  each account's pending to-dos and each project's recent events, as `action_name`/`target_type`,
+  with the armed kind that matches each or `null`. No bodies, no tokens. It is a `GET` on purpose:
+  "the poller sees nothing" must be answerable with a read-only key from outside the box, which is
+  how this was found.
+
+### 15.4 Repairing the backlog
+
+A cursor that has already eaten the to-dos cannot re-read them, but GitLab still holds them as
+**pending** — only the ones the poller acted on were marked done, so the pending list *is* the
+backlog. **Catch up** (`POST /api/gitlab/poll/catch-up`) rewinds the to-do cursors to zero and the
+next tick reconsiders every pending one, bounded as ever by `gitlab_poll_max_wakes`. Event and
+pipeline cursors are deliberately left alone: they have no "pending", and rewinding one replays the
+project's whole history — the mistake baselining exists to prevent.
+
+So the two buttons now say different things, and both are honest: **Catch up** for "you missed
+things, go back and get them", **Re-baseline** for "forget all of it, start from now".

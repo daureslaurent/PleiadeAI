@@ -1979,6 +1979,8 @@ export interface GitLabPollReport {
   baselined: string[];
   deferred: number;
   skipped: string[];
+  /** Read but recognised by nothing armed, counted by shape — how a stale matcher shows itself. */
+  unmatched: { source: string; action: string; target_type: string; count: number }[];
   errors: string[];
 }
 
@@ -2185,6 +2187,8 @@ export const gitlabApi = {
   runPoll: () => api.post<GitLabPollReport>('/gitlab/poll').then((r) => r.data),
   /** Forget every cursor: the next tick baselines and wakes nobody. */
   rebaselinePoll: () => api.post<{ ok: true }>('/gitlab/poll/rebaseline').then((r) => r.data),
+  /** Reconsider every to-do still pending — the repair after a matcher was wrong. */
+  catchUpPoll: () => api.post<{ ok: true }>('/gitlab/poll/catch-up').then((r) => r.data),
   activity: (params: { project?: string; agent?: string; limit?: number } = {}) =>
     api.get<GitLabActivity[]>('/gitlab/activity', { params }).then((r) => r.data),
 };

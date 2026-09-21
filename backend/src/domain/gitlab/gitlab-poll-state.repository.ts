@@ -30,6 +30,21 @@ export const gitlabPollStateRepository = {
   },
 
   /**
+   * Rewind the to-do cursors only, so the next tick reconsiders every to-do still pending.
+   *
+   * The repair path for a matcher that was wrong (`GITLAB_PLAN.md` §15): GitLab still holds the
+   * skipped to-dos as pending, because only the ones the poller acted on were marked done — so the
+   * pending list *is* the backlog, and rewinding to zero replays exactly it. Event cursors are not
+   * touched: they have no "pending", and rewinding one replays the project's whole history.
+   */
+  async rewindTodos(): Promise<void> {
+    await GitLabPollStateModel.updateMany(
+      { key: { $regex: '^todos:' } },
+      { $set: { cursor_id: 0, updated_at: new Date() } },
+    ).exec();
+  },
+
+  /**
    * Forget every cursor. What the settings page calls "re-baseline": after a long pause the stored
    * cursors point at a backlog nobody wants replayed, and the honest reset is to start from now.
    */

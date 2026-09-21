@@ -2,7 +2,7 @@ import { createLogger } from '../../config/logger';
 import { agentRepository } from '../agents/agent.repository';
 import { settingsService } from '../settings/settings.service';
 import { gitlabProvision } from './gitlab-provision.service';
-import { armedKinds, type PollEventKind } from './gitlab-poll.catalogue';
+import { armedKinds, type PollEventKind, type PollSource } from './gitlab-poll.catalogue';
 import { gitlabPollStateRepository } from './gitlab-poll-state.repository';
 import { gitlabWakeQueue } from './gitlab-wake-runner';
 import { route, type WakeDecision } from './gitlab-webhook.service';
@@ -61,6 +61,15 @@ export interface PollReport {
   deferred: number;
   /** Rows that matched but routed to nobody, and calls that failed. */
   skipped: string[];
+  /**
+   * What was read and matched *nothing* armed, counted by shape.
+   *
+   * The whole reason this field exists: a to-do of an unrecognised shape is consumed by the cursor
+   * like any other, so before this a matcher that had gone stale against GitLab's own vocabulary
+   * was indistinguishable from a quiet week (§15). "Seen 4 · assigned/WorkItem" is the line that
+   * would have found that bug in a minute.
+   */
+  unmatched: { source: PollSource; action: string; target_type: string; count: number }[];
   errors: string[];
 }
 
@@ -162,9 +171,33 @@ async function routed(
   return { agentId: hit.agentId, agentName: hit.agentName, skipped: hit.why };
 }
 
+/**
+ * What GitLab calls the thing an event or a to-do points at, reduced to what we branch on.
+ *
+ * **This is the bug of 2026-09-21** (`GITLAB_PLAN.md` §15). GitLab 19 migrated issues onto the work
+ * item model, and a to-do or an event about an issue now arrives with `target_type: "WorkItem"` —
+ * GitLab's own tracker carries it as a defect (gitlab-org/gitlab#374954, "TODOs APIs failing when
+ * todo's target_type is WorkItem"), because the REST API never gained a WorkItem entity to match.
+ * An integration that compares against `"Issue"` sees nothing, which is precisely what happened
+ * here: an issue assigned to an agent produced a to-do the poller skipped and an event it skipped,
+ * and the tick reported `found: 0` with no error.
+ *
+ * `Task`, `Incident`, `Objective` and `KeyResult` are work item types too, and every one of them is
+ * an issue as far as anything in this codebase is concerned — they live at `/issues/:iid` in the
+ * REST API and are addressed by the same `iid`. Normalising rather than enumerating is deliberate:
+ * the next type GitLab adds should not need a release here.
+ */
+function targetKind(raw: unknown): 'Issue' | 'MergeRequest' | '' {
+  const value = String(raw ?? '').trim();
+  if (!value) return '';
+  if (value === 'MergeRequest') return 'MergeRequest';
+  // Everything else issue-shaped: Issue, WorkItem, Task, Incident, TestCase…
+  return 'Issue';
+}
+
 function matchTodo(kinds: PollEventKind[], todo: Record<string, any>): PollEventKind | undefined {
   const action = String(todo.action_name ?? '');
-  const target = String(todo.target_type ?? '');
+  const target = targetKind(todo.target_type);
   return kinds.find(
     (k) => (k.match ?? []).includes(action) && (!k.targetType || k.targetType === target),
   );
@@ -172,7 +205,7 @@ function matchTodo(kinds: PollEventKind[], todo: Record<string, any>): PollEvent
 
 function matchEvent(kinds: PollEventKind[], event: Record<string, any>): PollEventKind | undefined {
   const action = String(event.action_name ?? '');
-  const target = String(event.target_type ?? '');
+  const target = targetKind(event.target_type);
   return kinds.find(
     (k) =>
       // GitLab writes a push as "pushed to" / "pushed new", so a prefix rather than an equality.
@@ -198,12 +231,24 @@ class Tick {
       baselined: [],
       deferred: 0,
       skipped: [],
+      unmatched: [],
       errors: [],
     };
   }
 
   get exhausted(): boolean {
     return this.budget <= 0;
+  }
+
+  /** Record a row nothing armed recognised, aggregated by shape rather than listed one by one. */
+  unmatched(source: PollSource, action: unknown, targetType: unknown): void {
+    const act = String(action ?? '(none)');
+    const type = String(targetType ?? '(none)');
+    const row = this.report.unmatched.find(
+      (u) => u.source === source && u.action === act && u.target_type === type,
+    );
+    if (row) row.count += 1;
+    else this.report.unmatched.push({ source, action: act, target_type: type, count: 1 });
   }
 
   /**
@@ -278,7 +323,10 @@ async function pollTodos(
     const kind = matchTodo(kinds, todo);
     if (!kind) {
       // A todo of a kind nobody armed is *consumed* rather than left pending, so arming that kind
-      // later starts from then instead of replaying whatever has piled up in the meantime.
+      // later starts from then instead of replaying whatever has piled up in the meantime. It is
+      // counted first: consuming it silently is how a stale matcher hid for a day (§15), and
+      // "Catch up" is what replays the pending ones once the matcher is fixed.
+      tick.unmatched('todo', todo.action_name, todo.target_type);
       cursorId = Number(todo.id);
       continue;
     }
@@ -293,7 +341,8 @@ async function pollTodos(
 
     const title = String(todo.target?.title ?? todo.body ?? kind.label);
     const iid = todo.target?.iid;
-    const marker = kind.targetType === 'MergeRequest' || String(todo.target_type) === 'MergeRequest' ? '!' : '#';
+    const marker =
+      kind.targetType === 'MergeRequest' || targetKind(todo.target_type) === 'MergeRequest' ? '!' : '#';
     const decision: WakeDecision = {
       kind: kind.id,
       family: kind.family,
@@ -396,6 +445,9 @@ async function pollEvents(
     // Our own footprint. Without this, an agent merging a merge request wakes an agent to go and
     // look at the merge — which then comments, which is another event.
     if (!kind || ours.has(author)) {
+      // Only an unrecognised shape is worth reporting; a merge *we* performed is working as
+      // intended and would otherwise bury the signal under our own activity.
+      if (!kind && !ours.has(author)) tick.unmatched('event', event.action_name, event.target_type);
       advance();
       continue;
     }
@@ -426,14 +478,17 @@ async function pollEvents(
 
 function eventTitle(kind: PollEventKind, project: PolledProject, event: Record<string, any>): string {
   if (kind.id === 'pushed') return `push to ${project.defaultBranch}`;
-  const marker = String(event.target_type) === 'MergeRequest' ? '!' : '#';
+  const marker = targetKind(event.target_type) === 'MergeRequest' ? '!' : '#';
   return `${marker}${event.target_iid ?? ''} ${String(event.target_title ?? '').slice(0, 120)}`.trim();
 }
 
 function eventUrl(conn: GitLabConnection, project: PolledProject, event: Record<string, any>): string {
   const base = `${conn.url}/${project.path}/-`;
-  if (String(event.target_type) === 'MergeRequest') return `${base}/merge_requests/${event.target_iid}`;
-  if (String(event.target_type) === 'Issue') return `${base}/issues/${event.target_iid}`;
+  const kind = targetKind(event.target_type);
+  if (kind === 'MergeRequest') return `${base}/merge_requests/${event.target_iid}`;
+  // `/-/issues/:iid` still resolves in GitLab 19 — it is the same object the UI now shows at
+  // `/-/work_items/:iid`, and the redirect is GitLab's own.
+  if (kind === 'Issue' && event.target_iid) return `${base}/issues/${event.target_iid}`;
   return `${base}/commits/${project.defaultBranch}`;
 }
 
@@ -643,6 +698,115 @@ let lastReport: PollReport | null = null;
 
 export function lastPollReport(): PollReport | null {
   return lastReport;
+}
+
+/**
+ * What GitLab is actually sending — the read-only answer to "the poller sees nothing" (§15).
+ *
+ * Without it that sentence is unfalsifiable from outside the box: the tick reports what it matched,
+ * and a matcher that has gone stale against GitLab's own vocabulary matches nothing and looks
+ * exactly like a quiet instance. This returns the raw shapes — never a body, never a token — so an
+ * operator (or a read-only API key) can see `assigned/WorkItem` sitting in the list and know within
+ * a minute which side is wrong.
+ */
+export async function inspect(): Promise<{
+  configured: boolean;
+  reason?: string;
+  armed: string[];
+  identities: {
+    account: string;
+    agent: string | null;
+    error?: string;
+    pending: {
+      id: number;
+      action_name: string;
+      target_type: string;
+      project: string;
+      iid: number | null;
+      from: string;
+      /** Whether an armed kind recognises it — the whole point of the page. */
+      matches: string | null;
+    }[];
+  }[];
+  projects: {
+    project: string;
+    error?: string;
+    events: { action_name: string; target_type: string; author: string; at: string; matches: string | null }[];
+  }[];
+}> {
+  const settings = await settingsService.get();
+  const armed = settings.gitlab_poll_events ?? [];
+  if (!(await isConfigured())) {
+    return { configured: false, reason: 'GitLab is not configured on this instance', armed, identities: [], projects: [] };
+  }
+  const conn = await connection();
+  const todoKinds = armedKinds(armed, 'todo');
+  const eventKinds = armedKinds(armed, 'event');
+
+  const identityRows = [];
+  for (const identity of await identities(conn)) {
+    try {
+      const todos = await request<Record<string, any>[]>('todos', {
+        conn: identity.conn,
+        paginate: 50,
+        query: { state: 'pending' },
+      });
+      identityRows.push({
+        account: identity.label,
+        agent: identity.agentName ?? null,
+        pending: todos.map((t) => ({
+          id: Number(t.id),
+          action_name: String(t.action_name ?? ''),
+          target_type: String(t.target_type ?? ''),
+          project: String(t.project?.path_with_namespace ?? ''),
+          iid: t.target?.iid ?? null,
+          from: String(t.author?.username ?? ''),
+          matches: matchTodo(todoKinds, t)?.id ?? null,
+        })),
+      });
+    } catch (err) {
+      identityRows.push({ account: identity.label, agent: identity.agentName ?? null, error: errorText(err), pending: [] });
+    }
+  }
+
+  const projectRows = [];
+  for (const project of await pollProjects(conn, settings.gitlab_poll_projects ?? []).catch(() => [])) {
+    try {
+      const events = await request<Record<string, any>[]>(`projects/${project.id}/events`, {
+        conn,
+        query: { per_page: 20, sort: 'desc' },
+      });
+      projectRows.push({
+        project: project.path,
+        events: events.map((e) => ({
+          action_name: String(e.action_name ?? ''),
+          target_type: String(e.target_type ?? ''),
+          author: String(e.author?.username ?? e.author_username ?? ''),
+          at: String(e.created_at ?? ''),
+          matches: matchEvent(eventKinds, e)?.id ?? null,
+        })),
+      });
+    } catch (err) {
+      projectRows.push({ project: project.path, error: errorText(err), events: [] });
+    }
+  }
+
+  return { configured: true, armed, identities: identityRows, projects: projectRows };
+}
+
+/**
+ * Reconsider every to-do still pending, without replaying event history.
+ *
+ * The repair for a matcher that was wrong: the to-dos it skipped were consumed by the cursor, but
+ * GitLab still holds them as *pending* — that is the definition of the backlog, since anything the
+ * poller acted on was marked done. Rewinding only the to-do cursors replays exactly the unacted
+ * ones, and the per-tick cap keeps that from becoming a stampede. Event and pipeline cursors are
+ * left alone: they have no "pending" and rewinding them would replay a year of activity, which is
+ * the mistake baselining exists to prevent.
+ */
+export async function catchUpTodos(): Promise<void> {
+  await gitlabPollStateRepository.rewindTodos();
+  log.info('gitlab poll todo cursors rewound — the next tick reconsiders every pending to-do');
 }
 
 /** Forget every cursor: the next tick re-baselines and wakes nobody. */

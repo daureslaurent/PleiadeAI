@@ -4,7 +4,13 @@ import { createLogger } from '../../../config/logger';
 import { gitlabActivityRepository } from '../../../domain/gitlab/gitlab-activity.repository';
 import { gitlabWakeQueue, startGitlabTurn } from '../../../domain/gitlab/gitlab-wake-runner';
 import { POLL_EVENT_KINDS } from '../../../domain/gitlab/gitlab-poll.catalogue';
-import { lastPollReport, pollOnce, rebaseline } from '../../../domain/gitlab/gitlab-poll.service';
+import {
+  catchUpTodos,
+  inspect,
+  lastPollReport,
+  pollOnce,
+  rebaseline,
+} from '../../../domain/gitlab/gitlab-poll.service';
 import { syncGitlabPoll } from '../../../autonomy/agenda.setup';
 import { checkBrief, checkProject } from '../../../domain/gitlab/gitlab-review.service';
 import { agentRepository } from '../../../domain/agents/agent.repository';
@@ -482,6 +488,27 @@ gitlabRouter.post('/poll', async (_req, res) => {
 gitlabRouter.post('/poll/rebaseline', async (_req, res) => {
   await rebaseline();
   res.json({ ok: true });
+});
+
+/** Reconsider every to-do still pending — the repair after a matcher was wrong (§15). */
+gitlabRouter.post('/poll/catch-up', async (_req, res) => {
+  await catchUpTodos();
+  res.json({ ok: true });
+});
+
+/**
+ * What GitLab is actually sending, matched against what is armed.
+ *
+ * A **`GET`**, deliberately: "the poller sees nothing" has to be answerable by a read-only API key
+ * from outside the box, which is exactly how the `WorkItem` mismatch was found. It returns shapes
+ * and ids, never a to-do body and never a token.
+ */
+gitlabRouter.get('/poll/inspect', async (_req, res) => {
+  try {
+    res.json(await inspect());
+  } catch (err) {
+    fail(res, err);
+  }
 });
 
 /** The fleet's own activity feed — Mongo, not GitLab: this is the association GitLab cannot make. */

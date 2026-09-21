@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, Loader2, PlayCircle, Plus, RefreshCcw, Trash2, UserPlus, X } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  History,
+  Loader2,
+  PlayCircle,
+  Plus,
+  RefreshCcw,
+  Trash2,
+  UserPlus,
+  X,
+} from 'lucide-react';
 import {
   agentsApi,
   gitlabApi,
@@ -495,13 +506,21 @@ export function GitLabConnection() {
           </Button>
           <Button
             variant="ghost"
+            icon={<History size={12} />}
+            onClick={() => void gitlabApi.catchUpPoll().then(runPoll)}
+          >
+            Catch up
+          </Button>
+          <Button
+            variant="ghost"
             icon={<RefreshCcw size={12} />}
             onClick={() => void gitlabApi.rebaselinePoll().then(() => setReport(null))}
           >
             Re-baseline
           </Button>
           <span className="text-[11px] text-slate-600">
-            Save first — a tick reads what is stored, not what is typed.
+            Save first — a tick reads what is stored, not what is typed. <strong>Catch up</strong>
+            {' '}reconsiders every to-do still pending; <strong>Re-baseline</strong> starts from now.
           </span>
         </div>
 
@@ -526,6 +545,12 @@ export function GitLabConnection() {
               {report.woke.map((w, i) => (
                 <div key={i} className="font-mono text-[11px]">
                   {w.agent} ← {w.kind} · {w.title}
+                </div>
+              ))}
+              {report.unmatched?.map((u, i) => (
+                <div key={`u${i}`} className="text-[11px] text-slate-500">
+                  read but armed by nothing: {u.count} × <span className="font-mono">{u.action}</span> on{' '}
+                  <span className="font-mono">{u.target_type}</span> ({u.source})
                 </div>
               ))}
               {report.skipped.map((line, i) => (

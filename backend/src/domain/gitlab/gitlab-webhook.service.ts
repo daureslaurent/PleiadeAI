@@ -125,7 +125,10 @@ export async function decide(payload: Record<string, any>): Promise<WakeDecision
       .filter((u: any) => !(payload?.changes?.[field]?.previous ?? []).some((p: any) => p.id === u.id))
       .map((u: any) => String(u.username ?? ''));
 
-  if (kind === 'issue' && settings.gitlab_wake_issues) {
+  // GitLab 19 emits `work_item` beside `issue` for the same object (`GITLAB_PLAN.md` §15). A hook
+  // that only knows `issue` silently ignores half its deliveries, which is the webhook-shaped
+  // version of the bug that hid the poller's to-dos.
+  if ((kind === 'issue' || kind === 'work_item') && settings.gitlab_wake_issues) {
     const attrs = payload.object_attributes ?? {};
     // Only a *new* assignment, not every edit of an already-assigned issue: GitLab re-sends the
     // whole object on any change, and without this a typo fix in the description wakes somebody.
