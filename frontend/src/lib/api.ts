@@ -1933,6 +1933,14 @@ export interface GitLabConnectionInfo {
   project_agents: { project: string; agent_id: string }[];
   wake_issues: boolean;
   wake_reviews: boolean;
+  /** Polling (`GITLAB_PLAN.md` §13) — what wakes agents when GitLab cannot call in. */
+  poll_enabled: boolean;
+  poll_interval_minutes: number;
+  /** Armed catalogue ids. Empty → the poller makes no calls at all. */
+  poll_events: string[];
+  /** Empty → the most recently active projects in scope. */
+  poll_projects: string[];
+  poll_max_wakes: number;
   git_transport: 'https' | 'ssh';
   ssh_host: string;
   ssh_port: number;
@@ -1948,6 +1956,40 @@ export interface GitLabConnectionInfo {
   token_set: boolean;
   ssh_key_set: boolean;
   webhook_secret_set: boolean;
+}
+
+/** One event a poll may wake an agent on, as the backend's catalogue declares it. */
+export interface GitLabPollEventKind {
+  id: string;
+  label: string;
+  hint: string;
+  source: 'todo' | 'event' | 'pipeline';
+  family: 'issue' | 'merge_request' | 'note' | 'pipeline';
+}
+
+/** What one tick did — the settings page's "is this actually working" answer. */
+export interface GitLabPollReport {
+  at: string;
+  ran: boolean;
+  reason?: string;
+  identities: string[];
+  projects: string[];
+  found: number;
+  woke: { agent: string; kind: string; title: string }[];
+  baselined: string[];
+  deferred: number;
+  skipped: string[];
+  errors: string[];
+}
+
+export interface GitLabPollConfig {
+  catalogue: GitLabPollEventKind[];
+  enabled: boolean;
+  interval_minutes: number;
+  events: string[];
+  projects: string[];
+  max_wakes: number;
+  last: GitLabPollReport | null;
 }
 
 export interface GitLabProject {
@@ -2137,6 +2179,12 @@ export const gitlabApi = {
         { agent_id: agentId },
       )
       .then((r) => r.data),
+  /** The event catalogue, the armed ids and the last tick's report. */
+  poll: () => api.get<GitLabPollConfig>('/gitlab/poll').then((r) => r.data),
+  /** Run one tick now — works while polling is off, which is how the token gets verified. */
+  runPoll: () => api.post<GitLabPollReport>('/gitlab/poll').then((r) => r.data),
+  /** Forget every cursor: the next tick baselines and wakes nobody. */
+  rebaselinePoll: () => api.post<{ ok: true }>('/gitlab/poll/rebaseline').then((r) => r.data),
   activity: (params: { project?: string; agent?: string; limit?: number } = {}) =>
     api.get<GitLabActivity[]>('/gitlab/activity', { params }).then((r) => r.data),
 };

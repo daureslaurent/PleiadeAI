@@ -7,6 +7,7 @@ import { liveRuns } from '../../transport/ws/live-runs';
 import { TurnRecorder } from '../../transport/ws/TurnRecorder';
 import { notificationRepository } from '../notifications/notification.repository';
 import { sessionRepository } from '../sessions/session.repository';
+import type { WakeFamily } from './gitlab-poll.catalogue';
 import type { WakeDecision } from './gitlab-webhook.service';
 
 const log = createLogger('gitlab-wake');
@@ -58,41 +59,51 @@ function quote(body: string): string {
  *
  * It also names the finishing move. A woken agent that investigates well and then says nothing on
  * the issue has done nothing, as far as everyone waiting on it is concerned.
+ *
+ * The opening sentence arrives on the decision (`lead`) rather than being switched on here: the
+ * poller has fourteen kinds to announce (`GITLAB_PLAN.md` §13) and each knows its own wording, while
+ * what the agent must *do* about it collapses into the four families below.
  */
+const FINISH: Record<WakeFamily, string> = {
+  merge_request:
+    '**Finish by reviewing on the merge request itself** — `gitlab_mr({action:"comment"})`, with ' +
+    '`path` and `line` when your point is about a specific line. Read the whole `diff` first. If ' +
+    'it is good, say so and `approve`; if it is not, say exactly what would have to change.',
+  issue:
+    '**Finish by commenting on the issue** — `gitlab_issue({action:"comment"})` — with what you ' +
+    'found, what you did, and what you need from a human if you are blocked. Close it only when ' +
+    'the work is genuinely done, and say in the closing comment how it was verified.',
+  note:
+    '**Finish by replying where you were named** — `gitlab_issue({action:"comment"})` or ' +
+    '`gitlab_mr({action:"comment"})`. Answer the question that was actually asked; if it was not ' +
+    'addressed to you in any useful sense, say nothing and stop.',
+  pipeline:
+    '**Read the failing job log before you conclude anything** — `gitlab_ci({action:"job_log"})`; ' +
+    'a runner timeout and a broken test look identical from the pipeline list. Then either fix it ' +
+    'on a branch and open a merge request, or open an issue saying what is broken and why. ' +
+    'Retrying an unchanged failing build is the one move that is always wrong.',
+};
+
 function brief(item: Queued): string {
-  const where = item.kind === 'merge_request' ? 'merge request' : item.kind === 'note' ? 'comment' : 'issue';
-  const opening =
-    item.kind === 'issue'
-      ? `You have been assigned an issue on GitLab: **${item.title}** in \`${item.project}\`.`
-      : item.kind === 'merge_request'
-        ? `You have been asked to review a merge request on GitLab: **${item.title}** in \`${item.project}\`.`
-        : `You were named in a comment on GitLab, on **${item.title}** in \`${item.project}\`.`;
+  const where =
+    item.family === 'merge_request' ? 'merge request' : item.family === 'pipeline' ? 'pipeline' : 'issue';
 
   return [
-    opening,
+    item.lead,
     '',
-    `The ${where} says:`,
-    '',
-    quote(item.body || '(no description)'),
-    '',
+    ...(item.body ? [`The ${where} says:`, '', quote(item.body), ''] : []),
     item.url ? `It is at ${item.url}.` : '',
     '',
     'Work it with the `gitlab_*` tools. Read before you act: fetch the issue or the merge request, ' +
       'look at the code it concerns, and check whether somebody has already answered.',
     '',
-    item.kind === 'merge_request'
-      ? '**Finish by reviewing on the merge request itself** — `gitlab_mr({action:"comment"})`, with ' +
-        '`path` and `line` when your point is about a specific line. Read the whole `diff` first. If ' +
-        'it is good, say so and `approve`; if it is not, say exactly what would have to change.'
-      : '**Finish by commenting on the issue** — `gitlab_issue({action:"comment"})` — with what you ' +
-        'found, what you did, and what you need from a human if you are blocked. Close it only when ' +
-        'the work is genuinely done, and say in the closing comment how it was verified.',
+    FINISH[item.family],
     '',
     'Your answer here is not delivered anywhere by itself: the tool call is what other people see. ' +
       'If there is nothing useful to add, say so in one line rather than restating what the thread ' +
       'already says.',
   ]
-    .filter(Boolean)
+    .filter((line, i, all) => line !== '' || all[i - 1] !== '')
     .join('\n');
 }
 

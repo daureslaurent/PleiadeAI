@@ -3,6 +3,9 @@ import { Router } from 'express';
 import { createLogger } from '../../../config/logger';
 import { gitlabActivityRepository } from '../../../domain/gitlab/gitlab-activity.repository';
 import { gitlabWakeQueue, startGitlabTurn } from '../../../domain/gitlab/gitlab-wake-runner';
+import { POLL_EVENT_KINDS } from '../../../domain/gitlab/gitlab-poll.catalogue';
+import { lastPollReport, pollOnce, rebaseline } from '../../../domain/gitlab/gitlab-poll.service';
+import { syncGitlabPoll } from '../../../autonomy/agenda.setup';
 import { checkBrief, checkProject } from '../../../domain/gitlab/gitlab-review.service';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { ACCESS_LEVELS, gitlabProvision } from '../../../domain/gitlab/gitlab-provision.service';
@@ -58,6 +61,11 @@ gitlabRouter.get('/connection', async (_req, res) => {
     project_agents: s.gitlab_project_agents,
     wake_issues: s.gitlab_wake_issues,
     wake_reviews: s.gitlab_wake_reviews,
+    poll_enabled: s.gitlab_poll_enabled,
+    poll_interval_minutes: s.gitlab_poll_interval_minutes,
+    poll_events: s.gitlab_poll_events,
+    poll_projects: s.gitlab_poll_projects,
+    poll_max_wakes: s.gitlab_poll_max_wakes,
     git_transport: s.gitlab_git_transport,
     ssh_host: s.gitlab_ssh_host,
     ssh_port: s.gitlab_ssh_port,
@@ -93,6 +101,24 @@ gitlabRouter.put('/connection', async (req, res) => {
   }
   if (b.wake_issues !== undefined) patch.gitlab_wake_issues = Boolean(b.wake_issues);
   if (b.wake_reviews !== undefined) patch.gitlab_wake_reviews = Boolean(b.wake_reviews);
+  if (b.poll_enabled !== undefined) patch.gitlab_poll_enabled = Boolean(b.poll_enabled);
+  if (b.poll_interval_minutes !== undefined) {
+    patch.gitlab_poll_interval_minutes = Math.max(1, Math.min(1440, Number(b.poll_interval_minutes) || 5));
+  }
+  if (Array.isArray(b.poll_events)) {
+    // Only catalogue ids land: an unknown id would be a checkbox that silently matches nothing, and
+    // the catalogue is the one place a kind is declared (`GITLAB_PLAN.md` §13.2).
+    const known = new Set(POLL_EVENT_KINDS.map((k) => k.id));
+    patch.gitlab_poll_events = [...new Set(b.poll_events.filter((id: unknown) => known.has(String(id))))];
+  }
+  if (Array.isArray(b.poll_projects)) {
+    patch.gitlab_poll_projects = b.poll_projects
+      .map((p: unknown) => String(p ?? '').trim().replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean);
+  }
+  if (b.poll_max_wakes !== undefined) {
+    patch.gitlab_poll_max_wakes = Math.max(1, Math.min(50, Number(b.poll_max_wakes) || 5));
+  }
   if (GITLAB_GIT_TRANSPORTS.includes(b.git_transport as GitLabGitTransport)) {
     patch.gitlab_git_transport = b.git_transport;
   }
@@ -120,6 +146,9 @@ gitlabRouter.put('/connection', async (req, res) => {
   if (typeof b.webhook_secret === 'string') {
     await settingsService.setGitlabSecret('webhookSecret', b.webhook_secret.trim());
   }
+  // The clock has to match the switch the operator just flipped, without a restart — the same
+  // re-registration a conversation generator does on save.
+  await syncGitlabPoll().catch((err) => log.warn({ err: String(err) }, 'could not reschedule the gitlab poll'));
   const s = await settingsService.get();
   res.json({
     ok: true,
@@ -416,6 +445,43 @@ gitlabRouter.post('/identities/:agentId', async (req, res) => {
   } catch (err) {
     fail(res, err);
   }
+});
+
+/**
+ * Polling (`GITLAB_PLAN.md` §13) — how an instance with no webhooks wakes agents.
+ *
+ * The catalogue is served rather than duplicated in the frontend: the settings page renders its
+ * checkboxes from these rows and the poller matches GitLab objects against the same ones, so a
+ * checkbox cannot come to mean something the poller never looks for.
+ */
+gitlabRouter.get('/poll', async (_req, res) => {
+  const s = await settingsService.get();
+  res.json({
+    catalogue: POLL_EVENT_KINDS,
+    enabled: s.gitlab_poll_enabled,
+    interval_minutes: s.gitlab_poll_interval_minutes,
+    events: s.gitlab_poll_events,
+    projects: s.gitlab_poll_projects,
+    max_wakes: s.gitlab_poll_max_wakes,
+    last: lastPollReport(),
+  });
+});
+
+/**
+ * Run one tick now, and answer with its report.
+ *
+ * `force` so the button works while polling is switched off: a GitLab that answers 403 on `/todos`
+ * is otherwise indistinguishable from a quiet one, and the operator needs to find that out before
+ * arming anything rather than by noticing nothing ever happens.
+ */
+gitlabRouter.post('/poll', async (_req, res) => {
+  res.json(await pollOnce({ force: true }));
+});
+
+/** Forget every cursor: the next tick baselines and wakes nobody. */
+gitlabRouter.post('/poll/rebaseline', async (_req, res) => {
+  await rebaseline();
+  res.json({ ok: true });
 });
 
 /** The fleet's own activity feed — Mongo, not GitLab: this is the association GitLab cannot make. */

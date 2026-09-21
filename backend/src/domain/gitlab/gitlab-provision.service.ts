@@ -334,6 +334,18 @@ export const gitlabProvision = {
     }
   },
 
+  /**
+   * The identity already stored on an agent, or null — **without provisioning one**.
+   *
+   * `ensure` is the wrong call for the poller (`GITLAB_PLAN.md` §13): a tick that ran every five
+   * minutes through `ensure` would mint a GitLab account for every agent in the fleet the first
+   * time it fired. Polling reads the accounts that exist; creating them stays a decision made by a
+   * tool call or the operator's Provision button.
+   */
+  async stored(agentId: string): Promise<AgentIdentity | null> {
+    return storedIdentity(agentId);
+  },
+
   /** Every provisioned identity, for the settings page. Tokens are never included. */
   async list(): Promise<
     { agentId: string; agentName: string; username: string; userId: number; expiresAt: Date | null }[]

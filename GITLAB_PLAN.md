@@ -397,3 +397,115 @@ a GitLab one, and it is the other half of "said it did it, nothing happened".
 - The webhook route is the only unauthenticated surface, it compares its secret in constant time,
   and it can only ever *enqueue* — it never executes anything the tools couldn't already do.
 - Group scoping re-resolves on every call, so a project argument cannot escape the namespace.
+
+## 13. Polling — waking agents on an instance with no webhooks
+
+Webhooks are the wrong shape for this instance. Group webhooks are a paid feature, project webhooks
+have to be armed one repository at a time by somebody with Maintainer on each, and an operator whose
+GitLab sits behind a NAT has no inbound path at all. §5 shipped the only mechanism there was; this
+section adds the one that needs nothing of GitLab but an API token it already has.
+
+**The poller asks GitLab what happened, instead of waiting to be told.** It is the same three
+outcomes — a decision, a queue entry, a turn — reached from the other direction, so everything after
+`gitlabWakeQueue.enqueue` is untouched: serial draining, the in-flight guard, `sessionLock`
+yielding, the `TurnRecorder`, the inbox notification. What is new is only where a `WakeDecision`
+comes from.
+
+Webhooks stay. An instance that has them keeps them (they are instant, and a poll is not), and the
+two share the queue's `seen` set, so an event that arrives both ways wakes one agent once.
+
+### 13.1 Three sources, because GitLab keeps the answer in three places
+
+| Source | Call | What only it can tell us |
+|---|---|---|
+| **Todos** | `GET /todos?state=pending`, once per identity | What GitLab itself decided was *directed at you*: assigned, review requested, mentioned, your pipeline broke. No routing to invent — GitLab already did it, per account |
+| **Project events** | `GET /projects/:id/events`, per project | State changes nobody is notified about: an MR **merged**, opened, closed; an issue closed; a push to the default branch |
+| **Pipelines** | `GET /projects/:id/pipelines?ref=<default>&status=failed` | A red default branch. A `build_failed` todo only ever reaches the MR's own author, and nobody owns `main` |
+
+The todo source is what makes this worth building rather than a cron job that greps issues. GitLab's
+todo list *is* the per-account inbox the webhook router had to reconstruct from prose — and §11 gave
+every agent its own account, so polling `/todos` with each agent's own token answers "who should act
+on this" with GitLab's own answer instead of a name matched out of a comment body. Marking the todo
+done (`POST /todos/:id/mark_as_done`) is the acknowledgement, which is why this source cannot
+double-wake even across a restart.
+
+### 13.2 The operator picks the events
+
+`gitlab-poll.catalogue.ts` is the single source of truth — id, label, hint, source, and which
+GitLab shape matches it. The settings page renders its checkboxes from the catalogue and the poller
+matches against the same rows, the way `flows/nodes/index.ts` serves both the palette and the
+runner. Adding an event kind is one entry, never a second edit in the UI.
+
+Fourteen kinds ship, every one **off**:
+
+`issue_assigned`, `mr_assigned`, `mr_review_requested`, `mr_approval_required`, `mentioned`,
+`mr_build_failed`, `mr_unmergeable` (todos) · `mr_merged`, `mr_opened`, `mr_closed`,
+`issue_opened`, `issue_closed`, `pushed` (events) · `pipeline_failed` (pipelines).
+
+**A disabled kind is not fetched.** Nothing polls project events unless an event-source kind is on,
+and nothing polls pipelines unless `pipeline_failed` is on — the same rule as the prompt modules,
+where a switched-off module costs no query. An instance that only wants review requests makes one
+call per identity per tick and touches no project at all.
+
+### 13.3 Arming is a baseline, not a replay
+
+The first tick after a source becomes active records a cursor and wakes **nobody**. Without that,
+ticking `mr_merged` on a year-old instance starts a turn for every merge in the project's history,
+which is the kind of mistake that is discovered by the inference bill.
+
+Cursors live in `gitlab_poll_state`, one document per source and project (`events:group/app`,
+`todos:<agentId>`, `pipelines:group/app`): the newest `created_at` consumed, plus the ids seen at
+exactly that instant so a tie does not re-emit. In Mongo rather than memory, because a restart that
+replays a day of events is the same mistake as the one above.
+
+`gitlab_poll_max_wakes` (default 5) caps how many turns one tick may start. Excess is **left
+behind**, not dropped: an unconsumed todo is not marked done and the cursor does not advance past an
+unconsumed event, so a backlog drains a few at a time over the following ticks instead of starting
+forty runs at once on a single-GPU fleet.
+
+### 13.4 Not waking ourselves
+
+The fleet acts on GitLab through accounts the fleet owns, so every source has to exclude its own
+footprints or an agent merging an MR wakes an agent to look at the merge.
+
+- **Events** authored by the fleet bot or any provisioned agent are skipped outright.
+- **Todos** are skipped when the author is one of ours *only for `mentioned`* — the comment→comment
+  loop `FORUM_MENTION_LOOP_PLAN.md` documents is a property of prose, and the webhook router already
+  draws the line there. An assignment or a review request from one agent to another is a discrete
+  state change that does not regenerate itself, and agents asking each other for review is the
+  point, so those wake regardless of who created them.
+
+### 13.5 Routing
+
+Unchanged from §5, and for the same reason: an event that names nobody must not pick an agent at
+random.
+
+- A todo read with an **agent's own token** wakes that agent. Nothing to resolve.
+- A todo on the **fleet bot's** account, and every event or pipeline row, routes by project row
+  (`gitlab_project_agents`) then by `gitlab_default_agent_id`. With neither, nothing runs and the
+  tick says so in its report.
+
+### 13.6 Settings, and where it is operated
+
+On the settings singleton, saved through `PUT /api/gitlab/connection` like the rest of the
+connection (never the generic settings PUT — that route's whitelist is for keys a browser may
+write blind):
+
+| Key | Default |
+|---|---|
+| `gitlab_poll_enabled` | `false` |
+| `gitlab_poll_interval_minutes` | `5` |
+| `gitlab_poll_events` | `[]` — the catalogue ids that are armed |
+| `gitlab_poll_projects` | `[]` — empty means the 20 most recently active projects in scope |
+| `gitlab_poll_max_wakes` | `5` |
+
+The clock is an Agenda job (`gitlab:poll`), registered and cancelled by `syncGitlabPoll()` at boot
+and on every connection save, exactly as `scheduleGenerator` handles a conversation generator. Agenda
+because it is already the house scheduler and already survives a restart without double-firing.
+
+Settings → Connections → GitLab gains a **Polling** block beside the webhook one: the interval, the
+checkbox list rendered from the catalogue, the optional project narrowing, a **Poll now** button, and
+the last tick's report (when, what it found, who it woke, what failed). `POST /api/gitlab/poll`
+runs a tick on demand and returns that report — which is also how an operator verifies the token can
+see todos at all, since a GitLab that answers 403 on `/todos` is otherwise indistinguishable from a
+quiet one.

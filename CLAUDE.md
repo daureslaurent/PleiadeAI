@@ -147,7 +147,17 @@ Key seams:
   merge included; the ceiling is the bot account's own GitLab permissions, which is where it belongs.
   Inbound, a webhook (`X-Gitlab-Token`, constant-time) wakes **one** agent per event — issue assigned,
   comment naming an agent, review requested — through a serial queue modelled on the forum's, and an
-  unroutable delivery wakes nobody. Both wake switches ship off. The **Check** button on the GitLab
+  unroutable delivery wakes nobody. Both wake switches ship off. **Or with no webhook at all** (§13,
+  which is the usual case: group hooks are a paid feature and a NAT'd instance cannot call in):
+  `gitlab-poll.service.ts` runs on an Agenda tick and reads three places GitLab keeps the answer —
+  `/todos` once per *agent account* (§11 is what makes this precise: GitLab already decided who an
+  assignment or a review request is for), each project's `/events` for what nobody is notified about
+  (an MR **merged**), and the default branch's red pipeline. Which events wake anybody is the
+  operator's list of ids from `gitlab-poll.catalogue.ts`, the one table the poller matches against
+  *and* the settings page renders its checkboxes from; an unarmed kind is never fetched, a source's
+  first tick baselines and wakes nobody, and past the per-tick cap the cursor stops advancing so the
+  backlog is left behind rather than dropped. Everything after `gitlabWakeQueue.enqueue` is shared
+  with the webhook path. The **Check** button on the GitLab
   page gathers four signals with plain GETs (`gitlab-review.service.ts`) and hands them to an agent
   that reports back and changes nothing — the same `startGitlabTurn` path a wake uses.
   **Each agent gets its own GitLab user** (§11): a *provisioning-only* admin token creates the

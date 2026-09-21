@@ -169,6 +169,13 @@ export interface EffectiveSettings {
   gitlab_project_agents: GitLabProjectAgent[];
   gitlab_wake_issues: boolean;
   gitlab_wake_reviews: boolean;
+  /** Polling (`GITLAB_PLAN.md` §13) — waking agents on an instance with no webhooks. */
+  gitlab_poll_enabled: boolean;
+  gitlab_poll_interval_minutes: number;
+  /** Armed catalogue ids (`gitlab-poll.catalogue.ts`). Empty → the poller fetches nothing. */
+  gitlab_poll_events: string[];
+  gitlab_poll_projects: string[];
+  gitlab_poll_max_wakes: number;
   gitlab_git_transport: GitLabGitTransport;
   gitlab_ssh_host: string;
   gitlab_ssh_port: number;
@@ -327,6 +334,11 @@ export const settingsService = {
       gitlab_project_agents: (doc?.gitlab_project_agents as GitLabProjectAgent[] | undefined) ?? [],
       gitlab_wake_issues: doc?.gitlab_wake_issues ?? false,
       gitlab_wake_reviews: doc?.gitlab_wake_reviews ?? false,
+      gitlab_poll_enabled: doc?.gitlab_poll_enabled ?? false,
+      gitlab_poll_interval_minutes: doc?.gitlab_poll_interval_minutes ?? 5,
+      gitlab_poll_events: (doc?.gitlab_poll_events as string[] | undefined) ?? [],
+      gitlab_poll_projects: (doc?.gitlab_poll_projects as string[] | undefined) ?? [],
+      gitlab_poll_max_wakes: doc?.gitlab_poll_max_wakes ?? 5,
       gitlab_git_transport: (doc?.gitlab_git_transport as GitLabGitTransport | undefined) ?? 'https',
       gitlab_ssh_host: doc?.gitlab_ssh_host ?? '',
       gitlab_ssh_port: doc?.gitlab_ssh_port ?? 22,

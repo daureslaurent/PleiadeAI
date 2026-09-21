@@ -332,6 +332,25 @@ const SettingsSchema = new Schema(
     gitlab_wake_issues: { type: Boolean, default: false },
     gitlab_wake_reviews: { type: Boolean, default: false },
     /**
+     * Polling (`GITLAB_PLAN.md` §13) — the way an instance with no webhooks wakes agents.
+     *
+     * `gitlab_poll_events` holds catalogue ids (`gitlab-poll.catalogue.ts`), and an empty list is
+     * the shipped state: polling that is switched on with nothing armed makes no calls and wakes
+     * nobody. A kind that is *not* in the list is never even fetched — the poller follows the same
+     * rule as the prompt modules, where a switched-off module costs no query.
+     */
+    gitlab_poll_enabled: { type: Boolean, default: false },
+    gitlab_poll_interval_minutes: { type: Number, default: 5 },
+    gitlab_poll_events: { type: [String], default: [] },
+    /** Projects to poll for events/pipelines. Empty → the most recently active ones in scope. */
+    gitlab_poll_projects: { type: [String], default: [] },
+    /**
+     * How many turns one tick may start. The backlog is *left behind* rather than dropped, so a
+     * quiet week followed by a busy morning drains a few at a time instead of starting forty runs
+     * at once on a single-GPU fleet.
+     */
+    gitlab_poll_max_wakes: { type: Number, default: 5 },
+    /**
      * How a *cloned* repo authenticates inside an agent's container (`gitlab_repo`). `https` writes
      * a 0600 `~/.git-credentials` carrying the token; `ssh` writes the key below. Either way the
      * credential is a file, never an argv and never an env var the agent's `bash` could print.

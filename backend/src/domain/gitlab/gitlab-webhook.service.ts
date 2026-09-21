@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createLogger } from '../../config/logger';
 import { agentRepository } from '../agents/agent.repository';
 import { settingsService } from '../settings/settings.service';
+import type { WakeFamily } from './gitlab-poll.catalogue';
 
 const log = createLogger('gitlab-webhook');
 
@@ -20,7 +21,16 @@ const log = createLogger('gitlab-webhook');
 
 /** What a delivery resolved to. `null` targets mean nothing runs — the honest outcome for "unsure". */
 export interface WakeDecision {
-  kind: 'issue' | 'note' | 'merge_request';
+  /**
+   * What happened, for logging and de-duplication: a webhook kind (`issue`, `note`,
+   * `merge_request`) or a poll catalogue id (`mr_merged`, …). Free-form on purpose — the brief
+   * reads `family` and `lead`, so a new poll kind needs no case added here.
+   */
+  kind: string;
+  /** Which brief the agent reads, and therefore which finishing move it is told to make. */
+  family: WakeFamily;
+  /** One sentence naming what happened, in the second person. Opens the brief. */
+  lead: string;
   agentId: string | null;
   agentName: string | null;
   project: string;
@@ -51,7 +61,7 @@ function mentionedNames(body: string): string[] {
  * default. A delivery that matches none of the three wakes **nobody** — picking an agent at random
  * for an event that named none is how an inbound endpoint turns into a random inference bill.
  */
-async function route(
+export async function route(
   project: string,
   body: string,
   assignedUsernames: string[],
@@ -124,6 +134,8 @@ export async function decide(payload: Record<string, any>): Promise<WakeDecision
     const routed = await route(project, `${attrs.title ?? ''}\n${attrs.description ?? ''}`, assigned);
     return {
       kind: 'issue',
+      family: 'issue',
+      lead: `You have been assigned an issue on GitLab: **#${attrs.iid} ${attrs.title ?? ''}** in \`${project}\`.`,
       agentId: routed.agentId,
       agentName: routed.agentName,
       project,
@@ -157,6 +169,8 @@ export async function decide(payload: Record<string, any>): Promise<WakeDecision
     const subject = payload.issue ?? payload.merge_request ?? {};
     return {
       kind: 'note',
+      family: 'note',
+      lead: `You were named in a comment on GitLab, on **${String(subject.title ?? 'a comment')}** in \`${project}\`.`,
       agentId: routed.agentId,
       agentName: routed.agentName,
       project,
@@ -174,6 +188,10 @@ export async function decide(payload: Record<string, any>): Promise<WakeDecision
     const routed = await route(project, `${attrs.title ?? ''}\n${attrs.description ?? ''}`, reviewers);
     return {
       kind: 'merge_request',
+      family: 'merge_request',
+      lead:
+        'You have been asked to review a merge request on GitLab: ' +
+        `**!${attrs.iid} ${attrs.title ?? ''}** in \`${project}\`.`,
       agentId: routed.agentId,
       agentName: routed.agentName,
       project,

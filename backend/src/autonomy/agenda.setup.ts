@@ -10,6 +10,8 @@ import { flowRunner } from '../flows/FlowRunner';
 import { runResultRepository } from '../domain/autonomy/run-result.repository';
 import { alertEngine } from '../alerts/AlertEngine';
 import { conversationGenService } from '../domain/conversation-gen/conversation-gen.service';
+import { pollOnce } from '../domain/gitlab/gitlab-poll.service';
+import { settingsService } from '../domain/settings/settings.service';
 import { generatorRepository } from '../domain/conversation-gen/generator.repository';
 import type { ConversationGeneratorDoc } from '../domain/conversation-gen/generator.model';
 
@@ -32,6 +34,14 @@ export interface FlowJobData {
   cron?: string;
   once?: boolean;
 }
+
+/**
+ * The GitLab poll tick (`GITLAB_PLAN.md` §13) — what wakes agents on an instance whose GitLab
+ * cannot call in. Agenda rather than a `setInterval` for the reason every other schedule here uses
+ * it: one registration that survives a restart without double-firing, and one place the operator
+ * can see the clock.
+ */
+export const GITLAB_POLL_JOB = 'gitlab:poll';
 
 /** Conversation Generator tick: one generated conversation with one target agent. */
 export const CONVERSATION_GEN_JOB = 'conversation:generate';
@@ -237,12 +247,21 @@ export async function setupAgenda(): Promise<Agenda> {
     await conversationGenService.runOnce(generatorId);
   });
 
+  // The poller owns its own restraint: it never throws, it returns a report saying what it found,
+  // and it refuses to do anything when polling is off or no event kind is armed. The job is the
+  // clock and nothing else.
+  agenda.define(GITLAB_POLL_JOB, async () => {
+    const report = await pollOnce();
+    if (report.errors.length) log.warn({ errors: report.errors }, 'gitlab poll reported errors');
+  });
+
   agenda.on('fail', (err: Error, job: Job) => {
     log.error({ err, job: job.attrs.name }, 'agenda job failed');
   });
 
   await agenda.start();
   await syncConversationGenerators();
+  await syncGitlabPoll();
   await cancelRetiredJobs();
   log.info('agenda started');
   return agenda;
@@ -287,6 +306,26 @@ export async function syncConversationGenerators(): Promise<void> {
   const enabled = await generatorRepository.listEnabled();
   for (const gen of enabled) await scheduleGenerator(gen);
   log.info({ count: enabled.length }, 'conversation generators synced');
+}
+
+/**
+ * (Re)register the GitLab poll tick from the current settings.
+ *
+ * Called at boot and after every connection save, exactly as `scheduleGenerator` is: the schedule in
+ * Mongo must always match the switch the operator sees, and an interval changed on the settings page
+ * has to take effect without a restart. `skipImmediate` so saving the form does not instantly spend
+ * a turn — "Poll now" is the button for that.
+ */
+export async function syncGitlabPoll(): Promise<void> {
+  const a = getAgenda();
+  await a.cancel({ name: GITLAB_POLL_JOB });
+  const settings = await settingsService.get();
+  if (!settings.gitlab_poll_enabled) return;
+  const minutes = Math.max(1, Math.min(1440, settings.gitlab_poll_interval_minutes || 5));
+  const job = a.create(GITLAB_POLL_JOB, {});
+  job.repeatEvery(`${minutes} minutes`, { skipImmediate: true });
+  await job.save();
+  log.info({ every: minutes, armed: settings.gitlab_poll_events.length }, 'gitlab poll scheduled');
 }
 
 /**

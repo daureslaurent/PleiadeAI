@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, Loader2, Plus, RefreshCcw, Trash2, UserPlus, X } from 'lucide-react';
+import { Check, Copy, Loader2, PlayCircle, Plus, RefreshCcw, Trash2, UserPlus, X } from 'lucide-react';
 import {
   agentsApi,
   gitlabApi,
   type Agent,
   type GitLabConnectionInfo,
   type GitLabIdentities,
+  type GitLabPollConfig,
+  type GitLabPollReport,
   type GitLabTestResult,
 } from '../../../lib/api';
 import { Button, Callout, Checkbox, Field, Hint, Input, Row, Select } from '../../../components/ui';
@@ -23,6 +25,33 @@ import { Button, Callout, Checkbox, Field, Hint, Input, Row, Select } from '../.
  * token works (Test fills in the bot username from the answer), decide how much of the instance the
  * fleet may touch, then — optionally — arm the webhook.
  */
+/**
+ * The poll catalogue, grouped the way the three sources differ from each other — because what an
+ * operator needs to decide is not "which fourteen events" but "should agents answer things aimed at
+ * them, should they watch project activity nobody is notified about, and should they watch CI".
+ */
+const SOURCE_GROUPS: { source: GitLabPollConfig['catalogue'][number]['source']; title: string; blurb: string }[] = [
+  {
+    source: 'todo',
+    title: 'Directed at an agent',
+    blurb:
+      'Read from GitLab’s own to-do list, once per account. An agent with its own GitLab user (below) ' +
+      'is woken by GitLab’s answer to “who is this for”, so nothing has to be guessed from prose.',
+  },
+  {
+    source: 'event',
+    title: 'Project activity',
+    blurb:
+      'Things GitLab notifies nobody about. These name no agent, so they go to the project’s row or ' +
+      'the default agent — and anything the fleet itself did is skipped.',
+  },
+  {
+    source: 'pipeline',
+    title: 'Continuous integration',
+    blurb: 'A merge request’s own author hears about its pipeline; nobody owns the default branch.',
+  },
+];
+
 export function GitLabConnection() {
   const [form, setForm] = useState<GitLabConnectionInfo | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -35,10 +64,22 @@ export function GitLabConnection() {
   const [test, setTest] = useState<GitLabTestResult | null>(null);
   const [secret, setSecret] = useState('');
   const [copied, setCopied] = useState(false);
+  const [poll, setPoll] = useState<GitLabPollConfig | null>(null);
+  const [polling, setPolling] = useState(false);
+  const [report, setReport] = useState<GitLabPollReport | null>(null);
 
   useEffect(() => {
     void gitlabApi.connection().then(setForm).catch(() => setForm(null));
     void agentsApi.list().then(setAgents).catch(() => setAgents([]));
+    // The catalogue is served rather than declared here, so a release that adds an event kind shows
+    // up as a new checkbox with no frontend change (`GITLAB_PLAN.md` §13.2).
+    void gitlabApi
+      .poll()
+      .then((p) => {
+        setPoll(p);
+        setReport(p.last);
+      })
+      .catch(() => setPoll(null));
   }, []);
 
   if (!form) return <Loader2 size={14} className="animate-spin text-slate-500" />;
@@ -66,6 +107,20 @@ export function GitLabConnection() {
       setSaved(true);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const toggleEvent = (id: string, on: boolean) => {
+    if (!form) return;
+    set('poll_events', on ? [...form.poll_events, id] : form.poll_events.filter((e) => e !== id));
+  };
+
+  const runPoll = async () => {
+    setPolling(true);
+    try {
+      setReport(await gitlabApi.runPoll());
+    } finally {
+      setPolling(false);
     }
   };
 
@@ -288,12 +343,15 @@ export function GitLabConnection() {
 
       <div className="space-y-3 border-t hairline pt-4">
         <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-          Waking agents from GitLab
+          Webhooks — instant, if GitLab can reach this instance
         </div>
         <Hint>
           Both ship off. When on, GitLab calls this instance and one agent takes a full turn — so arm
           them deliberately: an assignment or a review request then costs inference the moment it
-          happens.
+          happens. This needs a webhook per project (group-wide hooks are a paid feature, and an
+          instance behind a NAT cannot call in at all) — if that is not available to you, use polling
+          below instead. Both may run together; an event that arrives twice still wakes one agent
+          once.
         </Hint>
         <div className="space-y-2">
           <Checkbox checked={form.wake_issues} onChange={(v) => set('wake_issues', v)}>
@@ -342,80 +400,233 @@ export function GitLabConnection() {
               </Callout>
             )}
 
-            <Field
-              label="Default agent"
-              hint="Who answers when the event named nobody and no project row matches. Leave unset and such events are ignored rather than handed to someone at random."
-            >
-              <Select value={form.default_agent_id} onChange={(e) => set('default_agent_id', e.target.value)}>
-                <option value="">— nobody (ignore unrouted events) —</option>
-                {agents.map((a) => (
-                  <option key={a._id} value={a._id}>
-                    {a.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-
-            <div>
-              <div className="mb-1.5 flex items-center gap-2">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
-                  Per-project routing
-                </span>
-                <Button
-                  variant="ghost"
-                  className="ml-auto"
-                  icon={<Plus size={12} />}
-                  onClick={() =>
-                    set('project_agents', [...form.project_agents, { project: '', agent_id: agents[0]?._id ?? '' }])
-                  }
-                >
-                  Add
-                </Button>
-              </div>
-              <div className="space-y-1.5">
-                {form.project_agents.map((row, i) => (
-                  <Row key={i} className="flex items-center gap-2 p-2">
-                    <Input
-                      className="flex-1"
-                      value={row.project}
-                      placeholder="group/project"
-                      onChange={(e) => {
-                        const next = [...form.project_agents];
-                        next[i] = { ...row, project: e.target.value };
-                        set('project_agents', next);
-                      }}
-                    />
-                    <Select
-                      className="w-44"
-                      value={row.agent_id}
-                      onChange={(e) => {
-                        const next = [...form.project_agents];
-                        next[i] = { ...row, agent_id: e.target.value };
-                        set('project_agents', next);
-                      }}
-                    >
-                      {agents.map((a) => (
-                        <option key={a._id} value={a._id}>
-                          {a.name}
-                        </option>
-                      ))}
-                    </Select>
-                    <button
-                      onClick={() => set('project_agents', form.project_agents.filter((_, j) => j !== i))}
-                      className="shrink-0 text-slate-600 hover:text-red-400"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </Row>
-                ))}
-                {form.project_agents.length === 0 && (
-                  <Hint>No overrides — everything unrouted falls to the default agent above.</Hint>
-                )}
-              </div>
-            </div>
           </div>
         )}
       </div>
+
+      <div className="space-y-3 border-t hairline pt-4">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+          Polling — no webhook needed
+        </div>
+        <Hint>
+          Group webhooks are a paid feature and project webhooks have to be armed one repository at a
+          time, so this asks GitLab what happened instead of waiting to be told. Each armed event is
+          polled with the token you configured above; an event nobody ticked is never even fetched.
+        </Hint>
+
+        <Checkbox checked={form.poll_enabled} onChange={(v) => set('poll_enabled', v)}>
+          Poll GitLab on a schedule
+        </Checkbox>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Every (minutes)" hint="How often a tick runs. Five is a sane starting point.">
+            <Input
+              type="number"
+              value={form.poll_interval_minutes}
+              onChange={(e) => set('poll_interval_minutes', Math.max(1, Number(e.target.value) || 5))}
+            />
+          </Field>
+          <Field
+            label="Turns per tick"
+            hint="The cap on how many agents one tick may wake. The rest waits for the next tick — nothing is dropped."
+          >
+            <Input
+              type="number"
+              value={form.poll_max_wakes}
+              onChange={(e) => set('poll_max_wakes', Math.max(1, Number(e.target.value) || 5))}
+            />
+          </Field>
+        </div>
+
+        {poll && (
+          <div className="space-y-3">
+            {SOURCE_GROUPS.map(({ source, title, blurb }) => {
+              const kinds = poll.catalogue.filter((k) => k.source === source);
+              if (!kinds.length) return null;
+              return (
+                <div key={source} className="space-y-1.5">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                    {title}
+                  </div>
+                  <Hint>{blurb}</Hint>
+                  {kinds.map((kind) => (
+                    <div key={kind.id}>
+                      <Checkbox
+                        checked={form.poll_events.includes(kind.id)}
+                        onChange={(v) => toggleEvent(kind.id, v)}
+                      >
+                        {kind.label}
+                      </Checkbox>
+                      <div className="ml-6 text-[11px] text-slate-600">{kind.hint}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <Field
+          label="Projects to watch"
+          hint="Comma-separated full paths. Leave empty and the 20 most recently active projects in scope are polled. Only the project-activity and CI events use this — to-dos follow the accounts, not the projects."
+        >
+          <Input
+            value={form.poll_projects.join(', ')}
+            placeholder="group/app, group/infra"
+            onChange={(e) =>
+              set(
+                'poll_projects',
+                e.target.value
+                  .split(',')
+                  .map((v) => v.trim())
+                  .filter(Boolean),
+              )
+            }
+          />
+        </Field>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            icon={polling ? <Loader2 size={12} className="animate-spin" /> : <PlayCircle size={12} />}
+            onClick={runPoll}
+          >
+            Poll now
+          </Button>
+          <Button
+            variant="ghost"
+            icon={<RefreshCcw size={12} />}
+            onClick={() => void gitlabApi.rebaselinePoll().then(() => setReport(null))}
+          >
+            Re-baseline
+          </Button>
+          <span className="text-[11px] text-slate-600">
+            Save first — a tick reads what is stored, not what is typed.
+          </span>
+        </div>
+
+        {report && (
+          <Callout tone={report.errors.length ? 'warn' : 'info'}>
+            <div className="space-y-1">
+              {!report.ran && <div>Nothing polled — {report.reason}.</div>}
+              {report.ran && (
+                <div>
+                  Read {report.identities.length} account{report.identities.length === 1 ? '' : 's'}
+                  {report.projects.length ? ` and ${report.projects.length} project${report.projects.length === 1 ? '' : 's'}` : ''}
+                  , matched {report.found}, woke {report.woke.length}
+                  {report.deferred ? `, deferred ${report.deferred} to the next tick` : ''}.
+                </div>
+              )}
+              {report.baselined.length > 0 && (
+                <div>
+                  Baselined {report.baselined.length} source
+                  {report.baselined.length === 1 ? '' : 's'} — nothing before now will wake anybody.
+                </div>
+              )}
+              {report.woke.map((w, i) => (
+                <div key={i} className="font-mono text-[11px]">
+                  {w.agent} ← {w.kind} · {w.title}
+                </div>
+              ))}
+              {report.skipped.map((line, i) => (
+                <div key={`s${i}`} className="text-[11px] text-slate-500">
+                  skipped: {line}
+                </div>
+              ))}
+              {report.errors.map((line, i) => (
+                <div key={`e${i}`} className="text-[11px] text-red-400">
+                  {line}
+                </div>
+              ))}
+            </div>
+          </Callout>
+        )}
+      </div>
+
+      {(form.wake_issues || form.wake_reviews || form.poll_enabled) && (
+        <div className="space-y-3 border-t hairline pt-4">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            Who answers
+          </div>
+          <Hint>
+            Used when the event named nobody — every polled project activity, and any webhook that
+            matched no agent. A to-do read on an agent&rsquo;s own GitLab account always wakes that
+            agent, whatever is set here.
+          </Hint>
+
+          <Field
+            label="Default agent"
+            hint="Who answers when the event named nobody and no project row matches. Leave unset and such events are ignored rather than handed to someone at random."
+          >
+            <Select value={form.default_agent_id} onChange={(e) => set('default_agent_id', e.target.value)}>
+              <option value="">— nobody (ignore unrouted events) —</option>
+              {agents.map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <div>
+            <div className="mb-1.5 flex items-center gap-2">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+                Per-project routing
+              </span>
+              <Button
+                variant="ghost"
+                className="ml-auto"
+                icon={<Plus size={12} />}
+                onClick={() =>
+                  set('project_agents', [...form.project_agents, { project: '', agent_id: agents[0]?._id ?? '' }])
+                }
+              >
+                Add
+              </Button>
+            </div>
+            <div className="space-y-1.5">
+              {form.project_agents.map((row, i) => (
+                <Row key={i} className="flex items-center gap-2 p-2">
+                  <Input
+                    className="flex-1"
+                    value={row.project}
+                    placeholder="group/project"
+                    onChange={(e) => {
+                      const next = [...form.project_agents];
+                      next[i] = { ...row, project: e.target.value };
+                      set('project_agents', next);
+                    }}
+                  />
+                  <Select
+                    className="w-44"
+                    value={row.agent_id}
+                    onChange={(e) => {
+                      const next = [...form.project_agents];
+                      next[i] = { ...row, agent_id: e.target.value };
+                      set('project_agents', next);
+                    }}
+                  >
+                    {agents.map((a) => (
+                      <option key={a._id} value={a._id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <button
+                    onClick={() => set('project_agents', form.project_agents.filter((_, j) => j !== i))}
+                    className="shrink-0 text-slate-600 hover:text-red-400"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </Row>
+              ))}
+              {form.project_agents.length === 0 && (
+                <Hint>No overrides — everything unrouted falls to the default agent above.</Hint>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 border-t hairline pt-4">
         <Button variant="primary" onClick={save} loading={saving}>
