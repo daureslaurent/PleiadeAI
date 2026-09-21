@@ -654,3 +654,67 @@ project's whole history — the mistake baselining exists to prevent.
 
 So the two buttons now say different things, and both are honest: **Catch up** for "you missed
 things, go back and get them", **Re-baseline** for "forget all of it, start from now".
+
+## 16. Waking on a broken build, and reading the log it broke in (2026-09-21)
+
+The operator armed `mr_build_failed` — *"so the agent can repair the pipeline of his MR"* — which
+is the right kind to arm and exposed two things that were wrong for it.
+
+### 16.1 The log reached the agent as a terminal recording
+
+A GitLab job trace is not a document. Fetched from production, every line of a real failure looked
+like this:
+
+```
+2026-09-21T14:28:36.108222Z 01E \u001b[0KERROR: failed to build: unable to prepare context: path "dancing-cats" not found
+└─ trace metadata ─────────┘ └─┘ └erase-line┘└─ the only part anybody wants ─────────────────────┘
+```
+
+The cleaner stripped ANSI **colour** — `\u001b[…m` — and GitLab's `section_start` markers. That was
+right when it was written and had since stopped being enough: `\u001b[0K` ends in `K`, not `m`, so
+every erase-line escape survived, and the per-line timestamp plus stream marker (`01E` for stderr)
+is a newer GitLab feature that did not exist at all. On the measured log, **39% of the bytes were
+machinery** — 4,403 characters in, 2,668 out — and the agent was paying context for `00O+[0K` in
+front of every line.
+
+`cleanJobLog()` now strips every CSI sequence rather than the colour ones, the trace prefix, and
+resolves carriage returns by keeping the **last frame** of each line — a `docker pull` progress bar
+redraws one line hundreds of times, and keeping every frame turns forty lines into four thousand.
+It lives in `domain/gitlab/gitlab-log.ts` and is used by both `gitlab_ci({action:'job_log'})` and
+the operator's log route, because two cleaners drift and then the operator and the agent are
+looking at different text while discussing the same failure.
+
+### 16.2 The brief told it to review its own merge request
+
+`mr_build_failed` mapped to the `merge_request` family, whose finishing move is *"review on the
+merge request itself — read the whole diff, and if it is good, say so and approve"*. For an agent
+woken because **its own** build broke, every clause of that is wrong.
+
+And the body it was given was the to-do's own `body`, which for a build failure is the merge
+request's **title**. No pipeline id, no job id, no error. §12 already recorded what an agent does
+with exactly that: it guesses pipeline ids, 404s twice, and walks the id space looking for a log
+that may not exist. The fix there was to put the ids in the brief — this path was added later and
+did not inherit it.
+
+Both halves are now specific to the situation:
+
+- **`mrFailureDetail()`** fetches the state at wake time — the head pipeline, its failed jobs by
+  name, `job_id` and `failure_reason`, and `yaml_errors` when the config never validated and there
+  is no log to read at all. Three calls, made only when a wake is about to be spent anyway.
+- Two new families. **`build`**: *this is yours, fix it, do not review it* — read a named job's log,
+  correct it on the same source branch, push (GitLab re-runs the pipeline itself), never retry an
+  unchanged build, `lint` a config correction before committing. **`conflict`** (`mr_unmergeable`):
+  rebase or resolve against what actually landed on the target, and if the work has been overtaken,
+  say so and close it rather than forcing it through.
+
+The quoted block's introduction changed with them: for these families the body is state *we*
+fetched, so it is introduced as "What GitLab reports right now" rather than as something somebody
+said.
+
+### 16.3 Measured against the live failure
+
+Merge request `!12` by `architect`, branch `rename-folder-to-src`, pipeline `49` red, job `122`
+(`build`, `script_failure`). The wake now carries the branch, `Pipeline 49`, `job_id: 122` and
+`failure_reason: script_failure`; `gitlab_ci({action:'job_log', job_id: 122})` returns a clean
+terminal session ending in `ERROR: failed to build: unable to prepare context: path "dancing-cats"
+not found`. From wake to cause is two calls, neither of them a guess.

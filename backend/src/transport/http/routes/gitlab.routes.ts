@@ -13,6 +13,7 @@ import {
 } from '../../../domain/gitlab/gitlab-poll.service';
 import { syncGitlabPoll } from '../../../autonomy/agenda.setup';
 import { checkBrief, checkProject } from '../../../domain/gitlab/gitlab-review.service';
+import { cleanJobLog } from '../../../domain/gitlab/gitlab-log';
 import { agentRepository } from '../../../domain/agents/agent.repository';
 import { ACCESS_LEVELS, gitlabProvision } from '../../../domain/gitlab/gitlab-provision.service';
 import { decide, verifySecret } from '../../../domain/gitlab/gitlab-webhook.service';
@@ -345,11 +346,9 @@ gitlabRouter.get('/jobs/:projectId/:jobId/log', async (req, res) => {
       `projects/${encodeURIComponent(req.params.projectId)}/jobs/${req.params.jobId}/trace`,
       { conn, raw: true },
     );
-    const lines = raw
-      // eslint-disable-next-line no-control-regex
-      .replace(/\u001b\[[0-9;]*m/g, '')
-      .replace(/section_(start|end):\d+:[^\r\n]*/g, '')
-      .split('\n');
+    // The same cleaner the agent's `gitlab_ci({action:"job_log"})` uses — the operator and the
+    // agent have to be looking at the same text while discussing the same failure.
+    const lines = cleanJobLog(raw).split('\n');
     res.json({ log: lines.slice(-400).join('\n'), truncated: lines.length > 400 });
   } catch (err) {
     fail(res, err);

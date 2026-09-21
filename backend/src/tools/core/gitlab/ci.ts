@@ -1,4 +1,5 @@
 import { createLogger } from '../../../config/logger';
+import { cleanJobLog } from '../../../domain/gitlab/gitlab-log';
 import { GitLabError, request, seg, slimPipeline } from '../../../domain/gitlab/gitlab.service';
 import {
   PROJECT_PARAM,
@@ -162,13 +163,9 @@ export const gitlabCi: Tool = {
           if (!Number.isFinite(jobId)) throw new GitLabError('`job_id` is required — get it from `jobs`');
           const raw = await request<string>(`projects/${id}/jobs/${jobId}/trace`, { conn, raw: true });
           const lines = Math.min(2000, Math.max(10, Number(args.lines) || DEFAULT_LOG_LINES));
-          // CI logs carry ANSI colour and GitLab's own section markers, which are pure noise once
-          // the text reaches a model rather than a terminal.
-          const clean = raw
-            // eslint-disable-next-line no-control-regex
-            .replace(/\u001b\[[0-9;]*m/g, '')
-            .replace(/section_(start|end):\d+:[^\r\n]*/g, '');
-          const out = tail(clean, lines);
+          // A job trace is a terminal recording: timestamps, stream markers, erase-line escapes and
+          // progress-bar redraws are most of the bytes and none of the meaning (`cleanJobLog`).
+          const out = tail(cleanJobLog(raw), lines);
           return { job_id: jobId, truncated: out.truncated, log: out.text };
         }
 

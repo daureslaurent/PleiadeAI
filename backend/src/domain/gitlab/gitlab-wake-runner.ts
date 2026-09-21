@@ -82,16 +82,44 @@ const FINISH: Record<WakeFamily, string> = {
     'a runner timeout and a broken test look identical from the pipeline list. Then either fix it ' +
     'on a branch and open a merge request, or open an issue saying what is broken and why. ' +
     'Retrying an unchanged failing build is the one move that is always wrong.',
+  build:
+    '**This is your own merge request, so fix it — do not review it.** Read the log of a failing ' +
+    'job named above first (`gitlab_ci({action:"job_log", job_id: <id>})`): the reason is usually ' +
+    'in the last twenty lines, and a runner timeout and a broken build look identical from ' +
+    'anywhere else. Then correct it **on the same source branch** — `gitlab_repo({action:"clone"})` ' +
+    'when you need to run something to be sure, `gitlab_commit` for a fix you are certain of — and ' +
+    'push. GitLab re-runs the pipeline by itself; you do not need to retry anything, and retrying ' +
+    'an unchanged build is the one move that is always wrong. If the failure is the CI config ' +
+    'itself, validate the correction with `gitlab_ci({action:"lint"})` before committing it. Say ' +
+    'on the merge request what was broken and what you changed, so the next red build is not ' +
+    'debugged from scratch.',
+  conflict:
+    '**Your merge request no longer merges cleanly.** Find out against what: `gitlab_mr({action:' +
+    '"get"})` gives the merge status, and the target branch has moved since you branched. Rebase ' +
+    'the source branch onto it — `gitlab_mr({action:"rebase"})` when there is nothing to resolve, ' +
+    'otherwise clone (`gitlab_repo`), rebase there, resolve the conflicts properly and push. Do ' +
+    'not resolve a conflict by discarding the other side because it is in your way; read what ' +
+    'changed on the target first. If the conflict means the work has been overtaken, say so on the ' +
+    'merge request and close it rather than forcing it through.',
 };
 
 function brief(item: Queued): string {
-  const where =
-    item.family === 'merge_request' ? 'merge request' : item.family === 'pipeline' ? 'pipeline' : 'issue';
+  // What introduces the quoted block. For most families it is the item's own text ("the issue
+  // says"); for a broken build or a conflict the body is state we *fetched* rather than something
+  // anybody wrote, and calling that "what the build says" reads as a quotation of the log.
+  const intro =
+    item.family === 'build' || item.family === 'conflict' || item.family === 'pipeline'
+      ? 'What GitLab reports right now:'
+      : item.family === 'merge_request'
+        ? 'The merge request says:'
+        : item.family === 'note'
+          ? 'It says:'
+          : 'The issue says:';
 
   return [
     item.lead,
     '',
-    ...(item.body ? [`The ${where} says:`, '', quote(item.body), ''] : []),
+    ...(item.body ? [intro, '', quote(item.body), ''] : []),
     item.url ? `It is at ${item.url}.` : '',
     '',
     'Work it with the `gitlab_*` tools, and **start by reading the item itself** — ' +

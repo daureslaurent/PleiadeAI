@@ -16,7 +16,15 @@ export type PollSource = 'todo' | 'event' | 'pipeline';
  * Which brief the woken agent reads. Several kinds share one: being assigned an issue and being
  * mentioned on one end in the same place — a comment on the issue.
  */
-export type WakeFamily = 'issue' | 'merge_request' | 'note' | 'pipeline';
+export type WakeFamily =
+  | 'issue'
+  | 'merge_request'
+  | 'note'
+  | 'pipeline'
+  /** Your own merge request's build broke: fix the branch, do not review it (`GITLAB_PLAN.md` §16). */
+  | 'build'
+  /** Your own merge request stopped merging cleanly: rebase or resolve, do not review it. */
+  | 'conflict';
 
 export interface PollEventKind {
   id: string;
@@ -83,9 +91,12 @@ export const POLL_EVENT_KINDS: PollEventKind[] = [
   {
     id: 'mr_build_failed',
     label: 'The pipeline of an agent’s merge request failed',
-    hint: 'Only reaches the MR’s own author — GitLab tells nobody else.',
+    hint:
+      'Only reaches the MR’s own author — GitLab tells nobody else. The wake carries the failing ' +
+      'job ids and the CI config error, so the agent can go straight to the log instead of ' +
+      'guessing pipeline ids.',
     source: 'todo',
-    family: 'merge_request',
+    family: 'build',
     match: ['build_failed'],
   },
   {
@@ -93,7 +104,7 @@ export const POLL_EVENT_KINDS: PollEventKind[] = [
     label: 'An agent’s merge request can no longer be merged',
     hint: 'Usually a conflict with the target branch that appeared after the MR was opened.',
     source: 'todo',
-    family: 'merge_request',
+    family: 'conflict',
     match: ['unmergeable'],
   },
 

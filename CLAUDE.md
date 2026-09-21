@@ -179,7 +179,11 @@ Key seams:
   *endpoints* but **not for the vocabulary** (§15): a to-do or event about an issue arrives with
   `target_type: "WorkItem"`, which matched nothing and silently woke nobody, so `targetKind()`
   folds every issue-shaped type onto `Issue` and the webhook router accepts `object_kind:
-  'work_item'`. That bug hid because an unmatched row was consumed by the cursor without a word —
+  'work_item'`. A build-failure wake carries the
+  failing `job_id`s and `yaml_errors` it fetched (§16) and its own finishing move — *fix your own
+  branch, do not review it* — and `gitlab-log.ts` is the one job-log cleaner (all CSI sequences,
+  GitLab's trace prefix, carriage-return redraws), shared by the tool and the operator route so
+  both read the same text. That WorkItem bug hid because an unmatched row was consumed by the cursor without a word —
   hence `unmatched` on the poll report and `GET /api/gitlab/poll/inspect`, a read-only view of what
   GitLab is actually sending versus what is armed, and **Catch up** (rewind the to-do cursors;
   pending *is* the backlog) as distinct from **Re-baseline** (start from now).

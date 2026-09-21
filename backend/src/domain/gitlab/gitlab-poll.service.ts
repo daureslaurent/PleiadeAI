@@ -341,6 +341,14 @@ async function pollTodos(
 
     const title = String(todo.target?.title ?? todo.body ?? kind.label);
     const iid = todo.target?.iid;
+    // A build failure or a conflict is the one case where the to-do's own body (the merge request's
+    // title) tells the agent nothing it can act on, so the state is fetched and quoted instead.
+    const detailKind =
+      kind.family === 'build' ? 'build' : kind.family === 'conflict' ? 'conflict' : null;
+    const detail =
+      detailKind && Number.isFinite(Number(iid)) && Number.isFinite(Number(todo.project?.id))
+        ? await mrFailureDetail(identity.conn, Number(todo.project.id), Number(iid), detailKind)
+        : '';
     const marker =
       kind.targetType === 'MergeRequest' || targetKind(todo.target_type) === 'MergeRequest' ? '!' : '#';
     const decision: WakeDecision = {
@@ -354,7 +362,7 @@ async function pollTodos(
       project,
       title: iid ? `${marker}${iid} ${title}` : title,
       url: String(todo.target_url ?? ''),
-      body: String(todo.body ?? ''),
+      body: detail || String(todo.body ?? ''),
     } as WakeDecision;
 
     if (!tick.wake(`poll:todo:${todo.id}`, decision)) break;
@@ -367,6 +375,90 @@ async function pollTodos(
   }
 
   if (cursorId !== state.cursorId) await gitlabPollStateRepository.set(stateKey, { cursorId });
+}
+
+/**
+ * What actually broke, fetched at wake time (`GITLAB_PLAN.md` §16).
+ *
+ * A `build_failed` to-do says "the pipeline of your merge request failed" and carries the merge
+ * request's *title* as its body — no pipeline id, no job id, no error. §12 already settled what an
+ * agent does with that: it guesses pipeline ids, 404s, and walks the id space looking for a log.
+ * The fix there was to put the ids in the brief, and this is the same fix on the path that was
+ * added later and did not inherit it.
+ *
+ * Three calls, only when a build-failure wake is about to be spent anyway, and every one of them is
+ * a call the agent would otherwise have to make from a worse starting point.
+ */
+async function mrFailureDetail(
+  conn: GitLabConnection,
+  projectId: number,
+  iid: number,
+  kind: 'build' | 'conflict',
+): Promise<string> {
+  const mr = await request<Record<string, any>>(`projects/${projectId}/merge_requests/${iid}`, {
+    conn,
+  }).catch(() => null);
+  if (!mr) return '';
+
+  if (kind === 'conflict') {
+    const status = String(mr.detailed_merge_status ?? mr.merge_status ?? 'unknown');
+    return [
+      `\`${mr.source_branch}\` → \`${mr.target_branch}\`, merge status \`${status}\`` +
+        (mr.has_conflicts ? ' — GitLab reports real conflicts with the target branch.' : '.'),
+      '',
+      'The target branch has moved since this branch was cut; what has to be reconciled is whatever ' +
+        'landed on it in the meantime.',
+    ].join('\n');
+  }
+
+  const pipelineId = Number(mr.head_pipeline?.id);
+  if (!Number.isFinite(pipelineId)) {
+    return `\`${mr.source_branch}\` → \`${mr.target_branch}\`. GitLab reports no pipeline on the head commit, so the failure is on an earlier one — list them with \`gitlab_ci({action:"pipelines", ref:"${mr.source_branch}"})\`.`;
+  }
+
+  const [full, jobs] = await Promise.all([
+    request<Record<string, any>>(`projects/${projectId}/pipelines/${pipelineId}`, { conn }).catch(
+      () => null,
+    ),
+    request<Record<string, any>[]>(`projects/${projectId}/pipelines/${pipelineId}/jobs`, {
+      conn,
+      query: { scope: 'failed', per_page: 20 },
+    }).catch(() => [] as Record<string, any>[]),
+  ]);
+
+  const lines = [
+    `\`${mr.source_branch}\` → \`${mr.target_branch}\`. Pipeline **${pipelineId}** on commit ` +
+      `\`${String(mr.sha ?? '').slice(0, 8)}\` failed.`,
+  ];
+
+  if (full?.yaml_errors) {
+    // The case with no job and no log at all. Naming a log to read here is what sent an agent
+    // guessing pipeline ids in production (§12).
+    lines.push(
+      '',
+      `It produced **no jobs at all**: the CI config is invalid — \`${full.yaml_errors}\`.`,
+      'There is no job log to read. The fix is in `.gitlab-ci.yml`, and `gitlab_ci({action:"lint"})` ' +
+        'validates a correction before it is committed.',
+    );
+  } else if (jobs.length) {
+    lines.push(
+      '',
+      'Failed jobs — read one before you conclude anything, because a runner timeout and a broken ' +
+        'build look identical from here:',
+      ...jobs.map(
+        (j) =>
+          `- **${j.name}** (${j.stage}) — \`job_id: ${j.id}\`` +
+          (j.failure_reason ? `, failure_reason \`${j.failure_reason}\`` : ''),
+      ),
+    );
+  } else {
+    lines.push(
+      '',
+      'It produced **no failed jobs**, and GitLab reports no config error — so either nothing ' +
+        `matched this ref or no runner picked it up. \`gitlab_ci({action:"pipeline", pipeline_id: ${pipelineId}})\` has the detail.`,
+    );
+  }
+  return lines.join('\n');
 }
 
 function leadForTodo(kind: PollEventKind, project: string, target: string, author: string): string {
