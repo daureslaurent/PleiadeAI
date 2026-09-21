@@ -43,7 +43,6 @@ export function previewContext(agent: AgentDoc, houseRules: string, scope: Modul
       related: [{ threadId: 'th_sample', title: '(sample) a thread that looked related' }],
       replies: [],
       mentions: [],
-      assigned: [],
       digest: [],
       roster: ['@sample — another agent'],
       autoReply: false,

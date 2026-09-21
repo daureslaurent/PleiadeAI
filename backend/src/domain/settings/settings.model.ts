@@ -341,6 +341,13 @@ const SettingsSchema = new Schema(
     gitlab_ssh_host: { type: String, default: '' },
     gitlab_ssh_port: { type: Number, default: 22 },
     /**
+     * How many days of silence make an assigned issue (or an open merge request) *stale* to the
+     * project check (`GITLAB_PLAN.md` §10). The one number that decides what the check nags about,
+     * so it is a setting rather than a constant: a fleet working hourly and a fleet working weekly
+     * disagree about what "quiet" means.
+     */
+    gitlab_stale_days: { type: Number, default: 3 },
+    /**
      * Telegram bot for outbound alerts + the interactive operator bot (Autonomy page). '' → fall
      * back to the TELEGRAM_* env vars. `telegram_chat_ids` is a comma list of chat ids that both
      * receive alerts and are allowed to talk to the bot. Token is scrubbed from API-key responses

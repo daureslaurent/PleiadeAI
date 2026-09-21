@@ -2,7 +2,9 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { createLogger } from '../../../config/logger';
 import { gitlabActivityRepository } from '../../../domain/gitlab/gitlab-activity.repository';
-import { gitlabWakeQueue } from '../../../domain/gitlab/gitlab-wake-runner';
+import { gitlabWakeQueue, startGitlabTurn } from '../../../domain/gitlab/gitlab-wake-runner';
+import { checkBrief, checkProject } from '../../../domain/gitlab/gitlab-review.service';
+import { agentRepository } from '../../../domain/agents/agent.repository';
 import { decide, verifySecret } from '../../../domain/gitlab/gitlab-webhook.service';
 import {
   GitLabError,
@@ -52,6 +54,7 @@ gitlabRouter.get('/connection', async (_req, res) => {
     git_transport: s.gitlab_git_transport,
     ssh_host: s.gitlab_ssh_host,
     ssh_port: s.gitlab_ssh_port,
+    stale_days: s.gitlab_stale_days,
     token_set: s.gitlab_token_set,
     ssh_key_set: s.gitlab_ssh_key_set,
     webhook_secret_set: s.gitlab_webhook_secret_set,
@@ -83,6 +86,7 @@ gitlabRouter.put('/connection', async (req, res) => {
   }
   if (typeof b.ssh_host === 'string') patch.gitlab_ssh_host = b.ssh_host.trim();
   if (b.ssh_port !== undefined) patch.gitlab_ssh_port = Math.max(1, Number(b.ssh_port) || 22);
+  if (b.stale_days !== undefined) patch.gitlab_stale_days = Math.max(1, Number(b.stale_days) || 3);
   await settingsService.update(patch as never);
 
   if (typeof b.token === 'string') await settingsService.setGitlabSecret('token', b.token.trim());
@@ -281,6 +285,60 @@ gitlabRouter.get('/jobs/:projectId/:jobId/log', async (req, res) => {
       .replace(/section_(start|end):\d+:[^\r\n]*/g, '')
       .split('\n');
     res.json({ log: lines.slice(-400).join('\n'), truncated: lines.length > 400 });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/**
+ * "Is there anything to do on this project?" — the **Check now** button (`GITLAB_PLAN.md` §10).
+ *
+ * Two steps, and they are separable on purpose. `GET .../check` gathers the four signals and
+ * returns them: no inference, no session, instant, and enough on its own to answer "is this project
+ * quiet" from the UI. `POST .../check` does the same gather and then hands it to an agent, which
+ * reads what it means and reports back.
+ *
+ * The POST returns the session id straight away and leaves the turn running — the operator is meant
+ * to watch it arrive in the Workspace, not wait on an HTTP request for the length of an inference
+ * call.
+ */
+gitlabRouter.get('/projects/:project/check', async (req, res) => {
+  try {
+    res.json(await checkProject(req.params.project));
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+gitlabRouter.post('/projects/:project/check', async (req, res) => {
+  try {
+    const check = await checkProject(req.params.project);
+
+    // Who runs it: the agent the operator picked on the button, else the fleet's default. With
+    // neither, nothing is started — the same rule the webhook router follows, for the same reason:
+    // picking an agent at random to spend a turn is not a sensible default.
+    const settings = await settingsService.get();
+    const wantedId = String(req.body?.agent_id ?? '').trim() || settings.gitlab_default_agent_id;
+    const agent = wantedId ? await agentRepository.findById(wantedId) : null;
+    if (!agent) {
+      res.status(400).json({
+        error:
+          'no agent to run this check — pick one on the button, or set a default agent in ' +
+          'Settings → Connections → GitLab.',
+        check,
+      });
+      return;
+    }
+
+    const { sessionId } = await startGitlabTurn({
+      agentId: String(agent._id),
+      agentName: agent.name,
+      title: `GitLab · check ${check.project}`,
+      brief: checkBrief(check),
+      notify: `${agent.name} reviewed ${check.project}`,
+    });
+    log.info({ project: check.project, agent: agent.name, session: sessionId }, 'project check started');
+    res.json({ sessionId, agent: agent.name, check });
   } catch (err) {
     fail(res, err);
   }

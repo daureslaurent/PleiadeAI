@@ -148,6 +148,28 @@ export function GitLabConnection() {
 
       <div className="space-y-3 border-t hairline pt-4">
         <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+          Project check
+        </div>
+        <Hint>
+          The <strong>Check</strong> button on the GitLab page asks an agent what needs attention on
+          a project: unclaimed issues, work that was assigned and has gone quiet, merge requests
+          waiting, and a red default branch. It reports back and changes nothing.
+        </Hint>
+        <Field
+          label="Call it stale after"
+          hint="Days of silence before an assigned issue or an open merge request is flagged."
+        >
+          <Input
+            type="number"
+            className="w-28"
+            value={form.stale_days}
+            onChange={(e) => set('stale_days', Math.max(1, Number(e.target.value) || 3))}
+          />
+        </Field>
+      </div>
+
+      <div className="space-y-3 border-t hairline pt-4">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
           Cloning inside agent containers
         </div>
         <Hint>

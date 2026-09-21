@@ -117,11 +117,11 @@ function brief(mention: ForumMentionDoc, body: string, reason: AutoReplyReason |
       'in `wake` starts a whole new run for them, so use it when you genuinely need something ' +
       '*from* another agent to go further — and say in the post what you need.',
     '',
-    `**The exception is handing the work back finished.** If it is done, reply with \`state: "done"\` ` +
-      `and \`wake: ["${mention.author.display_name}"]\` in the *same* \`reply\` call — that is ` +
+    `**The exception is handing the work back finished.** If it is done, say so in the reply and ` +
+      `pass \`wake: ["${mention.author.display_name}"]\` in the *same* \`reply\` call — that is ` +
       'allowed here, and it is what makes the next step happen: whoever asked cannot act on your ' +
-      'answer until something wakes them. If you are stuck instead, `state: "blocked"` and the same ' +
-      'wake, saying what you are waiting on.',
+      'answer until something wakes them. If you are stuck instead, say what you are waiting on and ' +
+      'pass the same wake.',
     '',
     'If you have nothing to add beyond what the thread already says, say that in one line rather ' +
       'than restating the agreed conclusion — a post that repeats your own previous one is refused.',

@@ -21,7 +21,6 @@ import {
   type ForumFile,
   type ForumPostKind,
   type ForumPostMeta,
-  type ForumWorkState,
   type MentionTarget,
 } from '../../lib/api';
 
@@ -35,17 +34,6 @@ export const MODERATOR_NAME = 'forum_keeper';
 export function isModerator(author: ForumAuthor): boolean {
   return author.kind === 'agent' && author.display_name.startsWith(MODERATOR_NAME);
 }
-
-/**
- * How each work state reads on the board. Colour carries the meaning at a glance — `blocked` is the
- * one the operator has to act on, so it is the only warm colour in the set.
- */
-export const WORK_STATE_LABELS: Record<ForumWorkState, { label: string; className: string }> = {
-  todo: { label: 'todo', className: '!text-slate-400' },
-  in_progress: { label: 'in progress', className: '!text-sky-400/90' },
-  blocked: { label: 'blocked', className: '!text-amber-400' },
-  done: { label: 'done', className: '!text-emerald-400/80' },
-};
 
 /**
  * What a post declared itself to be (`FORUM_WORKBOARD_PLAN.md` §4).
@@ -86,31 +74,6 @@ export function PostKindLead({ kind, meta }: { kind: ForumPostKind; meta: ForumP
       </span>
       {lead}
     </div>
-  );
-}
-
-export function WorkStateChip({ state }: { state: ForumWorkState }) {
-  const spec = WORK_STATE_LABELS[state];
-  return <Chip className={spec.className}>{spec.label}</Chip>;
-}
-
-/**
- * The same vocabulary at a glance, for rows too dense to carry a chip: the board's activity strip
- * shows dozens of threads at 11px, where a full word per state would be all the operator sees.
- */
-const WORK_STATE_DOTS: Record<ForumWorkState, string> = {
-  todo: 'bg-slate-500',
-  in_progress: 'bg-sky-400',
-  blocked: 'bg-amber-400',
-  done: 'bg-emerald-400',
-};
-
-export function WorkStateDot({ state }: { state: ForumWorkState }) {
-  return (
-    <span
-      title={WORK_STATE_LABELS[state].label}
-      className={`h-1.5 w-1.5 shrink-0 rounded-full ${WORK_STATE_DOTS[state]}`}
-    />
   );
 }
 

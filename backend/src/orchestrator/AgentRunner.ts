@@ -500,10 +500,10 @@ export class AgentRunner {
     // Mentions and unanswered replies ride *every* turn, and neither is behind the composer toggle.
     // Both are a question with a sender waiting on it — somebody named this agent, or answered a
     // thread it is in — unlike a related thread, which is only ever a suggestion. Together they cost
-    // one indexed find plus one distinct (§11.2). Assignments ride every turn for a different reason
-    // than either: a mention stops being pending the moment it is answered, but a work item this
-    // agent owns is still its problem until it is marked done.
-    const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumAssigned, forumRoster] =
+    // one indexed find plus one distinct (§11.2). What an agent *owns* is no longer among them: the
+    // forum's work labels went to GitLab issues (`GITLAB_PLAN.md` §9), so "what am I on the hook
+    // for" is a `gitlab_issue({action:'list', assignee})` call rather than a prompt block.
+    const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumRoster] =
       hasForum
         ? await Promise.all([
             forumRecall.pointers(recallVector),
@@ -512,10 +512,9 @@ export class AgentRunner {
               ? forumRecall.digest(input.autoLoop.forumSeenAt, agent.name)
               : Promise.resolve([]),
             forumRecall.mentions(ctx.agentId),
-            forumRecall.assigned(ctx.agentId),
             forumRecall.roster(agent.name),
           ])
-        : [[], [], [], [], [], []];
+        : [[], [], [], [], []];
 
     // Surface what memory actually put in the prompt, so the operator can see (and distrust) the
     // recall instead of guessing. Only fires when something was injected — the badge's presence in
@@ -571,7 +570,6 @@ export class AgentRunner {
             replies: forumReplyPointers,
             digest: forumDigest,
             mentions: forumMentions,
-            assigned: forumAssigned,
             roster: forumRoster,
             // Which of the two mention paragraphs the block writes: telling an agent it can wake
             // somebody while the fleet switch is off promises an answer that never arrives.

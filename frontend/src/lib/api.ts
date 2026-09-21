@@ -1936,6 +1936,8 @@ export interface GitLabConnectionInfo {
   git_transport: 'https' | 'ssh';
   ssh_host: string;
   ssh_port: number;
+  /** Days of silence after which the project check calls an assigned issue or an open MR stale. */
+  stale_days: number;
   /** Presence flags — the values themselves never leave the backend. */
   token_set: boolean;
   ssh_key_set: boolean;
@@ -2033,6 +2035,19 @@ export interface GitLabActivity {
   at: string;
 }
 
+/** What "is there anything to do on this project" found, before any agent read it. */
+export interface GitLabProjectCheck {
+  project: string;
+  url: string;
+  default_branch: string;
+  unassigned: GitLabIssue[];
+  stale: { issue: GitLabIssue; days: number }[];
+  merge_requests: { mr: GitLabMergeRequest; why: string[] }[];
+  pipeline: { status: string; url: string; ref: string; failed_jobs: string[] } | null;
+  quiet: boolean;
+  checked_at: string;
+}
+
 export interface GitLabTestResult {
   ok: boolean;
   error?: string;
@@ -2067,6 +2082,19 @@ export const gitlabApi = {
   jobLog: (project: string, jobId: number) =>
     api
       .get<{ log: string; truncated: boolean }>(`/gitlab/jobs/${encodeURIComponent(project)}/${jobId}/log`)
+      .then((r) => r.data),
+  /** The signals alone — no inference, no session. */
+  check: (project: string) =>
+    api
+      .get<GitLabProjectCheck>(`/gitlab/projects/${encodeURIComponent(project)}/check`)
+      .then((r) => r.data),
+  /** The same gather, handed to an agent that reads what it means. Returns as soon as the session exists. */
+  runCheck: (project: string, agentId?: string) =>
+    api
+      .post<{ sessionId: string; agent: string; check: GitLabProjectCheck }>(
+        `/gitlab/projects/${encodeURIComponent(project)}/check`,
+        { agent_id: agentId },
+      )
       .then((r) => r.data),
   activity: (params: { project?: string; agent?: string; limit?: number } = {}) =>
     api.get<GitLabActivity[]>('/gitlab/activity', { params }).then((r) => r.data),
@@ -3210,12 +3238,6 @@ export interface ForumCategory {
   lastThread: { id: string; title: string; lastPostAt: string; lastPostAuthor: string } | null;
 }
 
-/**
- * Where the work a thread tracks has got to — a different axis from `status`, which is the thread's
- * own lifecycle on the forum. `null` means the thread is not a work item at all.
- */
-export type ForumWorkState = 'todo' | 'in_progress' | 'blocked' | 'done';
-
 /** What is left of a thread's automatic-reply allowance. Null when fleet auto-reply is off. */
 export interface ForumAutoRun {
   spent: number;
@@ -3232,8 +3254,6 @@ export interface ForumThread {
   title: string;
   author: ForumAuthor;
   status: 'open' | 'locked' | 'archived';
-  workState: ForumWorkState | null;
-  assignee: ForumAuthor | null;
   pinned: boolean;
   tags: string[];
   postCount: number;
@@ -3414,7 +3434,7 @@ export const forumApi = {
     categoryId?: string,
     limit = 50,
     includeArchived = false,
-    filter: { workState?: Array<ForumWorkState | 'none'>; assignee?: string; sort?: 'pinned' | 'active' } = {},
+    filter: { sort?: 'pinned' | 'active' } = {},
   ) =>
     api
       .get<ForumThread[]>('/forum/threads', {
@@ -3422,8 +3442,6 @@ export const forumApi = {
           category: categoryId,
           limit,
           includeArchived: includeArchived ? '1' : undefined,
-          workState: filter.workState?.length ? filter.workState.join(',') : undefined,
-          assignee: filter.assignee || undefined,
           sort: filter.sort === 'active' ? 'active' : undefined,
         },
       })
@@ -3439,8 +3457,6 @@ export const forumApi = {
     attachments?: string[];
     /** Agents to run over this post now, by exact name — the composer's version of the tool's `wake`. */
     wake?: string[];
-    assignee?: string | null;
-    workState?: ForumWorkState | 'none' | null;
     hubThreadId?: string | null;
   }) =>
     api
@@ -3457,8 +3473,6 @@ export const forumApi = {
       categoryId: string;
       resolvedPostId: string | null;
       hubThreadId: string | null;
-      workState: ForumWorkState | null;
-      assignee: ForumAuthor | null;
     }>,
   ) => api.patch<ForumThread>(`/forum/threads/${id}`, patch).then((r) => r.data),
   removeThread: (id: string) => api.delete(`/forum/threads/${id}`).then((r) => r.data),

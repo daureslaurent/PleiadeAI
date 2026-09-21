@@ -11,20 +11,19 @@ import { settingsService } from '../../../domain/settings/settings.service';
 import { forumPostRepository } from '../../../domain/forum/forum-post.repository';
 import { forumFileRepository } from '../../../domain/forum/forum-file.repository';
 import { forumService, ForumRuleError, type ForumSearchMode } from '../../../domain/forum/forum.service';
-import { OPERATOR_AUTHOR, type ForumAuthor } from '../../../domain/forum/forum-author';
+import { OPERATOR_AUTHOR } from '../../../domain/forum/forum-author';
 import { forumMentionRepository } from '../../../domain/forum/forum-mention.repository';
 import {
   forumMentionService,
-  loadRoster,
   planSummons,
   summonsOutcome,
   type SummonPlan,
 } from '../../../domain/forum/forum-mention.service';
 import { forumMentionRunner, MentionRunError } from '../../../domain/forum/forum-mention-runner';
 import type { ForumMentionDoc, ForumMentionStatus } from '../../../domain/forum/forum-mention.model';
-import { FORUM_THREAD_STATUSES, FORUM_WORK_STATES } from '../../../domain/forum/forum-thread.model';
+import { FORUM_THREAD_STATUSES } from '../../../domain/forum/forum-thread.model';
 import type { ForumCategoryDoc } from '../../../domain/forum/forum-category.model';
-import type { ForumThreadDoc, ForumWorkState } from '../../../domain/forum/forum-thread.model';
+import type { ForumThreadDoc } from '../../../domain/forum/forum-thread.model';
 import type { ForumPostDoc } from '../../../domain/forum/forum-post.model';
 import type { ForumFileDoc } from '../../../domain/forum/forum-file.model';
 
@@ -99,8 +98,6 @@ function shapeThread(doc: ForumThreadDoc) {
     title: doc.title,
     author: doc.author,
     status: doc.status,
-    workState: doc.work_state ?? null,
-    assignee: doc.assignee ?? null,
     pinned: doc.pinned,
     tags: doc.tags,
     postCount: doc.post_count,
@@ -111,32 +108,6 @@ function shapeThread(doc: ForumThreadDoc) {
     hubThreadId: doc.hub_thread_id ? String(doc.hub_thread_id) : null,
     createdAt: doc.created_at,
   };
-}
-
-/**
- * Resolve an agent name the operator picked into a board identity.
- *
- * Against the same roster that resolves `@name`, so the composer can never assign work to somebody a
- * mention could not reach — which is exactly the silent stall the work-item fields exist to remove.
- */
-function workStateFrom(raw: unknown): ForumWorkState | null | undefined {
-  if (raw === undefined) return undefined;
-  const value = String(raw ?? '').trim();
-  if (!value || value === 'none') return null;
-  if (!(FORUM_WORK_STATES as readonly string[]).includes(value)) {
-    throw new ForumRuleError(`workState must be one of: ${FORUM_WORK_STATES.join(', ')}, none`, 400);
-  }
-  return value as ForumWorkState;
-}
-
-async function resolveAssignee(name: unknown): Promise<ForumAuthor | null | undefined> {
-  if (name === undefined) return undefined;
-  const wanted = String(name ?? '').trim();
-  if (!wanted) return null;
-  const roster = await loadRoster();
-  const target = roster.byName.get(wanted.toLowerCase());
-  if (!target) throw new ForumRuleError(`no agent named "${wanted}"`, 400);
-  return { kind: target.kind, agent_id: target.agentId, display_name: target.name };
 }
 
 /**
@@ -289,16 +260,9 @@ forumRouter.delete('/categories/:id', async (req, res) => {
 
 forumRouter.get('/threads', async (req, res) => {
   const categoryId = typeof req.query.category === 'string' && req.query.category ? req.query.category : undefined;
-  // Comma-separated so the board's "open work" filter is one request rather than one per state.
-  const workState =
-    typeof req.query.workState === 'string' && req.query.workState
-      ? (req.query.workState.split(',').map((s) => s.trim()).filter(Boolean) as Array<ForumWorkState | 'none'>)
-      : undefined;
   const threads = await forumThreadRepository.list({
     categoryId,
     includeArchived: req.query.includeArchived === '1',
-    workState,
-    assignee: typeof req.query.assignee === 'string' && req.query.assignee ? req.query.assignee : undefined,
     sort: req.query.sort === 'active' ? 'active' : 'pinned',
     limit: Number(req.query.limit) || 50,
   });
@@ -319,7 +283,6 @@ forumRouter.post('/threads', async (req, res) => {
     // summons — a human typing a name means it — so this is additive, and it is what lets the
     // composer say *before* posting who is about to spend a turn.
     const wake = Array.isArray(req.body?.wake) ? req.body.wake.map(String) : [];
-    const assignee = await resolveAssignee(req.body?.assignee);
     const summons = await planSummons({ body, author: OPERATOR_AUTHOR, wake, threadId: null });
 
     const { thread, post } = await forumService.createThread({
@@ -332,8 +295,6 @@ forumRouter.post('/threads', async (req, res) => {
       byAgent: false,
       summons,
       hubThreadId: typeof req.body?.hubThreadId === 'string' ? req.body.hubThreadId : undefined,
-      assignee,
-      workState: workStateFrom(req.body?.workState),
     });
     res.status(201).json({
       ...shapeThread(thread),
@@ -436,17 +397,6 @@ forumRouter.patch('/threads/:id', async (req, res) => {
   }
   // `null` clears the verdict, a string sets it — so the key has to be present-but-undefined-safe.
   if ('resolvedPostId' in (req.body ?? {})) patch.resolved_post_id = req.body.resolvedPostId || null;
-  if ('workState' in (req.body ?? {})) {
-    const state = req.body.workState;
-    if (state !== null && !(FORUM_WORK_STATES as readonly string[]).includes(String(state))) {
-      res.status(400).json({ error: `workState must be null or one of: ${FORUM_WORK_STATES.join(', ')}` });
-      return;
-    }
-    patch.work_state = state ?? null;
-  }
-  // The operator assigns by picking from the roster in the UI, so the author object arrives whole;
-  // `null` un-assigns.
-  if ('assignee' in (req.body ?? {})) patch.assignee = req.body.assignee || null;
   // Which project this thread belongs to. Validated by the same resolver the agent tool uses, so the
   // one-level rule (and with it the impossibility of a cycle) holds however the field is set.
   if ('hubThreadId' in (req.body ?? {})) {

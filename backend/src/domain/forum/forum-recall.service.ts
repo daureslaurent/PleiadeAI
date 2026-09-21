@@ -48,8 +48,6 @@ export interface ForumPointer {
   lastPostAuthor?: string;
   /** Present for digest pointers: whether the thread itself is new, or just newly replied to. */
   opening?: boolean;
-  /** Present for assignment pointers: the work state the thread is sitting in. */
-  workState?: string;
   /** Files attached anywhere in the thread. A pointer that says "2 files" is worth opening. */
   attachments?: number;
 }
@@ -193,39 +191,6 @@ export const forumRecall = {
   },
 
   /**
-   * The work items this agent owns and has not finished (§13).
-   *
-   * A mention pointer disappears the moment the agent answers, which is right for a question and
-   * wrong for a task: "you own this, it is still open" is true on every turn until the work is
-   * actually done, and an assignment that scrolls out of view after one reply is an assignment
-   * nobody tracks. `done` is excluded — it is finished by definition — and so are archived threads.
-   *
-   * Cheap by construction: one indexed find on `assignee.display_name` + `work_state`.
-   */
-  async assigned(agentId: string, limit = MAX_POINTERS): Promise<ForumPointer[]> {
-    if (!agentId) return [];
-    try {
-      const rows = await ForumThreadModel.find({
-        'assignee.agent_id': agentId,
-        work_state: { $in: ['todo', 'in_progress', 'blocked'] },
-        status: { $ne: 'archived' },
-      })
-        .sort({ last_post_at: -1 })
-        .limit(limit)
-        .exec();
-      return rows.map((t) => ({
-        threadId: String(t._id),
-        title: clip(t.title),
-        workState: t.work_state ?? 'todo',
-        lastPostAuthor: t.last_post_author,
-      }));
-    } catch (err) {
-      log.warn({ err, agentId }, 'forum assignment pointers unavailable this turn');
-      return [];
-    }
-  },
-
-  /**
    * What has happened on the board *since a moment in time* — for the auto-loop agent
    * (`AUTO_AGENT_PLAN.md` §4), which wakes up every few minutes and would otherwise have no way to
    * notice work it was never directly addressed in.
@@ -341,8 +306,6 @@ export interface ForumBlockInput {
   mentions?: ForumPointer[];
   /** `@name — role` lines from `forumRecall.roster`. */
   roster?: string[];
-  /** Open work items assigned to this agent (spec §13). */
-  assigned?: ForumPointer[];
   /** Whether the forum runs mentions on its own (`settings.forum_auto_reply`, spec §11.6). */
   autoReply?: boolean;
 }
@@ -353,12 +316,11 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
     replies,
     digest = [],
     mentions = [],
-    assigned = [],
     roster = [],
     autoReply = false,
   } = input;
 
-  const hasForum = mentions.length || assigned.length || related.length || replies.length || digest.length;
+  const hasForum = mentions.length || related.length || replies.length || digest.length;
   // The block is omitted entirely when there is nothing on it. The old one was unconditional and
   // spent ~180 tokens a turn on doctrine about who to wake — doctrine for a mechanism that no
   // longer exists, on a turn that may have nothing to do with the forum at all.
@@ -371,14 +333,6 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
       'You were named on the forum. Answer if you have something to add; one line is a complete',
       'answer, and silence is fine if the thread already says it:',
       ...mentions.map((p) => `- \`${p.threadId}\` — ${p.title} (by ${p.mentionedBy})${files(p)}`),
-    );
-  }
-
-  if (assigned.length) {
-    lines.push(
-      '',
-      'Threads labelled as yours (these are labels, not dispatched work — real tasks are above):',
-      ...assigned.map((p) => `- \`${p.threadId}\` — ${p.title} [${p.workState}]${files(p)}`),
     );
   }
 
@@ -425,15 +379,15 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
             'The `wake` argument of the same call is what **runs** them, now, one full turn per name.',
             'Every post that names an agent must pass `wake`: the names that have to act, or `[]` if',
             'you are only telling them. Wake somebody when you need something *from* them to carry on',
-            '(say what), or when you are handing finished work back — `state: "done"` and',
+            '(say what), or when you are handing finished work back — say it is done and pass',
             '`wake: ["whoever asked"]` in the one reply. Never wake somebody to acknowledge or agree.',
           ]
         : [
             'Naming somebody tells them; it starts nothing. The fleet is not running mentions on its',
             'own right now (Settings → Forum), so `wake` records the request and the operator runs it.',
           ]),
-      'Work with a deliverable belongs on a thread of its own, with acceptance criteria and an',
-      'owner named in the opening post — so what it would take to finish is written down once.',
+      'Work with a deliverable is a GitLab issue, not a thread: open it with `gitlab_issue` and',
+      'discuss it here if it needs discussing. The forum holds findings, decisions and handoffs.',
     );
   }
 

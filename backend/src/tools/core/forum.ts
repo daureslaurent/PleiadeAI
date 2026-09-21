@@ -9,11 +9,8 @@ import {
   forumThreadRepository,
 } from '../../domain/forum/forum-thread.repository';
 import {
-  FORUM_WORK_STATES,
   type ForumThreadDoc,
-  type ForumWorkState,
 } from '../../domain/forum/forum-thread.model';
-import { loadRoster } from '../../domain/forum/forum-roster';
 import { FORUM_POST_KINDS, KIND_HELP, PostContractError } from '../../domain/forum/post-contract';
 import {
   agentsAddressedIn,
@@ -337,9 +334,9 @@ export const forum: Tool = {
     'you pass `wake`: give the names that must act, or `[]` if you are only telling them. ' +
     'Wake somebody when you need something *from* them to go further, and say what; do not wake ' +
     'somebody to acknowledge, agree, or confirm receipt — that is how a settled thread turns into ' +
-    'twenty posts. Handing finished work back is the case that *does* deserve a wake: reply with ' +
-    '`state: "done"` (or `"blocked"`) and `wake: ["whoever asked"]` in the one call, because they ' +
-    'cannot act on your answer until something wakes them. ' +
+    'twenty posts. Handing finished work back is the case that *does* deserve a wake: say in the ' +
+    'reply that it is done (or what you are blocked on) and pass `wake: ["whoever asked"]` in the ' +
+    'same call, because they cannot act on your answer until something wakes them. ' +
     'Post immediately, without waiting to finish, when you find something the rest of the fleet is ' +
     'wrong about or blocked by. ' +
     'ALWAYS `search` before you `post_thread` — the answer is often already on the board, and posting ' +
@@ -347,10 +344,10 @@ export const forum: Tool = {
     'Post findings that will still matter next week (causes, fixes, gotchas), not turn-by-turn chatter. ' +
     'Posts can carry files — attach the chart, the log bundle, the rendered clip rather than describing ' +
     'it, and use `get_attachment` to pull a file another agent attached into your own session. ' +
-    'A thread you opened is also a work item you can track: `set_state` marks it todo/in_progress/' +
-    'blocked/done and `assign` names the agent who owns it, so "what is still open and who has it" ' +
-    'is one `list_threads` call instead of a reading exercise. Keep them current — a board where ' +
-    'finished work still says in_progress is worse than one with no states at all.',
+    'The forum does not track work: it holds the discussion, the findings, the decisions and the ' +
+    'handoffs. A piece of work that has to be done is a GitLab issue (`gitlab_issue`) — one board, ' +
+    'the one the operator is already looking at. Use `set_hub` to say which project a thread belongs ' +
+    'to, so several threads about one thing read as one project.',
   parameters: {
     type: 'object',
     properties: {
@@ -364,8 +361,7 @@ export const forum: Tool = {
           'post_thread',
           'reply',
           'edit_post',
-          'set_state',
-          'assign',
+          'set_hub',
           'pin_thread',
           'create_category',
           'upload_file',
@@ -375,7 +371,7 @@ export const forum: Tool = {
         description:
           "'search' finds existing threads (do this first); 'read_thread' opens one; 'post_thread' " +
           "starts a new topic; 'reply' adds to an existing one; 'edit_post' revises your own post; " +
-          "'set_state' / 'assign' track a thread you opened as a work item; 'pin_thread' sticks it " +
+          "'set_hub' files a thread under the project it belongs to; 'pin_thread' sticks it " +
           "to the top of its category; 'get_attachment' downloads a file someone attached so you " +
           'can actually use it.',
       },
@@ -432,27 +428,11 @@ export const forum: Tool = {
       hub_thread_id: {
         type: 'string',
         description:
-          'For `post_thread`/`set_state`/`assign`: the thread tracking the project this one belongs ' +
+          'For `post_thread`/`set_hub`: the thread tracking the project this one belongs ' +
           "to — its hub or status thread. Set it when you open a thread as part of a larger piece of " +
           'work. Every thread naming the same hub shares one budget of automatic runs and shows as ' +
           'one project, so the operator sees the work rather than five unrelated threads. ' +
           "'none' detaches it. A hub may not itself have a hub.",
-      },
-      state: {
-        type: 'string',
-        enum: [...FORUM_WORK_STATES, 'none'],
-        description:
-          "For `set_state`, and for `reply`: where the work has got to. 'none' takes the thread " +
-          'back out of the work queue. Also filters `list_threads`. Setting it on a `reply` is how ' +
-          'you hand work back — a reply that marks the thread "done" (or "blocked", if you are ' +
-          'stuck) wakes whoever asked you for it, because they cannot act on it until something ' +
-          'does. Use it on the reply that delivers, not on a separate call afterwards.',
-      },
-      assignee: {
-        type: 'string',
-        description:
-          'For `assign` (and optionally `set_state`): the agent that owns this work item, by name — ' +
-          'the same name you would `@`. Empty string clears it. Also filters `list_threads`.',
       },
       wake: {
         type: 'array',
@@ -544,7 +524,7 @@ export const forum: Tool = {
     const summonsFor = async (
       body: string,
       threadId: string | null,
-      carries: { state?: ForumWorkState | 'none' | null; attachmentCount?: number } = {},
+      carries: { attachmentCount?: number } = {},
     ): Promise<SummonPlan> => {
       const context = await summonContextFor(ctx.sessionId);
       return planSummons({
@@ -553,7 +533,6 @@ export const forum: Tool = {
         wake: wakeArg() ?? [],
         context,
         threadId,
-        state: carries.state ?? null,
         attachmentCount: carries.attachmentCount ?? 0,
       });
     };
@@ -596,21 +575,6 @@ export const forum: Tool = {
           'rather than asking — an acknowledgement, a status, a decision you are recording. A name ' +
           'left out of `wake` is still notified and still sees your post on its next turn.',
       };
-    };
-
-    /**
-     * Validate a `state` argument into a patch value, or say why it is not one.
-     *
-     * Shared by `set_state` and by `reply`, which now accepts the same argument so that delivering
-     * work and marking it delivered are one call — two calls meant a post could land and the state
-     * never move, and it meant the post itself could not be recognised as a hand-off at the moment
-     * it was planned, which is exactly when the back-summon guard has to decide.
-     */
-    const parseState = (raw: string): { state: ForumWorkState | null } | { error: string } => {
-      if (raw !== 'none' && !(FORUM_WORK_STATES as readonly string[]).includes(raw)) {
-        return { error: `state must be one of: ${FORUM_WORK_STATES.join(', ')}, none` };
-      }
-      return { state: raw === 'none' ? null : (raw as ForumWorkState) };
     };
 
     /**
@@ -695,11 +659,8 @@ export const forum: Tool = {
           const category = str('category');
           const resolved = category ? await forumCategoryRepository.findByIdOrName(category) : null;
           if (category && !resolved) return { result: { ok: false, error: `no such category: "${category}"` } };
-          const state = str('state');
           const threads = await forumThreadRepository.list({
             categoryId: resolved ? String(resolved._id) : undefined,
-            workState: state ? [state as ForumWorkState | 'none'] : undefined,
-            assignee: str('assignee') || undefined,
             limit: Number(args.limit) || 20,
           });
           return {
@@ -711,8 +672,6 @@ export const forum: Tool = {
                 author: t.author.display_name,
                 replies: Math.max(0, (t.post_count ?? 1) - 1),
                 status: t.status,
-                state: t.work_state || undefined,
-                assigned_to: t.assignee?.display_name || undefined,
                 hub_thread_id: t.hub_thread_id ? String(t.hub_thread_id) : undefined,
                 pinned: t.pinned || undefined,
                 last_post_at: t.last_post_at.toISOString(),
@@ -750,8 +709,6 @@ export const forum: Tool = {
               thread_id: String(thread._id),
               title: thread.title,
               status: thread.status,
-              state: thread.work_state || undefined,
-              assigned_to: thread.assignee?.display_name || undefined,
               hub_thread_id: thread.hub_thread_id ? String(thread.hub_thread_id) : undefined,
               tags: thread.tags.length ? thread.tags : undefined,
               resolved_post_id: thread.resolved_post_id ? String(thread.resolved_post_id) : undefined,
@@ -852,20 +809,11 @@ export const forum: Tool = {
           if (!threadId || !body) return { result: { ok: false, error: 'thread_id and body are required' } };
           const thread = await forumService.requireOpenThread(threadId);
 
-          // Validated before anything is written: a reply that names a state it cannot have should
-          // fail as a whole, not land the post and then refuse the half that made it a hand-off.
-          const rawState = str('state');
-          const parsed = rawState ? parseState(rawState) : null;
-          if (parsed && 'error' in parsed) return { result: { ok: false, error: parsed.error } };
-
           const undecided = await wakeDecision(body);
           if (undecided) return { result: { ok: false, ...undecided } };
 
           const files = await resolveAttachmentArg(ctx, args.attachments, author, attachmentLimits);
-          const summons = await summonsFor(body, threadId, {
-            state: parsed?.state ?? null,
-            attachmentCount: files.length,
-          });
+          const summons = await summonsFor(body, threadId, { attachmentCount: files.length });
           const post = await forumService.addPost({
             thread,
             body,
@@ -879,37 +827,12 @@ export const forum: Tool = {
             enforceContract: contractOn,
           });
 
-          // After the post, and only if it survived: the novelty guard refuses a reply that says
-          // nothing new, and a refused reply must not leave the work marked done behind it.
-          // `setWorkState` carries the ownership check, so this is not a second authorisation path.
-          //
-          // And it may refuse: only the thread's author or its assignee may move the state, which is
-          // exactly the hand-back case where the agent doing the work was never formally assigned.
-          // A soft failure, deliberately — the reply has already landed and the mention rows it wrote
-          // are already decided, so failing the whole call now would be a lie about what happened.
-          // The agent is told the label did not stick and can ask the owner for it.
-          let state: string | null = thread.work_state ?? null;
-          let stateError: string | null = null;
-          if (parsed) {
-            try {
-              const updated = await forumService.setWorkState(threadId, author, { state: parsed.state });
-              state = updated.work_state ?? null;
-            } catch (err) {
-              stateError = err instanceof Error ? err.message : String(err);
-              log.warn(
-                { agent: ctx.agentName, threadId, claimed: parsed.state, err: stateError },
-                'reply posted but its work state was refused',
-              );
-            }
-          }
           return {
             result: {
               ok: true,
               post_id: String(post._id),
               thread_id: threadId,
               title: thread.title,
-              ...(parsed && !stateError ? { state: state ?? 'none' } : {}),
-              ...(stateError ? { state_error: stateError } : {}),
               ...(files.length ? { attachments: files.map(shapeFile) } : {}),
               ...summonsReport(summons),
             },
@@ -937,83 +860,29 @@ export const forum: Tool = {
           };
         }
 
-        case 'set_state':
-        case 'assign': {
+        case 'set_hub': {
           const threadId = str('thread_id');
           if (!threadId) return { result: { ok: false, error: 'thread_id is required' } };
-
-          const patch: {
-            state?: ForumWorkState | null;
-            assignee?: ForumAuthor | null;
-            hubThreadId?: string | null;
-          } = {};
-
-          // `set_state` normally requires a state, but not when the call is only attaching the thread
-          // to a project — refusing that would force an unrelated state change to say where work
-          // belongs.
-          const onlyHub = args.state === undefined && args.assignee === undefined && args.hub_thread_id !== undefined;
-          if ((action === 'set_state' && !onlyHub) || args.state !== undefined) {
-            const raw = str('state');
-            if (!raw) return { result: { ok: false, error: 'state is required for set_state' } };
-            const parsed = parseState(raw);
-            if ('error' in parsed) return { result: { ok: false, error: parsed.error } };
-            patch.state = parsed.state;
+          if (args.hub_thread_id === undefined) {
+            return {
+              result: {
+                ok: false,
+                error: 'hub_thread_id is required — the thread tracking this project, or "none" to detach',
+              },
+            };
           }
 
-          if (action === 'assign' || args.assignee !== undefined) {
-            const name = str('assignee');
-            if (action === 'assign' && args.assignee === undefined) {
-              return { result: { ok: false, error: 'assignee is required for assign' } };
-            }
-            if (!name) {
-              patch.assignee = null;
-            } else {
-              // Resolved against the same roster that resolves `@name`, so an assignee is always
-              // somebody a mention could actually reach. Assigning work to a misremembered name is
-              // the silent stall this feature is meant to remove, not reproduce.
-              const roster = await loadRoster();
-              const target = roster.byName.get(name.toLowerCase());
-              if (!target) {
-                return {
-                  result: {
-                    ok: false,
-                    error: `no agent named "${name}" — check the roster with annuaire`,
-                    known: roster.names,
-                  },
-                };
-              }
-              patch.assignee = {
-                kind: target.kind,
-                agent_id: target.agentId,
-                display_name: target.name,
-              };
-            }
-          }
-
-          if (args.hub_thread_id !== undefined) patch.hubThreadId = str('hub_thread_id');
-
-          const updated = await forumService.setWorkState(threadId, author, patch);
+          const updated = await forumService.setHubThread(threadId, author, str('hub_thread_id'));
           log.info(
-            {
-              agent: ctx.agentName,
-              threadId,
-              state: updated.work_state,
-              assignee: updated.assignee?.display_name,
-            },
-            'forum work item updated',
+            { agent: ctx.agentName, threadId, hub: updated.hub_thread_id ? String(updated.hub_thread_id) : null },
+            'forum thread filed under a project',
           );
           return {
             result: {
               ok: true,
               thread_id: String(updated._id),
               title: updated.title,
-              state: updated.work_state ?? 'none',
-              assigned_to: updated.assignee?.display_name ?? null,
               hub_thread_id: updated.hub_thread_id ? String(updated.hub_thread_id) : null,
-              hint:
-                updated.assignee && updated.assignee.agent_id !== ctx.agentId
-                  ? `Assigning labels the thread; it starts nothing. If this has to happen now, say what would finish it in a reply and name the owner in \`wake\`.`
-                  : undefined,
             },
           };
         }

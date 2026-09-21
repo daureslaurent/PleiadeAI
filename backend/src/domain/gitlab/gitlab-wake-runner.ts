@@ -137,85 +137,115 @@ async function drain(): Promise<void> {
 }
 
 /**
- * One woken turn, as an ordinary session the operator can open, watch and continue.
+ * One headless GitLab turn, as an ordinary session the operator can open, watch and continue.
  *
- * Mirrors the socket layer's "the client left mid-turn" path — a `TurnRecorder` off the EventBus,
- * persisted server-side — because nobody is guaranteed to be watching this session at all, and a
- * turn whose tool calls only ever existed in a browser buffer is a turn lost.
+ * Shared by the two things that start an agent from GitLab: a webhook wake, and the operator
+ * pressing **Check now** on a project (`GITLAB_PLAN.md` §10). They differ only in the brief, so
+ * they share everything else — and everything else is the part with the sharp edges: a
+ * `TurnRecorder` off the EventBus (nobody is guaranteed to be watching, and a turn whose tool calls
+ * only ever existed in a browser buffer is a turn lost), a `liveRuns` registration so the stop
+ * button works, and a `SessionLock` yield so a live operator chat wins.
+ *
+ * Returns the session id as soon as it exists, with the turn itself still running: a caller that
+ * waited would hang for the length of an inference call, and the point is to *watch* the answer
+ * arrive. `done` is offered for the wake queue, which drains strictly one at a time.
  */
-async function run(item: Queued): Promise<void> {
+export async function startGitlabTurn(input: {
+  agentId: string;
+  agentName: string;
+  title: string;
+  brief: string;
+  /** Inbox line when the turn finishes. */
+  notify: string;
+}): Promise<{ sessionId: string; done: Promise<void> }> {
   const session = await sessionRepository.create({
-    agentId: item.agentId,
-    agentName: item.agentName,
-    title: `GitLab · ${item.title}`.slice(0, 80),
+    agentId: input.agentId,
+    agentName: input.agentName,
+    title: input.title.slice(0, 80),
     origin: 'gitlab',
   });
   const sessionId = String(session._id);
-  const ctx: EventContext = { sessionId, agentId: item.agentId, agentName: item.agentName, depth: 0 };
-  const text = brief(item);
+  const ctx: EventContext = { sessionId, agentId: input.agentId, agentName: input.agentName, depth: 0 };
 
   eventBus.emit('conversation:session_created', {
     sessionId,
-    agentId: item.agentId,
-    agentName: item.agentName,
+    agentId: input.agentId,
+    agentName: input.agentName,
     title: session.title,
     origin: 'gitlab',
   });
 
-  await sessionRepository.addMessage(sessionId, { role: 'user', text });
-  eventBus.emit('chat:user_message', { ctx, content: text });
+  await sessionRepository.addMessage(sessionId, { role: 'user', text: input.brief });
+  eventBus.emit('chat:user_message', { ctx, content: input.brief });
 
   // Registered before the wait below, so a Workspace opening this session while it queues is told
-  // the run is live rather than showing an idle conversation that suddenly sprouts an answer. The
-  // controller is what makes the stop button work on a woken run.
-  const recorder = new TurnRecorder(sessionId, item.agentName);
+  // the run is live rather than showing an idle conversation that suddenly sprouts an answer.
+  const recorder = new TurnRecorder(sessionId, input.agentName);
   recorder.start();
   const controller = new AbortController();
   liveRuns.start(sessionId, recorder, controller);
 
-  // A live operator chat on this agent wins. The webhook has already waited; it can wait a minute.
-  await sessionLock.waitUntilFree(item.agentId, YIELD_TIMEOUT_MS);
+  const done = (async () => {
+    try {
+      // A live operator chat on this agent wins. GitLab has already waited; it can wait a minute.
+      await sessionLock.waitUntilFree(input.agentId, YIELD_TIMEOUT_MS);
 
-  try {
-    const result = await agentRunner.run({
-      agentName: item.agentName,
-      sessionId,
-      depth: 0,
-      userText: text,
-      signal: controller.signal,
-    });
-    const turn = recorder.build(result.text);
-    await sessionRepository.addMessage(sessionId, {
-      role: 'assistant',
-      text: result.text,
-      blocks: turn.blocks,
-      reasoning: turn.reasoning || undefined,
-      trace: turn.trace,
-      memories: turn.memories,
-      context_tokens: turn.contextTokens,
-      context_window: turn.contextWindow,
-      turn_id: result.turnId,
-      run_id: result.runId,
-    });
-    eventBus.emit('conversation:turn_complete', {
-      ctx,
-      answer: result.text,
-      blocks: turn.blocks as unknown[],
-      memories: turn.memories,
-      turnId: result.turnId,
-      runId: result.runId,
-    });
-    // The operator's inbox: a woken run happened while nobody was looking, so the only way they
-    // learn an agent went and commented on an issue is a notification pointing at the session.
-    await notificationRepository.create({
-      agent_id: item.agentId,
-      kind: 'gitlab',
-      title: `${item.agentName} answered ${item.title}`.slice(0, 200),
-      content: result.text.slice(0, 500),
-      ref_id: sessionId,
-    });
-    log.info({ agent: item.agentName, session: sessionId, project: item.project }, 'gitlab wake run complete');
-  } finally {
-    liveRuns.end(sessionId);
-  }
+      const result = await agentRunner.run({
+        agentName: input.agentName,
+        sessionId,
+        depth: 0,
+        userText: input.brief,
+        signal: controller.signal,
+      });
+      const turn = recorder.build(result.text);
+      await sessionRepository.addMessage(sessionId, {
+        role: 'assistant',
+        text: result.text,
+        blocks: turn.blocks,
+        reasoning: turn.reasoning || undefined,
+        trace: turn.trace,
+        memories: turn.memories,
+        context_tokens: turn.contextTokens,
+        context_window: turn.contextWindow,
+        turn_id: result.turnId,
+        run_id: result.runId,
+      });
+      eventBus.emit('conversation:turn_complete', {
+        ctx,
+        answer: result.text,
+        blocks: turn.blocks as unknown[],
+        memories: turn.memories,
+        turnId: result.turnId,
+        runId: result.runId,
+      });
+      // The operator's inbox: this ran while nobody was looking, so the only way they learn an agent
+      // went and did something is a notification pointing at the session.
+      await notificationRepository.create({
+        agent_id: input.agentId,
+        kind: 'gitlab',
+        title: input.notify.slice(0, 200),
+        content: result.text.slice(0, 500),
+        ref_id: sessionId,
+      });
+      log.info({ agent: input.agentName, session: sessionId }, 'gitlab turn complete');
+    } catch (err) {
+      log.error({ err: String(err), agent: input.agentName, session: sessionId }, 'gitlab turn failed');
+    } finally {
+      liveRuns.end(sessionId);
+    }
+  })();
+
+  return { sessionId, done };
+}
+
+/** One woken turn, from a webhook. */
+async function run(item: Queued): Promise<void> {
+  const { done } = await startGitlabTurn({
+    agentId: item.agentId,
+    agentName: item.agentName,
+    title: `GitLab · ${item.title}`,
+    brief: brief(item),
+    notify: `${item.agentName} answered ${item.title}`,
+  });
+  await done;
 }

@@ -662,6 +662,14 @@ the whole point of surfacing it: the information is worthless to anyone who lear
 
 ### Ownership was implicit
 
+> **Removed 2026-09-21 — this section is history, not behaviour** (`GITLAB_PLAN.md` §9). `work_state`
+> and `assignee` are gone from the model, the repository, the `forum` tool (`set_state` / `assign`
+> were replaced by the single `set_hub`), the prompt block and the UI. Work is tracked in **GitLab
+> issues**, which the operator and the fleet share; the forum holds the discussion, the findings, the
+> decisions and the handoffs. What survived from this section is `hub_thread_id`, below — it is not
+> work tracking, it is what makes several threads read as one project and share one auto-run budget.
+> The rest is kept for the reasoning, which is still the reasoning — it just picked the other board.
+
 With every handoff a post, "what is still open and who has it" was answerable only by reading. Two
 fields fix it: `work_state` (`todo` / `in_progress` / `blocked` / `done`) and `assignee`.
 

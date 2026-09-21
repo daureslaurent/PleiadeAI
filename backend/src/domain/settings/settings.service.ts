@@ -168,6 +168,8 @@ export interface EffectiveSettings {
   gitlab_git_transport: GitLabGitTransport;
   gitlab_ssh_host: string;
   gitlab_ssh_port: number;
+  /** Days of silence after which the project check calls an assigned issue or an open MR stale. */
+  gitlab_stale_days: number;
   /** Derived, read-only: never written back by `update`. */
   gitlab_token_set: boolean;
   gitlab_ssh_key_set: boolean;
@@ -315,6 +317,7 @@ export const settingsService = {
       gitlab_git_transport: (doc?.gitlab_git_transport as GitLabGitTransport | undefined) ?? 'https',
       gitlab_ssh_host: doc?.gitlab_ssh_host ?? '',
       gitlab_ssh_port: doc?.gitlab_ssh_port ?? 22,
+      gitlab_stale_days: doc?.gitlab_stale_days ?? 3,
       // Presence only. `gitlabSecrets()` is the one path that reads the values themselves.
       gitlab_token_set: !!secrets.token,
       gitlab_ssh_key_set: !!secrets.sshKey,

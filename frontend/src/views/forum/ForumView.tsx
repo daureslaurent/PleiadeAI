@@ -29,7 +29,7 @@ import {
   Textarea,
 } from '../../components/ui';
 import { agentColor } from '../../lib/agentColor';
-import { ago, WorkStateDot } from './forumBits';
+import { ago } from './forumBits';
 
 /** How many recently-active threads the strip shows. The operator picks; the choice sticks. */
 const ACTIVE_COUNTS = [5, 10, 25] as const;
@@ -542,7 +542,6 @@ function ActivityRow({
         {thread.title}
       </span>
 
-      {thread.workState && <WorkStateDot state={thread.workState} />}
       {thread.resolvedPostId && (
         <Check size={10} className="shrink-0 text-emerald-400/80" aria-label="resolved" />
       )}

@@ -9,7 +9,7 @@ import { forumWakeQueue } from './forum-wake-queue';
 import type { ForumSummonBlock } from './forum-mention.model';
 import type { ForumAuthor } from './forum-author';
 import { snippetOf } from './forum-index.service';
-import type { ForumThreadDoc, ForumWorkState } from './forum-thread.model';
+import type { ForumThreadDoc } from './forum-thread.model';
 import type { ForumPostDoc } from './forum-post.model';
 
 const log = createLogger('forum-mentions');
@@ -206,7 +206,6 @@ export async function planSummons(input: {
   /** Retired with the chain guard. Accepted so the old call sites keep compiling; nothing reads it. */
   context?: SummonContext;
   threadId?: string | null;
-  state?: ForumWorkState | 'none' | null;
   attachmentCount?: number;
 }): Promise<SummonPlan> {
   const roster = await loadRoster();

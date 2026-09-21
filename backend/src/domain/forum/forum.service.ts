@@ -17,7 +17,7 @@ import { forumMentionService, type SummonPlan } from './forum-mention.service';
 import { forumMentionRepository } from './forum-mention.repository';
 import type { ForumAuthor } from './forum-author';
 import type { ForumCategoryDoc } from './forum-category.model';
-import type { ForumThreadDoc, ForumWorkState } from './forum-thread.model';
+import type { ForumThreadDoc } from './forum-thread.model';
 import type { ForumPostDoc } from './forum-post.model';
 import type { ForumFileDoc } from './forum-file.model';
 
@@ -222,16 +222,6 @@ export const forumService = {
     summons?: SummonPlan;
     /** The project's hub thread, when this one is opened as part of a project. */
     hubThreadId?: string | null;
-    /**
-     * Work-item fields set at the moment the thread is opened.
-     *
-     * Only the operator's composer passes these. An agent still uses `assign` / `set_state` after
-     * the fact, because it opens threads that are not work items far more often than it opens ones
-     * that are — while the operator writing a task means it by definition, and making them post and
-     * then re-label is how a board ends up full of unowned work.
-     */
-    assignee?: ForumAuthor | null;
-    workState?: ForumWorkState | null;
     /** The opening post's kind and its structured half (spec `FORUM_WORKBOARD_PLAN.md` §4). */
     kind?: string;
     meta?: ForumPostMeta;
@@ -247,8 +237,6 @@ export const forumService = {
       author: input.author,
       tags: input.tags ?? [],
       hub_thread_id: hub ?? null,
-      assignee: input.assignee ?? null,
-      work_state: input.workState ?? null,
     });
     const post = await this.addPost({
       thread,
@@ -405,61 +393,45 @@ export const forumService = {
   },
 
   /**
-   * Set a thread's work state and/or its owner, refusing anyone with no claim on it.
+   * Say which project a thread belongs to — its hub (`FORUM_AUTORUN_PLAN.md`).
    *
-   * Ownership rather than moderation. `forum_admin` is reserved for the built-in moderator and
-   * checks that on every call, so routing a project manager's "this is now in progress" through it
-   * would mean granting board-wide moderation to run a project — the wrong trade entirely. The
-   * thread's **author** opened the work item and the **assignee** is doing it; those two are exactly
-   * the people who know its state, and neither needs any power over anybody else's threads.
+   * All that is left of what used to be `setWorkState`. The work state and the assignee went to
+   * GitLab issues on 2026-09-21 (`GITLAB_PLAN.md` §9); the hub stayed, because it is not work
+   * tracking — it is what makes five threads about one thing share a single auto-run budget and
+   * show up as one project rather than five unrelated conversations.
    *
-   * The operator is not checked here: the HTTP route is already behind `requireAuth`, and an
-   * operator who can delete the thread outright is not meaningfully restrained from re-labelling it.
+   * Author-only, by ownership rather than moderation: `forum_admin` is the built-in moderator's
+   * tool, and routing "this thread is part of that project" through it would mean granting
+   * board-wide moderation to organise your own threads. The operator is not checked at all — the
+   * HTTP route is behind `requireAuth`, and somebody who can delete the thread outright is not
+   * meaningfully restrained from re-filing it.
    */
-  async setWorkState(
+  async setHubThread(
     threadId: string,
     actor: ForumAuthor,
-    patch: {
-      state?: ForumWorkState | null;
-      assignee?: ForumAuthor | null;
-      /** Raw hub reference from the caller: an id, `'none'` to clear, absent to leave alone. */
-      hubThreadId?: string | null;
-    },
+    /** Raw hub reference from the caller: an id, or `'none'` to detach. */
+    hubThreadId: string | null,
   ): Promise<ForumThreadDoc> {
     const thread = await forumThreadRepository.findById(threadId);
     if (!thread) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);
     if (thread.status === 'archived') throw new ForumRuleError('thread is archived', 409);
 
-    if (actor.kind === 'agent') {
-      const isAuthor = thread.author.agent_id === actor.agent_id;
-      const isAssignee = thread.assignee?.agent_id === actor.agent_id;
-      if (!isAuthor && !isAssignee) {
-        throw new ForumRuleError(
-          'only the agent that opened this thread, or the agent it is assigned to, may change its ' +
-            'work state — reply on the thread and ask its owner instead',
-          403,
-        );
-      }
+    if (actor.kind === 'agent' && thread.author.agent_id !== actor.agent_id) {
+      throw new ForumRuleError(
+        'only the agent that opened this thread may say which project it belongs to — reply on the ' +
+          'thread and ask its author instead',
+        403,
+      );
     }
 
-    const update: Record<string, unknown> = {};
-    if (patch.state !== undefined) update.work_state = patch.state;
-    // `null` clears the owner, which is a real intention ("nobody is on this any more"), so the key
-    // being present matters more than its value being truthy.
-    if (patch.assignee !== undefined) update.assignee = patch.assignee;
-    // Deliberately behind the same author-or-assignee check above rather than its own: saying which
-    // project a thread belongs to is the same kind of act as saying who owns it and where it has got
-    // to, and a second authorisation path for a third bookkeeping field is one to get wrong.
-    if (patch.hubThreadId !== undefined) {
-      update.hub_thread_id = await this.resolveHub(patch.hubThreadId, String(thread._id));
-    }
-
-    const updated = await forumThreadRepository.update(threadId, update);
+    const updated = await forumThreadRepository.update(threadId, {
+      hub_thread_id: await this.resolveHub(hubThreadId, String(thread._id)),
+    });
     if (!updated) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);
     return updated;
   },
 
-  /** Sticky a thread to the top of its category. Author-only, by the same argument as `setWorkState`. */
+  /** Sticky a thread to the top of its category. Author-only, by the same argument as `setHubThread`. */
   async setPinned(threadId: string, actor: ForumAuthor, pinned: boolean): Promise<ForumThreadDoc> {
     const thread = await forumThreadRepository.findById(threadId);
     if (!thread) throw new ForumRuleError(`no such thread: "${threadId}"`, 404);

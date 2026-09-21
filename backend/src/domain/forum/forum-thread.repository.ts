@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { ForumThreadModel, type ForumThreadDoc, type ForumWorkState } from './forum-thread.model';
+import { ForumThreadModel, type ForumThreadDoc } from './forum-thread.model';
 import type { ForumAuthor } from './forum-author';
 
 export interface CreateForumThreadInput {
@@ -9,19 +9,12 @@ export interface CreateForumThreadInput {
   tags?: string[];
   /** The project's hub thread, when this one is opened as part of a project. */
   hub_thread_id?: Types.ObjectId | null;
-  /** Work-item fields, when the thread is opened as one (the operator's composer). */
-  assignee?: ForumAuthor | null;
-  work_state?: ForumWorkState | null;
 }
 
 export interface ListThreadsOptions {
   categoryId?: string;
   /** Archived threads are hidden unless asked for. */
   includeArchived?: boolean;
-  /** Restrict to work items in these states. `'none'` selects threads that are not work items. */
-  workState?: Array<ForumWorkState | 'none'>;
-  /** Restrict to work items owned by this display name (case-insensitive). */
-  assignee?: string;
   /**
    * `'pinned'` (default) is the category reading order — sticky threads first. `'active'` is pure
    * recency: the board's "last active" list answers *what moved*, and a pinned thread nobody has
@@ -99,11 +92,6 @@ export function autoRunBudget(
   };
 }
 
-/** Neutralise a caller-supplied name before it becomes an anchored case-insensitive match. */
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /** Clamp any caller-supplied page size — an agent asking for 10_000 threads must not get them. */
 function clamp(limit: number | undefined, fallback: number, max: number): number {
   return Math.max(1, Math.min(max, Math.trunc(limit ?? fallback) || fallback));
@@ -114,15 +102,6 @@ export const forumThreadRepository = {
     const filter: Record<string, unknown> = {};
     if (opts.categoryId && Types.ObjectId.isValid(opts.categoryId)) filter.category_id = opts.categoryId;
     if (!opts.includeArchived) filter.status = { $ne: 'archived' };
-    if (opts.workState?.length) {
-      // `'none'` has to become an explicit null match: threads written before work states existed
-      // have no such field at all, and `$in: [null]` matches both missing and null.
-      const states = opts.workState.filter((s) => s !== 'none');
-      filter.work_state = opts.workState.includes('none') ? { $in: [...states, null] } : { $in: states };
-    }
-    if (opts.assignee) {
-      filter['assignee.display_name'] = new RegExp(`^${escapeRegex(opts.assignee)}$`, 'i');
-    }
     return ForumThreadModel.find(filter)
       .sort(opts.sort === 'active' ? { last_post_at: -1 } : { pinned: -1, last_post_at: -1 })
       .limit(clamp(opts.limit, 50, 200))

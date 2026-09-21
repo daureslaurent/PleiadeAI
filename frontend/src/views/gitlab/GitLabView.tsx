@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
@@ -11,9 +11,12 @@ import {
   Loader2,
   RefreshCw,
   Rocket,
+  ScanSearch,
 } from 'lucide-react';
 import {
+  agentsApi,
   gitlabApi,
+  type Agent,
   type GitLabActivity,
   type GitLabConnectionInfo,
   type GitLabIssue,
@@ -186,9 +189,67 @@ function TabHeader({ title, busy, onReload }: { title: string; busy: boolean; on
 
 function ProjectsTab() {
   const { data, error, busy, reload } = useLoad(() => gitlabApi.projects());
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [who, setWho] = useState('');
+  const [running, setRunning] = useState('');
+  const [failed, setFailed] = useState('');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    void gitlabApi
+      .connection()
+      .then((c) => setWho(c.default_agent_id))
+      .catch(() => undefined);
+    void agentsApi
+      .list()
+      .then((rows) => setAgents(rows.filter((a) => !a.subagent)))
+      .catch(() => setAgents([]));
+  }, []);
+
+  /**
+   * Start a review of one project and follow it.
+   *
+   * Navigating straight into the session is the point of the button: the run takes as long as an
+   * inference call, and the alternative is a spinner that ends with a notification the operator has
+   * to go and find.
+   */
+  const check = async (path: string) => {
+    setRunning(path);
+    setFailed('');
+    try {
+      const { sessionId } = await gitlabApi.runCheck(path, who || undefined);
+      navigate(`/workspace?session=${sessionId}`);
+    } catch (err: any) {
+      setFailed(err?.response?.data?.error ?? 'could not start the check');
+    } finally {
+      setRunning('');
+    }
+  };
+
   return (
     <div className="mx-auto max-w-5xl">
       <TabHeader title="Projects" busy={busy} onReload={reload} />
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+        <ScanSearch size={12} />
+        <span>“Check” asks an agent what needs attention on a project. It reports back; it changes nothing.</span>
+        <select
+          value={who}
+          onChange={(e) => setWho(e.target.value)}
+          className="ml-auto rounded-lg border hairline raise-1 px-2 py-1 text-[11px] text-slate-300"
+        >
+          <option value="">default agent</option>
+          {agents.map((a) => (
+            <option key={a._id} value={a._id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {failed && (
+        <Callout tone="error" icon={<AlertTriangle size={13} />}>
+          {failed}
+        </Callout>
+      )}
       {error && <Callout tone="error" icon={<AlertTriangle size={13} />}>{error}</Callout>}
       {!error && data?.length === 0 && <EmptyState icon={<GitBranch size={20} />}>No projects in scope.</EmptyState>}
       <div className="grid gap-2 md:grid-cols-2">
@@ -218,6 +279,14 @@ function ProjectsTab() {
               <span className="font-mono">{p.default_branch}</span>
               <span>{p.open_issues} open</span>
               <span className="ml-auto">{ago(p.last_activity)}</span>
+              <Button
+                variant="ghost"
+                loading={running === p.path}
+                icon={<ScanSearch size={11} />}
+                onClick={() => void check(p.path)}
+              >
+                Check
+              </Button>
             </div>
           </Row>
         ))}

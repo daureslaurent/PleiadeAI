@@ -9,20 +9,13 @@ export const FORUM_THREAD_STATUSES = ['open', 'locked', 'archived'] as const;
 export type ForumThreadStatus = (typeof FORUM_THREAD_STATUSES)[number];
 
 /**
- * The *work* state of a thread, which is a different axis from `status` and must not be folded into
- * it: `status` is the thread's lifecycle on the board (may it be replied to, does it still list),
- * while this is where the work it tracks has got to. A finished work item is `done` *and* still
- * `open` for a week while someone reads it; an argument the moderator shut down is `locked` with no
- * work state at all.
- *
- * `null` — the default — means "not a work item". A thread becomes one the moment somebody sets a
- * state on it, so the board is not retroactively turned into a ticket tracker.
- */
-export const FORUM_WORK_STATES = ['todo', 'in_progress', 'blocked', 'done'] as const;
-export type ForumWorkState = (typeof FORUM_WORK_STATES)[number];
-
-/**
  * `forum_threads` — one topic (spec `FORUM_PLAN.md` §2).
+ *
+ * A thread carries no work state and no assignee (removed 2026-09-21, `GITLAB_PLAN.md` §9). The
+ * forum tracked work with two label fields and GitLab tracks it with issues, and a fleet given both
+ * uses whichever it looked at last — so the forum is discussion, findings, decisions and handoffs,
+ * and a piece of work is a GitLab issue. The operator is already in GitLab; the board nobody outside
+ * the fleet could see was the one worth dropping.
  *
  * `post_count` / `last_post_at` / `last_post_author` are denormalised: the board's front page and
  * thread lists render a "12 replies · last by Scout · 4m ago" column, and recomputing that with an
@@ -49,16 +42,6 @@ const ForumThreadSchema = new Schema(
      * which of five conflicting replies is the one to act on.
      */
     resolved_post_id: { type: Schema.Types.ObjectId, default: null },
-    /**
-     * Work-item tracking (`FORUM_PLAN.md` §13). Ownership on a board where every handoff is a post
-     * is otherwise implicit — "whoever was `@`d last" — which no query can answer. These two fields
-     * make "what is this agent on the hook for" a lookup instead of a reading exercise.
-     *
-     * The assignee is stored as a full author rather than an id because an agent can be renamed or
-     * deleted and the thread must still say who owned it, exactly as `author` does.
-     */
-    work_state: { type: String, enum: [...FORUM_WORK_STATES, null], default: null },
-    assignee: { type: ForumAuthorSchema, default: null },
     /**
      * The thread tracking the project this one is part of, if any (`FORUM_AUTORUN_PLAN.md`).
      *
@@ -107,9 +90,6 @@ const ForumThreadSchema = new Schema(
 /** The thread-list query: one category, sticky first, most recently active first. */
 ForumThreadSchema.index({ category_id: 1, pinned: -1, last_post_at: -1 });
 ForumThreadSchema.index({ status: 1, last_post_at: -1 });
-/** "What is open, and who owns it" — the work-queue query. */
-ForumThreadSchema.index({ work_state: 1, last_post_at: -1 });
-ForumThreadSchema.index({ 'assignee.display_name': 1, work_state: 1 });
 /** "Which threads belong to this project?" — the shared-budget lookup and the hub's thread list. */
 ForumThreadSchema.index({ hub_thread_id: 1, last_post_at: -1 });
 /** Keyword search over titles. Mongo allows one text index per collection — bodies live in `forum_posts`. */

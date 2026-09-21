@@ -21,7 +21,7 @@ import {
   Section,
   Spinner,
 } from '../../components/ui';
-import { ago, AuthorAvatar, Composer, useMentionRoster, WorkStateChip } from './forumBits';
+import { ago, AuthorAvatar, Composer, useMentionRoster } from './forumBits';
 
 /** One category's thread list: sticky threads first, then most recently active (FORUM_PLAN.md §5). */
 export function CategoryView() {
@@ -138,14 +138,12 @@ function ThreadRow({ thread, onClick }: { thread: ForumThread; onClick: () => vo
           {thread.status === 'locked' && <Lock size={11} className="shrink-0 text-amber-400" />}
           {thread.status === 'archived' && <Archive size={11} className="shrink-0 text-slate-600" />}
           <span className="truncate text-sm text-slate-100">{thread.title}</span>
-          {thread.workState && <WorkStateChip state={thread.workState} />}
           {thread.resolvedPostId && (
             <Chip className="!text-emerald-400/80">resolved</Chip>
           )}
         </span>
         <span className="mt-0.5 block truncate text-[11px] text-slate-500">
           started by {thread.author.display_name} · {ago(thread.createdAt)}
-          {thread.assignee && <> · owned by {thread.assignee.display_name}</>}
         </span>
       </span>
 
@@ -171,17 +169,14 @@ function ThreadRow({ thread, onClick }: { thread: ForumThread; onClick: () => vo
  * afterwards from the thread header, and the composer never said whether anybody was actually woken.
  * A post that summoned nobody looked exactly like one that did.
  *
- * So: `wake` names agents to run whether or not the prose mentions them, `assignee` and `state` make
- * the thread a work item at the moment it is written — the two are deliberately different, and a
- * task needs both, since assigning wakes nobody and waking leaves no owner behind once the turn ends
- * — and the result reports back what happened.
+ * So: `wake` names agents to run whether or not the prose mentions them, and the result reports back
+ * what happened. Ownership is no longer here at all — a thread is a discussion, and the work it
+ * might imply is a GitLab issue with a real assignee on it (`GITLAB_PLAN.md` §9).
  */
 function TaskControls({
   roster,
   wake,
   setWake,
-  assignee,
-  setAssignee,
   hubThreadId,
   setHubThreadId,
   hubs,
@@ -189,8 +184,6 @@ function TaskControls({
   roster: MentionTarget[];
   wake: string[];
   setWake: (names: string[]) => void;
-  assignee: string;
-  setAssignee: (name: string) => void;
   hubThreadId: string;
   setHubThreadId: (id: string) => void;
   hubs: ForumThread[];
@@ -231,21 +224,6 @@ function TaskControls({
         </div>
       </Field>
 
-      <Field label="Assign to" hint="Keeps it in their work items every turn. Does not wake them.">
-        <select
-          value={assignee}
-          onChange={(e) => setAssignee(e.target.value)}
-          className="rounded-lg border hairline raise-1 px-2 py-1 text-[12px] text-slate-200"
-        >
-          <option value="">nobody</option>
-          {agents.map((t) => (
-            <option key={t.name} value={t.name}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </Field>
-
       <Field label="Part of" hint="Threads sharing a hub are one project, on one budget.">
         <select
           value={hubThreadId}
@@ -276,7 +254,6 @@ function NewThreadForm({
   const [title, setTitle] = useState('');
   const [err, setErr] = useState('');
   const [wake, setWake] = useState<string[]>([]);
-  const [assignee, setAssignee] = useState('');
   const [hubThreadId, setHubThreadId] = useState('');
   const [hubs, setHubs] = useState<ForumThread[]>([]);
   // What the post did, when it did not do what was asked. Holding the navigation is the point: this
@@ -327,8 +304,6 @@ function NewThreadForm({
         roster={roster}
         wake={wake}
         setWake={setWake}
-        assignee={assignee}
-        setAssignee={setAssignee}
         hubThreadId={hubThreadId}
         setHubThreadId={setHubThreadId}
         hubs={hubs}
@@ -350,10 +325,6 @@ function NewThreadForm({
               body,
               attachments,
               wake,
-              assignee: assignee || null,
-              // Assigning it is what makes it a work item; without a state it would sit outside every
-              // "what is still open" query, which is the one thing an assignee is for.
-              workState: assignee ? 'todo' : null,
               hubThreadId: hubThreadId || null,
             });
             // Asked for a run and got none: stop here and say so, rather than navigating away from

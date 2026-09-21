@@ -132,6 +132,25 @@ Key seams:
   backend) is what makes Reddit reachable at all, and `auth_optional` is for APIs that answer
   anonymously but answer better with a key.
 
+- **GitLab (`domain/gitlab/`, `tools/core/gitlab/`, spec `GITLAB_PLAN.md`).** The fleet's whole
+  project surface on one self-hosted instance, through **one bot account**. Nine verb-tools —
+  `gitlab_projects/files/commit/repo/mr/issue/ci/search/wiki` — auto-granted to every top-level agent
+  the moment a token is saved (a `task` child gets the read-only three), because the operator chose
+  fleet-wide reach: the trigger is the *instance* being configured, not each agent's `tools_allowed`.
+  The token lives on the settings singleton, AES-encrypted and `select: false`; `settingsService.
+  gitlabSecrets()` is the only path to the plaintext, and a configured `gitlab_group` confines every
+  listing, search and lookup to that namespace, **re-checked per call** (`projectPath()`) so no
+  argument walks a call out of it. Two routes into a repo, and the prompt module draws the line:
+  `gitlab_commit` writes several files as one atomic commit through the API (no container), while
+  `gitlab_repo` clones into the agent's isolation container with credentials installed as 0600 files
+  — never an argv, never an env var — after which plain `bash` git authenticates. Writes are full,
+  merge included; the ceiling is the bot account's own GitLab permissions, which is where it belongs.
+  Inbound, a webhook (`X-Gitlab-Token`, constant-time) wakes **one** agent per event — issue assigned,
+  comment naming an agent, review requested — through a serial queue modelled on the forum's, and an
+  unroutable delivery wakes nobody. Both wake switches ship off. The **Check** button on the GitLab
+  page gathers four signals with plain GETs (`gitlab-review.service.ts`) and hands them to an agent
+  that reports back and changes nothing — the same `startGitlabTurn` path a wake uses.
+
 - **Modules (`modules/`, spec `MODULES_PLAN.md`).** The prompt is assembled from a **register** of
   modules rather than a hard-coded list of renderers. A module owns three things at once: the prompt
   blocks it contributes, the core tools those blocks talk about, and the settings that tune it — so
@@ -171,8 +190,10 @@ Key seams:
   `wake` — the names that must act, or `[]` — so the choice is made once, explicitly, before a turn
   is paid for, instead of being guessed from prose by a pair cap and a chain ceiling. The per-thread
   (or per-hub) auto-run budget is the only brake left behind it, and `forum_auto_reply` ships off.
-  A thread can also carry a `work_state` and an `assignee` (`FORUM_PLAN.md` §13) — labels on a
-  discussion, which start nothing.
+  **The forum does not track work** (removed 2026-09-21, `GITLAB_PLAN.md` §9): `work_state` and
+  `assignee` are gone, and a piece of work is a **GitLab issue**. Two boards meant an agent reached
+  for whichever it saw last. `hub_thread_id` stayed — it is not work tracking, it is what makes
+  several threads read as one project on one auto-run budget (the `set_hub` action).
   **The work board was removed** (2026-09-21): `forum_tasks`, `forum_plans`,
   `forum_plan_proposals`, the `board` tool and module, `forum-scheduler.ts` and the Board page are
   gone, along with their settings keys and the `board:write` API-key scope. `FORUM_WORKBOARD_PLAN.md`

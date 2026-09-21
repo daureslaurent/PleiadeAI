@@ -212,6 +212,69 @@ which reports the account the token belongs to and offers it as the bot username
 | Connection section | `views/settings/panels/ConnectionsPanel.tsx` + `managers/GitLabConnection.tsx` |
 | API client + types | `lib/api.ts` |
 
+## 9. One board: the forum stops tracking work
+
+Decided 2026-09-21, and implemented in the same release.
+
+The forum carried `work_state` (`todo`/`in_progress`/`blocked`/`done`) and an `assignee` on every
+thread, and GitLab carries issues. Two boards is worse than either one: an agent handed both reaches
+for whichever it saw last, and the operator has to read two places to learn what is open. Issues win
+because **the humans are already in them** — a task an agent claims shows up in the same list, with
+the same notifications and the same history, as a task a person claims.
+
+So the labels are gone, everywhere:
+
+| Removed | Where |
+|---|---|
+| `work_state`, `assignee` fields + their two indexes | `forum-thread.model.ts`, unset by `2026…-forum-work-labels.js` |
+| `workState`/`assignee` create inputs and list filters | `forum-thread.repository.ts`, `forum.routes.ts` |
+| `forum` tool actions `set_state` and `assign`, and `reply`'s `state` argument | `tools/core/forum.ts` |
+| The "threads labelled as yours" prompt block and the query behind it (`forumRecall.assigned`) | `forum-recall.service.ts`, `AgentRunner.ts` |
+| The work-state chips, dots and picker | `forumBits.tsx`, `ThreadView`, `CategoryView`, `ForumView` |
+
+What **stayed**:
+
+- `hub_thread_id`. It is not work tracking — it is what makes five threads about one thing share a
+  single auto-run budget and read as one project. `forumService.setWorkState` shrank to
+  `setHubThread`, and the tool's two removed actions were replaced by one, `set_hub`.
+- Everything else about the forum: threads, the post contract's `kind`s, mentions, `wake`, files,
+  search, moderation. The forum is where the fleet *talks*; GitLab is where the work *is*.
+
+The `forum` tool's own description now says exactly that, so a model reading its toolset is told
+once, in the place it is looking.
+
+## 10. "Anything to do on this project?" — the Check button
+
+The one way a project review starts: a **Check** button on each row of the GitLab page's Projects
+tab, with an agent picker beside it (defaulting to `gitlab_default_agent_id`). No cron, no
+fleet-wide sweep, no tool — those were considered and deliberately left out until this one has been
+watched for a while.
+
+Two halves, separable on purpose (`gitlab-review.service.ts`):
+
+- **`checkProject(path)`** gathers four signals with four plain GETs, no model involved: open issues
+  with **no assignee**; issues **assigned but untouched** for `gitlab_stale_days` (default 3);
+  **merge requests** with no reviewer, conflicts, a failing pipeline or the same silence; and a
+  **red default branch**, with the names of the failed jobs. `GET /api/gitlab/projects/:p/check`
+  returns exactly this, instantly, and is enough on its own to answer "is this project quiet".
+- **`checkBrief(check)`** renders it into the turn an agent actually reads. Handing the findings
+  over already-gathered is the point: an agent made to discover them first spends five tool rounds
+  re-deriving what four parallel GETs know, and finds a slightly different set each time.
+
+`POST /api/gitlab/projects/:p/check` does both and starts a headless session through
+`startGitlabTurn` — the same path a webhook wake uses, so it inherits the `TurnRecorder`, the
+`liveRuns` registration (the stop button works) and the `SessionLock` yield to a live operator chat.
+It returns the session id immediately and the UI navigates into the Workspace to watch the answer
+arrive; the finished report also lands in the inbox.
+
+**Report-only, and the boundary is the prompt.** The brief says twice to change nothing — no
+assigning, no commenting, no closing, no pushing. The agent still *holds* the write tools, because
+it holds them in every run; if that needs enforcing rather than stating, the fix is a read-only
+toolset for this run, not a firmer sentence. Worth revisiting once you have watched a few.
+
+A project with nothing in any of the four buckets gets a brief that says so and tells the agent to
+answer in one line rather than go hunting for work to invent.
+
 ## 8. Security notes
 
 - The token is `select: false`, `_enc$`-suffixed (so `redact.ts` scrubs it), decrypted only in the
