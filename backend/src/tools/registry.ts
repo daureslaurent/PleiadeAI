@@ -41,6 +41,7 @@ import { gitlabCommit, gitlabRepo } from './core/gitlab/code';
 import { gitlabIssue, gitlabMr } from './core/gitlab/review';
 import { gitlabCi } from './core/gitlab/ci';
 import { gitlabSearch, gitlabWiki } from './core/gitlab/knowledge';
+import { gitlabTodo } from './core/gitlab/todo';
 import { guide } from './core/guide';
 import { todoWrite } from './core/todo';
 import { loopDone } from './core/loopDone';
@@ -112,6 +113,7 @@ export const GITLAB_TOOL_NAMES = [
   'gitlab_ci',
   'gitlab_search',
   'gitlab_wiki',
+  'gitlab_todo',
 ] as const;
 
 /**
@@ -186,6 +188,7 @@ const CORE_TOOLS: Record<string, Tool> = {
   [gitlabCi.name]: gitlabCi,
   [gitlabSearch.name]: gitlabSearch,
   [gitlabWiki.name]: gitlabWiki,
+  [gitlabTodo.name]: gitlabTodo,
   // Session resource pool (list/save/store) — auto-granted to every agent (see AgentRunner).
   [data.name]: data,
   // Man-style tool/workflow guides — auto-granted to every agent (see AgentRunner).
@@ -349,6 +352,7 @@ const CATEGORY_BY_TOOL: Record<string, ToolCategory> = {
   gitlab_ci: 'gitlab',
   gitlab_search: 'gitlab',
   gitlab_wiki: 'gitlab',
+  gitlab_todo: 'gitlab',
   visual_screenshot: 'desktop',
   visual_act: 'desktop',
   visual_click: 'desktop',

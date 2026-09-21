@@ -94,8 +94,11 @@ function brief(item: Queued): string {
     ...(item.body ? [`The ${where} says:`, '', quote(item.body), ''] : []),
     item.url ? `It is at ${item.url}.` : '',
     '',
-    'Work it with the `gitlab_*` tools. Read before you act: fetch the issue or the merge request, ' +
-      'look at the code it concerns, and check whether somebody has already answered.',
+    'Work it with the `gitlab_*` tools, and **start by reading the item itself** — ' +
+      '`gitlab_issue({action:"get"})` or `gitlab_mr({action:"get"})` returns the whole thread, not ' +
+      'just the description quoted above. Writing to an item you have not read this turn is ' +
+      'refused, and the reason is this exact situation: what you were told about it is a snapshot, ' +
+      'and somebody may have answered, closed it or changed their mind since.',
     '',
     FINISH[item.family],
     '',

@@ -52,6 +52,15 @@ export interface ToolContext {
   askUser?: (question: string) => Promise<string>;
   /** LLM tool-call id for this invocation (correlates streamed output to the block). */
   callId?: string;
+  /**
+   * The id of the whole user turn — minted at depth 0 and propagated through every hop, so it spans
+   * all of a turn's tool rounds rather than one call.
+   *
+   * It is what lets a tool remember something *for this turn*: `gitlab-read-guard.ts` keys the
+   * "you have read this item" set on it, which is the difference between "read it before you act"
+   * as advice and as a refusal (`GITLAB_PLAN.md` §14).
+   */
+  turnId?: string;
   /** Emit incremental output while running (e.g. bash stdout) for live streaming to the UI. */
   emitOutput?: (chunk: string) => void;
   /**

@@ -283,6 +283,11 @@ export function slimMergeRequest(m: Record<string, any>): Record<string, unknown
     // in a second", and an agent that can merge needs to tell them apart.
     merge_status: m.detailed_merge_status ?? m.merge_status,
     has_conflicts: m.has_conflicts,
+    // `merge_user`, not the `merged_by` GitLab deprecated: who actually landed it is the first
+    // question asked about a merged merge request, and on a fleet that can merge its own work the
+    // answer is not always the author.
+    merged_by: m.merge_user?.username ?? null,
+    merged_at: m.merged_at ?? null,
     pipeline: m.head_pipeline ? { status: m.head_pipeline.status, id: m.head_pipeline.id } : null,
     created_at: m.created_at,
     updated_at: m.updated_at,

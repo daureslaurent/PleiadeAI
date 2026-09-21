@@ -201,8 +201,16 @@ export const gitlabModule: PromptModule = {
     'gitlab_ci',
     'gitlab_search',
     'gitlab_wiki',
+    'gitlab_todo',
   ],
-  settingsKeys: ['gitlab_url', 'gitlab_group', 'gitlab_wake_issues', 'gitlab_wake_reviews'],
+  settingsKeys: [
+    'gitlab_url',
+    'gitlab_group',
+    'gitlab_wake_issues',
+    'gitlab_wake_reviews',
+    'gitlab_poll_enabled',
+    'gitlab_poll_events',
+  ],
   blocks: [
     {
       title: 'GitLab',
@@ -226,6 +234,22 @@ export const gitlabModule: PromptModule = {
               : 'You act as the shared fleet account, so your work is attributed to the fleet rather ' +
                 'than to you by name.'),
           '',
+          '**Read the item before you touch it — this is enforced.** `gitlab_issue({action:"get"})` ' +
+            'and `gitlab_mr({action:"get"})` return the *whole* thing: the description, every ' +
+            'comment and review thread oldest-first, what was closed and reopened, which labels came ' +
+            'and went, and what is linked to it. Commenting on, closing, approving or merging an ' +
+            'item you have not read this turn is **refused** — because the single most useless thing ' +
+            'you can do here is answer a question somebody already answered, and the second most ' +
+            'useless is start work a colleague already has a branch open for. When you do reply, ' +
+            'reply *inside the thread* (`reply` with the `thread_id` from the timeline), not as a ' +
+            'new comment at the bottom where nobody is notified; resolve a review thread once it is ' +
+            'genuinely settled (`gitlab_mr({action:"resolve"})`).',
+          '',
+          '**What is aimed at you.** `gitlab_todo({action:"list"})` is GitLab\'s own answer to ' +
+            '"what should I be working on" — issues assigned to you, reviews requested from you, ' +
+            'comments naming you, your merge requests that broke. Prefer it to guessing from a ' +
+            'project listing, and clear a to-do with `done` once you have actually acted on it.',
+          '',
           '**Finding your way in.** `gitlab_search` (scope `projects`, or `blobs` to grep the real ' +
             'source) turns a described task into a project path; `gitlab_projects({action:"get"})` ' +
             'gives you its default branch, which you need before you branch off anything.',
@@ -243,14 +267,19 @@ export const gitlabModule: PromptModule = {
             'checked it. You are technically permitted to push to main and to merge your own work; ' +
             'the permission exists so that *approved* work can land without waiting for a human at ' +
             'midnight, not so review can be skipped. Read `gitlab_mr({action:"diff"})` before you ' +
-            'approve or merge anything, including your own.',
+            'approve or merge anything, including your own — `get` tells you who has already ' +
+            'approved it and which threads are still unresolved, and an unresolved thread is ' +
+            'somebody waiting on an answer, not a formality.',
           '',
           '**Issues are the work board.** `gitlab_issue({action:"list"})` with no project shows ' +
             'everything open; with `assignee` it shows what is yours. Claim a piece of work by ' +
             'assigning the issue to yourself and saying so in a comment, report anything that ' +
             'changes your estimate as a comment, and when it is done close it with a comment stating ' +
             'what you actually did and linking the merge request. An issue that is silently assigned ' +
-            'and never updated is worse than an unclaimed one — it looks handled.',
+            'and never updated is worse than an unclaimed one — it looks handled. Two issues that ' +
+            'turn out to be the same work get `link`ed rather than both worked. GitLab\'s own ' +
+            'interface calls these **work items** and puts them at `/-/work_items/…`; it is the same ' +
+            'object as an issue and the same `iid`, so do not go looking for a separate tool.',
           '',
           '**A red pipeline gets read, not retried.** `gitlab_ci({action:"jobs", scope:"failed"})` ' +
             'then `job_log` on the job that broke. Retrying without a change runs exactly the same ' +

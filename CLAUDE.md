@@ -133,8 +133,8 @@ Key seams:
   anonymously but answer better with a key.
 
 - **GitLab (`domain/gitlab/`, `tools/core/gitlab/`, spec `GITLAB_PLAN.md`).** The fleet's whole
-  project surface on one self-hosted instance, through **one bot account**. Nine verb-tools —
-  `gitlab_projects/files/commit/repo/mr/issue/ci/search/wiki` — auto-granted to every top-level agent
+  project surface on one self-hosted instance, through **one bot account**. Ten verb-tools —
+  `gitlab_projects/files/commit/repo/mr/issue/ci/search/wiki/todo` — auto-granted to every top-level agent
   the moment a token is saved (a `task` child gets the read-only three), because the operator chose
   fleet-wide reach: the trigger is the *instance* being configured, not each agent's `tools_allowed`.
   The token lives on the settings singleton, AES-encrypted and `select: false`; `settingsService.
@@ -167,6 +167,16 @@ Key seams:
   the shared account rather than failing a call, which is why the settings page has an explicit
   Provision button (the silent path cannot report why). Container git follows automatically, and the
   credential stamp fingerprints the token so a new identity or a renewal re-provisions the container.
+  **`get` returns the conversation** (§14): `gitlab-item.service.ts` assembles an item's whole story
+  in parallel — `discussions` (threaded, so a `reply` has a `thread_id` to go into), plus
+  `resource_state_events` and `resource_label_events`, which stopped being system notes years ago
+  and are invisible to anything reading only notes — with an issue's linked MRs or an MR's
+  `approval_state` beside it. There is deliberately no cheaper read: the bug being fixed is that an
+  agent *could* open an issue and not be shown the four comments on it. `gitlab-read-guard.ts` then
+  refuses a comment/close/approve/merge on an item the **turn** has not read (keyed on the
+  `ctx.turnId` added for it), the way `post-contract.ts` refuses a malformed post — prompt-level
+  instruction already lost this argument in §12. GitLab 19's "work item" is a UI/URL rename, not an
+  API change; only epics (Premium) moved to GraphQL.
 
 - **Modules (`modules/`, spec `MODULES_PLAN.md`).** The prompt is assembled from a **register** of
   modules rather than a hard-coded list of renderers. A module owns three things at once: the prompt

@@ -509,3 +509,83 @@ the last tick's report (when, what it found, who it woke, what failed). `POST /a
 runs a tick on demand and returns that report — which is also how an operator verifies the token can
 see todos at all, since a GitLab that answers 403 on `/todos` is otherwise indistinguishable from a
 quiet one.
+
+## 14. The conversation was invisible (2026-09-21)
+
+The operator's report: *"agents do not see comments when using the GitLab tools — they have to
+check apart."* Reading the tool surface settles it immediately, and it is worse than "inconvenient":
+
+`gitlab_issue` had **no action that returned a comment**. It could *post* one — `comment` shipped
+from day one — and it could never read one. `get` returned `slimIssue`, which is a title, a
+description and some metadata. So an agent could open an issue, be handed everything except the
+four messages on it, and answer a question that was settled two days ago. `gitlab_mr` was half
+covered: `discussions` existed, but nothing made an agent call it before commenting.
+
+This is the same class of bug as §12's `yaml_errors`: the data existed, the tool dropped it, and
+the agent looked incompetent for acting on what it was given.
+
+### 14.1 `get` returns the item, not the summary of the item
+
+Both `get`s now return the whole story, assembled by `gitlab-item.service.ts` from the three places
+GitLab keeps it, in parallel:
+
+| Call | Why it is not optional |
+|---|---|
+| `…/discussions` | The comments, **threaded**, with `resolved` and the file:line a review comment is anchored to. Read instead of `…/notes` because only this endpoint carries the thread id, and without a thread id a reply cannot go *into* the conversation |
+| `…/resource_state_events` | Closed and reopened. These stopped being system notes years ago, so an integration reading only notes cannot see that an issue was closed twice |
+| `…/resource_label_events` | Label churn, which is how most shops encode status. `needs-review` going on and coming off *is* the story |
+
+Plus, per kind: an issue's `related_merge_requests`, `closed_by` and `links` — the answer to "is
+somebody already doing this?", and a branch open against an issue is the most reliable form of that
+answer there is. A merge request's `approval_state` and `closes_issues`.
+
+Five calls, all parallel, all Free tier. The alternative was an `activity` action beside `get`, and
+it was rejected for the reason the whole bug existed: an agent that *can* read an item without the
+conversation will, so there is no longer a way to ask for less. A 200-comment thread is budgeted
+(12k characters) by dropping the **middle** — the opening says what it is for, the end says where it
+stands, and the count of what was dropped is returned.
+
+### 14.2 Read-before-write, refused rather than requested
+
+§12 settled the general form of this argument: an agent told four times to change nothing posted a
+comment anyway, and the fix was to make the toolset enforce it. The same applies here, so
+`gitlab-read-guard.ts` refuses `comment`, `reply`, `close`, `reopen`, `resolve`, `approve`,
+`unapprove` and `merge` on an item **this turn** has not read, naming the call that would fix it and
+*why* — "somebody may already have answered" is the part that stops an agent reading and then
+posting the comment it had already written.
+
+Scope is `ctx.turnId` (added to `ToolContext` for this), not the session: one `get` unlocks the
+writes that follow it, while the same agent coming back an hour later looks again — and what changed
+in between is exactly what it would otherwise talk over. `create` marks its own new item as read;
+`update` is deliberately **not** guarded, because assigning yourself something you found in a list
+is how work gets claimed.
+
+### 14.3 What else was missing, and one real deprecation
+
+Everything added is Free tier. Approvals are the surprising one: approval *rules* are Premium, but
+`approve`, `unapprove`, reset and `approval_state` are available on every tier — and without the
+last of them an agent cannot tell "nobody has looked at this" from "two people approved it an hour
+ago".
+
+| Tool | Added |
+|---|---|
+| `gitlab_issue` | `reply` (into a thread), `link` (related issues), `time` (spend/estimate), `subscribe`; `get` carries time stats and links |
+| `gitlab_mr` | `reply`, `resolve` (a review thread), `unapprove`, `commits`, `rebase`; `get` carries approvals and closed issues |
+| **`gitlab_todo`** (new) | The agent's own GitLab to-do list — GitLab's own answer to "what should I be working on", and the same list §13's poller reads from outside. `done` clears one or all |
+
+**Fixed:** `gitlab_mr({action:'diff'})` called `…/merge_requests/:iid/changes`, deprecated since
+GitLab 15.7 and slated for removal in API v5. It now calls `…/diffs`, which also paginates — a
+300-file merge request no longer arrives as one unbounded response. `slimMergeRequest` gained
+`merged_by` from `merge_user` (the `merged_by` field GitLab deprecated) and `merged_at`.
+
+### 14.4 GitLab 19 calls them work items
+
+Checked against the operator's 19.4-ee instance. **"Work item" is a UI and URL rename, not an API
+change**: the issues REST endpoints are not deprecated, `/-/work_items/:iid` and `/-/issues/:iid`
+are the same object with the same `iid`, and the REST work-items API is still a design document. The
+only thing deprecated in favour of the Work Items GraphQL API is **epics**, which are Premium and
+therefore out of scope here.
+
+So nothing moved. What changed is that the prompt module now *says* so — an agent that reads "work
+item" in the interface and has a tool called `gitlab_issue` will otherwise go looking for the tool
+it does not have.

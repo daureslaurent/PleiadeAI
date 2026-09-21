@@ -1329,6 +1329,7 @@ export class AgentRunner {
           ? this.makeTaskInvoker(ctx, delegation.subagents, call.id, delegation.turnId, delegation.signal, taskSlot)
           : undefined,
       callId: call.id,
+      turnId: delegation.turnId,
       emitOutput: (chunk) =>
         eventBus.emit('tool:output_chunk', { ctx, callId: call.id, chunk }),
       emitVision: (payload) =>
