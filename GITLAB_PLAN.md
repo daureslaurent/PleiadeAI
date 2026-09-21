@@ -718,3 +718,22 @@ Merge request `!12` by `architect`, branch `rename-folder-to-src`, pipeline `49`
 `failure_reason: script_failure`; `gitlab_ci({action:'job_log', job_id: 122})` returns a clean
 terminal session ending in `ERROR: failed to build: unable to prepare context: path "dancing-cats"
 not found`. From wake to cause is two calls, neither of them a guess.
+
+### 16.4 Not waiting to be told
+
+`mr_build_failed` reads GitLab's to-do list, which means it fires only when GitLab decides to raise
+a `build_failed` to-do. Measured on the live case, it did not: pipeline `49` failed at 14:28:36 on
+`!12`'s branch, `mr_build_failed` was armed, and the 14:33 tick found nothing. Whether that is the
+pipeline's `source` (a branch push rather than a merge-request event), the project's settings or
+something else is not answerable from outside the box until `/poll/inspect` ships — which is the
+point that section §15.3 was making.
+
+So the feature stops depending on it. **`mr_pipeline_failed`** asks the project directly: which
+pipelines failed recently, and is the branch of one of them the source branch of an open merge
+request? Two calls per project, and it wakes the merge request's **own author** when that author is
+one of our agents — falling back to the project's routing row when a human opened it. The default
+branch is deliberately excluded: a red `main` is `pipeline_failed`'s job and has a different brief,
+because nobody owns it.
+
+Both kinds may be armed at once. They key their delivery on the **pipeline id** — the to-do path
+already fetches it to build the brief — so one red build is one wake whichever path sees it first.

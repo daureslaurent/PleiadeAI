@@ -165,6 +165,17 @@ export const POLL_EVENT_KINDS: PollEventKind[] = [
 
   // ——— Pipelines: nobody owns the default branch, so nobody gets a todo when it goes red.
   {
+    id: 'mr_pipeline_failed',
+    label: 'A merge request’s pipeline failed (watched, not waited for)',
+    hint:
+      'The same outcome as the to-do above, reached by watching the project instead of trusting ' +
+      'GitLab to raise one — which it does not do for every shape of failure. Wakes the merge ' +
+      'request’s own author when that is an agent. Arming both is safe: they de-duplicate on the ' +
+      'pipeline, so one failure is one wake.',
+    source: 'pipeline',
+    family: 'build',
+  },
+  {
     id: 'pipeline_failed',
     label: 'The default branch’s pipeline went red',
     hint: 'Costs one extra call per polled project, and only while this is on.',

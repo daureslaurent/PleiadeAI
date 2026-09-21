@@ -348,7 +348,7 @@ async function pollTodos(
     const detail =
       detailKind && Number.isFinite(Number(iid)) && Number.isFinite(Number(todo.project?.id))
         ? await mrFailureDetail(identity.conn, Number(todo.project.id), Number(iid), detailKind)
-        : '';
+        : { text: '', pipelineId: null };
     const marker =
       kind.targetType === 'MergeRequest' || targetKind(todo.target_type) === 'MergeRequest' ? '!' : '#';
     const decision: WakeDecision = {
@@ -362,10 +362,16 @@ async function pollTodos(
       project,
       title: iid ? `${marker}${iid} ${title}` : title,
       url: String(todo.target_url ?? ''),
-      body: detail || String(todo.body ?? ''),
+      body: detail.text || String(todo.body ?? ''),
     } as WakeDecision;
 
-    if (!tick.wake(`poll:todo:${todo.id}`, decision)) break;
+    // Keyed on the *pipeline* when there is one, so that arming both this and `mr_pipeline_failed`
+    // — the to-do GitLab may raise and the watch that does not depend on it — cannot wake an agent
+    // twice for one red build.
+    const deliveryId = detail.pipelineId
+      ? `poll:mr-pipeline:${detail.pipelineId}`
+      : `poll:todo:${todo.id}`;
+    if (!tick.wake(deliveryId, decision)) break;
     cursorId = Number(todo.id);
     // Best effort: the cursor above is what actually prevents a repeat. Marking done is for the
     // human looking at the same todo list, and a GitLab that refuses it must not fail the tick.
@@ -394,26 +400,32 @@ async function mrFailureDetail(
   projectId: number,
   iid: number,
   kind: 'build' | 'conflict',
-): Promise<string> {
+): Promise<{ text: string; pipelineId: number | null }> {
   const mr = await request<Record<string, any>>(`projects/${projectId}/merge_requests/${iid}`, {
     conn,
   }).catch(() => null);
-  if (!mr) return '';
+  if (!mr) return { text: '', pipelineId: null };
 
   if (kind === 'conflict') {
     const status = String(mr.detailed_merge_status ?? mr.merge_status ?? 'unknown');
-    return [
-      `\`${mr.source_branch}\` → \`${mr.target_branch}\`, merge status \`${status}\`` +
-        (mr.has_conflicts ? ' — GitLab reports real conflicts with the target branch.' : '.'),
-      '',
-      'The target branch has moved since this branch was cut; what has to be reconciled is whatever ' +
-        'landed on it in the meantime.',
-    ].join('\n');
+    return {
+      text: [
+        `\`${mr.source_branch}\` → \`${mr.target_branch}\`, merge status \`${status}\`` +
+          (mr.has_conflicts ? ' — GitLab reports real conflicts with the target branch.' : '.'),
+        '',
+        'The target branch has moved since this branch was cut; what has to be reconciled is whatever ' +
+          'landed on it in the meantime.',
+      ].join('\n'),
+      pipelineId: null,
+    };
   }
 
   const pipelineId = Number(mr.head_pipeline?.id);
   if (!Number.isFinite(pipelineId)) {
-    return `\`${mr.source_branch}\` → \`${mr.target_branch}\`. GitLab reports no pipeline on the head commit, so the failure is on an earlier one — list them with \`gitlab_ci({action:"pipelines", ref:"${mr.source_branch}"})\`.`;
+    return {
+      text: `\`${mr.source_branch}\` → \`${mr.target_branch}\`. GitLab reports no pipeline on the head commit, so the failure is on an earlier one — list them with \`gitlab_ci({action:"pipelines", ref:"${mr.source_branch}"})\`.`,
+      pipelineId: null,
+    };
   }
 
   const [full, jobs] = await Promise.all([
@@ -458,7 +470,7 @@ async function mrFailureDetail(
         `matched this ref or no runner picked it up. \`gitlab_ci({action:"pipeline", pipeline_id: ${pipelineId}})\` has the detail.`,
     );
   }
-  return lines.join('\n');
+  return { text: lines.join('\n'), pipelineId };
 }
 
 function leadForTodo(kind: PollEventKind, project: string, target: string, author: string): string {
@@ -701,6 +713,92 @@ async function pollPipelines(
 }
 
 /**
+ * A merge request whose pipeline is red, found by **watching** rather than by being told (§16.4).
+ *
+ * `mr_build_failed` depends on GitLab raising a `build_failed` to-do, and GitLab does not raise one
+ * for every shape of failure — a branch pipeline that is not the merge request's own event
+ * pipeline, a author who is not the one GitLab notifies, a project where the feature is off. This
+ * path asks the question directly instead: which recent pipelines failed, and is the branch one of
+ * them belongs to the source branch of an open merge request?
+ *
+ * Two calls per project, and it wakes the merge request's **own author** when that author is one of
+ * our agents — which is the point of the feature ("so the agent can repair the pipeline of his
+ * MR") — falling back to the project's routing row when the author is a human.
+ *
+ * De-duplicated with the to-do path on the pipeline id, so arming both is safe.
+ */
+async function pollMrPipelines(
+  tick: Tick,
+  conn: GitLabConnection,
+  project: PolledProject,
+  kind: PollEventKind,
+): Promise<void> {
+  const stateKey = `mr-pipelines:${project.path}`;
+  const [failed, open] = await Promise.all([
+    request<Record<string, any>[]>(`projects/${project.id}/pipelines`, {
+      conn,
+      query: { status: 'failed', order_by: 'id', sort: 'desc', per_page: 20 },
+    }),
+    request<Record<string, any>[]>(`projects/${project.id}/merge_requests`, {
+      conn,
+      paginate: 50,
+      query: { state: 'opened', order_by: 'updated_at' },
+    }),
+  ]);
+
+  const state = await gitlabPollStateRepository.get(stateKey);
+  const newest = failed.reduce((max, p) => Math.max(max, Number(p.id) || 0), 0);
+  if (!state) {
+    await gitlabPollStateRepository.set(stateKey, { cursorId: newest });
+    tick.report.baselined.push(stateKey);
+    return;
+  }
+
+  // Branch → the open merge request it belongs to. The default branch is deliberately absent: a red
+  // `main` is `pipeline_failed`'s job, and it has a different brief because nobody owns it.
+  const byBranch = new Map<string, Record<string, any>>();
+  for (const mr of open) {
+    if (String(mr.source_branch) !== project.defaultBranch) byBranch.set(String(mr.source_branch), mr);
+  }
+
+  const agents = await agentRepository.list();
+  let cursorId = state.cursorId;
+  for (const pipeline of failed.filter((p) => Number(p.id) > state.cursorId).sort((a, b) => a.id - b.id)) {
+    const mr = byBranch.get(String(pipeline.ref));
+    if (!mr) {
+      cursorId = Number(pipeline.id);
+      continue;
+    }
+    const author = String(mr.author?.username ?? '').toLowerCase();
+    // The author's *own* agent, because this is their branch to fix. `ours` is not an exclusion
+    // here the way it is for events — quite the opposite, it is how the right agent is found.
+    const owner = agents.find((a) => a.gitlab_username && a.gitlab_username.toLowerCase() === author);
+    const detail = await mrFailureDetail(conn, project.id, Number(mr.iid), 'build');
+    const target = owner
+      ? { agentId: String(owner._id), agentName: owner.name }
+      : await routed(project.path);
+
+    const decision: WakeDecision = {
+      kind: kind.id,
+      family: 'build',
+      lead:
+        `The pipeline of merge request **!${mr.iid} ${mr.title}** in \`${project.path}\` failed` +
+        (owner ? ' — it is yours.' : ` (opened by @${author || 'someone'}).`),
+      ...target,
+      project: project.path,
+      title: `!${mr.iid} ${mr.title}`,
+      url: String(mr.web_url ?? ''),
+      body: detail.text,
+    } as WakeDecision;
+
+    if (!tick.wake(`poll:mr-pipeline:${detail.pipelineId ?? pipeline.id}`, decision)) break;
+    cursorId = Number(pipeline.id);
+  }
+
+  if (cursorId !== state.cursorId) await gitlabPollStateRepository.set(stateKey, { cursorId });
+}
+
+/**
  * One tick.
  *
  * Never throws: it is called by an Agenda job every few minutes and by a button, and a GitLab that
@@ -717,8 +815,10 @@ export async function pollOnce(opts: { force?: boolean } = {}): Promise<PollRepo
   const armed = settings.gitlab_poll_events ?? [];
   const todoKinds = armedKinds(armed, 'todo');
   const eventKinds = armedKinds(armed, 'event');
-  const pipelineKind = armedKinds(armed, 'pipeline')[0];
-  if (!todoKinds.length && !eventKinds.length && !pipelineKind) {
+  const pipelineKinds = armedKinds(armed, 'pipeline');
+  const defaultBranchKind = pipelineKinds.find((k) => k.id === 'pipeline_failed');
+  const mrPipelineKind = pipelineKinds.find((k) => k.id === 'mr_pipeline_failed');
+  if (!todoKinds.length && !eventKinds.length && !pipelineKinds.length) {
     return off('no event is armed — tick the ones that should wake an agent');
   }
 
@@ -741,7 +841,7 @@ export async function pollOnce(opts: { force?: boolean } = {}): Promise<PollRepo
     }
   }
 
-  if (eventKinds.length || pipelineKind) {
+  if (eventKinds.length || pipelineKinds.length) {
     let projects: PolledProject[] = [];
     try {
       projects = await pollProjects(conn, settings.gitlab_poll_projects ?? []);
@@ -758,11 +858,18 @@ export async function pollOnce(opts: { force?: boolean } = {}): Promise<PollRepo
           tick.report.errors.push(`events for ${project.path}: ${errorText(err)}`);
         }
       }
-      if (pipelineKind && !tick.exhausted) {
+      if (defaultBranchKind && !tick.exhausted) {
         try {
-          await pollPipelines(tick, conn, project, pipelineKind);
+          await pollPipelines(tick, conn, project, defaultBranchKind);
         } catch (err) {
           tick.report.errors.push(`pipelines for ${project.path}: ${errorText(err)}`);
+        }
+      }
+      if (mrPipelineKind && !tick.exhausted) {
+        try {
+          await pollMrPipelines(tick, conn, project, mrPipelineKind);
+        } catch (err) {
+          tick.report.errors.push(`merge-request pipelines for ${project.path}: ${errorText(err)}`);
         }
       }
     }

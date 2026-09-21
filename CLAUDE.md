@@ -181,7 +181,10 @@ Key seams:
   folds every issue-shaped type onto `Issue` and the webhook router accepts `object_kind:
   'work_item'`. A build-failure wake carries the
   failing `job_id`s and `yaml_errors` it fetched (§16) and its own finishing move — *fix your own
-  branch, do not review it* — and `gitlab-log.ts` is the one job-log cleaner (all CSI sequences,
+  branch, do not review it* — and comes by either of two routes that de-duplicate on the pipeline
+  id: GitLab's `build_failed` to-do, or `mr_pipeline_failed`, which watches each project's failed
+  pipelines for one whose ref is an open MR's source branch and wakes that MR's author, because
+  GitLab does not raise that to-do for every shape of failure — and `gitlab-log.ts` is the one job-log cleaner (all CSI sequences,
   GitLab's trace prefix, carriage-return redraws), shared by the tool and the operator route so
   both read the same text. That WorkItem bug hid because an unmatched row was consumed by the cursor without a word —
   hence `unmatched` on the poll report and `GET /api/gitlab/poll/inspect`, a read-only view of what
