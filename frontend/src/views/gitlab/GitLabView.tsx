@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
+  ArrowUp,
   CircleDot,
   ExternalLink,
   GitBranch,
   GitMerge,
   GitPullRequest,
+  ListOrdered,
   Loader2,
+  Pause,
+  Play,
   RefreshCw,
   Rocket,
   ScanSearch,
+  X,
 } from 'lucide-react';
 import {
   agentsApi,
   gitlabApi,
+  runQueueApi,
   type Agent,
   type GitLabActivity,
   type GitLabConnectionInfo,
@@ -24,26 +30,30 @@ import {
   type GitLabMergeRequest,
   type GitLabPipeline,
   type GitLabProject,
+  type RunQueueEntry,
+  type RunQueueSnapshot,
 } from '../../lib/api';
 import { Button, Callout, Dot, EmptyState, Row, Section, Spinner, type Tone } from '../../components/ui';
 
 /**
  * `/gitlab` — what the fleet is doing on GitLab (`GITLAB_PLAN.md` §6).
  *
- * Four tabs, and the ordering is the operator's question order: *what exists* (Projects), *what have
- * my agents actually done* (Activity), *what is in flight* (Work), *is it green* (Pipelines).
+ * Five tabs, and the ordering is the operator's question order: *what exists* (Projects), *what have
+ * my agents actually done* (Activity), *what is in flight* (Work), *is it green* (Pipelines), *what
+ * is about to run* (Queue).
  *
  * Activity is the one that does not exist in GitLab. GitLab knows a commit was authored by the bot
  * account; only we know which agent made it, in which conversation, so each row links both out to
  * GitLab and back into the Workspace session that produced it.
  */
-type Tab = 'projects' | 'activity' | 'work' | 'pipelines';
+type Tab = 'projects' | 'activity' | 'work' | 'pipelines' | 'queue';
 
 const TABS: { id: Tab; label: string; icon: typeof GitBranch }[] = [
   { id: 'projects', label: 'Projects', icon: GitBranch },
   { id: 'activity', label: 'Agent activity', icon: Activity },
   { id: 'work', label: 'Work', icon: CircleDot },
   { id: 'pipelines', label: 'Pipelines', icon: Rocket },
+  { id: 'queue', label: 'Queue', icon: ListOrdered },
 ];
 
 /** GitLab's statuses mapped onto the shared tone vocabulary. */
@@ -88,7 +98,7 @@ export function GitLabView() {
 
   if (loading) return <Spinner />;
 
-  // An unconfigured instance gets the setup path, not four empty tabs: every one of them would
+  // An unconfigured instance gets the setup path, not five empty tabs: every one of them would
   // otherwise render "failed to load" and say nothing about why.
   if (!conn?.url || !conn.token_set) {
     return (
@@ -139,10 +149,11 @@ export function GitLabView() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-6">
-        {tab === 'projects' && <ProjectsTab />}
+        {tab === 'projects' && <ProjectsTab onQueued={() => setTab('queue')} />}
         {tab === 'activity' && <ActivityTab />}
         {tab === 'work' && <WorkTab />}
         {tab === 'pipelines' && <PipelinesTab />}
+        {tab === 'queue' && <QueueTab />}
       </div>
     </div>
   );
@@ -187,13 +198,12 @@ function TabHeader({ title, busy, onReload }: { title: string; busy: boolean; on
   );
 }
 
-function ProjectsTab() {
+function ProjectsTab({ onQueued }: { onQueued: () => void }) {
   const { data, error, busy, reload } = useLoad(() => gitlabApi.projects());
   const [agents, setAgents] = useState<Agent[]>([]);
   const [who, setWho] = useState('');
   const [running, setRunning] = useState('');
   const [failed, setFailed] = useState('');
-  const navigate = useNavigate();
 
   useEffect(() => {
     void gitlabApi
@@ -207,20 +217,21 @@ function ProjectsTab() {
   }, []);
 
   /**
-   * Start a review of one project and follow it.
+   * Queue a review of one project and go and watch the line.
    *
-   * Navigating straight into the session is the point of the button: the run takes as long as an
-   * inference call, and the alternative is a spinner that ends with a notification the operator has
-   * to go and find.
+   * It used to navigate straight into the session, because the run started here. It no longer does:
+   * the check waits in the run lane like every other autonomous turn, so the honest thing to show
+   * is the queue it was put in — with the row's link into the Workspace appearing the moment it
+   * starts.
    */
   const check = async (path: string) => {
     setRunning(path);
     setFailed('');
     try {
-      const { sessionId } = await gitlabApi.runCheck(path, who || undefined);
-      navigate(`/workspace?session=${sessionId}`);
+      await gitlabApi.runCheck(path, who || undefined);
+      onQueued();
     } catch (err: any) {
-      setFailed(err?.response?.data?.error ?? 'could not start the check');
+      setFailed(err?.response?.data?.error ?? 'could not queue the check');
     } finally {
       setRunning('');
     }
@@ -539,6 +550,257 @@ function PipelinesTab() {
                 {log.text}
               </pre>
             )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** `queued_at` → how long it has been waiting, in the same register as `ago`. */
+function waited(iso: string): string {
+  const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(sec / 60);
+  return min < 60 ? `${min}m` : `${Math.round(min / 60)}h`;
+}
+
+/** How long a finished run took. Blank when it never started (cancelled before its turn). */
+function tookFor(row: RunQueueEntry): string {
+  if (!row.started_at || !row.ended_at) return '';
+  const sec = Math.round((new Date(row.ended_at).getTime() - new Date(row.started_at).getTime()) / 1000);
+  return sec < 60 ? `${sec}s` : `${Math.round(sec / 60)}m`;
+}
+
+const QUEUE_TONES: Record<string, Tone> = {
+  running: 'busy',
+  queued: 'idle',
+  done: 'ok',
+  failed: 'error',
+  cancelled: 'idle',
+  interrupted: 'error',
+};
+
+/** The one line that says what a row *is*: where it came from and what about. */
+function QueueRowBody({ row }: { row: RunQueueEntry }) {
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="text-xs font-medium text-slate-200">{row.agent_name}</span>
+        <span className="text-[10px] uppercase tracking-wider text-slate-600">{row.origin || row.kind}</span>
+      </div>
+      <p className="mt-0.5 truncate text-[11px] text-slate-500">
+        {row.project && <span className="font-mono text-slate-600">{row.project} · </span>}
+        {row.title || row.kind}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * **Queue** — the LLM calls that have not happened yet (`RUN_QUEUE_PLAN.md` §5).
+ *
+ * The list is GitLab's own rows, but the *lane* is the whole fleet's: a forum wake or a cron task
+ * holding it is why a GitLab row is not moving, so it is named in a banner rather than left to look
+ * like a bug. Positions are counted within this list; `total_queued` says how many are really in
+ * front, everything included.
+ *
+ * It polls rather than listening on the socket: three seconds is well inside the grain of a run that
+ * takes an inference call, and the alternative is a new wire event for a page nobody keeps open.
+ */
+function QueueTab() {
+  const [snap, setSnap] = useState<RunQueueSnapshot | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(true);
+  const [acting, setActing] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setSnap(await runQueueApi.list('gitlab'));
+      setError('');
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'could not read the queue');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const timer = setInterval(() => void load(), 3000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const act = async (id: string, what: 'cancel' | 'promote') => {
+    setActing(id);
+    try {
+      await (what === 'cancel' ? runQueueApi.cancel(id) : runQueueApi.promote(id));
+      await load();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? `could not ${what} that run`);
+    } finally {
+      setActing('');
+    }
+  };
+
+  const togglePause = async () => {
+    if (!snap) return;
+    setActing('pause');
+    try {
+      await runQueueApi.pause(!snap.paused);
+      await load();
+    } finally {
+      setActing('');
+    }
+  };
+
+  if (!snap && busy) return <Spinner />;
+
+  const holder = snap?.holder ?? null;
+  const elsewhere = holder && holder.source !== 'gitlab' ? holder : null;
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      <div className="mb-3 flex items-center gap-2">
+        <h2 className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+          What is about to run
+        </h2>
+        <Button
+          variant="ghost"
+          className="ml-auto"
+          loading={acting === 'pause'}
+          icon={snap?.paused ? <Play size={12} /> : <Pause size={12} />}
+          onClick={() => void togglePause()}
+        >
+          {snap?.paused ? 'Resume' : 'Pause'}
+        </Button>
+        <Button variant="ghost" onClick={() => void load()} loading={busy} icon={<RefreshCw size={12} />}>
+          Refresh
+        </Button>
+      </div>
+
+      {error && (
+        <div className="mb-3">
+          <Callout tone="error" icon={<AlertTriangle size={13} />}>{error}</Callout>
+        </div>
+      )}
+
+      {snap?.paused && (
+        <div className="mb-3">
+          <Callout tone="warn" icon={<Pause size={13} />}>
+            The run lane is held. Nothing new starts — a turn already running finishes on its own.
+            Everything below keeps its place until you resume.
+          </Callout>
+        </div>
+      )}
+
+      {elsewhere && (
+        <div className="mb-3">
+          <Callout tone="info" icon={<Loader2 size={13} className="animate-spin" />}>
+            The lane is busy with a <span className="font-medium">{elsewhere.source}</span> run —{' '}
+            <span className="font-medium">{elsewhere.agent_name}</span>
+            {elsewhere.title ? `, ${elsewhere.title}` : ''}. One turn runs at a time across the whole
+            fleet, so the rows below start when it finishes.
+          </Callout>
+        </div>
+      )}
+
+      {snap?.running && (
+        <Row className="mb-3 border-accent/30 p-3">
+          <div className="flex items-center gap-2">
+            <Dot tone="busy" pulse />
+            <QueueRowBody row={snap.running} />
+            <span className="shrink-0 text-[10px] text-slate-600">
+              {snap.running.started_at ? `running ${waited(snap.running.started_at)}` : 'starting'}
+            </span>
+            {snap.running.session_id && (
+              <Link
+                to={`/workspace?session=${snap.running.session_id}`}
+                className="shrink-0 text-[11px] text-accent hover:underline"
+              >
+                Watch
+              </Link>
+            )}
+          </div>
+        </Row>
+      )}
+
+      {snap && snap.queued.length === 0 && !snap.running && (
+        <EmptyState icon={<ListOrdered size={20} />}>
+          Nothing is waiting. A wake, a poll tick or a project check puts a turn in here.
+        </EmptyState>
+      )}
+
+      {snap && snap.queued.length > 0 && (
+        <div className="space-y-2">
+          {snap.queued.map((row, i) => (
+            <Row key={row.id} className="p-3">
+              <div className="flex items-center gap-3">
+                <span className="w-5 shrink-0 text-center font-mono text-[11px] text-slate-600">{i + 1}</span>
+                <QueueRowBody row={row} />
+                <span className="shrink-0 text-[10px] text-slate-600">waiting {waited(row.queued_at)}</span>
+                <Button
+                  variant="ghost"
+                  disabled={i === 0}
+                  loading={acting === row.id}
+                  icon={<ArrowUp size={11} />}
+                  onClick={() => void act(row.id, 'promote')}
+                >
+                  Run next
+                </Button>
+                <Button
+                  variant="ghost"
+                  loading={acting === row.id}
+                  icon={<X size={11} />}
+                  onClick={() => void act(row.id, 'cancel')}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </Row>
+          ))}
+        </div>
+      )}
+
+      {snap && snap.total_queued > snap.queued.length && (
+        <p className="mt-2 text-[11px] text-slate-600">
+          {snap.total_queued - snap.queued.length} other run
+          {snap.total_queued - snap.queued.length === 1 ? '' : 's'} from elsewhere in the fleet share this
+          lane.
+        </p>
+      )}
+
+      {snap && snap.history.length > 0 && (
+        <div className="mt-6">
+          <h2 className="mb-2 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            Already run
+          </h2>
+          <div className="space-y-1.5">
+            {snap.history.map((row) => (
+              <Row key={row.id} className="px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <Dot tone={QUEUE_TONES[row.status] ?? 'idle'} title={row.status} />
+                  <QueueRowBody row={row} />
+                  {row.error && (
+                    <span className="max-w-[14rem] shrink-0 truncate text-[10px] text-red-400" title={row.error}>
+                      {row.error}
+                    </span>
+                  )}
+                  <span className="shrink-0 text-[10px] text-slate-600">
+                    {row.status === 'done' ? tookFor(row) : row.status}
+                    {row.ended_at ? ` · ${ago(row.ended_at)}` : ''}
+                  </span>
+                  {row.session_id && (
+                    <Link
+                      to={`/workspace?session=${row.session_id}`}
+                      className="shrink-0 text-[11px] text-accent hover:underline"
+                    >
+                      Open
+                    </Link>
+                  )}
+                </div>
+              </Row>
+            ))}
           </div>
         </div>
       )}

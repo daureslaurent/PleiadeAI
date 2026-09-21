@@ -155,6 +155,13 @@ export interface EffectiveSettings {
    */
   memory_distill_enabled: boolean;
   memory_max_tokens: number;
+  /**
+   * The autonomous run lane (`RUN_QUEUE_PLAN.md`). Paused, nothing new starts — whatever is running
+   * finishes. On the settings singleton rather than in memory precisely because the reason to pause
+   * is usually a restart of the inference server.
+   */
+  run_queue_paused: boolean;
+
   /** How this instance is reached from a browser (e.g. `https://pleiades.example.com`) — the base of the OAuth redirect URI. */
   /**
    * **GitLab** (`GITLAB_PLAN.md`). The three secrets are *not* here — they are `select: false` on
@@ -327,6 +334,7 @@ export const settingsService = {
       forum_auto_reply_max_per_project: doc?.forum_auto_reply_max_per_project ?? 40,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,
+      run_queue_paused: doc?.run_queue_paused ?? false,
       gitlab_url: doc?.gitlab_url ?? '',
       gitlab_group: doc?.gitlab_group ?? '',
       gitlab_bot_username: doc?.gitlab_bot_username ?? '',

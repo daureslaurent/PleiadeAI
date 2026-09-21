@@ -5,6 +5,7 @@ import { getAgenda } from '../../autonomy/agenda.setup';
 import { flowTimerScheduler } from '../../flows/TimerScheduler';
 import { streamRegistry } from '../../streaming/StreamRegistry';
 import { monitorPoller } from '../monitor/monitor.poller';
+import { runQueue } from '../run-queue/run-queue.service';
 import { endpointHealth } from '../../inference/endpoint-health';
 import { telegramBot } from '../../telegram/TelegramBot';
 
@@ -58,6 +59,10 @@ export async function enterMaintenance(why: string): Promise<void> {
     await getAgenda().stop();
   });
   await stopQuietly('flow timers', () => flowTimerScheduler.stopAll());
+  // Hold the run lane rather than pausing it: an autonomous turn started mid-restore writes a
+  // session into a collection that has already been replaced, and `hold` leaves no trace in the
+  // database being swapped out.
+  await stopQuietly('run queue', async () => runQueue.hold(true));
   await stopQuietly('streams', () => streamRegistry.stopAll());
   await stopQuietly('monitor poller', async () => monitorPoller.stop());
   await stopQuietly('endpoint health', async () => endpointHealth.stop());
@@ -86,6 +91,7 @@ export async function leaveMaintenance(): Promise<void> {
   await stopQuietly('agenda restart', async () => {
     await getAgenda().start();
   });
+  runQueue.hold(false);
   monitorPoller.start();
   endpointHealth.start();
   log.warn('left maintenance mode');

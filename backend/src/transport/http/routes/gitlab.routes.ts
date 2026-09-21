@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { createLogger } from '../../../config/logger';
 import { gitlabActivityRepository } from '../../../domain/gitlab/gitlab-activity.repository';
-import { gitlabWakeQueue, startGitlabTurn } from '../../../domain/gitlab/gitlab-wake-runner';
+import { gitlabWakeQueue } from '../../../domain/gitlab/gitlab-wake-runner';
 import { POLL_EVENT_KINDS } from '../../../domain/gitlab/gitlab-poll.catalogue';
 import {
   catchUpTodos,
@@ -363,9 +363,10 @@ gitlabRouter.get('/jobs/:projectId/:jobId/log', async (req, res) => {
  * quiet" from the UI. `POST .../check` does the same gather and then hands it to an agent, which
  * reads what it means and reports back.
  *
- * The POST returns the session id straight away and leaves the turn running — the operator is meant
- * to watch it arrive in the Workspace, not wait on an HTTP request for the length of an inference
- * call.
+ * The POST does not run it here: it puts a row in the fleet's run lane (`RUN_QUEUE_PLAN.md`) ahead
+ * of the queued wakes and answers with the row's id. Pressing the button on three projects during a
+ * busy morning therefore queues three checks instead of starting three inference calls at once, and
+ * the Queue tab is where the operator watches it come up and follows the link into the Workspace.
  */
 gitlabRouter.get('/projects/:project/check', async (req, res) => {
   try {
@@ -395,18 +396,21 @@ gitlabRouter.post('/projects/:project/check', async (req, res) => {
       return;
     }
 
-    const { sessionId } = await startGitlabTurn({
+    const row = await gitlabWakeQueue.enqueueTurn({
       agentId: String(agent._id),
       agentName: agent.name,
+      kind: 'check',
+      origin: 'Check now',
       title: `GitLab · check ${check.project}`,
+      project: check.project,
       brief: checkBrief(check),
       notify: `${agent.name} reviewed ${check.project}`,
       // The brief says "change nothing" and production showed that is not enough — an agent told
       // four times not to comment posted a merge-request comment anyway. The toolset enforces it.
       readOnly: true,
     });
-    log.info({ project: check.project, agent: agent.name, session: sessionId }, 'project check started');
-    res.json({ sessionId, agent: agent.name, check });
+    log.info({ project: check.project, agent: agent.name, queued: String(row?._id) }, 'project check queued');
+    res.json({ queued: true, id: String(row?._id ?? ''), agent: agent.name, check });
   } catch (err) {
     fail(res, err);
   }
@@ -556,11 +560,14 @@ gitlabWebhookRouter.post('/', async (req, res) => {
     return;
   }
 
-  gitlabWakeQueue.enqueue({
-    ...decision,
-    agentId: decision.agentId,
-    agentName: decision.agentName,
-    deliveryId,
-  });
-  res.json({ ok: true, woke: decision.agentName, queued: gitlabWakeQueue.depth() });
+  gitlabWakeQueue.enqueue(
+    {
+      ...decision,
+      agentId: decision.agentId,
+      agentName: decision.agentName,
+      deliveryId,
+    },
+    'webhook',
+  );
+  res.json({ ok: true, woke: decision.agentName });
 });

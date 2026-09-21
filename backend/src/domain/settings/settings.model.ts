@@ -331,6 +331,10 @@ const SettingsSchema = new Schema(
      */
     gitlab_wake_issues: { type: Boolean, default: false },
     gitlab_wake_reviews: { type: Boolean, default: false },
+
+    /** The autonomous run lane is held (`RUN_QUEUE_PLAN.md` §3) — nothing new starts. */
+    run_queue_paused: { type: Boolean, default: false },
+
     /**
      * Polling (`GITLAB_PLAN.md` §13) — the way an instance with no webhooks wakes agents.
      *

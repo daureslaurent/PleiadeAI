@@ -267,12 +267,15 @@ class Tick {
     }
     if (gitlabWakeQueue.isDuplicate(deliveryId)) return true;
     this.budget -= 1;
-    gitlabWakeQueue.enqueue({
-      ...decision,
-      agentId: decision.agentId,
-      agentName: decision.agentName,
-      deliveryId,
-    });
+    gitlabWakeQueue.enqueue(
+      {
+        ...decision,
+        agentId: decision.agentId,
+        agentName: decision.agentName,
+        deliveryId,
+      },
+      'poll',
+    );
     this.report.woke.push({ agent: decision.agentName, kind: decision.kind, title: decision.title });
     return true;
   }

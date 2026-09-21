@@ -420,6 +420,7 @@ export const forumMentionService = {
             mentionId: String(row._id),
             threadId: String(input.thread._id),
             threadTitle: input.thread.title,
+            agentId: String(row.target.agent_id ?? ''),
             agentName: row.target.display_name,
             authorName: input.author.display_name,
             // Woken, addressed to an agent, and to one that has not opted out of running itself.

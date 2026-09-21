@@ -2131,6 +2131,53 @@ export interface GitLabTestResult {
   suggested_bot_username?: string;
 }
 
+/**
+ * **The run lane** (`RUN_QUEUE_PLAN.md`) — the autonomous turns waiting for the inference server, in
+ * the order they will run. One row is one LLM call that has not happened yet, or one that has.
+ */
+export type RunQueueStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
+
+export interface RunQueueEntry {
+  id: string;
+  /** Which subsystem wants the turn: `gitlab`, `forum`, `cron`, `auto_loop`. */
+  source: string;
+  kind: string;
+  /** One line naming how it arrived — `webhook`, `poll · mr_merged`, `Check now`. */
+  origin: string;
+  agent_id: string;
+  agent_name: string;
+  title: string;
+  project: string;
+  url: string;
+  priority: number;
+  status: RunQueueStatus;
+  session_id: string;
+  error: string;
+  queued_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface RunQueueSnapshot {
+  paused: boolean;
+  /** Every source's waiting rows, not just the filtered ones — what the position really means. */
+  total_queued: number;
+  /** Whatever holds the lane right now, whichever source it belongs to. */
+  holder: RunQueueEntry | null;
+  /** The running row *if* it belongs to the source asked for. */
+  running: RunQueueEntry | null;
+  queued: RunQueueEntry[];
+  history: RunQueueEntry[];
+}
+
+export const runQueueApi = {
+  list: (source?: string, limit?: number) =>
+    api.get<RunQueueSnapshot>('/run-queue', { params: { source, limit } }).then((r) => r.data),
+  pause: (paused: boolean) => api.post<{ paused: boolean }>('/run-queue/pause', { paused }).then((r) => r.data),
+  cancel: (id: string) => api.post<{ ok: true }>(`/run-queue/${id}/cancel`).then((r) => r.data),
+  promote: (id: string) => api.post<{ ok: true }>(`/run-queue/${id}/promote`).then((r) => r.data),
+};
+
 export const gitlabApi = {
   connection: () => api.get<GitLabConnectionInfo>('/gitlab/connection').then((r) => r.data),
   saveConnection: (
@@ -2173,10 +2220,14 @@ export const gitlabApi = {
     api
       .get<GitLabProjectCheck>(`/gitlab/projects/${encodeURIComponent(project)}/check`)
       .then((r) => r.data),
-  /** The same gather, handed to an agent that reads what it means. Returns as soon as the session exists. */
+  /**
+   * The same gather, handed to an agent that reads what it means. It does not start here: the turn
+   * goes in the run lane ahead of the queued wakes, and the answer is the row's id — the Queue tab
+   * is where it is watched and where the link into the Workspace appears.
+   */
   runCheck: (project: string, agentId?: string) =>
     api
-      .post<{ sessionId: string; agent: string; check: GitLabProjectCheck }>(
+      .post<{ queued: boolean; id: string; agent: string; check: GitLabProjectCheck }>(
         `/gitlab/projects/${encodeURIComponent(project)}/check`,
         { agent_id: agentId },
       )

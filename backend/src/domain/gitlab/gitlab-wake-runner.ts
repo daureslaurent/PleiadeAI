@@ -6,6 +6,8 @@ import { agentRunner } from '../../orchestrator/AgentRunner';
 import { liveRuns } from '../../transport/ws/live-runs';
 import { TurnRecorder } from '../../transport/ws/TurnRecorder';
 import { notificationRepository } from '../notifications/notification.repository';
+import { runQueue } from '../run-queue/run-queue.service';
+import type { RunQueueDoc } from '../run-queue/run-queue.model';
 import { sessionRepository } from '../sessions/session.repository';
 import type { WakeFamily } from './gitlab-poll.catalogue';
 import type { WakeDecision } from './gitlab-webhook.service';
@@ -19,27 +21,43 @@ const YIELD_TIMEOUT_MS = 60_000;
 const MAX_QUOTE_CHARS = 4_000;
 
 /**
- * GitLab wakes (`GITLAB_PLAN.md` §5), modelled on `forum-mention-runner.ts`.
+ * GitLab wakes (`GITLAB_PLAN.md` §5, `RUN_QUEUE_PLAN.md`).
  *
- * A **queue**, not a fan-out, and for the same reason the forum's is: two agents woken by the same
+ * The ordering used to live here, in an in-memory array drained one at a time. It now lives in the
+ * fleet's **run queue**, and the reason is the half of the problem the local array could not see:
+ * it serialised GitLab against GitLab, while the forum's identical array serialised the forum
+ * against the forum, and neither knew the other was holding the one inference server. This module
+ * keeps what is GitLab's — which agent, what brief, what finishing move — and registers a handler
+ * the lane calls when a row's turn comes.
+ *
+ * Serial is still the point, and for the same reason it always was: two agents woken by the same
  * thread have to see each other's posted comments, which only exist once the first run has
- * finished. Serial also means an afternoon of GitLab activity cannot start twelve inference runs at
- * once on a single-GPU fleet.
+ * finished.
  *
- * In memory rather than a collection, again following the forum: a restart mid-queue drops what had
- * not started yet, which is the honest failure mode for a convenience — GitLab still holds the
- * issue, and the agent will see it next time it looks.
+ * What changed for the worse in nothing, and for the better in two places: a queued wake now
+ * survives a restart (the row carries the whole decision), and the operator can cancel one before
+ * it is paid for.
  */
-interface Queued extends WakeDecision {
+export interface Queued extends WakeDecision {
   deliveryId: string;
   agentId: string;
   agentName: string;
 }
 
-const queue: Queued[] = [];
-/** Deliveries already handled — GitLab retries a hook it thinks failed. */
+/**
+ * What a `gitlab` row carries. Two shapes, because two things start a GitLab turn: an event that
+ * woke somebody, and the operator pressing **Check now** on a project.
+ */
+type GitLabRunPayload =
+  | ({ mode: 'wake' } & Queued)
+  | { mode: 'turn'; title: string; brief: string; notify: string; readOnly?: boolean };
+
+/**
+ * Deliveries already handled, in memory, for the *synchronous* answer the webhook route and the
+ * poll tick need before they decide whether to spend a row. The durable half of the same question
+ * is `dedupe_key` on the queue, which is what survives a restart.
+ */
 const seen = new Set<string>();
-let draining = false;
 
 function quote(body: string): string {
   const text = body.length <= MAX_QUOTE_CHARS ? body : `${body.slice(0, MAX_QUOTE_CHARS)}\n…[truncated]`;
@@ -138,45 +156,111 @@ function brief(item: Queued): string {
     .join('\n');
 }
 
+/** Where a wake came from, for the operator's queue list. Set by the caller that enqueued it. */
+export type WakeOrigin = 'webhook' | 'poll';
+
 export const gitlabWakeQueue = {
   /** Whether this delivery has already been handled (GitLab retries). */
   isDuplicate(deliveryId: string): boolean {
     return !!deliveryId && seen.has(deliveryId);
   },
 
-  enqueue(item: Queued): void {
+  /**
+   * Put one wake in the lane.
+   *
+   * Fire-and-forget on purpose: both callers are answering something else — a webhook that GitLab
+   * disables if it is slow to reply, and a poll tick walking a page of to-dos — and neither has
+   * anything to do with the row once it exists.
+   */
+  enqueue(item: Queued, origin: WakeOrigin = 'webhook'): void {
     if (item.deliveryId) {
       seen.add(item.deliveryId);
       // Unbounded growth over an uptime of months, for a set that only needs to remember the last
       // few minutes of deliveries — GitLab retries within seconds, not days.
       if (seen.size > 5_000) seen.clear();
     }
-    queue.push(item);
-    log.info({ agent: item.agentName, kind: item.kind, project: item.project, depth: queue.length }, 'gitlab wake queued');
-    void drain();
+    const payload: GitLabRunPayload = { mode: 'wake', ...item };
+    void runQueue
+      .enqueue({
+        source: 'gitlab',
+        kind: item.kind,
+        origin: origin === 'poll' ? `poll · ${item.kind}` : 'webhook',
+        agentId: item.agentId,
+        agentName: item.agentName,
+        title: item.title,
+        project: item.project,
+        url: item.url,
+        payload: payload as unknown as Record<string, unknown>,
+        dedupeKey: item.deliveryId,
+      })
+      .catch((err) => log.error({ err: String(err), agent: item.agentName }, 'could not queue a gitlab wake'));
   },
 
-  depth(): number {
-    return queue.length;
+  /**
+   * Queue one operator-initiated turn — **Check now** (`GITLAB_PLAN.md` §10).
+   *
+   * Ahead of the wakes, because a person is standing in front of it waiting to see what the agent
+   * says, and behind nothing else: the lane is still one turn at a time, so pressing the button
+   * during a busy morning queues rather than doubling up on the inference server.
+   */
+  async enqueueTurn(input: {
+    agentId: string;
+    agentName: string;
+    kind: string;
+    origin: string;
+    title: string;
+    project?: string;
+    brief: string;
+    notify: string;
+    readOnly?: boolean;
+  }): Promise<RunQueueDoc | null> {
+    const payload: GitLabRunPayload = {
+      mode: 'turn',
+      title: input.title,
+      brief: input.brief,
+      notify: input.notify,
+      readOnly: input.readOnly,
+    };
+    return runQueue.enqueue({
+      source: 'gitlab',
+      kind: input.kind,
+      origin: input.origin,
+      agentId: input.agentId,
+      agentName: input.agentName,
+      title: input.title,
+      project: input.project,
+      payload: payload as unknown as Record<string, unknown>,
+      priority: 10,
+    });
   },
 };
 
-async function drain(): Promise<void> {
-  if (draining) return;
-  draining = true;
-  try {
-    while (queue.length) {
-      const item = queue.shift()!;
-      try {
-        await run(item);
-      } catch (err) {
-        log.error({ err: String(err), agent: item.agentName }, 'gitlab wake run failed');
-      }
-    }
-  } finally {
-    draining = false;
-  }
-}
+/**
+ * How the lane runs a `gitlab` row. Registered at import time, before `runQueue.start()` — a row
+ * left over from before a restart is claimed by the drain, and it has to find this.
+ */
+runQueue.register('gitlab', async (row, onSession) => {
+  const payload = row.payload as unknown as GitLabRunPayload;
+  const { sessionId, done } =
+    payload.mode === 'wake'
+      ? await startGitlabTurn({
+          agentId: payload.agentId,
+          agentName: payload.agentName,
+          title: `GitLab · ${payload.title}`,
+          brief: brief(payload),
+          notify: `${payload.agentName} answered ${payload.title}`,
+        })
+      : await startGitlabTurn({
+          agentId: row.agent_id,
+          agentName: row.agent_name,
+          title: payload.title,
+          brief: payload.brief,
+          notify: payload.notify,
+          readOnly: payload.readOnly,
+        });
+  onSession(sessionId);
+  await done;
+});
 
 /**
  * One headless GitLab turn, as an ordinary session the operator can open, watch and continue.
@@ -188,9 +272,10 @@ async function drain(): Promise<void> {
  * only ever existed in a browser buffer is a turn lost), a `liveRuns` registration so the stop
  * button works, and a `SessionLock` yield so a live operator chat wins.
  *
- * Returns the session id as soon as it exists, with the turn itself still running: a caller that
- * waited would hang for the length of an inference call, and the point is to *watch* the answer
- * arrive. `done` is offered for the wake queue, which drains strictly one at a time.
+ * Returns the session id as soon as it exists, with the turn itself still running, so the queue row
+ * can be linked to the conversation while it streams — the operator watches the answer arrive
+ * rather than waiting on it. `done` settles when the turn does, and **rejects** when it fails:
+ * the lane awaits it, and that is what the row's `done`/`failed` is.
  */
 export async function startGitlabTurn(input: {
   agentId: string;
@@ -275,22 +360,13 @@ export async function startGitlabTurn(input: {
       log.info({ agent: input.agentName, session: sessionId }, 'gitlab turn complete');
     } catch (err) {
       log.error({ err: String(err), agent: input.agentName, session: sessionId }, 'gitlab turn failed');
+      // Rethrown, unlike before: the caller is now the run queue, and a row that says `done` after
+      // an unreachable endpoint is exactly the lie the history exists to prevent.
+      throw err;
     } finally {
       liveRuns.end(sessionId);
     }
   })();
 
   return { sessionId, done };
-}
-
-/** One woken turn, from a webhook. */
-async function run(item: Queued): Promise<void> {
-  const { done } = await startGitlabTurn({
-    agentId: item.agentId,
-    agentName: item.agentName,
-    title: `GitLab · ${item.title}`,
-    brief: brief(item),
-    notify: `${item.agentName} answered ${item.title}`,
-  });
-  await done;
 }

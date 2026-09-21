@@ -1,6 +1,7 @@
 import type { Types } from 'mongoose';
 import { createLogger } from '../../config/logger';
 import { notificationRepository } from '../notifications/notification.repository';
+import { runQueue } from '../run-queue/run-queue.service';
 import { settingsService } from '../settings/settings.service';
 import { forumMentionRepository } from './forum-mention.repository';
 import { forumMentionRunner } from './forum-mention-runner';
@@ -23,20 +24,21 @@ const log = createLogger('forum-wake');
  * developer" is a sequence, and the second agent has to see the first one's *posted* reply, which
  * only exists once that run has finished.
  *
- * In memory rather than a collection. A restart mid-queue leaves the mentions `pending`, which is
- * exactly the state the operator's Run button expects — nothing is lost, it just stops being
- * automatic, which is the honest failure mode for a convenience.
+ * The queue itself is no longer here: rows go into the fleet's one run lane
+ * (`RUN_QUEUE_PLAN.md`), which is what stops a forum wake and a GitLab wake from holding the single
+ * inference server at the same time — each was serial within itself and neither could see the
+ * other. What stayed is everything that is the forum's own: the fleet switch, the budget, and the
+ * re-checks below, which still run at the moment the row comes up rather than when it was written,
+ * because a queue drains slowly by design.
  */
 interface Queued {
   mentionId: string;
   threadId: string;
   threadTitle: string;
+  agentId: string;
   agentName: string;
   authorName: string;
 }
-
-const queue: Queued[] = [];
-let draining = false;
 
 export const forumWakeQueue = {
   /**
@@ -53,31 +55,33 @@ export const forumWakeQueue = {
       log.info({ woken: rows.map((r) => r.agentName) }, 'wake requested but auto-reply is off — left pending');
       return;
     }
-    queue.push(...rows);
-    log.info({ woken: rows.map((r) => r.agentName), depth: queue.length }, 'agents woken by a post');
-    void drain();
+    for (const row of rows) {
+      await runQueue.enqueue({
+        source: 'forum',
+        kind: 'mention',
+        origin: `@${row.agentName} by ${row.authorName}`,
+        agentId: row.agentId,
+        agentName: row.agentName,
+        title: row.threadTitle,
+        payload: row as unknown as Record<string, unknown>,
+        // A mention can only be answered once — the row's own `status`/`session_id` guards say so —
+        // so a second queued copy of the same one is a wasted claim at best.
+        dedupeKey: `forum:${row.mentionId}`,
+      });
+    }
+    log.info({ woken: rows.map((r) => r.agentName) }, 'agents woken by a post');
   },
 
-  /** True while anything is queued or running. */
+  /** True while anything the forum queued is waiting or running. */
   isBusy(): boolean {
-    return draining || queue.length > 0;
+    return runQueue.isBusy();
   },
 };
 
-/** Drain strictly one run at a time. A re-entrant call returns — the running loop takes what it pushed. */
-async function drain(): Promise<void> {
-  if (draining) return;
-  draining = true;
-  try {
-    for (let next = queue.shift(); next; next = queue.shift()) {
-      await runOne(next).catch((err) =>
-        log.error({ err: String(err), mentionId: next?.mentionId }, 'wake run failed'),
-      );
-    }
-  } finally {
-    draining = false;
-  }
-}
+/** How the lane runs a `forum` row. Registered at import time, before `runQueue.start()`. */
+runQueue.register('forum', async (row) => {
+  await runOne(row.payload as unknown as Queued);
+});
 
 /**
  * Run one woken mention, if it still deserves it.

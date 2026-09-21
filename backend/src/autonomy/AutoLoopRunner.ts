@@ -4,6 +4,7 @@ import type { EventContext } from '../core/event-bus/events.types';
 import { sessionLock } from '../core/session/SessionLock';
 import { agentRunner } from '../orchestrator/AgentRunner';
 import { autoLoopRepository } from '../domain/auto-loops/auto-loop.repository';
+import { runQueue } from '../domain/run-queue/run-queue.service';
 import type { AutoLoopDoc } from '../domain/auto-loops/auto-loop.model';
 import { sessionRepository } from '../domain/sessions/session.repository';
 import type { ChatMessage } from '../domain/agents/jit-builder';
@@ -53,6 +54,16 @@ const MAX_HISTORY_MESSAGES = 30;
 class AutoLoopRunner {
   private timers = new Map<string, NodeJS.Timeout>();
 
+  constructor() {
+    // A loop iteration is an autonomous turn like any other, so it waits in the fleet's one lane
+    // (`RUN_QUEUE_PLAN.md`) instead of firing the moment its timer goes off. The tick itself is
+    // unchanged and still re-reads the loop before doing anything — which is exactly what a row
+    // that waited twenty minutes for the lane needs.
+    runQueue.register('auto_loop', async (row) => {
+      await this.tick(String((row.payload as { sessionId?: string }).sessionId ?? ''));
+    });
+  }
+
   /** Re-arm every loop that was running when the process went down. Called once at boot. */
   async resume(): Promise<void> {
     const loops = await autoLoopRepository.listActive();
@@ -100,13 +111,37 @@ class AutoLoopRunner {
     const ms = Math.max(0, delaySec) * 1000;
     const timer = setTimeout(() => {
       this.timers.delete(sessionId);
-      void this.tick(sessionId).catch((err) =>
+      void this.queueTick(sessionId).catch((err) =>
         log.error({ err: String(err), session: sessionId }, 'auto loop tick crashed'),
       );
     }, ms);
     // Don't hold the event loop open for a countdown — a shutdown shouldn't wait out an interval.
     timer.unref?.();
     this.timers.set(sessionId, timer);
+  }
+
+  /**
+   * The timer fired: put this iteration in the lane rather than running it here.
+   *
+   * At most one row per loop can be waiting, because the next tick is only armed once the previous
+   * one has finished — the `dedupe_key` says so anyway, since a duplicate would burn an iteration
+   * on the same instruction.
+   */
+  private async queueTick(sessionId: string): Promise<void> {
+    const loop = await autoLoopRepository.findBySession(sessionId);
+    if (!loop) return;
+    if (loop.status !== 'waiting' && loop.status !== 'running') return;
+    await runQueue.enqueue({
+      source: 'auto_loop',
+      kind: 'iteration',
+      origin: `auto loop · iteration ${loop.iteration + 1}`,
+      agentId: String(loop.agent_id),
+      agentName: loop.agent_name,
+      title: loop.goal.slice(0, 120),
+      payload: { sessionId },
+      sessionId,
+      dedupeKey: `auto_loop:${sessionId}`,
+    });
   }
 
   /**

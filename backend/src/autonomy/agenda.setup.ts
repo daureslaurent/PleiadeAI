@@ -11,6 +11,7 @@ import { runResultRepository } from '../domain/autonomy/run-result.repository';
 import { alertEngine } from '../alerts/AlertEngine';
 import { conversationGenService } from '../domain/conversation-gen/conversation-gen.service';
 import { pollOnce } from '../domain/gitlab/gitlab-poll.service';
+import { runQueue } from '../domain/run-queue/run-queue.service';
 import { settingsService } from '../domain/settings/settings.service';
 import { generatorRepository } from '../domain/conversation-gen/generator.repository';
 import type { ConversationGeneratorDoc } from '../domain/conversation-gen/generator.model';
@@ -81,6 +82,88 @@ export interface AutonomousJobData {
 /** How long a queued cron job waits for a live user session before re-queuing itself. */
 const YIELD_TIMEOUT_MS = 5 * 60_000;
 
+/** What a `cron` row carries — everything the run needs once the job has stopped existing. */
+interface CronRunPayload {
+  agentId: string;
+  agentName: string;
+  prompt: string;
+  alert?: boolean;
+  scheduleId: string;
+}
+
+/**
+ * How the lane runs a `cron` row: everything the Agenda job used to do once it had decided this
+ * task should run.
+ *
+ * It re-checks the session lock, because the queue drains on its own clock — the agent was free
+ * when the job fired and the operator may have started chatting with it in the meantime. A failed
+ * run is recorded and alerted on exactly as before, then rethrown so the row says `failed` rather
+ * than quietly reading as a turn that happened.
+ */
+runQueue.register('cron', async (row, onSession) => {
+  const { agentId, agentName, prompt, alert = true, scheduleId } = row.payload as unknown as CronRunPayload;
+  await sessionLock.waitUntilFree(agentId, YIELD_TIMEOUT_MS);
+
+  log.info({ agentName }, 'running autonomous task');
+  const startedAt = new Date();
+  let answer: string;
+  // Each run is its own conversation in the agent's Workspace list: it starts from fresh context,
+  // and the operator can open it to read the tool calls or carry on from where it ended.
+  const sessionId = await openHeadlessSession({
+    agentId,
+    agentName,
+    title: titleFrom('Cron', prompt),
+    origin: 'cron',
+    scheduleId,
+  });
+  onSession(sessionId);
+  try {
+    answer = (await runHeadlessTurn({ sessionId, agentId, agentName, userText: prompt })).text;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await runResultRepository
+      .record({
+        schedule_id: scheduleId,
+        agent_name: agentName,
+        prompt,
+        status: 'error',
+        output: message,
+        started_at: startedAt,
+      })
+      .catch((e) => log.error({ err: e }, 'failed to persist autonomous run result'));
+    // A failed run still ran — alert on it too (Telegram + inbox) so failures aren't silent.
+    if (alert) {
+      await alertEngine
+        .dispatch({
+          agentId,
+          title: `Autonomous task FAILED: ${agentName}`,
+          content: message.slice(0, 2000),
+        })
+        .catch((e) => log.error({ err: e }, 'failed to dispatch failure alert'));
+    }
+    throw err;
+  }
+
+  await runResultRepository
+    .record({
+      schedule_id: scheduleId,
+      agent_name: agentName,
+      prompt,
+      status: 'success',
+      output: answer,
+      started_at: startedAt,
+    })
+    .catch((e) => log.error({ err: e }, 'failed to persist autonomous run result'));
+
+  if (alert) {
+    await alertEngine.dispatch({
+      agentId,
+      title: `Autonomous task complete: ${agentName}`,
+      content: answer.slice(0, 2000),
+    });
+  }
+});
+
 let agenda: Agenda | undefined;
 
 /**
@@ -134,65 +217,20 @@ export async function setupAgenda(): Promise<Agenda> {
       return;
     }
 
-    log.info({ agentName }, 'running autonomous task');
-    const startedAt = new Date();
-    let answer: string;
-    try {
-      // Each run is its own conversation in the agent's Workspace list: it starts from fresh context,
-      // and the operator can open it to read the tool calls or carry on from where it ended.
-      const sessionId = await openHeadlessSession({
-        agentId,
-        agentName: agent.name,
-        title: titleFrom('Cron', prompt),
-        origin: 'cron',
-        scheduleId,
-      });
-      answer = (
-        await runHeadlessTurn({ sessionId, agentId, agentName: agent.name, userText: prompt })
-      ).text;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await runResultRepository
-        .record({
-          schedule_id: scheduleId,
-          agent_name: agentName,
-          prompt,
-          status: 'error',
-          output: message,
-          started_at: startedAt,
-        })
-        .catch((e) => log.error({ err: e }, 'failed to persist autonomous run result'));
-      // A failed run still ran — alert on it too (Telegram + inbox) so failures aren't silent.
-      if (alert) {
-        await alertEngine
-          .dispatch({
-            agentId,
-            title: `Autonomous task FAILED: ${agentName}`,
-            content: message.slice(0, 2000),
-          })
-          .catch((e) => log.error({ err: e }, 'failed to dispatch failure alert'));
-      }
-      throw err;
-    }
-
-    await runResultRepository
-      .record({
-        schedule_id: scheduleId,
-        agent_name: agentName,
-        prompt,
-        status: 'success',
-        output: answer,
-        started_at: startedAt,
-      })
-      .catch((e) => log.error({ err: e }, 'failed to persist autonomous run result'));
-
-    if (alert) {
-      await alertEngine.dispatch({
-        agentId,
-        title: `Autonomous task complete: ${agentName}`,
-        content: answer.slice(0, 2000),
-      });
-    }
+    // The turn itself goes in the fleet's run lane (`RUN_QUEUE_PLAN.md`): one autonomous turn at a
+    // time across cron, the forum and GitLab, which is what a single inference server was doing
+    // badly on its own. The job returns as soon as the row exists rather than waiting for it —
+    // holding Agenda's job lock for the length of a queued inference call is how a task past
+    // `lockLifetime` gets picked up and run a second time.
+    await runQueue.enqueue({
+      source: 'cron',
+      kind: 'task',
+      origin: 'cron',
+      agentId,
+      agentName: agent.name,
+      title: titleFrom('Cron', prompt),
+      payload: { agentId, agentName: agent.name, prompt, alert, scheduleId },
+    });
   });
 
   // Scheduled flows (FLOWS_PLAN.md §7). Deliberately the same tail as an autonomous task: the result

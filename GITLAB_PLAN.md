@@ -737,3 +737,28 @@ because nobody owns it.
 
 Both kinds may be armed at once. They key their delivery on the **pipeline id** — the to-do path
 already fetches it to build the brief — so one red build is one wake whichever path sees it first.
+
+## 17. The queue, made visible and made singular (2026-09-21)
+
+The wake queue in §5 was an array in one module, drained one run at a time. The forum had an
+identical array in another module, cron had none at all, and none of the three could see the others:
+"one after another" was true of each and false of the fleet. On a single inference server that is
+the difference between a turn taking a minute and three turns taking four, with nothing on any page
+saying why.
+
+The queue now lives in Mongo, in one lane every autonomous source shares (`RUN_QUEUE_PLAN.md`). What
+that changes for GitLab:
+
+- **`gitlab-wake-runner.ts` keeps the briefs and loses the array.** It registers a handler and
+  enqueues rows; the order, the one-at-a-time and the draining belong to the lane. A wake that was
+  waiting when the container went down is still waiting when it comes back, because the row carries
+  the whole `WakeDecision`.
+- **Check now queues** instead of starting a turn inline, at a priority above the wakes — a person
+  is waiting on it, but not badly enough to run two inference calls at once. The route answers with
+  the row's id rather than a session id, and the row grows its session link the moment it starts.
+- **A fifth tab, Queue**, lists GitLab's own rows in the order they will run, with the waiting time,
+  a cancel and a *run next*. The lane is the whole fleet's, so when it is held by a forum or cron run
+  the tab says so in a banner: a row sitting still for ten minutes now has a stated reason instead of
+  looking like the poller has died again.
+- **Pause** is on the settings singleton, because the reason to pause is nearly always that the
+  inference server is being restarted, which is also when the backend is least likely to stay up.

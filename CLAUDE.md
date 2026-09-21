@@ -209,6 +209,18 @@ Key seams:
   `prompt-usage.ts` derives its block titles from the registry, so the debugger's context breakdown
   can't drift from what was actually sent.
 
+- **The run lane (`domain/run-queue/`, spec `RUN_QUEUE_PLAN.md`).** One Mongo-backed queue for every
+  turn nobody is waiting in front of — GitLab wakes, forum wakes, cron tasks, auto-loop iterations —
+  drained strictly one at a time. It replaces two private in-memory arrays (`gitlab-wake-runner.ts`,
+  `forum-wake-queue.ts`) that were each serial *within themselves* and could therefore hold the one
+  inference server together. A source registers a handler at boot and its rows carry their own
+  `payload`, so the lane knows nothing about GitLab or the forum and a queued row survives a restart;
+  a row left `running` by a dead process becomes `interrupted` rather than being replayed, since its
+  turn may already have posted a comment. Operator chat, Telegram and flow agent nodes deliberately
+  stay out (a human is waiting, or the node is nested inside a run that already holds the lane).
+  `GET /api/run-queue?source=gitlab` is what the GitLab page's Queue tab reads; cancel, promote and a
+  persisted pause are the operator's controls, and a restore `hold()`s the lane without writing to
+  the database being replaced.
 - **Memory (`domain/memory/`).** Each agent has a strictly siloed `qdrant_namespace`. `AgentRunner`
   auto-recalls relevant memories before a turn and fire-and-forget-persists the exchange after.
   Embeddings failures degrade gracefully (memory just skipped).

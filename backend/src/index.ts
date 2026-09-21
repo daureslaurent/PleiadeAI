@@ -64,6 +64,8 @@ import {
 import { ensureDirs as ensureBackupDirs, pruneArchives } from './domain/migration/storage';
 import { mailRouter, mailOauthCallbackRouter } from './transport/http/routes/mail.routes';
 import { gitlabRouter, gitlabWebhookRouter } from './transport/http/routes/gitlab.routes';
+import { runQueueRouter } from './transport/http/routes/run-queue.routes';
+import { runQueue } from './domain/run-queue/run-queue.service';
 import { scheduleUpdateCheck } from './host';
 import { settingsService } from './domain/settings/settings.service';
 import { telegramBot } from './telegram/TelegramBot';
@@ -199,6 +201,7 @@ async function main(): Promise<void> {
   // as the Gmail OAuth callback is guarded by a single-purpose state JWT.
   app.use('/api/gitlab/webhook', gitlabWebhookRouter);
   app.use('/api/gitlab', requireAuth, gitlabRouter);
+  app.use('/api/run-queue', requireAuth, runQueueRouter);
 
   // After every route is mounted: catch async rejections and turn them into real status codes.
   // Without this an invalid body rejects its handler, the request hangs, and the caller gets a bare
@@ -212,6 +215,10 @@ async function main(): Promise<void> {
   attachVisualProxy(httpServer);
   attachAndroidProxy(httpServer);
   await setupAgenda();
+  // The fleet's run lane (`RUN_QUEUE_PLAN.md`). Started *after* every source module has been
+  // imported — a row waiting from before the restart is claimed within milliseconds, and it has to
+  // find its source's handler already registered.
+  await runQueue.start().catch((err) => rootLogger.error({ err }, 'run queue failed to start'));
   // Any flow run still marked live belongs to an executor that died with the previous process
   // (FLOWS_PLAN.md §4) — fail them so the UI never shows a run that nothing is driving.
   await flowRunner.sweepInterrupted().catch((err) => rootLogger.error({ err }, 'flow run sweep failed'));
