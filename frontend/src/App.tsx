@@ -18,6 +18,7 @@ import { CategoryView } from './views/forum/CategoryView';
 import { MentionsView } from './views/forum/MentionsView';
 import { ThreadView } from './views/forum/ThreadView';
 import { FilesView } from './views/FilesView';
+import { GitLabView } from './views/gitlab/GitLabView';
 import { IsolationsView } from './views/IsolationsView';
 import { ImagesView } from './views/ImagesView';
 import { MemoryVault } from './views/MemoryVault';
@@ -130,6 +131,7 @@ export default function App() {
           <Route path="/forum/mentions" element={<MentionsView />} />
           <Route path="/forum/c/:categoryId" element={<CategoryView />} />
           <Route path="/forum/t/:threadId" element={<ThreadView />} />
+          <Route path="/gitlab" element={<GitLabView />} />
           <Route path="/files" element={<FilesView />} />
           <Route path="/images" element={<ImagesView />} />
           <Route path="/isolation" element={<IsolationsView />} />

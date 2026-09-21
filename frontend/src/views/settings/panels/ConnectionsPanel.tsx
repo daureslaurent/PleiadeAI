@@ -1,22 +1,35 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Check, Copy, KeySquare, Loader2, Mail, Smartphone, Wand2 } from 'lucide-react';
+import { AlertTriangle, Check, Copy, GitBranch, KeySquare, Loader2, Mail, Smartphone, Wand2 } from 'lucide-react';
 import { Section } from '../../../components/ui';
 import { mediaApi, type ComfyStatus } from '../../../lib/api';
 import { SettingNumber, SettingText } from '../controls';
 import { MailAccountsManager } from '../managers/MailAccountsManager';
+import { GitLabConnection } from '../managers/GitLabConnection';
 import { AndroidDevicesManager } from '../managers/AndroidDevicesManager';
 import { useSettings } from '../context';
 
 /**
- * `/settings/connections` — external services agents can reach: Gmail (read-only) and Android
- * devices. Gmail's one-time setup: create an OAuth client in the Google Cloud console (type "Web
+ * `/settings/connections` — external services agents can reach: GitLab, Gmail (read-only) and
+ * Android devices. Gmail's one-time setup: create an OAuth client in the Google Cloud console (type "Web
  * application"), register the redirect URI shown here, paste the client ID/secret, then link
  * mailboxes. Android needs no credential — just an adb address the agent containers can route to.
  */
 export function ConnectionsPanel() {
   return (
     <div className="animate-fade-up space-y-5">
+      <Section title="GitLab" icon={<GitBranch size={13} />}>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          One bot account the whole fleet works through (<span className="font-mono">GITLAB_PLAN.md</span>).
+          Once a token is saved here, every top-level agent gets the nine{' '}
+          <span className="font-mono">gitlab_*</span> tools — projects, files, commits, merge requests,
+          issues, CI, search, wikis and cloning — and the GitLab prompt module teaches them how to use
+          them. What the fleet then does shows up on the{' '}
+          <Link to="/gitlab" className="text-accent hover:underline">GitLab page</Link>.
+        </p>
+        <GitLabConnection />
+      </Section>
+
       <Section title="Google OAuth client" icon={<KeySquare size={13} />}>
         <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
           Linking a mailbox needs a Google Cloud OAuth client (APIs &amp; Services → Credentials →

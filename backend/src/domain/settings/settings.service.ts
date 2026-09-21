@@ -1,4 +1,5 @@
 import { env } from '../../config/env';
+import { decryptSecret, encryptSecret } from '../../isolation/ssh.service';
 import { SettingsModel } from './settings.model';
 import type { GlobalMode } from '../endpoints/endpoint.model';
 import { BUILTIN_GLOBAL_MODES } from './builtin-modes';
@@ -18,6 +19,16 @@ export const UI_THEMES = ['pleiades', 'codex', 'terminal', 'paper', 'nebula'] as
 export type UiTheme = (typeof UI_THEMES)[number];
 export const UI_CHAT_LAYOUTS = ['hybrid', 'transcript', 'workbench', 'timeline', 'bubbles'] as const;
 export type UiChatLayout = (typeof UI_CHAT_LAYOUTS)[number];
+
+/** How a cloned repo authenticates inside an agent's container. */
+export const GITLAB_GIT_TRANSPORTS = ['https', 'ssh'] as const;
+export type GitLabGitTransport = (typeof GITLAB_GIT_TRANSPORTS)[number];
+
+/** Which agent a GitLab webhook about one project wakes when the event named nobody. */
+export interface GitLabProjectAgent {
+  project: string;
+  agent_id: string;
+}
 
 /** Effective inference settings the rest of the app reads. */
 export interface EffectiveSettings {
@@ -141,6 +152,26 @@ export interface EffectiveSettings {
   memory_distill_enabled: boolean;
   memory_max_tokens: number;
   /** How this instance is reached from a browser (e.g. `https://pleiades.example.com`) — the base of the OAuth redirect URI. */
+  /**
+   * **GitLab** (`GITLAB_PLAN.md`). The three secrets are *not* here — they are `select: false` on
+   * the document and reachable only through `gitlabSecrets()`, so an ordinary settings read (which
+   * the whole app makes, and which the browser receives) cannot carry the fleet's git credential.
+   * What the UI needs instead is whether each one is set.
+   */
+  gitlab_url: string;
+  gitlab_group: string;
+  gitlab_bot_username: string;
+  gitlab_default_agent_id: string;
+  gitlab_project_agents: GitLabProjectAgent[];
+  gitlab_wake_issues: boolean;
+  gitlab_wake_reviews: boolean;
+  gitlab_git_transport: GitLabGitTransport;
+  gitlab_ssh_host: string;
+  gitlab_ssh_port: number;
+  /** Derived, read-only: never written back by `update`. */
+  gitlab_token_set: boolean;
+  gitlab_ssh_key_set: boolean;
+  gitlab_webhook_secret_set: boolean;
   public_base_url: string;
   /** Google Cloud OAuth client for linking Gmail mailboxes ('' → mail linking unconfigured). */
   google_client_id: string;
@@ -178,7 +209,17 @@ const KEY = 'global';
  */
 export const settingsService = {
   async get(): Promise<EffectiveSettings> {
-    const doc = await SettingsModel.findOne({ key: KEY }).lean();
+    // The three GitLab secrets are `select: false`, so they are asked for by name here — not to
+    // return them (they never leave `gitlabSecrets`), but so this one read can report whether each
+    // is set without a second round trip on a query the app makes every turn.
+    const doc = await SettingsModel.findOne({ key: KEY })
+      .select('+gitlab_token_enc +gitlab_webhook_secret_enc +gitlab_ssh_key_enc')
+      .lean();
+    const secrets = {
+      token: doc?.gitlab_token_enc ?? '',
+      webhookSecret: doc?.gitlab_webhook_secret_enc ?? '',
+      sshKey: doc?.gitlab_ssh_key_enc ?? '',
+    };
     const disabled = (doc?.global_modes_disabled as string[] | undefined) ?? [];
     const standing = (doc?.global_modes_default_on as string[] | undefined) ?? [];
     return {
@@ -264,6 +305,20 @@ export const settingsService = {
       forum_auto_reply_max_per_project: doc?.forum_auto_reply_max_per_project ?? 40,
       memory_distill_enabled: doc?.memory_distill_enabled ?? true,
       memory_max_tokens: doc?.memory_max_tokens ?? 800,
+      gitlab_url: doc?.gitlab_url ?? '',
+      gitlab_group: doc?.gitlab_group ?? '',
+      gitlab_bot_username: doc?.gitlab_bot_username ?? '',
+      gitlab_default_agent_id: doc?.gitlab_default_agent_id ?? '',
+      gitlab_project_agents: (doc?.gitlab_project_agents as GitLabProjectAgent[] | undefined) ?? [],
+      gitlab_wake_issues: doc?.gitlab_wake_issues ?? false,
+      gitlab_wake_reviews: doc?.gitlab_wake_reviews ?? false,
+      gitlab_git_transport: (doc?.gitlab_git_transport as GitLabGitTransport | undefined) ?? 'https',
+      gitlab_ssh_host: doc?.gitlab_ssh_host ?? '',
+      gitlab_ssh_port: doc?.gitlab_ssh_port ?? 22,
+      // Presence only. `gitlabSecrets()` is the one path that reads the values themselves.
+      gitlab_token_set: !!secrets.token,
+      gitlab_ssh_key_set: !!secrets.sshKey,
+      gitlab_webhook_secret_set: !!secrets.webhookSecret,
       public_base_url: doc?.public_base_url ?? '',
       google_client_id: doc?.google_client_id ?? '',
       google_client_secret: doc?.google_client_secret ?? '',
@@ -288,10 +343,57 @@ export const settingsService = {
     };
   },
 
-  async update(patch: Partial<EffectiveSettings>): Promise<EffectiveSettings> {
+  /**
+   * The GitLab credentials in plaintext — the *only* path to them.
+   *
+   * Kept off `EffectiveSettings` on purpose: that object is handed to the browser by
+   * `GET /api/settings` and read by every turn, and a credential that can merge into any repository
+   * in the instance has no business riding along with the temperature.
+   */
+  async gitlabSecrets(): Promise<{ token: string; webhookSecret: string; sshKey: string }> {
+    const doc = await SettingsModel.findOne({ key: KEY })
+      .select('+gitlab_token_enc +gitlab_webhook_secret_enc +gitlab_ssh_key_enc')
+      .lean();
+    const open = (payload?: string): string => {
+      if (!payload) return '';
+      try {
+        return decryptSecret(payload);
+      } catch {
+        // A key rotation (or a restore onto a fresh `.env`) leaves undecryptable ciphertext. Report
+        // it as "unset" — the operator re-pastes it — rather than throwing on every settings read.
+        return '';
+      }
+    };
+    return {
+      token: open(doc?.gitlab_token_enc),
+      webhookSecret: open(doc?.gitlab_webhook_secret_enc),
+      sshKey: open(doc?.gitlab_ssh_key_enc),
+    };
+  },
+
+  /** Store (or clear, on '') one GitLab secret, encrypted at rest. */
+  async setGitlabSecret(field: 'token' | 'webhookSecret' | 'sshKey', plaintext: string): Promise<void> {
+    const key = {
+      token: 'gitlab_token_enc',
+      webhookSecret: 'gitlab_webhook_secret_enc',
+      sshKey: 'gitlab_ssh_key_enc',
+    }[field];
     await SettingsModel.updateOne(
       { key: KEY },
-      { $set: { key: KEY, ...patch } },
+      { $set: { key: KEY, [key]: plaintext ? encryptSecret(plaintext) : '' } },
+      { upsert: true },
+    );
+  },
+
+  async update(patch: Partial<EffectiveSettings>): Promise<EffectiveSettings> {
+    // `gitlab_*_set` are derived from the encrypted fields on read. A caller round-tripping a whole
+    // settings object (`update(await get())`) would otherwise persist the booleans as real columns
+    // that then never change — the presence flags must stay a function of the ciphertext.
+    const { gitlab_token_set, gitlab_ssh_key_set, gitlab_webhook_secret_set, ...storable } = patch;
+    void gitlab_token_set, gitlab_ssh_key_set, gitlab_webhook_secret_set;
+    await SettingsModel.updateOne(
+      { key: KEY },
+      { $set: { key: KEY, ...storable } },
       { upsert: true },
     );
     return this.get();

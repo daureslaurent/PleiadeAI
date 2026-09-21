@@ -171,3 +171,90 @@ export const androidModule: PromptModule = {
     'android_file',
   ],
 };
+
+/**
+ * **GitLab** (`GITLAB_PLAN.md` §3).
+ *
+ * The only capability module here that carries a prompt block, and it needs one for a reason the
+ * others don't: the nine tools describe *what can be done*, and nothing in them says what should be.
+ * A model handed a token that can merge will merge — to its own branch, into main, without reading
+ * the diff — because every one of those is a legal call. The block is where the working practice
+ * lives: branch, don't push to the default; commit through the API when you are sure and clone when
+ * you need to run something; read the log before you retry; claim work by assigning the issue.
+ *
+ * It renders from `PromptContext.gitlab`, which `AgentRunner` fills from the settings it has already
+ * loaded — so the module still never fetches, and an instance with no GitLab configured renders
+ * nothing at all rather than teaching agents to reach for tools they don't have.
+ */
+export const gitlabModule: PromptModule = {
+  id: 'gitlab',
+  name: 'GitLab',
+  description: 'Projects, code, merge requests, issues-as-work-board, CI and wikis on the configured GitLab.',
+  group: 'capabilities',
+  tools: [
+    'gitlab_projects',
+    'gitlab_files',
+    'gitlab_commit',
+    'gitlab_repo',
+    'gitlab_mr',
+    'gitlab_issue',
+    'gitlab_ci',
+    'gitlab_search',
+    'gitlab_wiki',
+  ],
+  settingsKeys: ['gitlab_url', 'gitlab_group', 'gitlab_wake_issues', 'gitlab_wake_reviews'],
+  blocks: [
+    {
+      title: 'GitLab',
+      placement: 'system_tail',
+      order: 150,
+      render(ctx: PromptContext) {
+        const gl = ctx.gitlab;
+        if (!gl) return null;
+        const scope = gl.group
+          ? `You can reach the projects under the **${gl.group}** group.`
+          : 'You can reach every project the fleet account is a member of.';
+        return [
+          '## GitLab',
+          '',
+          `This fleet works on ${gl.url}. ${scope} You act as the shared fleet account, so anything ` +
+            'you do there is visible to the humans on those projects and attributed to your name.',
+          '',
+          '**Finding your way in.** `gitlab_search` (scope `projects`, or `blobs` to grep the real ' +
+            'source) turns a described task into a project path; `gitlab_projects({action:"get"})` ' +
+            'gives you its default branch, which you need before you branch off anything.',
+          '',
+          '**Changing code — two routes, and they are not interchangeable.** For an edit you are ' +
+            'certain of, `gitlab_commit({action:"create"})` writes several files as one commit ' +
+            'through the API: no clone, no container, nothing left behind if the turn dies. For ' +
+            'anything you need to *run* — install the dependencies, execute the tests, reproduce a ' +
+            'bug — `gitlab_repo({action:"clone"})` gives you a real checkout in your container and ' +
+            'ordinary `bash` git afterwards (`git commit`, `git push` are already authenticated). ' +
+            'Guessing that a change works is not the same as knowing, and a clone is how you know.',
+          '',
+          '**Never commit to the default branch.** Branch, commit there, then open a merge request ' +
+            'with `gitlab_mr({action:"create"})` and say in the description what changed and how you ' +
+            'checked it. You are technically permitted to push to main and to merge your own work; ' +
+            'the permission exists so that *approved* work can land without waiting for a human at ' +
+            'midnight, not so review can be skipped. Read `gitlab_mr({action:"diff"})` before you ' +
+            'approve or merge anything, including your own.',
+          '',
+          '**Issues are the work board.** `gitlab_issue({action:"list"})` with no project shows ' +
+            'everything open; with `assignee` it shows what is yours. Claim a piece of work by ' +
+            'assigning the issue to yourself and saying so in a comment, report anything that ' +
+            'changes your estimate as a comment, and when it is done close it with a comment stating ' +
+            'what you actually did and linking the merge request. An issue that is silently assigned ' +
+            'and never updated is worse than an unclaimed one — it looks handled.',
+          '',
+          '**A red pipeline gets read, not retried.** `gitlab_ci({action:"jobs", scope:"failed"})` ' +
+            'then `job_log` on the job that broke. Retrying without a change runs exactly the same ' +
+            'code and wastes a runner; the only honest reasons to retry are a runner timeout or a ' +
+            'lost connection, which the job\'s `failure_reason` tells you.',
+          '',
+          '**Documentation.** What belongs to a project goes in its wiki (`gitlab_wiki`), where its ' +
+            'maintainers will find it. What belongs to the fleet goes on the forum.',
+        ].join('\n');
+      },
+    },
+  ],
+};

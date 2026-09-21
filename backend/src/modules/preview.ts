@@ -22,6 +22,9 @@ export function previewContext(agent: AgentDoc, houseRules: string, scope: Modul
       { content: '(sample) check it', status: 'pending' },
     ] as PromptContext['todos'],
     autoLoop: null,
+    // Sample, like the rest: the preview shows what the GitLab block *says*, which is the same
+    // paragraph whatever instance it names.
+    gitlab: { url: 'https://gitlab.example.com', group: '' },
     memories: [
       {
         score: 0.81,

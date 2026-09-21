@@ -63,6 +63,7 @@ import {
 } from './domain/migration/maintenance-mode';
 import { ensureDirs as ensureBackupDirs, pruneArchives } from './domain/migration/storage';
 import { mailRouter, mailOauthCallbackRouter } from './transport/http/routes/mail.routes';
+import { gitlabRouter, gitlabWebhookRouter } from './transport/http/routes/gitlab.routes';
 import { scheduleUpdateCheck } from './host';
 import { settingsService } from './domain/settings/settings.service';
 import { telegramBot } from './telegram/TelegramBot';
@@ -193,6 +194,11 @@ async function main(): Promise<void> {
   // mounted openly (before the authed router grabs the prefix) and guarded by its signed state token.
   app.use('/api/mail/oauth/callback', mailOauthCallbackRouter);
   app.use('/api/mail', requireAuth, mailRouter);
+  // GitLab (`GITLAB_PLAN.md`). The webhook is an inbound POST from GitLab, which cannot carry a JWT:
+  // mounted ahead of the authenticated router and guarded by its own shared secret instead, exactly
+  // as the Gmail OAuth callback is guarded by a single-purpose state JWT.
+  app.use('/api/gitlab/webhook', gitlabWebhookRouter);
+  app.use('/api/gitlab', requireAuth, gitlabRouter);
 
   // After every route is mounted: catch async rejections and turn them into real status codes.
   // Without this an invalid body rejects its handler, the request hangs, and the caller gets a bare

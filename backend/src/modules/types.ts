@@ -41,6 +41,11 @@ export interface PromptContext {
   memories: RecalledMemory[];
   /** Forum pointers for this turn, or null when the module is off / the agent lacks the tool. */
   forum: ForumBlockInput | null;
+  /**
+   * The GitLab instance this fleet works on, or null when none is configured / the module is off.
+   * Two fields only: the block teaches practice, and practice does not change per project.
+   */
+  gitlab: { url: string; group: string } | null;
   images: ImagePromptState;
   /** Active `prompt` modes, already split by the placement each one declared. */
   modes: { system: string[]; user: string[] };

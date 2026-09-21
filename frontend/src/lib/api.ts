@@ -1031,6 +1031,7 @@ export type ToolCategory =
   | 'memory'
   | 'forum'
   | 'mail'
+  | 'gitlab'
   | 'desktop'
   | 'android'
   | 'automation'
@@ -1918,6 +1919,157 @@ export const mailApi = {
   remove: (id: string) => api.delete(`/mail/accounts/${id}`).then((r) => r.data),
   /** Start an OAuth link flow; navigate the browser to the returned Google consent URL. */
   oauthStart: () => api.post<{ url: string }>('/mail/oauth/start').then((r) => r.data),
+};
+
+/**
+ * **GitLab** (`GITLAB_PLAN.md`). Every call proxies through the backend, which holds the token — the
+ * browser never sees a credential, the same rule the inference endpoints follow.
+ */
+export interface GitLabConnectionInfo {
+  url: string;
+  group: string;
+  bot_username: string;
+  default_agent_id: string;
+  project_agents: { project: string; agent_id: string }[];
+  wake_issues: boolean;
+  wake_reviews: boolean;
+  git_transport: 'https' | 'ssh';
+  ssh_host: string;
+  ssh_port: number;
+  /** Presence flags — the values themselves never leave the backend. */
+  token_set: boolean;
+  ssh_key_set: boolean;
+  webhook_secret_set: boolean;
+}
+
+export interface GitLabProject {
+  id: number;
+  path: string;
+  name: string;
+  description: string | null;
+  default_branch: string;
+  visibility: string;
+  url: string;
+  last_activity: string;
+  archived: boolean;
+  topics: string[];
+  open_issues: number;
+  stars: number;
+  pipeline: GitLabPipeline | null;
+}
+
+export interface GitLabIssue {
+  iid: number;
+  project_id: number;
+  project: string;
+  title: string;
+  state: string;
+  author: string;
+  assignees: string[];
+  labels: string[];
+  milestone: string | null;
+  due_date: string | null;
+  url: string;
+  created_at: string;
+  updated_at: string;
+  comments: number;
+  description: string | null;
+}
+
+export interface GitLabMergeRequest {
+  iid: number;
+  project_id: number;
+  project: string;
+  title: string;
+  state: string;
+  draft: boolean;
+  source_branch: string;
+  target_branch: string;
+  author: string;
+  reviewers: string[];
+  labels: string[];
+  url: string;
+  merge_status: string;
+  has_conflicts: boolean;
+  pipeline: { status: string; id: number } | null;
+  updated_at: string;
+}
+
+export interface GitLabPipeline {
+  id: number;
+  iid: number;
+  status: string;
+  ref: string;
+  sha: string;
+  source: string;
+  url: string;
+  created_at: string;
+  updated_at: string;
+  duration: number | null;
+  project?: string;
+}
+
+export interface GitLabJob {
+  id: number;
+  name: string;
+  stage: string;
+  status: string;
+  duration: number | null;
+  url: string;
+  failure_reason: string | null;
+}
+
+/** One write the fleet made, stamped with the agent and the conversation it came out of. */
+export interface GitLabActivity {
+  _id: string;
+  agent_id: string;
+  agent_name: string;
+  session_id: string;
+  project: string;
+  action: string;
+  target: string;
+  title: string;
+  url: string;
+  at: string;
+}
+
+export interface GitLabTestResult {
+  ok: boolean;
+  error?: string;
+  user?: { username: string; name: string; id: number };
+  group?: string | null;
+  reachable_projects?: boolean;
+  suggested_bot_username?: string;
+}
+
+export const gitlabApi = {
+  connection: () => api.get<GitLabConnectionInfo>('/gitlab/connection').then((r) => r.data),
+  saveConnection: (patch: Partial<GitLabConnectionInfo> & { token?: string; ssh_key?: string; webhook_secret?: string }) =>
+    api.put('/gitlab/connection', patch).then((r) => r.data),
+  generateWebhookSecret: () =>
+    api.post<{ secret: string }>('/gitlab/webhook-secret').then((r) => r.data),
+  test: () => api.post<GitLabTestResult>('/gitlab/test').then((r) => r.data),
+  projects: (search?: string) =>
+    api.get<GitLabProject[]>('/gitlab/projects', { params: { search } }).then((r) => r.data),
+  issues: (state?: string) =>
+    api.get<GitLabIssue[]>('/gitlab/issues', { params: { state } }).then((r) => r.data),
+  mergeRequests: (state?: string) =>
+    api.get<GitLabMergeRequest[]>('/gitlab/merge-requests', { params: { state } }).then((r) => r.data),
+  pipelines: () => api.get<GitLabPipeline[]>('/gitlab/pipelines').then((r) => r.data),
+  /**
+   * `project` is the full path (`group/app`), encoded into one path segment — Express keeps a `%2F`
+   * as a single segment and hands it back decoded, which is exactly what GitLab's `:id` wants.
+   */
+  jobs: (project: string, pipelineId: number) =>
+    api
+      .get<GitLabJob[]>(`/gitlab/pipelines/${encodeURIComponent(project)}/${pipelineId}/jobs`)
+      .then((r) => r.data),
+  jobLog: (project: string, jobId: number) =>
+    api
+      .get<{ log: string; truncated: boolean }>(`/gitlab/jobs/${encodeURIComponent(project)}/${jobId}/log`)
+      .then((r) => r.data),
+  activity: (params: { project?: string; agent?: string; limit?: number } = {}) =>
+    api.get<GitLabActivity[]>('/gitlab/activity', { params }).then((r) => r.data),
 };
 
 /** One OpenAI-compatible inference endpoint with its autodiscovered model list. */

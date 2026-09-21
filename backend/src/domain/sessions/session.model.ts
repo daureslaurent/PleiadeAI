@@ -28,13 +28,13 @@ const SessionSchema = new Schema(
      * which is the whole point of reusing sessions for it: the operator can keep talking after the
      * agent's answer has gone back to the thread.
      *
-     * `cron`, `telegram` and `flow` mark a turn nobody typed in the Workspace — a scheduled run, a
+     * `cron`, `telegram`, `flow` and `gitlab` mark a turn nobody typed in the Workspace — a scheduled run, a
      * Telegram chat, a flow's agent node — kept as a conversation so the agent's list holds everything
      * it did, not just what the operator said to it here (`headless-turn.ts`).
      */
     origin: {
       type: String,
-      enum: ['user', 'synthetic', 'forum', 'cron', 'telegram', 'flow'],
+      enum: ['user', 'synthetic', 'forum', 'cron', 'telegram', 'flow', 'gitlab'],
       default: 'user',
       index: true,
     },

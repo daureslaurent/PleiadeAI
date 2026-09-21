@@ -36,6 +36,11 @@ import { runFlow } from './core/runFlow';
 import { forum } from './core/forum';
 import { forumAdmin } from './core/forumAdmin';
 import { listMail, readMail } from './core/mail';
+import { gitlabFiles, gitlabProjects } from './core/gitlab/projects';
+import { gitlabCommit, gitlabRepo } from './core/gitlab/code';
+import { gitlabIssue, gitlabMr } from './core/gitlab/review';
+import { gitlabCi } from './core/gitlab/ci';
+import { gitlabSearch, gitlabWiki } from './core/gitlab/knowledge';
 import { guide } from './core/guide';
 import { todoWrite } from './core/todo';
 import { loopDone } from './core/loopDone';
@@ -91,6 +96,35 @@ export const OBSERVATION_TOOL_NAMES = new Set<string>([
   'android_logcat',
 ]);
 
+/**
+ * The GitLab toolset (`GITLAB_PLAN.md` §0). Auto-added by `AgentRunner` to every top-level agent when
+ * the instance has a GitLab connection — the operator chose fleet-wide reach, so this is a property
+ * of the *instance being configured*, not of each agent's `tools_allowed`. The module switch and the
+ * per-tool kill-switch in `resolveTools` still apply.
+ */
+export const GITLAB_TOOL_NAMES = [
+  'gitlab_projects',
+  'gitlab_files',
+  'gitlab_commit',
+  'gitlab_repo',
+  'gitlab_mr',
+  'gitlab_issue',
+  'gitlab_ci',
+  'gitlab_search',
+  'gitlab_wiki',
+] as const;
+
+/**
+ * The read-only subset a `task` subagent may hold. A child is handed one narrow job and its report
+ * is thrown away with its context; letting it merge things is a permission its parent never asked
+ * for, while letting it *read* the code is most of why you would spawn one.
+ */
+export const GITLAB_READONLY_TOOL_NAMES = [
+  'gitlab_projects',
+  'gitlab_files',
+  'gitlab_search',
+] as const;
+
 /** Static core tools every agent implicitly gets, keyed by name. */
 const CORE_TOOLS: Record<string, Tool> = {
   [setAgentParameter.name]: setAgentParameter,
@@ -140,6 +174,18 @@ const CORE_TOOLS: Record<string, Tool> = {
   // Read-only Gmail (opt-in via tools_allowed + a per-agent mailbox grant on the Agents page).
   [listMail.name]: listMail,
   [readMail.name]: readMail,
+  // GitLab (`GITLAB_PLAN.md`): one bot account, the whole project surface. Auto-granted to every
+  // top-level agent once a connection is configured (see AgentRunner) — the operator asked for the
+  // fleet to have it, not for it to be ticked agent by agent.
+  [gitlabProjects.name]: gitlabProjects,
+  [gitlabFiles.name]: gitlabFiles,
+  [gitlabCommit.name]: gitlabCommit,
+  [gitlabRepo.name]: gitlabRepo,
+  [gitlabMr.name]: gitlabMr,
+  [gitlabIssue.name]: gitlabIssue,
+  [gitlabCi.name]: gitlabCi,
+  [gitlabSearch.name]: gitlabSearch,
+  [gitlabWiki.name]: gitlabWiki,
   // Session resource pool (list/save/store) — auto-granted to every agent (see AgentRunner).
   [data.name]: data,
   // Man-style tool/workflow guides — auto-granted to every agent (see AgentRunner).
@@ -254,6 +300,7 @@ export const TOOL_CATEGORIES = [
   'memory',
   'forum',
   'mail',
+  'gitlab',
   'desktop',
   'android',
   'automation',
@@ -293,6 +340,15 @@ const CATEGORY_BY_TOOL: Record<string, ToolCategory> = {
   forum_admin: 'forum',
   list_mail: 'mail',
   read_mail: 'mail',
+  gitlab_projects: 'gitlab',
+  gitlab_files: 'gitlab',
+  gitlab_commit: 'gitlab',
+  gitlab_repo: 'gitlab',
+  gitlab_mr: 'gitlab',
+  gitlab_issue: 'gitlab',
+  gitlab_ci: 'gitlab',
+  gitlab_search: 'gitlab',
+  gitlab_wiki: 'gitlab',
   visual_screenshot: 'desktop',
   visual_act: 'desktop',
   visual_click: 'desktop',

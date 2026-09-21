@@ -37,6 +37,7 @@ const CATEGORY_LABELS: Record<ToolCategory, string> = {
   memory: 'Memory',
   forum: 'Forum',
   mail: 'Mail',
+  gitlab: 'GitLab',
   desktop: 'Desktop',
   android: 'Android',
   automation: 'Automation',

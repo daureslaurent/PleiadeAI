@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
+import { Bot, Box, Bug, Clapperboard, Cpu, Database, Gauge, GitBranch, LogOut, MessageSquareText, MessagesSquare, Mic, MonitorDot, Package, Paperclip, PanelLeftClose, PanelLeftOpen, Settings2, Sparkles, Users, Workflow, Wrench } from 'lucide-react';
 import { PleiadesMark } from './PleiadesMark';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { useAuth } from '../store/auth';
@@ -39,6 +39,9 @@ const NAV_GROUPS: NavGroup[] = [
       // The agents' shared forum: a durable, cross-agent knowledge base and coordination space,
       // readable by the operator (FORUM_PLAN.md).
       { to: '/forum', label: 'Forum', icon: MessageSquareText },
+      // Where the fleet's work on the configured GitLab shows up: projects, what each agent did,
+      // the issues they are working and whether the pipelines are green (`GITLAB_PLAN.md` §6).
+      { to: '/gitlab', label: 'GitLab', icon: GitBranch },
       { to: '/files', label: 'Files', icon: Paperclip },
     ],
   },

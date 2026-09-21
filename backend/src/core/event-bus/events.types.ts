@@ -594,9 +594,10 @@ export interface ConversationSessionCreatedPayload {
   /**
    * Which kind of machine-driven session this is, so the Workspace can draw the right icon without
    * refetching the list. `synthetic` — the Conversation Generator; `forum` — a mention run
-   * (`FORUM_PLAN.md` §11.3). Absent means synthetic, which is all this event carried before.
+   * (`FORUM_PLAN.md` §11.3); `gitlab` — an agent woken by a GitLab webhook (`GITLAB_PLAN.md` §5).
+   * Absent means synthetic, which is all this event carried before.
    */
-  origin?: 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow';
+  origin?: 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'gitlab';
 }
 
 /**

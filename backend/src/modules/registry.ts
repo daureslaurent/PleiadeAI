@@ -5,6 +5,7 @@ import {
   desktopModule,
   filesModule,
   flowsModule,
+  gitlabModule,
   mailModule,
   shellModule,
   visualsModule,
@@ -51,6 +52,7 @@ export const MODULES: PromptModule[] = [
   flowsModule,
   automationModule,
   mailModule,
+  gitlabModule,
   desktopModule,
   androidModule,
 ];

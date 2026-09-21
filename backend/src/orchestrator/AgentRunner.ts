@@ -19,7 +19,14 @@ import { resolveInference, resolveFallbacks, type ResolvedInference } from '../i
 import { runWithCaptureContext } from '../inference/capture-context';
 import { ReasoningParser } from './streaming/ReasoningParser';
 import { parseFallbackToolCalls, detectNarratedTools } from './streaming/ToolCallFallbackParser';
-import { resolveTools, ANDROID_TOOL_NAMES, OBSERVATION_TOOL_NAMES, VISUAL_TOOL_NAMES } from '../tools/registry';
+import {
+  resolveTools,
+  ANDROID_TOOL_NAMES,
+  GITLAB_READONLY_TOOL_NAMES,
+  GITLAB_TOOL_NAMES,
+  OBSERVATION_TOOL_NAMES,
+  VISUAL_TOOL_NAMES,
+} from '../tools/registry';
 import { annuaire } from '../tools/core/annuaire';
 import { askAgent } from '../tools/core/askAgent';
 import { analyzeImage } from '../tools/core/analyzeImage';
@@ -344,6 +351,12 @@ export class AgentRunner {
     const inference = await resolveInference(agent, picked.on, picked.off, input.inference);
     const fallbacks = await resolveFallbacks(inference.url);
 
+    // The settings singleton, loaded once for the whole turn. It is read here rather than further
+    // down because the toolset depends on it too: whether this instance has a GitLab connection
+    // decides whether the fleet-wide GitLab tools are granted below, and re-reading the document a
+    // second time for the module switches would query Mongo twice for one turn.
+    const settings = await settingsService.get();
+
     // Resolve the agent's isolation profile (if any) up front: its image's `visual` flag decides
     // whether we auto-grant the visual-desktop tools below, and the profile drives container boot.
     const iso = agent.isolation_id ? await isolationRepository.findById(agent.isolation_id) : null;
@@ -355,6 +368,15 @@ export class AgentRunner {
     // trigger here is the link rather than the image: one Android image backs any number of agents
     // pointed at different phones, which is exactly the case the `visual` flag can't express.
     const androidTools = agent.android_device_id ? [...ANDROID_TOOL_NAMES] : [];
+    // GitLab (`GITLAB_PLAN.md` §0). The operator's choice was fleet-wide reach, so the trigger is the
+    // *instance* being connected rather than each agent's `tools_allowed` — the same reasoning that
+    // auto-grants `annuaire`/`ask_agent` below. A `task` child gets the read-only subset: it was
+    // handed one narrow job and its context is thrown away afterwards, so letting it merge is a
+    // permission nobody asked for, while letting it read the code is most of why it was spawned.
+    // The module switch and the per-tool kill-switch in `resolveTools` still decide the rest.
+    const gitlabTools = settings.gitlab_url.trim() && settings.gitlab_token_set
+      ? [...(input.task ? GITLAB_READONLY_TOOL_NAMES : GITLAB_TOOL_NAMES)]
+      : [];
     // `analyze_image` exists so a *text-only* agent can still read an image: it routes the pixels
     // through the separate Vision endpoint and hands back a description. An agent whose own model is
     // multimodal has no use for it — every image in its scope is fed to it as raw pixels (this turn's
@@ -381,7 +403,7 @@ export class AgentRunner {
     // A `task` child is never an orchestrator, whatever its agent is: it was handed one job.
     const isTask = !!input.task;
     const orchestrationTools = agent.subagent || isTask
-      ? [...agent.tools_allowed, ...visualTools, ...androidTools, ...imageTools]
+      ? [...agent.tools_allowed, ...visualTools, ...androidTools, ...imageTools, ...gitlabTools]
       : [
           ...agent.tools_allowed,
           annuaire.name,
@@ -389,6 +411,7 @@ export class AgentRunner {
           ...visualTools,
           ...androidTools,
           ...imageTools,
+          ...gitlabTools,
         ];
     // An agent that can write memory must be able to retire one: without `forget`, a memory that
     // turns out to be wrong is recalled forever alongside its own correction, and the model is handed
@@ -442,12 +465,11 @@ export class AgentRunner {
     // the row and make the live breakdown disagree with the one fetched from a capture.
     const wireTools = toWireTools(toolSchemas);
 
-    // Which modules are live (`MODULES_PLAN.md` §7). Read per turn, from the same settings document
-    // the rest of this block already needs, so a switch on Settings → Modules binds every agent on
+    // Which modules are live (`MODULES_PLAN.md` §7). Read per turn, from the settings document the
+    // toolset resolution above already loaded, so a switch on Settings → Modules binds every agent on
     // its next turn without a restart. Everything below is gated on it *before* the query runs: a
     // module that is off costs no embedding, no Qdrant round-trip and no forum find, which is the
     // saving that matters — the tokens are the smaller half.
-    const settings = await settingsService.get();
     const mods = moduleStateFrom(settings as unknown as Record<string, unknown>);
 
     // Auto-RAG: pull the most relevant memories for this query and inject them as a block ahead of
@@ -537,6 +559,12 @@ export class AgentRunner {
       todos,
       autoLoop: input.autoLoop ?? null,
       memories: recalled,
+      // Two fields, from settings already in hand: the block teaches working practice, and practice
+      // does not vary per project. Null when nothing is connected, so an unconfigured instance
+      // renders no GitLab section at all rather than advertising tools its agents don't hold.
+      gitlab: settings.gitlab_url.trim() && settings.gitlab_token_set
+        ? { url: settings.gitlab_url.trim(), group: settings.gitlab_group.trim() }
+        : null,
       forum: hasForum
         ? {
             related: forumRelated,

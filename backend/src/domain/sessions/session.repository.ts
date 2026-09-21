@@ -14,7 +14,15 @@ function deriveTitle(text: string): string {
  * — matched as `user`. Mention runs ride along with `user`: the operator started them deliberately
  * and will want to continue them, which is not true of a generated interview.
  */
-export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'all';
+export type SessionOrigin =
+  | 'user'
+  | 'synthetic'
+  | 'forum'
+  | 'cron'
+  | 'telegram'
+  | 'flow'
+  | 'gitlab'
+  | 'all';
 
 function originFilter(agentId: string | Types.ObjectId, origin: SessionOrigin): Record<string, unknown> {
   const filter: Record<string, unknown> = { agent_id: agentId };
