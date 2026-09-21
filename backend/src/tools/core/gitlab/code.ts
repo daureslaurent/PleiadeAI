@@ -82,7 +82,7 @@ export const gitlabCommit: Tool = {
   async execute(args, ctx) {
     return guard(async () => {
       const action = String(args.action ?? '');
-      const { conn, id, path } = await project(args);
+      const { conn, id, path } = await project(args, ctx);
       log.info({ agent: ctx.agentName, action, project: path }, 'gitlab_commit');
 
       switch (action) {
@@ -268,7 +268,7 @@ export const gitlabRepo: Tool = {
           return credentialStatus(ctx.exec);
 
         case 'clone': {
-          const { conn, id, path } = await project(args);
+          const { conn, id, path } = await project(args, ctx);
           // Resolve the project first: it validates the group scope, confirms the bot can see the
           // repo, and gives us the default branch — three failures that are far cheaper here than as
           // a git exit code the agent has to interpret.

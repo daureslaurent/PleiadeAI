@@ -7,6 +7,7 @@ import { agentContainerRouter } from './agent-container.routes';
 import { suggestAgentIdentity } from '../../../domain/agents/identity-suggester';
 import { createLogger } from '../../../config/logger';
 import { invalidateRoster } from '../../../domain/forum/forum-mention.service';
+import { gitlabProvision } from '../../../domain/gitlab/gitlab-provision.service';
 
 const log = createLogger('agents-routes');
 
@@ -112,6 +113,16 @@ agentsRouter.patch('/:id', async (req, res) => {
     return;
   }
 
+  // A renamed agent keeps its GitLab account, renamed to match (`GITLAB_PLAN.md` §11). GitLab leaves
+  // a redirect behind, so nothing breaks in the meantime; what would break is recognition — the
+  // webhook router resolves an assignee to an agent, and the two names have to stay the same name.
+  // Best-effort and detached: a GitLab hiccup must not fail the save the operator just made.
+  if (typeof body.name === 'string' && before && before.name !== agent.name) {
+    void gitlabProvision
+      .rename(String(agent._id), agent.name)
+      .catch((err) => log.warn({ id: String(agent._id), err: String(err) }, 'gitlab rename failed'));
+  }
+
   const isolationChanged =
     ('isolation_id' in body && String(before?.isolation_id ?? '') !== String(agent.isolation_id ?? '')) ||
     ('isolation_volume_mode' in body && before?.isolation_volume_mode !== agent.isolation_volume_mode);
@@ -186,6 +197,13 @@ agentsRouter.delete('/:id', async (req, res) => {
     });
     return;
   }
+
+  // Before the row goes: `retire` reads the agent's stored identity, which is about to be deleted.
+  // What it does — block by default, delete only if the operator chose that — is decided by
+  // `gitlab_on_agent_delete` (`GITLAB_PLAN.md` §11).
+  await gitlabProvision
+    .retire(req.params.id)
+    .catch((err) => log.warn({ id: req.params.id, err: String(err) }, 'gitlab retire on delete failed'));
 
   const agent = await agentRepository.delete(req.params.id);
   invalidateRoster();

@@ -1,7 +1,6 @@
 import { createLogger } from '../../../config/logger';
 import {
   GitLabError,
-  connection,
   request,
   scopedPath,
   seg,
@@ -13,6 +12,7 @@ import {
 import {
   PROJECT_PARAM,
   actionParam,
+  agentConnection,
   clip,
   guard,
   logWrite,
@@ -67,8 +67,8 @@ export const gitlabSearch: Tool = {
       if (!query) throw new GitLabError('`query` is required');
       const limit = Math.min(100, Math.max(1, Number(args.limit) || 20));
       const hasProject = !!String(args.project ?? '').trim();
-      const scopeRef = hasProject ? await project(args) : null;
-      const conn = scopeRef?.conn ?? (await connection());
+      const scopeRef = hasProject ? await project(args, ctx) : null;
+      const conn = scopeRef?.conn ?? (await agentConnection(ctx));
       const path = scopeRef ? `projects/${scopeRef.id}/search` : scopedPath(conn, 'search', 'search');
       log.info({ agent: ctx.agentName, scope, query, project: args.project }, 'gitlab_search');
 
@@ -144,7 +144,7 @@ export const gitlabWiki: Tool = {
   async execute(args, ctx) {
     return guard(async () => {
       const action = String(args.action ?? '');
-      const { conn, id, path } = await project(args);
+      const { conn, id, path } = await project(args, ctx);
       const slug = String(args.slug ?? '').trim();
       log.info({ agent: ctx.agentName, action, project: path, slug }, 'gitlab_wiki');
 

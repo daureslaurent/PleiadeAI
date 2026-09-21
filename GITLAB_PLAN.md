@@ -275,6 +275,68 @@ toolset for this run, not a firmer sentence. Worth revisiting once you have watc
 A project with nothing in any of the four buckets gets a brief that says so and tells the agent to
 answer in one line rather than go hunting for work to invent.
 
+## 11. One GitLab account per agent
+
+The fleet started as a single bot account. That was the right first move and became the wrong one
+for three reasons, none of which a shared account can fix:
+
+1. `git log` could not say **which agent** wrote a commit — every one of them was `pleiades-bot`.
+2. "This agent may propose, that one may merge" was **unexpressible**. Permissions attach to
+   accounts, and there was one.
+3. The webhook router had to read an agent's name **out of prose**, because there was no assignee
+   field that could name one.
+
+So agents get real GitLab users, created by a **second, provisioning-only admin token**
+(`gitlab_admin_token_enc`). Four admin calls do it: `POST /users` (with `skip_confirmation`, without
+which the account sits unconfirmed and its token is refused — the likeliest way for this to *look*
+broken), `POST /users/:id/personal_access_tokens`, `POST /groups/:id/members` at
+`gitlab_member_access_level` (30 = Developer), and `PUT/DELETE /users/:id` for the lifecycle.
+
+**The admin token never leaves `gitlab-provision.service.ts`.** It is read there, used there, and
+never placed in a `GitLabConnection` a tool could hold. What a tool gets is the agent's *own* token,
+which can do exactly what that agent's GitLab account can do — so the blast radius of a confused
+agent is now its own membership rather than the whole fleet's.
+
+**`connectionFor(agentId)` is the single seam.** Everything above it — `request`, `projectPath`, all
+nine tools — is unchanged and unaware; the tools just pass their `ctx`. An agent with an identity
+calls as itself; one without falls back to the fleet account. That fallback is load-bearing:
+provisioning is best-effort and **never fails a tool call**, so no admin token, a switched-off
+`gitlab_auto_provision`, or a GitLab refusal degrades *attribution* and nothing else. The explicit
+`POST /api/gitlab/identities/:agentId` is the path that does report its failure, which is why the
+settings page has a Provision button at all — silent fallback otherwise leaves no way to ask why.
+
+**Concurrency and renewal.** A batch of parallel-safe calls from one turn all reach `connectionFor`
+at once, so provisioning is shared through an in-flight promise per agent — otherwise one turn
+creates four users. GitLab forces an expiry on a PAT (capped at a year), so tokens are minted for
+350 days and re-minted inside 30 days of lapsing; an expired identity would otherwise 401 in a way
+indistinguishable from a revoked fleet token.
+
+**Git in the container follows automatically.** `ensureGitCredentials` already takes the connection,
+so the agent's own token lands in `~/.git-credentials`, and `user.name` is set to the agent's GitLab
+username — the commit author and the pushing account are the same person, so GitLab links the commit
+to the account instead of showing an unmatched author. The stamp file now fingerprints the
+credential, so a container re-provisions when an agent gains an identity or its token is renewed;
+without that it would keep pushing with a stale credential and fail at `git push`, long after the
+cause.
+
+**Lifecycle.** A rename here renames the GitLab user (GitLab leaves a redirect, so nothing breaks in
+the meantime; what would break is recognition — the router matches an assignee to an agent, and the
+two names must stay the same name). A delete here **blocks** the user by default
+(`gitlab_on_agent_delete`), because deleting reassigns everything the account ever did to GitLab's
+ghost user — which destroys precisely the attribution this whole section exists to create. `delete`
+and `nothing` are offered; the operator picked both block and delete, so it became a setting.
+
+**Routing got better for free.** The webhook router now resolves an assignee by `gitlab_username`
+first and the agent's own name second, so "assigned to `scout`" is a field GitLab filled in rather
+than a name parsed out of a sentence. The self-post guard was widened at the same time: a comment
+written by *any* provisioned agent no longer wakes anybody, or giving agents their own accounts
+would have quietly re-opened the reply loop that guard was written to close.
+
+**Migration.** `SECRET_FIELDS` gained `settings` and `agents` entries — a gap left by the first
+GitLab commit, where the fleet token, webhook secret and SSH key were **not** re-wrapped and would
+have arrived on a moved instance as ciphertext under a key that no longer existed. That is exactly
+the silent failure `secrets.ts` exists to prevent: the rows look present and every call fails.
+
 ## 8. Security notes
 
 - The token is `select: false`, `_enc$`-suffixed (so `redact.ts` scrubs it), decrypted only in the

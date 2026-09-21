@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, Loader2, Plus, RefreshCcw, Trash2, X } from 'lucide-react';
+import { Check, Copy, Loader2, Plus, RefreshCcw, Trash2, UserPlus, X } from 'lucide-react';
 import {
   agentsApi,
   gitlabApi,
   type Agent,
   type GitLabConnectionInfo,
+  type GitLabIdentities,
   type GitLabTestResult,
 } from '../../../lib/api';
 import { Button, Callout, Checkbox, Field, Hint, Input, Row, Select } from '../../../components/ui';
@@ -26,6 +27,7 @@ export function GitLabConnection() {
   const [form, setForm] = useState<GitLabConnectionInfo | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [token, setToken] = useState('');
+  const [adminToken, setAdminToken] = useState('');
   const [sshKey, setSshKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -54,9 +56,11 @@ export function GitLabConnection() {
         // Sent only when typed: an untouched field must leave the stored secret alone, which is what
         // lets the form render "configured" without ever having held the value.
         ...(token ? { token } : {}),
+        ...(adminToken ? { admin_token: adminToken } : {}),
         ...(sshKey ? { ssh_key: sshKey } : {}),
       });
       setToken('');
+      setAdminToken('');
       setSshKey('');
       setForm(await gitlabApi.connection());
       setSaved(true);
@@ -166,6 +170,75 @@ export function GitLabConnection() {
             onChange={(e) => set('stale_days', Math.max(1, Number(e.target.value) || 3))}
           />
         </Field>
+      </div>
+
+      <div className="space-y-3 border-t hairline pt-4">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
+          One GitLab account per agent
+        </div>
+        <Hint>
+          Without this, every agent acts as the one bot account above:{' '}
+          <span className="font-mono">git log</span> cannot say which agent wrote a commit, and “this
+          one may propose, that one may merge” is unexpressible, because permissions attach to
+          accounts and there is one. With an admin token here, each agent gets a real GitLab user,
+          its own access token, and membership in your group — after which its access level in GitLab
+          is the permission model.
+        </Hint>
+        <Field
+          label={
+            form.admin_token_set
+              ? 'Provisioning admin token (configured — type to replace)'
+              : 'Provisioning admin token'
+          }
+          hint="An admin PAT with the api scope. Used ONLY to create users, mint their tokens and set group membership — never handed to a tool, so no agent call carries admin rights. Safe to delete once the fleet is provisioned."
+        >
+          <Input
+            type="password"
+            value={adminToken}
+            onChange={(e) => setAdminToken(e.target.value)}
+            placeholder={form.admin_token_set ? '••••••••••••••••' : 'glpat-… (admin)'}
+          />
+        </Field>
+        <Checkbox checked={form.auto_provision} onChange={(v) => set('auto_provision', v)}>
+          Give an agent its own account the first time it touches GitLab
+        </Checkbox>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Access level in the group" hint="Adjust individuals in GitLab afterwards.">
+            <Select
+              value={String(form.member_access_level)}
+              onChange={(e) => set('member_access_level', Number(e.target.value))}
+            >
+              <option value="10">Guest</option>
+              <option value="20">Reporter — read and comment only</option>
+              <option value="30">Developer — branch, commit, open MRs</option>
+              <option value="40">Maintainer — can merge protected branches</option>
+            </Select>
+          </Field>
+          <Field
+            label="When an agent is deleted here"
+            hint="Blocking keeps its commits and comments attributed; deleting hands them to GitLab's ghost user."
+          >
+            <Select
+              value={form.on_agent_delete}
+              onChange={(e) => set('on_agent_delete', e.target.value as 'block' | 'delete' | 'nothing')}
+            >
+              <option value="block">Block its GitLab user (recommended)</option>
+              <option value="delete">Delete its GitLab user</option>
+              <option value="nothing">Leave GitLab alone</option>
+            </Select>
+          </Field>
+        </div>
+        <Field
+          label="Email domain for created users"
+          hint="GitLab requires an address on every account, even one nobody reads. Empty uses the instance host."
+        >
+          <Input
+            value={form.user_email_domain}
+            onChange={(e) => set('user_email_domain', e.target.value)}
+            placeholder={form.url ? form.url.replace(/^https?:\/\//, '') : 'git.example.com'}
+          />
+        </Field>
+        <GitLabIdentitiesList agents={agents} adminReady={form.admin_token_set} />
       </div>
 
       <div className="space-y-3 border-t hairline pt-4">
@@ -359,6 +432,85 @@ export function GitLabConnection() {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Which agents have their own GitLab account, and a button for the ones that don't.
+ *
+ * The button exists because ordinary provisioning is deliberately silent — it falls back to the
+ * fleet account rather than failing a tool call — so without an explicit path the operator would
+ * have no way to find out *why* an agent never got an account.
+ */
+function GitLabIdentitiesList({ agents, adminReady }: { agents: Agent[]; adminReady: boolean }) {
+  const [data, setData] = useState<GitLabIdentities | null>(null);
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+
+  const load = () => {
+    void gitlabApi
+      .identities()
+      .then(setData)
+      .catch(() => setData(null));
+  };
+  useEffect(load, []);
+
+  const provision = async (agentId: string) => {
+    setBusy(agentId);
+    setErr('');
+    try {
+      await gitlabApi.provision(agentId);
+      load();
+    } catch (e: any) {
+      setErr(e?.response?.data?.error ?? 'could not provision this agent');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  if (!data) return null;
+  const byAgent = new Map(data.identities.map((i) => [i.agentId, i]));
+  const top = agents.filter((a) => !a.subagent);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-slate-500">Identities</div>
+      {!adminReady && (
+        <Hint>No admin token yet — every agent acts as the shared bot account.</Hint>
+      )}
+      {err && <Callout tone="error">{err}</Callout>}
+      {top.map((a) => {
+        const identity = byAgent.get(a._id);
+        return (
+          <Row key={a._id} className="flex items-center gap-2 px-3 py-1.5">
+            <span className="min-w-0 flex-1 truncate text-xs text-slate-300">{a.name}</span>
+            {identity ? (
+              <>
+                <span className="shrink-0 font-mono text-[11px] text-emerald-400">@{identity.username}</span>
+                {identity.expiresAt && (
+                  <span className="shrink-0 text-[10px] text-slate-600">
+                    token to {new Date(identity.expiresAt).toLocaleDateString()}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="shrink-0 text-[10px] text-slate-600">shared bot account</span>
+                <Button
+                  variant="ghost"
+                  loading={busy === a._id}
+                  disabled={!adminReady}
+                  icon={<UserPlus size={11} />}
+                  onClick={() => void provision(a._id)}
+                >
+                  Provision
+                </Button>
+              </>
+            )}
+          </Row>
+        );
+      })}
     </div>
   );
 }

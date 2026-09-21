@@ -1,8 +1,8 @@
 import { createLogger } from '../../../config/logger';
 import {
   GitLabError,
-  connection,
   request,
+  type GitLabConnection,
   scopedPath,
   slimIssue,
   slimMergeRequest,
@@ -10,6 +10,7 @@ import {
 import {
   PROJECT_PARAM,
   actionParam,
+  agentConnection,
   clip,
   guard,
   logWrite,
@@ -82,8 +83,8 @@ export const gitlabIssue: Tool = {
         const hasProject = !!String(args.project ?? '').trim();
         // Resolved once: `project()` validates the group scope *and* opens the connection, and doing
         // it twice would cost two settings reads to answer one question.
-        const scopeRef = hasProject ? await project(args) : null;
-        const conn = scopeRef?.conn ?? (await connection());
+        const scopeRef = hasProject ? await project(args, ctx) : null;
+        const conn = scopeRef?.conn ?? (await agentConnection(ctx));
         const path = scopeRef ? `projects/${scopeRef.id}/issues` : scopedPath(conn, 'issues', 'issues');
         const rows = await request<Record<string, any>[]>(path, {
           conn,
@@ -100,7 +101,7 @@ export const gitlabIssue: Tool = {
         return { count: rows.length, issues: rows.map(slimIssue) };
       }
 
-      const { conn, id, path } = await project(args);
+      const { conn, id, path } = await project(args, ctx);
       const needsIid = ['get', 'update', 'comment', 'close', 'reopen'];
       if (needsIid.includes(action) && !Number.isFinite(iid)) {
         throw new GitLabError('`iid` is required — the issue number within its project');
@@ -251,8 +252,8 @@ export const gitlabMr: Tool = {
 
       if (action === 'list') {
         const hasProject = !!String(args.project ?? '').trim();
-        const scopeRef = hasProject ? await project(args) : null;
-        const conn = scopeRef?.conn ?? (await connection());
+        const scopeRef = hasProject ? await project(args, ctx) : null;
+        const conn = scopeRef?.conn ?? (await agentConnection(ctx));
         const path = scopeRef
           ? `projects/${scopeRef.id}/merge_requests`
           : scopedPath(conn, 'merge_requests', 'merge_requests');
@@ -271,7 +272,7 @@ export const gitlabMr: Tool = {
         return { count: rows.length, merge_requests: rows.map(slimMergeRequest) };
       }
 
-      const { conn, id, path } = await project(args);
+      const { conn, id, path } = await project(args, ctx);
       const needsIid = ['get', 'update', 'diff', 'discussions', 'comment', 'approve', 'merge', 'close'];
       if (needsIid.includes(action) && !Number.isFinite(iid)) {
         throw new GitLabError('`iid` is required — the merge request number within its project');
@@ -467,7 +468,7 @@ export const gitlabMr: Tool = {
  */
 async function resolveAssignees(
   username: unknown,
-  conn: Awaited<ReturnType<typeof connection>>,
+  conn: GitLabConnection,
 ): Promise<number[] | undefined> {
   if (username === undefined) return undefined;
   const name = String(username ?? '').trim().replace(/^@/, '');

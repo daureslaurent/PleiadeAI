@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { createLogger } from '../../config/logger';
 import type { AgentExecutor } from '../../isolation/AgentContainerManager';
 import { settingsService } from '../settings/settings.service';
@@ -52,13 +53,22 @@ export async function ensureGitCredentials(
   const settings = await settingsService.get();
   const transport = settings.gitlab_git_transport;
   const host = hostOf(conn.url);
-  const stamp = `${STAMP}-${transport}`;
+  // The stamp names the transport *and* fingerprints the credential, so a container re-provisions
+  // when either changes. Without the fingerprint, an agent that has just been given its own GitLab
+  // identity — or whose token was renewed before expiry — keeps pushing with the stale credential
+  // baked into its container, and the failure surfaces at `git push`, long after the cause.
+  const fingerprint = crypto.createHash('sha256').update(conn.token).digest('hex').slice(0, 12);
+  const stamp = `${STAMP}-${transport}-${fingerprint}`;
 
+  // When the agent has its own GitLab account, git is configured as *that* account — so the commit
+  // author GitLab sees and the user the push authenticates as are the same person, and GitLab links
+  // the commit to the account instead of showing an unmatched author.
+  const gitUser = conn.actingAs || agentName;
   const identity =
-    `git config --global user.name ${shellQuote(agentName)} && ` +
+    `git config --global user.name ${shellQuote(gitUser)} && ` +
     // A commit needs *an* address; it is never read, so it names the instance rather than inventing
     // a person. The agent's own name is already on the commit, which is the part that matters.
-    `git config --global user.email ${shellQuote(`${agentName.toLowerCase().replace(/\s+/g, '-')}@${host}`)} && ` +
+    `git config --global user.email ${shellQuote(`${gitUser.toLowerCase().replace(/\s+/g, '-')}@${host}`)} && ` +
     'git config --global init.defaultBranch main && ' +
     // Without this, a `git pull` on a diverged branch stops to ask which strategy to use — and
     // nobody is there to answer.
@@ -101,7 +111,8 @@ export async function ensureGitCredentials(
       'cat > "$HOME/.git-credentials" && chmod 600 "$HOME/.git-credentials" && ' +
       'git config --global credential.helper store && ' +
       `${identity} && touch ${stamp}`;
-    // `oauth2:<token>@host` is GitLab's documented HTTPS form for a personal access token.
+    // `oauth2:<token>@host` is GitLab's documented HTTPS form for a personal access token — the
+    // agent's own when it has an identity, the fleet account's otherwise.
     const line = `https://oauth2:${encodeURIComponent(conn.token)}@${host}\n`;
     const res = await exec.run(provision, { timeoutMs: 30_000, stdin: line });
     if (res.exitCode !== 0) {

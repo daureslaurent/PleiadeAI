@@ -59,10 +59,18 @@ async function route(
   const settings = await settingsService.get();
   const agents = await agentRepository.list();
   const byName = new Map(agents.map((a) => [a.name.toLowerCase(), a]));
+  // Agents that have their own GitLab account are resolvable by that account's username, which is
+  // the whole point of provisioning them (`GITLAB_PLAN.md` §11): "assigned to `scout`" stops being
+  // a name read out of prose and becomes an assignee field GitLab filled in itself.
+  const byGitlabUser = new Map(
+    agents.filter((a) => a.gitlab_username).map((a) => [a.gitlab_username!.toLowerCase(), a]),
+  );
 
-  // 1. Named in the text, or assigned under an agent's own name.
-  for (const name of [...mentionedNames(body), ...assignedUsernames.map((u) => u.toLowerCase())]) {
-    const hit = byName.get(name);
+  // 1. Named in the text, or assigned to an agent — by its GitLab username first, since that is the
+  //    identity GitLab actually recorded, then by the agent's own name for an unprovisioned fleet.
+  for (const raw of [...assignedUsernames, ...mentionedNames(body)]) {
+    const name = raw.toLowerCase();
+    const hit = byGitlabUser.get(name) ?? byName.get(name);
     if (hit) return { agentId: String(hit._id), agentName: hit.name };
   }
 
@@ -131,10 +139,17 @@ export async function decide(payload: Record<string, any>): Promise<WakeDecision
     const body = String(attrs.note ?? '');
     const names = mentionedNames(body);
     if (!names.length) return null;
-    // A comment the bot account wrote itself, naming somebody, would otherwise wake that agent —
-    // and its reply would name the first one back. That is the loop, and this is where it stops.
-    if (bot && String(payload?.user?.username ?? '').toLowerCase() === bot) {
-      log.debug({ project }, 'ignoring a note written by the fleet account itself');
+    // A comment one of *our own* accounts wrote, naming somebody, would otherwise wake that agent —
+    // and its reply would name the first one back. That is the loop, and this is where it stops. It
+    // has to cover every provisioned agent, not just the fleet bot, or giving agents their own
+    // accounts would quietly re-open the loop the check was written to close.
+    const writer = String(payload?.user?.username ?? '').toLowerCase();
+    const ours = await agentRepository.list();
+    if (
+      (bot && writer === bot) ||
+      ours.some((a) => a.gitlab_username && a.gitlab_username.toLowerCase() === writer)
+    ) {
+      log.debug({ project, writer }, 'ignoring a note written by one of our own GitLab accounts');
       return null;
     }
     const routed = await route(project, body, []);

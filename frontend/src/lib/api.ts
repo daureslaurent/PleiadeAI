@@ -1938,6 +1938,12 @@ export interface GitLabConnectionInfo {
   ssh_port: number;
   /** Days of silence after which the project check calls an assigned issue or an open MR stale. */
   stale_days: number;
+  /** Per-agent GitLab identities (`GITLAB_PLAN.md` §11). */
+  auto_provision: boolean;
+  member_access_level: number;
+  on_agent_delete: 'block' | 'delete' | 'nothing';
+  user_email_domain: string;
+  admin_token_set: boolean;
   /** Presence flags — the values themselves never leave the backend. */
   token_set: boolean;
   ssh_key_set: boolean;
@@ -2048,6 +2054,22 @@ export interface GitLabProjectCheck {
   checked_at: string;
 }
 
+/** One agent's own GitLab account. The token itself never reaches the browser. */
+export interface GitLabIdentity {
+  agentId: string;
+  agentName: string;
+  username: string;
+  userId: number;
+  expiresAt: string | null;
+}
+
+export interface GitLabIdentities {
+  /** False when no provisioning admin token is configured — the "why is nothing happening" answer. */
+  available: boolean;
+  access_levels: Record<number, string>;
+  identities: GitLabIdentity[];
+}
+
 export interface GitLabTestResult {
   ok: boolean;
   error?: string;
@@ -2059,7 +2081,14 @@ export interface GitLabTestResult {
 
 export const gitlabApi = {
   connection: () => api.get<GitLabConnectionInfo>('/gitlab/connection').then((r) => r.data),
-  saveConnection: (patch: Partial<GitLabConnectionInfo> & { token?: string; ssh_key?: string; webhook_secret?: string }) =>
+  saveConnection: (
+    patch: Partial<GitLabConnectionInfo> & {
+      token?: string;
+      admin_token?: string;
+      ssh_key?: string;
+      webhook_secret?: string;
+    },
+  ) =>
     api.put('/gitlab/connection', patch).then((r) => r.data),
   generateWebhookSecret: () =>
     api.post<{ secret: string }>('/gitlab/webhook-secret').then((r) => r.data),
@@ -2083,6 +2112,10 @@ export const gitlabApi = {
     api
       .get<{ log: string; truncated: boolean }>(`/gitlab/jobs/${encodeURIComponent(project)}/${jobId}/log`)
       .then((r) => r.data),
+  identities: () => api.get<GitLabIdentities>('/gitlab/identities').then((r) => r.data),
+  /** Provision one agent now, and say why if it fails — ordinary provisioning is silent. */
+  provision: (agentId: string) =>
+    api.post<GitLabIdentity>(`/gitlab/identities/${agentId}`).then((r) => r.data),
   /** The signals alone — no inference, no session. */
   check: (project: string) =>
     api

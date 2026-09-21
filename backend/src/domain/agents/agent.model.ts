@@ -154,6 +154,25 @@ const AgentSchema = new Schema(
      * built on the `gmail.readonly` scope and never alter read-state.
      */
     mail_accounts: { type: [String], default: [] },
+    /**
+     * This agent's own GitLab account (`GITLAB_PLAN.md` §11).
+     *
+     * Provisioned by the admin token rather than configured: the fleet used to act as one shared bot
+     * account, which made `git log` say nothing about *which* agent wrote a commit and made
+     * "this one may propose, that one may merge" unexpressible. With a real user each, the access
+     * level in GitLab is the permission model, and the webhook router can match an assignee directly
+     * instead of reading a name out of prose.
+     *
+     * `gitlab_token_enc` is that user's own personal access token, AES-GCM'd like every other stored
+     * credential and `select: false` so an ordinary agent read never carries it. GitLab forces an
+     * expiry on a PAT, so `gitlab_token_expires_at` is kept and the token is renewed from the admin
+     * token before it lapses — an expired identity would otherwise fail every call with a 401 that
+     * looks exactly like a revoked fleet token.
+     */
+    gitlab_user_id: { type: Number, default: null },
+    gitlab_username: { type: String, default: '', index: true },
+    gitlab_token_enc: { type: String, default: '', select: false },
+    gitlab_token_expires_at: { type: Date, default: null },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

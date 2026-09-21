@@ -28,6 +28,13 @@ export const SECRET_FIELDS: Record<string, string[]> = {
   mail_accounts: ['refresh_token_enc'],
   finetune_servers: ['api_key_enc'],
   monitor_targets: ['api_key_enc'],
+  // The settings singleton holds credentials too — GitLab's fleet token, its provisioning-admin
+  // token and the webhook secret. Missing from this map, they arrived on the new box as ciphertext
+  // under a key that no longer existed, which is exactly the silent failure this file exists to
+  // prevent: the rows look present in the UI and every GitLab call fails once an agent tries one.
+  settings: ['gitlab_token_enc', 'gitlab_admin_token_enc', 'gitlab_webhook_secret_enc', 'gitlab_ssh_key_enc'],
+  // Each agent's own GitLab identity token (`GITLAB_PLAN.md` §11).
+  agents: ['gitlab_token_enc'],
 };
 
 export interface RewrapStats {

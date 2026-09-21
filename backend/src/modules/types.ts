@@ -45,7 +45,7 @@ export interface PromptContext {
    * The GitLab instance this fleet works on, or null when none is configured / the module is off.
    * Two fields only: the block teaches practice, and practice does not change per project.
    */
-  gitlab: { url: string; group: string } | null;
+  gitlab: { url: string; group: string; actingAs: string } | null;
   images: ImagePromptState;
   /** Active `prompt` modes, already split by the placement each one declared. */
   modes: { system: string[]; user: string[] };

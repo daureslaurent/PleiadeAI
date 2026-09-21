@@ -27,6 +27,12 @@ export interface GitLabConnection {
   /** Namespace every call is confined to, or '' for the whole instance. */
   group: string;
   botUsername: string;
+  /**
+   * The agent's own GitLab username, when this connection carries that agent's token rather than
+   * the fleet account's (`GITLAB_PLAN.md` §11). Display only — the token is what actually decides
+   * who GitLab thinks is calling.
+   */
+  actingAs?: string;
 }
 
 /**

@@ -5,6 +5,7 @@ import { gitlabActivityRepository } from '../../../domain/gitlab/gitlab-activity
 import { gitlabWakeQueue, startGitlabTurn } from '../../../domain/gitlab/gitlab-wake-runner';
 import { checkBrief, checkProject } from '../../../domain/gitlab/gitlab-review.service';
 import { agentRepository } from '../../../domain/agents/agent.repository';
+import { ACCESS_LEVELS, gitlabProvision } from '../../../domain/gitlab/gitlab-provision.service';
 import { decide, verifySecret } from '../../../domain/gitlab/gitlab-webhook.service';
 import {
   GitLabError,
@@ -16,7 +17,13 @@ import {
   slimPipeline,
   slimProject,
 } from '../../../domain/gitlab/gitlab.service';
-import { GITLAB_GIT_TRANSPORTS, settingsService, type GitLabGitTransport } from '../../../domain/settings/settings.service';
+import {
+  GITLAB_DELETE_ACTIONS,
+  GITLAB_GIT_TRANSPORTS,
+  settingsService,
+  type GitLabDeleteAction,
+  type GitLabGitTransport,
+} from '../../../domain/settings/settings.service';
 
 const log = createLogger('gitlab-routes');
 
@@ -55,6 +62,11 @@ gitlabRouter.get('/connection', async (_req, res) => {
     ssh_host: s.gitlab_ssh_host,
     ssh_port: s.gitlab_ssh_port,
     stale_days: s.gitlab_stale_days,
+    auto_provision: s.gitlab_auto_provision,
+    member_access_level: s.gitlab_member_access_level,
+    on_agent_delete: s.gitlab_on_agent_delete,
+    user_email_domain: s.gitlab_user_email_domain,
+    admin_token_set: s.gitlab_admin_token_set,
     token_set: s.gitlab_token_set,
     ssh_key_set: s.gitlab_ssh_key_set,
     webhook_secret_set: s.gitlab_webhook_secret_set,
@@ -87,15 +99,34 @@ gitlabRouter.put('/connection', async (req, res) => {
   if (typeof b.ssh_host === 'string') patch.gitlab_ssh_host = b.ssh_host.trim();
   if (b.ssh_port !== undefined) patch.gitlab_ssh_port = Math.max(1, Number(b.ssh_port) || 22);
   if (b.stale_days !== undefined) patch.gitlab_stale_days = Math.max(1, Number(b.stale_days) || 3);
+  if (b.auto_provision !== undefined) patch.gitlab_auto_provision = Boolean(b.auto_provision);
+  if (b.member_access_level !== undefined) {
+    const level = Number(b.member_access_level);
+    if (ACCESS_LEVELS[level]) patch.gitlab_member_access_level = level;
+  }
+  if (GITLAB_DELETE_ACTIONS.includes(b.on_agent_delete as GitLabDeleteAction)) {
+    patch.gitlab_on_agent_delete = b.on_agent_delete;
+  }
+  if (typeof b.user_email_domain === 'string') {
+    patch.gitlab_user_email_domain = b.user_email_domain.trim().replace(/^@/, '');
+  }
   await settingsService.update(patch as never);
 
   if (typeof b.token === 'string') await settingsService.setGitlabSecret('token', b.token.trim());
+  if (typeof b.admin_token === 'string') {
+    await settingsService.setGitlabSecret('adminToken', b.admin_token.trim());
+  }
   if (typeof b.ssh_key === 'string') await settingsService.setGitlabSecret('sshKey', b.ssh_key);
   if (typeof b.webhook_secret === 'string') {
     await settingsService.setGitlabSecret('webhookSecret', b.webhook_secret.trim());
   }
   const s = await settingsService.get();
-  res.json({ ok: true, token_set: s.gitlab_token_set, webhook_secret_set: s.gitlab_webhook_secret_set });
+  res.json({
+    ok: true,
+    token_set: s.gitlab_token_set,
+    webhook_secret_set: s.gitlab_webhook_secret_set,
+    admin_token_set: s.gitlab_admin_token_set,
+  });
 });
 
 /** Mint a webhook secret. Returned once, in this response, and stored encrypted. */
@@ -339,6 +370,46 @@ gitlabRouter.post('/projects/:project/check', async (req, res) => {
     });
     log.info({ project: check.project, agent: agent.name, session: sessionId }, 'project check started');
     res.json({ sessionId, agent: agent.name, check });
+  } catch (err) {
+    fail(res, err);
+  }
+});
+
+/**
+ * Per-agent GitLab identities (`GITLAB_PLAN.md` §11).
+ *
+ * `GET` lists what exists — usernames and token expiry, never a token. `POST /:agentId` provisions
+ * one on demand with `force`, which is the path that *reports its failure*: ordinary provisioning is
+ * best-effort and falls back to the fleet account silently, so without an explicit route the
+ * operator would have no way to find out why an agent has no account.
+ */
+gitlabRouter.get('/identities', async (_req, res) => {
+  res.json({
+    available: await gitlabProvision.available(),
+    access_levels: ACCESS_LEVELS,
+    identities: await gitlabProvision.list(),
+  });
+});
+
+gitlabRouter.post('/identities/:agentId', async (req, res) => {
+  try {
+    const agent = await agentRepository.findById(req.params.agentId);
+    if (!agent) {
+      res.status(404).json({ error: 'no such agent' });
+      return;
+    }
+    const identity = await gitlabProvision.ensure(req.params.agentId, { force: true });
+    if (!identity) {
+      res.status(400).json({ error: 'provisioning produced no identity' });
+      return;
+    }
+    res.json({
+      agentId: req.params.agentId,
+      agentName: agent.name,
+      username: identity.username,
+      userId: identity.userId,
+      expiresAt: identity.expiresAt,
+    });
   } catch (err) {
     fail(res, err);
   }

@@ -24,7 +24,7 @@ export function previewContext(agent: AgentDoc, houseRules: string, scope: Modul
     autoLoop: null,
     // Sample, like the rest: the preview shows what the GitLab block *says*, which is the same
     // paragraph whatever instance it names.
-    gitlab: { url: 'https://gitlab.example.com', group: '' },
+    gitlab: { url: 'https://gitlab.example.com', group: '', actingAs: 'sample-agent' },
     memories: [
       {
         score: 0.81,

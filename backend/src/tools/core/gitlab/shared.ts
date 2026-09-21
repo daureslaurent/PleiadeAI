@@ -1,4 +1,5 @@
-import { GitLabError, connection, projectPath, type GitLabConnection } from '../../../domain/gitlab/gitlab.service';
+import { GitLabError, projectPath, type GitLabConnection } from '../../../domain/gitlab/gitlab.service';
+import { connectionFor } from '../../../domain/gitlab/gitlab-provision.service';
 import { gitlabActivityRepository } from '../../../domain/gitlab/gitlab-activity.repository';
 import type { ToolContext, ToolResult } from '../../types';
 
@@ -34,11 +35,25 @@ export async function guard(fn: () => Promise<unknown>): Promise<ToolResult> {
   }
 }
 
-/** Resolve the connection and the project argument together — the opening move of most actions. */
-export async function project(args: Record<string, unknown>): Promise<{ conn: GitLabConnection; id: string; path: string }> {
-  const conn = await connection();
+/**
+ * Resolve the connection and the project argument together — the opening move of most actions.
+ *
+ * The connection is resolved *for the calling agent*: if it has its own GitLab account, the call is
+ * made as that account and GitLab attributes the commit, the comment or the merge to it. An agent
+ * with no identity falls back to the shared fleet account, so this is transparent either way.
+ */
+export async function project(
+  args: Record<string, unknown>,
+  ctx?: ToolContext,
+): Promise<{ conn: GitLabConnection; id: string; path: string }> {
+  const conn = await connectionFor(ctx?.agentId);
   const raw = String(args.project ?? '').trim().replace(/^\/+|\/+$/g, '');
   return { conn, id: projectPath(args.project, conn), path: raw };
+}
+
+/** The connection alone, for the handful of actions that take no project. */
+export async function agentConnection(ctx?: ToolContext): Promise<GitLabConnection> {
+  return connectionFor(ctx?.agentId);
 }
 
 /** Refuse an action the tool doesn't have, naming the ones it does — the model self-corrects. */

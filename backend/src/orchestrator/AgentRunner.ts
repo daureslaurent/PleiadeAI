@@ -562,7 +562,12 @@ export class AgentRunner {
       // does not vary per project. Null when nothing is connected, so an unconfigured instance
       // renders no GitLab section at all rather than advertising tools its agents don't hold.
       gitlab: settings.gitlab_url.trim() && settings.gitlab_token_set
-        ? { url: settings.gitlab_url.trim(), group: settings.gitlab_group.trim() }
+        ? {
+            url: settings.gitlab_url.trim(),
+            group: settings.gitlab_group.trim(),
+            // Already on the agent document — no extra query to tell it who it is on GitLab.
+            actingAs: agent.gitlab_username ?? '',
+          }
         : null,
       forum: hasForum
         ? {

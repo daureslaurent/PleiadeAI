@@ -24,6 +24,10 @@ export type UiChatLayout = (typeof UI_CHAT_LAYOUTS)[number];
 export const GITLAB_GIT_TRANSPORTS = ['https', 'ssh'] as const;
 export type GitLabGitTransport = (typeof GITLAB_GIT_TRANSPORTS)[number];
 
+/** What becomes of an agent's GitLab user when the agent is deleted here. */
+export const GITLAB_DELETE_ACTIONS = ['block', 'delete', 'nothing'] as const;
+export type GitLabDeleteAction = (typeof GITLAB_DELETE_ACTIONS)[number];
+
 /** Which agent a GitLab webhook about one project wakes when the event named nobody. */
 export interface GitLabProjectAgent {
   project: string;
@@ -170,6 +174,14 @@ export interface EffectiveSettings {
   gitlab_ssh_port: number;
   /** Days of silence after which the project check calls an assigned issue or an open MR stale. */
   gitlab_stale_days: number;
+  /** Give an agent its own GitLab identity the first time it needs one (`GITLAB_PLAN.md` §11). */
+  gitlab_auto_provision: boolean;
+  /** Access level new agent users get in the group. 30 = Developer. */
+  gitlab_member_access_level: number;
+  gitlab_on_agent_delete: GitLabDeleteAction;
+  gitlab_user_email_domain: string;
+  /** Derived, read-only: whether a provisioning admin token is stored. */
+  gitlab_admin_token_set: boolean;
   /** Derived, read-only: never written back by `update`. */
   gitlab_token_set: boolean;
   gitlab_ssh_key_set: boolean;
@@ -215,12 +227,13 @@ export const settingsService = {
     // return them (they never leave `gitlabSecrets`), but so this one read can report whether each
     // is set without a second round trip on a query the app makes every turn.
     const doc = await SettingsModel.findOne({ key: KEY })
-      .select('+gitlab_token_enc +gitlab_webhook_secret_enc +gitlab_ssh_key_enc')
+      .select('+gitlab_token_enc +gitlab_webhook_secret_enc +gitlab_ssh_key_enc +gitlab_admin_token_enc')
       .lean();
     const secrets = {
       token: doc?.gitlab_token_enc ?? '',
       webhookSecret: doc?.gitlab_webhook_secret_enc ?? '',
       sshKey: doc?.gitlab_ssh_key_enc ?? '',
+      adminToken: doc?.gitlab_admin_token_enc ?? '',
     };
     const disabled = (doc?.global_modes_disabled as string[] | undefined) ?? [];
     const standing = (doc?.global_modes_default_on as string[] | undefined) ?? [];
@@ -318,6 +331,11 @@ export const settingsService = {
       gitlab_ssh_host: doc?.gitlab_ssh_host ?? '',
       gitlab_ssh_port: doc?.gitlab_ssh_port ?? 22,
       gitlab_stale_days: doc?.gitlab_stale_days ?? 3,
+      gitlab_auto_provision: doc?.gitlab_auto_provision ?? true,
+      gitlab_member_access_level: doc?.gitlab_member_access_level ?? 30,
+      gitlab_on_agent_delete: (doc?.gitlab_on_agent_delete as GitLabDeleteAction | undefined) ?? 'block',
+      gitlab_user_email_domain: doc?.gitlab_user_email_domain ?? '',
+      gitlab_admin_token_set: !!secrets.adminToken,
       // Presence only. `gitlabSecrets()` is the one path that reads the values themselves.
       gitlab_token_set: !!secrets.token,
       gitlab_ssh_key_set: !!secrets.sshKey,
@@ -353,9 +371,14 @@ export const settingsService = {
    * `GET /api/settings` and read by every turn, and a credential that can merge into any repository
    * in the instance has no business riding along with the temperature.
    */
-  async gitlabSecrets(): Promise<{ token: string; webhookSecret: string; sshKey: string }> {
+  async gitlabSecrets(): Promise<{
+    token: string;
+    webhookSecret: string;
+    sshKey: string;
+    adminToken: string;
+  }> {
     const doc = await SettingsModel.findOne({ key: KEY })
-      .select('+gitlab_token_enc +gitlab_webhook_secret_enc +gitlab_ssh_key_enc')
+      .select('+gitlab_token_enc +gitlab_webhook_secret_enc +gitlab_ssh_key_enc +gitlab_admin_token_enc')
       .lean();
     const open = (payload?: string): string => {
       if (!payload) return '';
@@ -371,15 +394,20 @@ export const settingsService = {
       token: open(doc?.gitlab_token_enc),
       webhookSecret: open(doc?.gitlab_webhook_secret_enc),
       sshKey: open(doc?.gitlab_ssh_key_enc),
+      adminToken: open(doc?.gitlab_admin_token_enc),
     };
   },
 
   /** Store (or clear, on '') one GitLab secret, encrypted at rest. */
-  async setGitlabSecret(field: 'token' | 'webhookSecret' | 'sshKey', plaintext: string): Promise<void> {
+  async setGitlabSecret(
+    field: 'token' | 'webhookSecret' | 'sshKey' | 'adminToken',
+    plaintext: string,
+  ): Promise<void> {
     const key = {
       token: 'gitlab_token_enc',
       webhookSecret: 'gitlab_webhook_secret_enc',
       sshKey: 'gitlab_ssh_key_enc',
+      adminToken: 'gitlab_admin_token_enc',
     }[field];
     await SettingsModel.updateOne(
       { key: KEY },
@@ -392,8 +420,14 @@ export const settingsService = {
     // `gitlab_*_set` are derived from the encrypted fields on read. A caller round-tripping a whole
     // settings object (`update(await get())`) would otherwise persist the booleans as real columns
     // that then never change — the presence flags must stay a function of the ciphertext.
-    const { gitlab_token_set, gitlab_ssh_key_set, gitlab_webhook_secret_set, ...storable } = patch;
-    void gitlab_token_set, gitlab_ssh_key_set, gitlab_webhook_secret_set;
+    const {
+      gitlab_token_set,
+      gitlab_ssh_key_set,
+      gitlab_webhook_secret_set,
+      gitlab_admin_token_set,
+      ...storable
+    } = patch;
+    void gitlab_token_set, gitlab_ssh_key_set, gitlab_webhook_secret_set, gitlab_admin_token_set;
     await SettingsModel.updateOne(
       { key: KEY },
       { $set: { key: KEY, ...storable } },

@@ -150,6 +150,13 @@ Key seams:
   unroutable delivery wakes nobody. Both wake switches ship off. The **Check** button on the GitLab
   page gathers four signals with plain GETs (`gitlab-review.service.ts`) and hands them to an agent
   that reports back and changes nothing — the same `startGitlabTurn` path a wake uses.
+  **Each agent gets its own GitLab user** (§11): a *provisioning-only* admin token creates the
+  account, mints that user's PAT and adds it to the group, and never leaves
+  `gitlab-provision.service.ts` — so no agent call carries admin. `connectionFor(agentId)` is the one
+  seam that swaps the fleet token for the agent's own; provisioning is best-effort and falls back to
+  the shared account rather than failing a call, which is why the settings page has an explicit
+  Provision button (the silent path cannot report why). Container git follows automatically, and the
+  credential stamp fingerprints the token so a new identity or a renewal re-provisions the container.
 
 - **Modules (`modules/`, spec `MODULES_PLAN.md`).** The prompt is assembled from a **register** of
   modules rather than a hard-coded list of renderers. A module owns three things at once: the prompt

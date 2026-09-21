@@ -69,7 +69,7 @@ export const gitlabCi: Tool = {
   async execute(args, ctx) {
     return guard(async () => {
       const action = String(args.action ?? '');
-      const { conn, id, path } = await project(args);
+      const { conn, id, path } = await project(args, ctx);
       const pipelineId = Number(args.pipeline_id);
       const jobId = Number(args.job_id);
       log.info({ agent: ctx.agentName, action, project: path }, 'gitlab_ci');

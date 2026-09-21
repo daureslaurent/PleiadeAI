@@ -348,6 +348,35 @@ const SettingsSchema = new Schema(
      */
     gitlab_stale_days: { type: Number, default: 3 },
     /**
+     * **Per-agent GitLab identities** (`GITLAB_PLAN.md` §11).
+     *
+     * A *second* credential, and deliberately so: the fleet token above is "whatever the bot account
+     * can do", while this one is instance-admin and can do anything anywhere. It is used only by
+     * `gitlab-provision.service.ts` — to create a user per agent, mint that user's own token and add
+     * it to the group — and is never handed to a tool, so no agent call can ever carry admin rights.
+     * Delete it once the fleet is provisioned and everything keeps working, minus new identities.
+     */
+    gitlab_admin_token_enc: { type: String, default: '', select: false },
+    /** Give an agent an identity the first time it needs one, instead of waiting to be asked. */
+    gitlab_auto_provision: { type: Boolean, default: true },
+    /** Access level new agent users get in the configured group. 30 = Developer (GitLab's scale). */
+    gitlab_member_access_level: { type: Number, default: 30 },
+    /**
+     * What happens to an agent's GitLab user when the agent is deleted here.
+     *
+     * `block` keeps its commits, issues and comments attributed and readable while making it
+     * unusable — which is why it is the default: deleting reassigns everything it ever did to
+     * GitLab's ghost user, and the attribution is the entire point of giving agents their own
+     * accounts. `delete` is offered because an instance that provisions test agents accumulates
+     * real users; `nothing` leaves the accounts entirely to the operator.
+     */
+    gitlab_on_agent_delete: { type: String, enum: ['block', 'delete', 'nothing'], default: 'block' },
+    /**
+     * Email domain for created users — GitLab requires an address even for an account nobody reads.
+     * Empty falls back to the instance's own host, which is almost always what you want.
+     */
+    gitlab_user_email_domain: { type: String, default: '' },
+    /**
      * Telegram bot for outbound alerts + the interactive operator bot (Autonomy page). '' → fall
      * back to the TELEGRAM_* env vars. `telegram_chat_ids` is a comma list of chat ids that both
      * receive alerts and are allowed to talk to the bot. Token is scrubbed from API-key responses

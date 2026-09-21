@@ -1,7 +1,6 @@
 import { createLogger } from '../../../config/logger';
 import {
   GitLabError,
-  connection,
   request,
   scopedPath,
   seg,
@@ -11,6 +10,7 @@ import {
 import {
   PROJECT_PARAM,
   actionParam,
+  agentConnection,
   clip,
   guard,
   logWrite,
@@ -66,7 +66,7 @@ export const gitlabProjects: Tool = {
         case 'list': {
           // The only action that takes no project — `scopedPath` decides whether it runs against
           // the confined group's subtree or the instance root.
-          const conn = await connection();
+          const conn = await agentConnection(ctx);
           const rows = await request<Record<string, any>[]>(
             scopedPath(conn, 'projects', 'projects'),
             {
@@ -85,13 +85,13 @@ export const gitlabProjects: Tool = {
         }
 
         case 'get': {
-          const { conn, id } = await project(args);
+          const { conn, id } = await project(args, ctx);
           const p = await request<Record<string, any>>(`projects/${id}`, { conn });
           return { project: slimProject(p) };
         }
 
         case 'branches': {
-          const { conn, id } = await project(args);
+          const { conn, id } = await project(args, ctx);
           const rows = await request<Record<string, any>[]>(`projects/${id}/repository/branches`, {
             conn,
             paginate: limit,
@@ -108,7 +108,7 @@ export const gitlabProjects: Tool = {
         }
 
         case 'create_branch': {
-          const { conn, id, path } = await project(args);
+          const { conn, id, path } = await project(args, ctx);
           const branch = String(args.branch ?? '').trim();
           if (!branch) throw new GitLabError('`branch` is required — the name of the branch to create');
           let ref = String(args.from ?? '').trim();
@@ -130,7 +130,7 @@ export const gitlabProjects: Tool = {
         }
 
         case 'delete_branch': {
-          const { conn, id, path } = await project(args);
+          const { conn, id, path } = await project(args, ctx);
           const branch = String(args.branch ?? '').trim();
           if (!branch) throw new GitLabError('`branch` is required');
           await request(`projects/${id}/repository/branches/${seg(branch)}`, { conn, method: 'DELETE' });
@@ -180,7 +180,7 @@ export const gitlabFiles: Tool = {
   async execute(args, ctx) {
     return guard(async () => {
       const action = String(args.action ?? '');
-      const { conn, id } = await project(args);
+      const { conn, id } = await project(args, ctx);
       const ref = String(args.ref ?? '').trim() || undefined;
       const limit = Math.min(300, Math.max(1, Number(args.limit) || 100));
       log.info({ agent: ctx.agentName, action, project: args.project, path: args.path }, 'gitlab_files');

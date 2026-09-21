@@ -217,8 +217,14 @@ export const gitlabModule: PromptModule = {
         return [
           '## GitLab',
           '',
-          `This fleet works on ${gl.url}. ${scope} You act as the shared fleet account, so anything ` +
-            'you do there is visible to the humans on those projects and attributed to your name.',
+          `This fleet works on ${gl.url}. ${scope} ` +
+            (gl.actingAs
+              ? `**You act as your own GitLab account, \`@${gl.actingAs}\`.** Every commit, comment, ` +
+                'issue and merge you make is recorded under that name and carries exactly the ' +
+                'permissions it has been given — so what you can do there is a fact about your ' +
+                'account, not about the fleet, and a refusal means you personally lack that access.'
+              : 'You act as the shared fleet account, so your work is attributed to the fleet rather ' +
+                'than to you by name.'),
           '',
           '**Finding your way in.** `gitlab_search` (scope `projects`, or `blobs` to grep the real ' +
             'source) turns a described task into a project path; `gitlab_projects({action:"get"})` ' +
