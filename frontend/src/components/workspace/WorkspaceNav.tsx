@@ -17,7 +17,6 @@ import {
   Workflow,
   ChevronsDown,
   ChevronsUp,
-  ListChecks,
 } from 'lucide-react';
 import type { Agent, Session } from '../../lib/api';
 import { agentColor } from '../../lib/agentColor';
@@ -75,7 +74,6 @@ const HEADLESS_ORIGINS: Partial<Record<NonNullable<Session['origin']>, { icon: t
   cron: { icon: Clock, title: 'scheduled run (Autonomy)', tone: 'text-sky-400/70' },
   telegram: { icon: Send, title: 'Telegram chat', tone: 'text-cyan-400/70' },
   flow: { icon: Workflow, title: 'flow agent step', tone: 'text-violet-400/70' },
-  board: { icon: ListChecks, title: 'board item manager chat', tone: 'text-emerald-400/70' },
 };
 
 interface Props {
@@ -167,7 +165,7 @@ export function WorkspaceNav({
       // talking. Marked with a mic so it reads apart from a conversation the operator had.
       const generated = sn.origin === 'synthetic';
       // Started by running a forum @-mention (FORUM_PLAN.md §11.3): an ordinary conversation
-      // whose first turn came off the board and whose answer went back to it. The loop icon
+      // whose first turn came off the forum and whose answer went back to it. The loop icon
       // says exactly that — this one came from somewhere and returned there.
       const fromForum = sn.origin === 'forum';
       // Turns nobody typed here — a scheduled run, a Telegram chat, a flow's agent node — are kept as

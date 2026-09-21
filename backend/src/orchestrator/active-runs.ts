@@ -3,7 +3,7 @@ import type { AgentActivityPayload } from '../core/event-bus/events.types';
 
 /**
  * Every agent run in flight, whoever started it — the operator's chat, a cron job, an auto-loop tick,
- * a forum wake, a board dispatch, a flow node, Telegram, or another agent's `ask_agent`/`task`.
+ * a forum wake, a flow node, Telegram, or another agent's `ask_agent`/`task`.
  *
  * `AgentRunner.run` is the one door all of them walk through, so it registers here and this is the
  * only place that can truthfully say "this agent is working". The browser used to count that itself,

@@ -59,7 +59,7 @@ const GROUP_BLURBS: Record<ModuleGroup, string> = {
   core: 'Load-bearing. The clock the model has no other way to read, and the tool-calling contract.',
   operator: 'Standing instruction, read-only to the agent — it lands before the authored prompt.',
   self: 'What the agent wrote itself, or was reminded of. It lands after the authored prompt.',
-  work: 'How the fleet coordinates: delegation, the board, and self-driving loops.',
+  work: 'How the fleet coordinates: delegation, the forum, and self-driving loops.',
   capabilities: 'What agents can reach. No prompt text of their own — the tools speak for themselves.',
 };
 
@@ -574,7 +574,7 @@ function PreviewPane({
         {scope === 'subagent' &&
           'What a task subagent of this agent is given: only the modules marked "subagents", plus its task contract. '}
         The real charter, parameters and house rules. Anything that would cost a retrieval — recalled
-        memories, forum pointers, board items — is sample text, so flipping a switch costs nothing.
+        memories, forum pointers — is sample text, so flipping a switch costs nothing.
       </p>
       <pre className="well max-h-[52vh] overflow-auto whitespace-pre-wrap break-words rounded-lg p-3 font-mono text-[10px] leading-relaxed text-slate-300">
         {preview ? preview.system : 'Pick an agent to see its prompt.'}

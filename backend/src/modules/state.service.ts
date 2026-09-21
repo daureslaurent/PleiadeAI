@@ -16,9 +16,8 @@ import {
  * module — the same shape `global_modes_disabled` uses, and for the same reason: the modules
  * themselves are code-defined, so a release that adds one has it on by default instead of missing
  * from a table nobody migrated. Almost every module defaults on, so in practice this list reads as
- * "disabled" — but the one module that ships off (`board`) needs the same list to mean "enabled" for
- * its id, which is why membership is interpreted relative to `moduleDefaultEnabled`, never as a
- * literal "off".
+ * "disabled" — but a module that ships off needs the same list to mean "enabled" for its id, which
+ * is why membership is interpreted relative to `moduleDefaultEnabled`, never as a literal "off".
  */
 export interface ModuleState {
   /** Ids whose enabled state the operator flipped away from `moduleDefaultEnabled`. */
@@ -86,8 +85,8 @@ export function moduleStateFrom(settings: SettingsShape): ModuleState {
       if (mod.mandatory) return true;
       const def = moduleDefaultEnabled(mod);
       // Presence in the list means "flipped away from default", not "off" — a module that ships off
-      // (`board`) is turned ON by being in this same list, exactly the way one that ships on is
-      // turned off by it.
+      // is turned ON by being in this same list, exactly the way one that ships on is turned off by
+      // it.
       const on = disabled.has(id) ? !def : def;
       return scope === 'subagent' ? on && inProfile(id) : on;
     },

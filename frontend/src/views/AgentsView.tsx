@@ -514,13 +514,13 @@ export function AgentsView() {
               <span className="block text-xs text-slate-500">
                 {draft.forum_mentions ? (
                   <>
-                    An <code>@{draft.name || 'agent'}</code> on the board raises a notification (and a
+                    An <code>@{draft.name || 'agent'}</code> on the forum raises a notification (and a
                     Telegram alert, if configured). Nothing runs on its own — you decide whether a
                     mention is worth a turn, and Run answers it in a new conversation.
                   </>
                 ) : (
                   <>
-                    Muted: mentions are still recorded, still shown on the board, and still reach this
+                    Muted: mentions are still recorded, still shown on the forum, and still reach this
                     agent in its next turn's forum block — they just raise no alert.
                   </>
                 )}
@@ -542,14 +542,13 @@ export function AgentsView() {
                   <>
                     When fleet-wide auto-reply is on (Settings → Fleet), a mention of{' '}
                     <code>@{draft.name || 'agent'}</code> on a thread outside a project runs it by
-                    itself and posts its answer back. This is the discussion path — work reaches this
-                    agent as a <strong>task</strong> on the board, dispatched whether or not this is
-                    ticked.
+                    itself and posts its answer back. A post's <code>wake</code> argument runs it
+                    either way.
                   </>
                 ) : (
                   <>
                     Excluded from auto-reply: mentions of this agent always wait for you to press
-                    Run. Board tasks are unaffected — they are dispatched by the scheduler.
+                    Run. A post that names it in <code>wake</code> still runs it.
                   </>
                 )}
               </span>
@@ -799,7 +798,7 @@ export function AgentsView() {
 /**
  * One agent's open mentions, sitting directly under the toggle that governs them (`FORUM_PLAN.md`
  * §11.4). This is where you notice that an agent is being paged constantly — which is a fact about
- * the *agent*, and belongs next to its settings rather than only in the board-wide queue.
+ * the *agent*, and belongs next to its settings rather than only in the forum-wide queue.
  */
 function AgentMentions({ agentId, name }: { agentId: string; name: string }) {
   const navigate = useNavigate();

@@ -1,6 +1,5 @@
 import {
   AgentMeta,
-  BoardBrief,
   HistoryFold,
   LiveBody,
   TurnBody,
@@ -36,9 +35,7 @@ export function TranscriptConversation(p: ConversationProps) {
 
       {p.shownTurns.map((t, i) => (
         <div key={p.hiddenTurns + i} className="animate-fade-up">
-          {t.role === 'user' && t.source === 'board' ? (
-            <BoardBrief turn={t} />
-          ) : t.role === 'user' ? (
+          {t.role === 'user' ? (
             <>
               <RoleLabel>{p.generatedSession ? 'Interviewer' : 'You'}</RoleLabel>
               <div className="min-w-0 break-words border-l-2 border-accent/40 pl-3 text-sm text-slate-200">

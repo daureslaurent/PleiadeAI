@@ -16,7 +16,7 @@ import type { ForumMentionDoc } from './forum-mention.model';
  * Why a mention is being run.
  *
  * `summon` — somebody named this agent in a post's `wake` argument, and `forum-wake-queue.ts` is
- * running it. `manual` — the operator pressed Run. `sweep` is dead (the sweeper went with the board
+ * running it. `manual` — the operator pressed Run. `sweep` is dead (the sweeper went with the
  * rework) and is kept in the union only so a transcript written under it still renders.
  */
 export type AutoReplyReason = 'summon' | 'sweep';

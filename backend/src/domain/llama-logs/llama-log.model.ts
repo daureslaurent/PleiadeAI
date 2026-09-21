@@ -20,7 +20,7 @@ const LlamaLogSchema = new Schema(
     call_id: { type: String, required: true, index: true },
     source: {
       type: String,
-      enum: ['chat-turn', 'title-gen', 'identity', 'vision', 'judge', 'memory', 'interview', 'board-analyse'],
+      enum: ['chat-turn', 'title-gen', 'identity', 'vision', 'judge', 'memory', 'interview'],
       required: true,
       index: true,
     },

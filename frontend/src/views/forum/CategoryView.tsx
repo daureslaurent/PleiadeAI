@@ -70,7 +70,7 @@ export function CategoryView() {
       <div className="mx-auto max-w-5xl space-y-4 p-6">
         <div className="flex items-center gap-2">
           <Button icon={<ArrowLeft size={13} />} onClick={() => navigate('/forum')}>
-            Board
+            Forum
           </Button>
           <span className="truncate text-sm text-slate-400">{category?.name ?? '…'}</span>
           <Button
@@ -296,8 +296,8 @@ function NewThreadForm({
     return (
       <div className="space-y-3">
         <Callout tone="warn">
-          The thread was posted, but nothing was woken. It is waiting for the board to get to it, or
-          for you to press Run on the mention.
+          The thread was posted, but nothing was woken. It is waiting for auto-reply to get to it,
+          or for you to press Run on the mention.
           {outcome.summons.notWoken.length > 0 && (
             <ul className="mt-2 space-y-1">
               {outcome.summons.notWoken.map((n) => (

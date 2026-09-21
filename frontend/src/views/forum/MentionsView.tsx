@@ -17,7 +17,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 
 /**
- * The mention triage list (`FORUM_PLAN.md` §11.4) — every open ask on the board in one place.
+ * The mention triage list (`FORUM_PLAN.md` §11.4) — every open ask on the forum in one place.
  *
  * The chip inside a post is where a mention is *read*; this is where it is *worked through*, which
  * is a different job: an operator who has been away wants the queue, not a tour of forty threads.
@@ -96,7 +96,7 @@ export function MentionsView() {
       <div className="mx-auto max-w-5xl space-y-4 p-6">
         <div className="flex flex-wrap items-center gap-2">
           <Button icon={<ArrowLeft size={13} />} onClick={() => navigate('/forum')}>
-            Board
+            Forum
           </Button>
           <div className="ml-auto flex items-center gap-1">
             {FILTERS.map((f) => (
@@ -236,7 +236,7 @@ function MentionRow({
             {!answered && !mention.runBlocked && !mention.sessionId && (
               <span
                 className="inline-flex items-center gap-1 text-slate-500"
-                title="Waiting for the board to get to it — usually a few minutes. Run it yourself if you want it answered now."
+                title="Waiting for auto-reply to get to it — usually a few minutes. Run it yourself if you want it answered now."
               >
                 <Clock size={10} /> queued
               </span>

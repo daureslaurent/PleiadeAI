@@ -413,8 +413,6 @@ export type Turn =
       role: 'user';
       blocks: [{ kind: 'text'; text: string }];
       images?: string[];
-      /** `board`: a brief the work board wrote into a PM conversation, drawn as a system line. */
-      source?: 'board';
     }
   | {
       role: 'assistant';
@@ -538,7 +536,7 @@ interface StreamState {
   workingAgents: Record<string, number>;
   /**
    * The backend's own list of runs in flight (`agent_activity`), from *any* entry point — cron, an
-   * auto loop, a forum wake, a board dispatch, a flow, another agent's `ask_agent`. The Workspace pins
+   * auto loop, a forum wake, a flow, another agent's `ask_agent`. The Workspace pins
    * an agent when either this or `workingAgents` says it works.
    */
   serverActivity: AgentActivityEvent;
@@ -1115,13 +1113,13 @@ export const useStream = create<StreamState>((set, get) => ({
     // A `user` turn this client did not send: the Conversation Generator's interviewer asking the
     // agent its next question. Locally-sent messages are appended by `send()`, so this only ever
     // fires for a generated conversation the operator happens to be watching.
-    socket.on('chat:user', ({ sessionId, text, source }: { sessionId: string; text: string; source?: 'board' }) => {
+    socket.on('chat:user', ({ sessionId, text }: { sessionId: string; text: string }) => {
       set((s) =>
         sessionId === s.activeSessionId
           ? {
               turns: [
                 ...s.turns,
-                { role: 'user' as const, blocks: [{ kind: 'text' as const, text }], source: source === 'board' ? source : undefined },
+                { role: 'user' as const, blocks: [{ kind: 'text' as const, text }] },
               ],
             }
           : {},
@@ -1331,7 +1329,6 @@ export const useStream = create<StreamState>((set, get) => ({
             role: 'user',
             blocks: [{ kind: 'text', text: m.text }],
             images: m.images?.length ? m.images : undefined,
-            source: m.source === 'board' ? 'board' : undefined,
           }
         : {
             role: 'assistant',
@@ -1500,7 +1497,7 @@ export const useStream = create<StreamState>((set, get) => ({
 
 /**
  * Names of the agents running right now: the ones this client just messaged (lit before the backend's
- * run begins) together with every run the backend reports — cron, forum, board, flow, Telegram,
+ * run begins) together with every run the backend reports — cron, forum, flow, Telegram,
  * `ask_agent`. What the working pin reads, on the Workspace and on the Agents page alike.
  */
 export function useWorkingAgentNames(): Set<string> {

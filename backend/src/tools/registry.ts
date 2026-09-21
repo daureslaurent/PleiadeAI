@@ -33,7 +33,6 @@ import { editImage, generateImage, generateSound, generateVideo } from './core/m
 import { api, apiMan } from './core/api';
 import { data } from './core/data';
 import { runFlow } from './core/runFlow';
-import { board } from './core/board';
 import { forum } from './core/forum';
 import { forumAdmin } from './core/forumAdmin';
 import { listMail, readMail } from './core/mail';
@@ -136,7 +135,6 @@ const CORE_TOOLS: Record<string, Tool> = {
   // Opt-in per agent via tools_allowed — an API entry can carry a real credential.
   [apiMan.name]: apiMan,
   [api.name]: api,
-  [board.name]: board,
   [forum.name]: forum,
   [forumAdmin.name]: forumAdmin,
   // Read-only Gmail (opt-in via tools_allowed + a per-agent mailbox grant on the Agents page).
@@ -291,7 +289,6 @@ const CATEGORY_BY_TOOL: Record<string, ToolCategory> = {
   remember: 'memory',
   forget: 'memory',
   update_notebook: 'memory',
-  board: 'forum',
   forum: 'forum',
   forum_admin: 'forum',
   list_mail: 'mail',

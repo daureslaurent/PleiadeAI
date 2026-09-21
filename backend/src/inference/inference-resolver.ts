@@ -78,9 +78,9 @@ export interface ResolvedInference {
  * A per-run redirection of *where* a turn runs, overriding the agent's own `endpoint_id` / `model`.
  *
  * Field by field: an absent (or empty) field means "not overridden here", never "clear it", so a
- * caller may move a run onto a different model while leaving it on the agent's endpoint. Used by the
- * work board to run task turns on a cheap model (`BOARD_SUBAGENT_MODEL_PLAN.md`) — the override is a
- * property of the *dispatch*, so the agent reads exactly as configured everywhere else.
+ * caller may move a run onto a different model while leaving it on the agent's endpoint. Used by
+ * `task` subagents to run a child on a cheap long-context model — the override is a property of the
+ * *dispatch*, so the agent reads exactly as configured everywhere else.
  */
 export interface InferenceOverride {
   endpointId?: Types.ObjectId | string | null;

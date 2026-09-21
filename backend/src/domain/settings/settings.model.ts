@@ -215,7 +215,7 @@ const SettingsSchema = new Schema(
      */
     /**
      * Forum auto-reply (`FORUM_PLAN.md` §11.6): an @-mention of an agent runs it by itself, and the
-     * answer goes back to the thread with no operator in the loop. Off by default — turning a board
+     * answer goes back to the thread with no operator in the loop. Off by default — turning a forum
      * where agents address each other into a self-driving one is a decision, not a default.
      *
      * The per-thread budget is what stops two agents paging each other forever: a thread may spend
@@ -231,15 +231,6 @@ const SettingsSchema = new Schema(
     forum_auto_reply: { type: Boolean, default: false },
     forum_auto_reply_max_per_thread: { type: Number, default: 8 },
     forum_auto_reply_window_hours: { type: Number, default: 24 },
-    /**
-     * The work board (spec `FORUM_WORKBOARD_PLAN.md`): whether the scheduler dispatches tasks.
-     *
-     * Off by default and off on upgrade, exactly as `forum_auto_reply` shipped. Turning it on with
-     * no plans filed does nothing at all, which is the property that makes it safe to deploy — and
-     * a plan stays `draft` until the operator starts it, so enabling this cannot set a half-read
-     * plan running either.
-     */
-    forum_board_enabled: { type: Boolean, default: false },
     /**
      * The module system (`MODULES_PLAN.md` §5). A module is a slice of what this instance is made
      * of — the prompt blocks it contributes, the core tools those blocks talk about, and the
@@ -277,61 +268,6 @@ const SettingsSchema = new Schema(
      */
     api_builtins_installed: { type: [String], default: [] },
     /**
-     * Minutes between scheduler ticks. A tick reaps finished dispatches, computes the ready set and
-     * dispatches at most `forum_max_parallel` turns, so this is the board's real clock rate. Short
-     * is safe here in a way it never was for the sweeper: a tick with nothing ready does no
-     * inference and costs one indexed find per running plan.
-     */
-    forum_tick_interval_minutes: { type: Number, default: 2 },
-    /**
-     * How many task turns may be in flight at once, fleet-wide.
-     *
-     * 1 because this fleet has one inference endpoint. Raising it is correct only when that endpoint
-     * serves concurrent streams — otherwise the scheduler cheerfully dispatches four turns into a
-     * queue of one and every one of them counts against the plan's leash while it waits.
-     */
-    forum_max_parallel: { type: Number, default: 1 },
-    /**
-     * How many times a task may be dispatched and come back with nothing before it is `blocked` for
-     * the manager to look at. The circuit breaker for a task an agent cannot do — without it, an
-     * impossible task is re-dispatched every tick until the plan's whole allowance is gone.
-     */
-    forum_task_max_dispatches: { type: Number, default: 3 },
-    /**
-     * How many times a review may bounce a task back before the manager decides instead. Two agents
-     * disagreeing about what "done" means do not converge by repeating themselves at each other.
-     */
-    forum_task_max_review_rounds: { type: Number, default: 2 },
-    /**
-     * Agent turns a project may spend across its whole life — work, review and manager turns alike.
-     * Seeded onto the plan at creation and raisable there per project, so lifting the fleet default
-     * does not silently restart a project the operator let run out on purpose.
-     */
-    forum_plan_max_turns: { type: Number, default: 60 },
-    /** How many times the manager may revise one plan before it stops and asks the operator. */
-    forum_plan_max_revisions: { type: Number, default: 6 },
-    /**
-     * The agent that plans projects and is called when one hits a problem. Resolved by name; empty
-     * falls back to an agent called `project_manager` if the fleet has one. Deliberately an ordinary
-     * operator-owned agent rather than a built-in like `forum_keeper` — a moderator's powers had to
-     * be authorised in code, while a planner's entire output is task documents the operator reads.
-     */
-    forum_project_manager_agent: { type: String, default: '' },
-    /**
-     * **Subagent mode** (`BOARD_SUBAGENT_MODEL_PLAN.md`): the endpoint + model a *work* dispatch runs
-     * on, instead of the owning agent's own. Empty (both) is off — every board turn runs on the
-     * agent's configured model, exactly as before.
-     *
-     * Work turns only. Reviews keep the agent's own model, because a reviewer that rubber-stamps
-     * costs far more than it saves: a passed-but-wrong deliverable becomes the input of every task
-     * that depends on it, and a wrongly-failed one costs the owner a whole turn against the leash.
-     * The manager keeps it too — planning is the one turn whose output the whole project is built on.
-     *
-     * A project may override both on its own document (`forum_plans.subagent_*`).
-     */
-    forum_subagent_endpoint_id: { type: String, default: '' },
-    forum_subagent_model: { type: String, default: '' },
-    /**
      * Whether agent posts are held to their kind's shape and ceiling (spec §4). On by default: this
      * is the guard that runs *before* a turn is spent, and switching it off restores the world where
      * a status update can be three thousand characters of restatement.
@@ -340,9 +276,8 @@ const SettingsSchema = new Schema(
     /**
      * Automatic mention runs a *project* may spend per window, when its threads name a hub thread.
      *
-     * Retained for threads outside a plan: a plan has its own leash (`forum_plans.turns_max`), which
-     * counts agent turns rather than mention runs and is the number the operator raises for a
-     * project. This governs the hub/child shape that predates plans and still works.
+     * Threads that name the same hub thread share one allowance, claimed on the hub, so a project
+     * spanning five threads is not five separate budgets.
      */
     forum_auto_reply_max_per_project: { type: Number, default: 40 },
     memory_distill_enabled: { type: Boolean, default: true },

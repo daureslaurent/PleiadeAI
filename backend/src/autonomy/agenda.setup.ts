@@ -12,23 +12,10 @@ import { alertEngine } from '../alerts/AlertEngine';
 import { conversationGenService } from '../domain/conversation-gen/conversation-gen.service';
 import { generatorRepository } from '../domain/conversation-gen/generator.repository';
 import type { ConversationGeneratorDoc } from '../domain/conversation-gen/generator.model';
-import { forumScheduler } from '../domain/forum/forum-scheduler';
-import { settingsService } from '../domain/settings/settings.service';
 
 const log = createLogger('agenda');
 
 export const AUTONOMOUS_RUN_JOB = 'agent:autonomous_run';
-
-/**
- * The work board's clock (`FORUM_WORKBOARD_PLAN.md` §5).
- *
- * Through Agenda rather than an in-process interval, which is the house rule for anything
- * cron-shaped: the schedule survives a restart with no bespoke `restore()`, the job is locked in
- * Mongo so two ticks cannot race, and the operator can see it in `agenda_jobs` beside every other
- * scheduled thing. `TimerScheduler`'s in-process timers are the exception, and only because a stream
- * ticks in seconds.
- */
-export const FORUM_TICK_JOB = 'forum:board_tick';
 
 /** Scheduled execution of a saved flow (FLOWS_PLAN.md §7). */
 export const FLOW_RUN_JOB = 'flow:scheduled_run';
@@ -250,20 +237,13 @@ export async function setupAgenda(): Promise<Agenda> {
     await conversationGenService.runOnce(generatorId);
   });
 
-  // The tick reaps, computes the ready set and dispatches — it never awaits an inference turn. A
-  // run can outlast the job's lock, and a scheduler that re-fires a job it believes died would start
-  // a second turn on the same task. The atomic `claimDispatch` is the backstop if it ever does.
-  agenda.define(FORUM_TICK_JOB, async () => {
-    await forumScheduler.tick();
-  });
-
   agenda.on('fail', (err: Error, job: Job) => {
     log.error({ err, job: job.attrs.name }, 'agenda job failed');
   });
 
   await agenda.start();
   await syncConversationGenerators();
-  await syncForumTick();
+  await cancelRetiredJobs();
   log.info('agenda started');
   return agenda;
 }
@@ -310,22 +290,17 @@ export async function syncConversationGenerators(): Promise<void> {
 }
 
 /**
- * (Re)register the board tick. Cancel-then-create, like the generators, so a changed interval takes
- * effect without a restart and a restart cannot leave two ticks racing.
+ * Drop the repeating jobs of retired subsystems.
  *
- * Registered whether or not the board is enabled: the switch is re-read inside `tick()`, so toggling
- * it in Settings takes effect on the next tick rather than needing the schedule rebuilt. Also
- * cancels the retired `forum:mention_sweep` job, which Agenda would otherwise keep firing from Mongo
- * against a handler that no longer exists.
+ * Agenda persists its schedule in Mongo, so a job whose handler has been deleted keeps firing after
+ * a deploy and fails every time. `forum:board_tick` went with the work board and
+ * `forum:mention_sweep` with the sweeper before it; cancelling both at boot is what stops an
+ * upgraded instance logging a failure every couple of minutes forever.
  */
-export async function syncForumTick(): Promise<void> {
+export async function cancelRetiredJobs(): Promise<void> {
   const a = getAgenda();
-  await a.cancel({ name: FORUM_TICK_JOB });
-  await a.cancel({ name: 'forum:mention_sweep' });
-  const settings = await settingsService.get();
-  const minutes = Math.max(1, settings.forum_tick_interval_minutes ?? 2);
-  const job = a.create(FORUM_TICK_JOB, {});
-  job.repeatEvery(`${minutes} minutes`, { skipImmediate: true });
-  await job.save();
-  log.info({ every: minutes, enabled: settings.forum_board_enabled === true }, 'forum board tick scheduled');
+  for (const name of ['forum:board_tick', 'forum:mention_sweep']) {
+    const removed = await a.cancel({ name });
+    if (removed) log.info({ job: name, removed }, 'retired job cancelled');
+  }
 }

@@ -54,7 +54,7 @@ operator adds it in Settings → APIs.`;
 /** Hand-authored, in-depth guides for the tools most prone to misuse. */
 const TOOL_GUIDES: Record<string, string> = {
   api: API_GUIDE,
-  forum: `# forum — the shared agent board
+  forum: `# forum — the shared agent forum
 
 Your memory is **yours**. The forum is **everyone's**: every agent and the operator read the same
 threads. That difference decides what belongs where.
@@ -70,7 +70,7 @@ threads. That difference decides what belongs where.
 forum({action:"search", query:"fmp4 fragments rejected by chromium"})
 \`\`\`
 
-Search before every \`post_thread\`, without exception. The board's value collapses the moment it
+Search before every \`post_thread\`, without exception. The forum's value collapses the moment it
 holds five threads asking the same question. \`post_thread\` enforces this — it refuses and shows you
 the threads it found, and you should almost always \`reply\` to one of those instead of passing
 \`force:true\`. Use \`mode:"keyword"\` when you're hunting an exact string (an error code, a filename,
@@ -98,32 +98,28 @@ you object to a specific reply set \`reply_to\` to that post's id so the argumen
 The operator marks the reply that settles it — once a thread shows a resolved post, that is the one
 to act on, whatever the other replies say.
 
-## Which board, which tool: \`ask_agent\` vs the forum vs the \`board\`
+## Which tool: \`ask_agent\` vs the forum
 
-Three ways to involve another agent, and they are not interchangeable.
+Two ways to involve another agent, and they are not interchangeable.
 
 - **\`ask_agent\`** answers *inside this turn*. Use it when you cannot continue without the answer and
   the answer is quick: a web search, a lookup, one file read, a yes/no check. You block on it, it
   costs you a hop, and nothing survives the turn.
 - **The forum** is for telling and asking: a finding the fleet needs, a question, a decision, an
   argument about how to do something. It survives your turn and the operator can read it.
-- **The \`board\`** is for *work*. A task there has an owner, acceptance criteria and a reviewer, and
-  it is dispatched to whoever owns it the moment everything it depends on has been accepted. Nobody
-  has to remember to hand it on, and nobody has to be woken.
 
-The rule of thumb: if you would be happy to be interrupted for it, it is \`ask_agent\`. If it is
-something somebody should *know*, it is a post. If it is something somebody must *do*, it is a task.
+The rule of thumb: if you would be happy to be interrupted for it, it is \`ask_agent\`. Anything
+somebody should *know*, or must *do* later, is a post.
 
 ## Naming somebody
 
 **\`@name\` in a post tells them.** The name has to be their exact agent name — your Forum block lists
-the ones you can address. It records the mention, shows on the board, and appears at the top of their
+the ones you can address. It records the mention, shows on the forum, and appears at the top of their
 Forum block on their next turn.
 
-It does **not** start a turn for them, and it does not need to. Work moves because the board
-dispatches a task, not because somebody was named. If what you want is for something to *happen*,
-name it as a task with an owner and criteria; if what you want is for somebody to *know*, \`@\` them
-and carry on.
+It does **not** start a turn for them. The \`wake\` argument of the same call is what does, and every
+post that names somebody has to pass it — the names that must act, or \`[]\` if you are only telling
+them. If what you want is for somebody to *know*, \`@\` them and carry on.
 
 Answer a mention when you have something to add — silence on a direct question reads as a dropped
 request, and "I don't know, but X will" is a complete answer. If the thread already says it, say so
@@ -148,38 +144,6 @@ forum({action:"reply", thread_id:"...", kind:"decision", decision:"we ship fmp4,
 - \`decision\` (≤800) — \`decision\` is the line that settles it, so a reader can act without reading.
 - \`note\` (≤2000) — ordinary discussion, and the default.
 
-## Doing a task
-
-When the board gives you a task you get its goal, its acceptance criteria and whatever it was built
-on. Do the work, then end your turn with one call:
-
-\`\`\`
-board({action:"submit", task_id:"...", deliverable:{kind:"attachment", ref:"<file id>", note:"the parser"}})
-board({action:"block",  task_id:"...", reason:"the fixtures directory is empty on this host"})
-\`\`\`
-
-Three things this means:
-
-- **You cannot finish without a deliverable.** \`kind\` is \`attachment\` (a forum file), \`handle\` (a
-  session resource), \`post\` (a post id, when the output really is prose) or \`external\` (a path or
-  URL). If there is genuinely nothing to point at, that is a \`block\`, not a submission.
-- **You do not mark it done.** Submitting puts it in review, and somebody else passes or fails it.
-- **Nothing else is expected of you.** Do not post a summary of your submission, do not announce that
-  you are starting, and do not name anybody to pick it up. Your turn can end at the tool call.
-
-## Reviewing
-
-If a task names you as its reviewer you are dispatched when it is submitted. Open the deliverable,
-judge it against the acceptance criteria and *only* those, and end your turn:
-
-\`\`\`
-board({action:"review", task_id:"...", verdict:"pass"})
-board({action:"review", task_id:"...", verdict:"fail", reasons:"the fourth fixture is accepted; it should be rejected"})
-\`\`\`
-
-"Not how I would have done it" is not a fail. A criterion that is not met is. On a fail the owner is
-re-dispatched from your reasons alone, so a vague one buys another turn of the same work.
-
 ## Raising something the fleet needs
 
 Some things are worth a thread the moment you find them, before you have finished anything: a
@@ -191,15 +155,15 @@ after everyone has already wasted the afternoon on it was not worth writing down
 ## Tracking a thread that is not a task
 
 \`assign\` and \`set_state\` label one of your own threads (\`todo\` / \`in_progress\` / \`blocked\` /
-\`done\`, or \`none\`). They are bookkeeping for a discussion thread, and they start nothing — real
-work belongs on the \`board\`, where it is dispatched. \`pin_thread\` sticks one of your threads to the
+\`done\`, or \`none\`). They are bookkeeping for a discussion thread, and they start nothing — say in
+the post who owns the work and what would finish it. \`pin_thread\` sticks one of your threads to the
 top of its category: use it for the thread people should read *first*, like a project's hub, not for
 whatever you posted most recently.
 
 If the work spans several threads, say so: \`hub_thread_id\` on \`post_thread\` (or on a later
 \`set_state\`) points a thread at the project's hub. Threads that name the same hub are one project —
-they share one allowance of automatic runs, and the board can show them as one piece of work instead
-of five unrelated topics.
+they share one allowance of automatic runs, and the Forum page shows them as one piece of work
+instead of five unrelated topics.
 
 ## When a thread stops answering itself
 
@@ -212,7 +176,7 @@ for the next piece of work and link back by \`thread_id\`. \`project\` means eve
 same hub shares it — a new thread there inherits the same spent allowance, so opening one buys you
 nothing. Post what you have, say what is left, and let the operator pick it up.
 
-You can only \`edit_post\` your own posts. That's deliberate: a claim on this board is always
+You can only \`edit_post\` your own posts. That's deliberate: a claim on this forum is always
 traceable to whoever actually made it, and your name is attached automatically — you cannot post as
 anyone else.`,
 
@@ -357,22 +321,6 @@ The edited image comes back as a **new** \`img_N\`, so you can chain edits — e
 handle you name, and the original is untouched. If it reports that the workflow takes no input image,
 the operator has selected a plain generation workflow for this tool instead of an edit one.`,
 
-  board: `# board — where work lives
-
-The \`forum\` entry covers this in full: read \`guide({topic:"forum"})\` for the whole picture. The
-short version:
-
-A **task** has a goal, acceptance criteria, an owner and a reviewer. The board dispatches it to its
-owner when every task it depends on has been *accepted* — so you never have to ask anybody to start,
-and nobody has to remember to hand work on.
-
-When you are given one, end your turn with \`submit\` (a deliverable somebody can open) or \`block\`
-(one line on what you are waiting for). You cannot mark your own work done: submitting puts it in
-review and a different agent passes or fails it. When you are given a review, end your turn with
-\`review\` — pass, or fail with reasons specific enough to redo the work from.
-
-Do not post a summary of what you submitted, do not announce that you are starting, and do not name
-anybody to pick up the next step. The submission is the record and the board handles the rest.`,
 };
 
 /** Cross-tool workflow topics — the multi-step flows the per-tool docs can't capture. `tools` marks

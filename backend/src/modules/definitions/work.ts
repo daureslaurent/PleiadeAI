@@ -1,5 +1,4 @@
-import { buildBoardBlock, buildForumBlock } from '../../domain/forum/forum-recall.service';
-import type { BoardProjectPromptState } from '../../domain/forum/forum-project-context';
+import { buildForumBlock } from '../../domain/forum/forum-recall.service';
 import type {
   AutoLoopPromptState,
   PromptContext,
@@ -100,117 +99,6 @@ export const orchestrationModule: PromptModule = {
   ],
 };
 
-/**
- * The board: work items dispatched to this agent, and submitted work awaiting its verdict.
- *
- * **Ships off**, exactly as `forum_board_enabled` shipped — turning a board where agents address
- * each other into a self-driving one is a decision, not a default. The module switch *is* that
- * setting: toggling the row writes `settings.forum_board_enabled`, which is what
- * `forum-scheduler.ts` still reads.
- */
-export const boardModule: PromptModule = {
-  id: 'board',
-  name: 'Work board',
-  description: 'Dispatched tasks and reviews, and the scheduler that hands them out.',
-  group: 'work',
-  defaultEnabled: false,
-  // A subagent does one narrow job and hands back a report: the board's dispatched work belongs to
-  // the agent's own turns, not to a brief it was handed.
-  subagentDefault: false,
-  tools: ['board'],
-  settingsKeys: [
-    'forum_board_enabled',
-    'forum_tick_interval_minutes',
-    'forum_max_parallel',
-    'forum_subagent_endpoint_id',
-    'forum_subagent_model',
-    'forum_task_max_dispatches',
-    'forum_task_max_review_rounds',
-    'forum_plan_max_turns',
-    'forum_plan_max_revisions',
-    'forum_project_manager_agent',
-  ],
-  blocks: [
-    {
-      title: 'Board',
-      placement: 'system_tail',
-      order: 140,
-      render: (ctx: PromptContext) => (ctx.board ? buildBoardBlock(ctx.board) : null),
-    },
-    {
-      title: 'Board item',
-      placement: 'system_tail',
-      // Right after the agent's own board pointers: this is the item the conversation is *about*.
-      order: 141,
-      render: (ctx: PromptContext) => (ctx.boardProject ? renderBoardProjectBlock(ctx.boardProject) : null),
-    },
-  ],
-};
-
-/**
- * The manager's view of the item it runs (`BOARD_REFACTOR_PLAN.md` §8).
- *
- * Carried every turn rather than fetched by a tool call, because the operator's most common question
- * in this conversation is "where are we?" and a snapshot answers it for free. The tail differs by
- * mode, and that difference is the whole contract: a board-started turn writes the graph, a chat
- * turn only ever proposes — so the block says so, instead of letting the model find out from a
- * refused call.
- */
-export function renderBoardProjectBlock(p: BoardProjectPromptState): string {
-  const { plan } = p;
-  const lines = [
-    // The heading is the block's registry title verbatim — the context breakdown matches on it.
-    '## Board item',
-    `You are the manager of this ${plan.kind} (\`${plan.id}\`).`,
-    '',
-    `**${plan.name}** — state \`${plan.state}\`, turns ${plan.turnsSpent}/${plan.turnsMax}.`,
-  ];
-  if (plan.description) lines.push('', plan.description);
-  lines.push('', `Original request: ${plan.goal}`);
-  if (plan.acceptance.length) lines.push('', 'Done when:', ...plan.acceptance.map((a) => `- ${a}`));
-  if (plan.escalation) lines.push('', `Why the board stopped: ${plan.escalation}`);
-
-  lines.push('', p.tasks.length ? 'Tasks:' : 'No tasks yet.');
-  for (const t of p.tasks) {
-    const bits = [
-      t.owner ? `owner ${t.owner}` : 'unowned',
-      t.reviewer ? `reviewer ${t.reviewer}` : null,
-      t.dependsOn.length ? `waits on ${t.dependsOn.map((d) => `\`${d}\``).join(', ')}` : null,
-      t.delivered ? 'delivered' : null,
-      t.reviewRounds ? `sent back ${t.reviewRounds}×` : null,
-      t.blockedOn ? `blocked on: ${t.blockedOn}` : null,
-    ].filter(Boolean);
-    lines.push(`- \`${t.id}\` [${t.state}] ${t.goal} — ${bits.join(' · ')}`);
-  }
-
-  if (p.proposal) {
-    lines.push('', `Your last proposal (${p.proposal.state}): ${p.proposal.summary}`);
-    for (const o of p.proposal.ops) {
-      lines.push(`- ${o.status}: ${o.label}${o.error ? ` — failed: ${o.error}` : ''}`);
-    }
-  }
-
-  if (p.mode === 'chat') {
-    lines.push(
-      '',
-      'You are talking with the operator about this item. Answer questions about progress from the ' +
-        'snapshot above; use `board` `read_task` when they want the detail of one task.',
-      '',
-      '**You cannot change the board from this conversation.** When the operator asks for a change ' +
-        '(a new feature, a re-scope, a different owner, cancelling something), call `board` ' +
-        '`propose` **once** with every edit in `changes`, and a one-sentence `summary`. The operator ' +
-        'reads it as a checklist and applies the lines they agree with. Do not say a change is made ' +
-        'until the snapshot shows it — a proposal is a suggestion until then.',
-      '',
-      'Each change is one of: `add_task` (`ref` like "new1", `goal`, `acceptance`, `owner`, ' +
-        '`reviewer`, `depends_on` — task ids or earlier refs), `patch_task` (`task_id` plus only ' +
-        'the fields that change), `cancel_task` (`task_id`), `patch_plan` (`name`, `description`, ' +
-        '`acceptance`). Give each a short `why`.',
-    );
-  }
-  return lines.join('\n');
-}
-
 export const forumModule: PromptModule = {
   id: 'forum',
   name: 'Forum',
@@ -251,7 +139,7 @@ export const autoLoopModule: PromptModule = {
       title: 'Auto loop',
       placement: 'system_tail',
       // Right after the task list: the checklist is how the agent works, the goal is what it is
-      // working toward — and both precede what memory and the board hand it.
+      // working toward — and both precede what memory and the forum hand it.
       order: 125,
       render: (ctx: PromptContext) => (ctx.autoLoop ? renderAutoLoopBlock(ctx.autoLoop) : null),
     },

@@ -29,16 +29,12 @@ async function doc(): Promise<Record<string, unknown>> {
 /**
  * Switch a built-in module on or off.
  *
- * Two modules are special. A `mandatory` one is refused outright — without a clock the model dates
- * its own work wrongly and never notices. The **board** writes `forum_board_enabled` as well as its
- * own row: that flag is what `forum-scheduler.ts` reads to decide whether to dispatch at all, and a
- * module switch that left a scheduler running would be a switch that lies.
+ * A `mandatory` module is refused outright — without a clock the model dates its own work wrongly
+ * and never notices.
  *
  * `modules_disabled` holds ids *flipped away from their default* (`state.service.ts`), not literal
- * off-switches — `board` ships `defaultEnabled: false`, so enabling it has to ADD its id to that list
- * rather than delete from it, or the toggle is a no-op forever (which is exactly the bug that left
- * `forum_board_enabled: true` with the scheduler dispatching while every agent's `board` tool stayed
- * gated off).
+ * off-switches, so a module that ships `defaultEnabled: false` is enabled by ADDING its id to that
+ * list rather than deleting from it. Getting that backwards makes its toggle a no-op forever.
  */
 export async function setModuleEnabled(id: string, enabled: boolean): Promise<void> {
   const mod = moduleById(id);
@@ -52,10 +48,11 @@ export async function setModuleEnabled(id: string, enabled: boolean): Promise<vo
   if (enabled === moduleDefaultEnabled(mod)) disabled.delete(id);
   else disabled.add(id);
 
-  const set: Record<string, unknown> = { modules_disabled: [...disabled] };
-  if (id === 'board') set.forum_board_enabled = enabled;
-
-  await SettingsModel.updateOne({ key: 'global' }, { $set: set }, { upsert: true });
+  await SettingsModel.updateOne(
+    { key: 'global' },
+    { $set: { modules_disabled: [...disabled] } },
+    { upsert: true },
+  );
 }
 
 /**

@@ -81,8 +81,6 @@ export interface UserMessagePayload {
   content: string;
   /** Drag-and-drop or tool-acquired images attached to this message. */
   images?: ImageBlock[];
-  /** `board`: a brief the work board wrote into a PM conversation, not the operator's words. */
-  source?: 'board';
 }
 
 export interface StreamChunkPayload {
@@ -460,9 +458,7 @@ export type LlamaCallSource =
   | 'judge'
   | 'memory'
   /** The Conversation Generator's interviewer asking a target agent its next question. */
-  | 'interview'
-  /** The board's create form asking an agent to fill in a task or project (`BOARD_REFACTOR_PLAN.md` §2). */
-  | 'board-analyse';
+  | 'interview';
 
 /** Token accounting mirrored from `TokenUsage` (kept structural to avoid an inference→events import). */
 export interface LlamaUsage {
@@ -600,7 +596,7 @@ export interface ConversationSessionCreatedPayload {
    * refetching the list. `synthetic` — the Conversation Generator; `forum` — a mention run
    * (`FORUM_PLAN.md` §11.3). Absent means synthetic, which is all this event carried before.
    */
-  origin?: 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'board';
+  origin?: 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow';
 }
 
 /**

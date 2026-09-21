@@ -14,7 +14,6 @@ import { endpointHealth } from '../../../inference/endpoint-health';
 import { scheduleUpdateCheck, stopUpdateCheck } from '../../../host';
 import { applyTelegramConfig } from '../../../telegram/telegram-config';
 import { telegramBot } from '../../../telegram/TelegramBot';
-import { syncForumTick } from '../../../autonomy/agenda.setup';
 import { Types } from 'mongoose';
 import type { GlobalMode } from '../../../domain/endpoints/endpoint.model';
 import { BUILTIN_GLOBAL_MODES, isBuiltinModeId } from '../../../domain/settings/builtin-modes';
@@ -217,29 +216,8 @@ settingsRouter.put('/', async (req, res) => {
     const hours = Number(b.forum_auto_reply_window_hours);
     patch.forum_auto_reply_window_hours = Number.isFinite(hours) ? Math.max(0, Math.min(720, hours)) : 24;
   }
-  // The work board (`FORUM_WORKBOARD_PLAN.md`). Whitelisted here or the field silently never
-  // persists — the one rule about this file that has bitten every feature that touched it.
-  if (b.forum_board_enabled !== undefined) patch.forum_board_enabled = Boolean(b.forum_board_enabled);
-  if (b.forum_tick_interval_minutes !== undefined)
-    patch.forum_tick_interval_minutes = Math.min(1440, Math.max(1, Number(b.forum_tick_interval_minutes) || 2));
-  if (b.forum_max_parallel !== undefined)
-    patch.forum_max_parallel = Math.min(8, Math.max(1, Number(b.forum_max_parallel) || 1));
-  if (b.forum_task_max_dispatches !== undefined)
-    patch.forum_task_max_dispatches = Math.min(10, Math.max(1, Number(b.forum_task_max_dispatches) || 3));
-  if (b.forum_task_max_review_rounds !== undefined)
-    patch.forum_task_max_review_rounds = Math.min(10, Math.max(1, Number(b.forum_task_max_review_rounds) || 2));
-  if (b.forum_plan_max_turns !== undefined)
-    patch.forum_plan_max_turns = Math.min(2000, Math.max(1, Number(b.forum_plan_max_turns) || 60));
-  if (b.forum_plan_max_revisions !== undefined)
-    patch.forum_plan_max_revisions = Math.min(50, Math.max(1, Number(b.forum_plan_max_revisions) || 6));
-  if (typeof b.forum_project_manager_agent === 'string')
-    patch.forum_project_manager_agent = b.forum_project_manager_agent.trim();
-  // Subagent mode. Either half may be set alone: an endpoint with no model runs that endpoint's own
-  // default, and a model with no endpoint runs on whatever endpoint the agent already uses.
-  if (typeof b.forum_subagent_endpoint_id === 'string')
-    patch.forum_subagent_endpoint_id = b.forum_subagent_endpoint_id.trim();
-  if (typeof b.forum_subagent_model === 'string')
-    patch.forum_subagent_model = b.forum_subagent_model.trim();
+  // Whitelisted here or the field silently never persists — the one rule about this file that has
+  // bitten every feature that touched it.
   if (b.forum_post_contract_enabled !== undefined)
     patch.forum_post_contract_enabled = Boolean(b.forum_post_contract_enabled);
   if (b.forum_auto_reply_max_per_project !== undefined)
@@ -301,12 +279,6 @@ settingsRouter.put('/', async (req, res) => {
   if (patch.telegram_bot_token !== undefined || patch.telegram_chat_ids !== undefined) {
     applyTelegramConfig(updated);
     void telegramBot.restart().catch((err) => log.error({ err }, 'telegram bot restart failed'));
-  }
-  // Re-arm the board's clock only when its *cadence* changed. The enable switch is re-read inside
-  // the tick, so toggling it needs no reschedule — rebuilding the job for that would just push the
-  // next tick a full interval away every time the operator flipped it.
-  if (patch.forum_tick_interval_minutes !== undefined) {
-    void syncForumTick().catch((err) => log.error({ err }, 'forum tick reschedule failed'));
   }
   res.json(updated);
 });

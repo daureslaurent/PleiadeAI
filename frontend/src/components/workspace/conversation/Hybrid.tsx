@@ -1,6 +1,5 @@
 import {
   AgentAvatar,
-  BoardBrief,
   AgentMeta,
   HistoryFold,
   InterviewerTag,
@@ -24,9 +23,7 @@ export function HybridConversation(p: ConversationProps) {
       <HistoryFold {...p} />
 
       {p.shownTurns.map((t, i) =>
-        t.role === 'user' && t.source === 'board' ? (
-          <BoardBrief key={p.hiddenTurns + i} turn={t} />
-        ) : t.role === 'user' ? (
+        t.role === 'user' ? (
           <div key={p.hiddenTurns + i} className="flex animate-fade-up flex-col items-end pl-10">
             {p.generatedSession && <InterviewerTag />}
             <div

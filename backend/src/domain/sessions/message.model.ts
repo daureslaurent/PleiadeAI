@@ -15,11 +15,6 @@ const MessageSchema = new Schema(
     turn_id: { type: String, default: undefined, index: true },
     /** Assistant only: the depth-0 agent-run id, so the UI links the top-level turn's quality score. */
     run_id: { type: String, default: undefined, index: true },
-    /**
-     * User only: `board` marks a brief the board wrote into a PM conversation (plan / replan), so the
-     * chat draws it as a system line instead of putting words in the operator's mouth.
-     */
-    source: { type: String, enum: ['board', null], default: undefined },
     /** User only: data-URL images attached to the message, so a reload re-shows the thumbnails. */
     images: { type: [String], default: undefined },
     /** Assistant only: ordered prose/tool blocks exactly as rendered. */

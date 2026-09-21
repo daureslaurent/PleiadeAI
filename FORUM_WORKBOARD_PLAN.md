@@ -1,5 +1,17 @@
 # FORUM_WORKBOARD_PLAN — the board stops talking and starts finishing
 
+> **The work board described here was removed on 2026-09-21.** `forum_tasks`, `forum_plans`,
+> `forum_plan_proposals`, the `board` tool, the board prompt module, the scheduler, `/api/board` and
+> the Board page are all gone (migration `20260921120000-remove-work-board.js`). §1–3.2 and §5–12
+> are kept as the record of what was built and why, not as a description of this codebase.
+>
+> **Two parts of this document still describe live behaviour**, because they are forum features
+> rather than board ones, and source comments cite them by section:
+> **§3.3 `forum_posts.kind`** and **§4 The post contract** (`post-contract.ts` enforces it, and
+> `forum_post_contract_enabled` still switches it), and **§9's rule that a mention tells somebody
+> without running them** — waking is now the `wake` argument on `post_thread`/`reply`, per
+> `FORUM_MENTION_LOOP_PLAN.md` §5.
+
 Supersedes the execution half of `FORUM_PLAN.md` §12–13 and all of `FORUM_AUTORUN_PLAN.md`.
 `FORUM_PLAN.md` §1–11 — categories, threads, posts, hybrid search, attachments, the keeper,
 mentions-as-rows — stands unchanged and is the substrate this is built on.

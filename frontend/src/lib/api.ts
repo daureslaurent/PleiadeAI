@@ -788,7 +788,7 @@ export const isolationsApi = {
       .then((r) => r.data),
 };
 
-export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow' | 'board';
+export type SessionOrigin = 'user' | 'synthetic' | 'forum' | 'cron' | 'telegram' | 'flow';
 
 export interface Session {
   _id: string;
@@ -823,8 +823,6 @@ export interface StoredMessage {
   text: string;
   /** User only: data-URL images attached to the message. */
   images?: string[];
-  /** User only: `board` marks a brief the work board wrote into a PM conversation. */
-  source?: 'board';
   blocks?: unknown[];
   reasoning?: string;
   trace?: unknown[];
@@ -1095,7 +1093,7 @@ export interface ModuleInfo {
   group: ModuleGroup;
   /** Load-bearing: the route refuses to switch it off. */
   mandatory: boolean;
-  /** Whether it ships on. Only the board ships off. */
+  /** Whether it ships on. */
   defaultEnabled: boolean;
   enabled: boolean;
   /** Whether it applies inside a `task` subagent run unless the operator says otherwise. */
@@ -1769,28 +1767,6 @@ export interface InferenceSettings {
   /** How many automatic runs one thread may spend before its mentions fall back to a manual Run. */
   forum_auto_reply_max_per_thread: number;
   forum_auto_reply_window_hours: number;
-  /** The work board (`FORUM_WORKBOARD_PLAN.md`): whether the scheduler dispatches tasks. */
-  forum_board_enabled: boolean;
-  /** Minutes between board ticks — reap, compute the ready set, dispatch. */
-  forum_tick_interval_minutes: number;
-  /** Task turns in flight at once, fleet-wide. */
-  forum_max_parallel: number;
-  /**
-   * Subagent mode: the endpoint + model a board *work* dispatch runs on instead of the owning
-   * agent's own. Both empty = off. Reviews and planning turns are never overridden.
-   */
-  forum_subagent_endpoint_id: string;
-  forum_subagent_model: string;
-  /** Empty dispatches a task tolerates before it is blocked for the manager. */
-  forum_task_max_dispatches: number;
-  /** Times a review may bounce a task back before the manager decides instead. */
-  forum_task_max_review_rounds: number;
-  /** Agent turns a project may spend across its whole life. */
-  forum_plan_max_turns: number;
-  /** Times the manager may revise one plan before it stops and asks the operator. */
-  forum_plan_max_revisions: number;
-  /** The agent that plans projects; empty falls back to one named `project_manager`. */
-  forum_project_manager_agent: string;
   /** Whether agent posts are held to their kind's shape and length ceiling. */
   forum_post_contract_enabled: boolean;
   /** Automatic runs a project may spend per window, shared by every thread naming the same hub. */
@@ -2192,7 +2168,7 @@ export interface LlamaCallRecord {
   turnId: string | null;
   /** Agent-run id (null for side-task calls) — links a record to its Conversation Quality score. */
   runId: string | null;
-  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge' | 'memory' | 'interview' | 'board-analyse';
+  source: 'chat-turn' | 'title-gen' | 'identity' | 'vision' | 'judge' | 'memory' | 'interview';
   endpoint: string;
   model: string;
   sessionId: string | null;
@@ -2581,7 +2557,6 @@ export const API_KEY_SCOPES = [
   { scope: 'android:write', label: 'register and test Android devices' },
   { scope: 'flows:write', label: 'create, edit, delete and run flows' },
   { scope: 'media:write', label: 'import, edit and test ComfyUI workflows' },
-  { scope: 'board:write', label: 'file, edit and dispatch board tasks and projects' },
 ] as const;
 
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number]['scope'];
@@ -3085,7 +3060,7 @@ export interface ForumCategory {
 
 /**
  * Where the work a thread tracks has got to — a different axis from `status`, which is the thread's
- * own lifecycle on the board. `null` means the thread is not a work item at all.
+ * own lifecycle on the forum. `null` means the thread is not a work item at all.
  */
 export type ForumWorkState = 'todo' | 'in_progress' | 'blocked' | 'done';
 
@@ -3125,7 +3100,7 @@ export interface ForumThreadRef extends ForumThread {
   excerpt: string;
 }
 
-/** A file in the board's registry (`FORUM_PLAN.md` §10). Bytes are fetched by id, never inlined. */
+/** A file in the forum's registry (`FORUM_PLAN.md` §10). Bytes are fetched by id, never inlined. */
 export interface ForumFile {
   id: string;
   filename: string;
@@ -3399,205 +3374,6 @@ export const forumApi = {
     const query = q.toString();
     return `${API_BASE}/api/forum/files/${id}/content${query ? `?${query}` : ''}`;
   },
-};
-
-// --- the work board (`FORUM_WORKBOARD_PLAN.md`) -------------------------------
-
-/** Where a task has got to. `review` is the state its owner cannot move it out of. */
-export type BoardTaskState = 'todo' | 'doing' | 'review' | 'blocked' | 'done' | 'cancelled';
-export type BoardPlanState = 'draft' | 'running' | 'blocked' | 'done' | 'cancelled';
-
-export interface BoardDeliverable {
-  kind: 'attachment' | 'handle' | 'post' | 'external';
-  ref: string;
-  note?: string;
-  submitted_by?: string;
-  submitted_at?: string;
-}
-
-export interface BoardTask {
-  id: string;
-  threadId: string;
-  planId: string | null;
-  goal: string;
-  acceptance: string[];
-  owner: ForumAuthor | null;
-  reviewer: ForumAuthor | null;
-  dependsOn: string[];
-  state: BoardTaskState;
-  deliverable: BoardDeliverable | null;
-  blockedOn: string;
-  reviewRounds: number;
-  dispatchCount: number;
-  /** A turn is running on this task right now — the board page renders it as live. */
-  inFlight: boolean;
-  sessionId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  doneAt: string | null;
-}
-
-/** A board item is a single task or a whole project (`BOARD_REFACTOR_PLAN.md`). */
-export type BoardPlanKind = 'task' | 'project';
-
-export interface BoardPlan {
-  id: string;
-  hubThreadId: string;
-  kind: BoardPlanKind;
-  /** Short title — the analyser's suggestion or the operator's own. */
-  name: string;
-  description: string;
-  /** Item-level "done when". */
-  acceptance: string[];
-  /** The persistent conversation with this item's manager. */
-  chatSessionId: string | null;
-  /** The operator's original request, verbatim. */
-  goal: string;
-  manager: ForumAuthor;
-  state: BoardPlanState;
-  turnsSpent: number;
-  turnsMax: number;
-  revision: number;
-  /**
-   * This project's own subagent model, overriding the fleet setting for its *work* dispatches.
-   * Empty inherits `forum_subagent_*`; empty there too means no override at all.
-   */
-  subagentEndpointId: string;
-  subagentModel: string;
-  escalation: string;
-  lastManagerAt: string | null;
-  createdAt: string;
-  finishedAt: string | null;
-  /** Only on the list endpoint, which counts them so the card needs no second request. */
-  taskCount?: number;
-  doneCount?: number;
-  blockedCount?: number;
-  reviewCount?: number;
-  doingCount?: number;
-  /** The manager has proposed changes nobody has decided on yet. */
-  pendingProposal?: boolean;
-  /** List only: something on this item only the operator can move. */
-  needsYou?: boolean;
-  /** List only, `kind: task`: its single task at a glance. */
-  task?: { state: BoardTaskState; owner: ForumAuthor | null; reviewer: ForumAuthor | null; inFlight: boolean } | null;
-  /** Detail only: the manager is mid-turn in its conversation. */
-  managerRunning?: boolean;
-}
-
-/** What the Analyse button fills the create form with. Suggestions — every field stays editable. */
-export interface BoardAnalysis {
-  kind: BoardPlanKind;
-  name: string;
-  description: string;
-  acceptance: string[];
-  owner: string;
-  reviewer: string;
-}
-
-export type BoardProposalOpKind = 'add_task' | 'patch_task' | 'cancel_task' | 'patch_plan';
-
-export interface BoardProposalOp {
-  opId: string;
-  op: BoardProposalOpKind;
-  /** `add_task`: the handle later ops use in `depends_on`. */
-  ref: string;
-  /** The task edited or cancelled — or, once applied, the task an `add_task` created. */
-  taskId: string;
-  args: {
-    goal?: string;
-    acceptance?: string[];
-    owner?: string;
-    reviewer?: string;
-    depends_on?: string[];
-    name?: string;
-    description?: string;
-  };
-  why: string;
-  status: 'pending' | 'applied' | 'rejected' | 'failed';
-  error: string;
-}
-
-export interface BoardProposal {
-  id: string;
-  planId: string;
-  sessionId: string | null;
-  summary: string;
-  state: 'pending' | 'applied' | 'partial' | 'rejected' | 'superseded';
-  createdAt: string;
-  decidedAt: string | null;
-  ops: BoardProposalOp[];
-}
-
-export const boardApi = {
-  plans: () => api.get<BoardPlan[]>('/board/plans').then((r) => r.data),
-  plan: (id: string) => api.get<BoardPlan & { tasks: BoardTask[] }>(`/board/plans/${id}`).then((r) => r.data),
-  createPlan: (body: {
-    goal: string;
-    kind?: BoardPlanKind;
-    name?: string;
-    description?: string;
-    acceptance?: string[];
-    managerAgentId?: string | null;
-    owner?: string | null;
-    reviewer?: string | null;
-    category?: string;
-    turnsMax?: number;
-  }) => api.post<BoardPlan>('/board/plans', body).then((r) => r.data),
-  /** Ask an agent to fill the create form from a prompt. Creates nothing. */
-  analyse: (body: { prompt: string; agentId: string; kind?: BoardPlanKind }) =>
-    api.post<BoardAnalysis>('/board/analyse', body).then((r) => r.data),
-  proposal: (id: string) => api.get<BoardProposal>(`/board/proposals/${id}`).then((r) => r.data),
-  proposals: (planId: string) =>
-    api.get<BoardProposal[]>(`/board/plans/${planId}/proposals`).then((r) => r.data),
-  /** Apply the ticked lines of a proposal; every pending line when `opIds` is omitted. */
-  applyProposal: (id: string, opIds?: string[]) =>
-    api.post<BoardProposal>(`/board/proposals/${id}/apply`, { opIds }).then((r) => r.data),
-  rejectProposal: (id: string) => api.post<BoardProposal>(`/board/proposals/${id}/reject`).then((r) => r.data),
-  /** Send the manager in to write or rewrite the graph; answers with the session to watch. */
-  runManager: (id: string, escalation?: string) =>
-    api.post<{ sessionId: string }>(`/board/plans/${id}/plan`, { escalation }).then((r) => r.data),
-  patchPlan: (
-    id: string,
-    patch: {
-      state?: BoardPlanState;
-      goal?: string;
-      name?: string;
-      description?: string;
-      acceptance?: string[];
-      turnsMax?: number;
-      // Empty strings clear the project's override and hand it back to the fleet setting.
-      subagentEndpointId?: string;
-      subagentModel?: string;
-    },
-  ) =>
-    api.patch<BoardPlan>(`/board/plans/${id}`, patch).then((r) => r.data),
-  deletePlan: (id: string) => api.delete(`/board/plans/${id}`).then(() => undefined),
-
-  tasks: (planId?: string) =>
-    api.get<BoardTask[]>('/board/tasks', { params: planId ? { plan: planId } : {} }).then((r) => r.data),
-  task: (id: string) => api.get<BoardTask & { threadTitle: string; planGoal: string }>(`/board/tasks/${id}`).then((r) => r.data),
-  /** The task a forum thread tracks, or null when the thread is just a conversation (204). */
-  taskByThread: (threadId: string) =>
-    api.get<BoardTask | ''>(`/board/tasks/by-thread/${threadId}`).then((r) => (r.data ? (r.data as BoardTask) : null)),
-  createTask: (body: {
-    goal: string;
-    acceptance: string[];
-    owner?: string | null;
-    reviewer?: string | null;
-    dependsOn?: string[];
-    planId?: string | null;
-    detail?: string;
-  }) => api.post<BoardTask & { threadId: string }>('/board/tasks', body).then((r) => r.data),
-  patchTask: (id: string, patch: Record<string, unknown>) =>
-    api.patch<BoardTask>(`/board/tasks/${id}`, patch).then((r) => r.data),
-  /** The operator's own verdict — needed for tasks whose reviewer resolves to the operator. */
-  review: (id: string, verdict: 'pass' | 'fail', reasons?: string) =>
-    api.post<BoardTask>(`/board/tasks/${id}/review`, { verdict, reasons }).then((r) => r.data),
-  dispatch: (id: string, kind: 'work' | 'review' = 'work') =>
-    api.post<{ sessionId: string }>(`/board/tasks/${id}/dispatch`, { kind }).then((r) => r.data),
-  /** Force an in-flight claim off, stopping its run — the way out of a `doing` with no turn behind it. */
-  release: (id: string) => api.post<BoardTask>(`/board/tasks/${id}/release`).then((r) => r.data),
-  deleteTask: (id: string) => api.delete(`/board/tasks/${id}`).then(() => undefined),
 };
 
 // ── Configured HTTP APIs (Settings → APIs; API_TOOL_PLAN.md) ────────────────────────────────────

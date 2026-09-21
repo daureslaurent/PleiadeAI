@@ -14,7 +14,7 @@ import { environmentModule, parallelToolsModule, sessionModule, toolUseModule } 
 import { modesModule } from './definitions/modes';
 import { agentsMdModule, houseRulesModule, parametersModule } from './definitions/operator';
 import { memoryModule, notebookModule, todoModule } from './definitions/self';
-import { autoLoopModule, boardModule, forumModule, orchestrationModule, subagentsModule } from './definitions/work';
+import { autoLoopModule, forumModule, orchestrationModule, subagentsModule } from './definitions/work';
 import type { BlockPlacement, PromptBlock, PromptModule } from './types';
 
 /**
@@ -40,7 +40,6 @@ export const MODULES: PromptModule[] = [
   // work
   orchestrationModule,
   subagentsModule,
-  boardModule,
   forumModule,
   autoLoopModule,
   // capabilities
@@ -62,7 +61,7 @@ export function moduleById(id: string): PromptModule | undefined {
   return BY_ID.get(id);
 }
 
-/** Whether a module ships on. Only the board ships off, for the reason its definition gives. */
+/** Whether a module ships on. Every module ships on unless its definition says otherwise. */
 export function moduleDefaultEnabled(m: PromptModule): boolean {
   return m.defaultEnabled !== false;
 }

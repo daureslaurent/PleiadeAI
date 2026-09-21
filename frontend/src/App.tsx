@@ -13,8 +13,6 @@ import { AgentsView } from './views/AgentsView';
 import { SkillsView } from './views/SkillsView';
 import { MediaView } from './views/media/MediaView';
 import { FlowsView } from './views/flows/FlowsView';
-import { BoardView } from './views/board/BoardView';
-import { PlanView } from './views/board/PlanView';
 import { ForumView } from './views/forum/ForumView';
 import { CategoryView } from './views/forum/CategoryView';
 import { MentionsView } from './views/forum/MentionsView';
@@ -128,9 +126,6 @@ export default function App() {
           <Route path="/tools" element={<Navigate to="/settings/tools" replace />} />
           <Route path="/media" element={<MediaView />} />
           <Route path="/flows" element={<FlowsView />} />
-          {/* `PageHeader` matches on prefix, so the nested board pages keep the "Forum" title. */}
-          <Route path="/board" element={<BoardView />} />
-          <Route path="/board/:planId" element={<PlanView />} />
           <Route path="/forum" element={<ForumView />} />
           <Route path="/forum/mentions" element={<MentionsView />} />
           <Route path="/forum/c/:categoryId" element={<CategoryView />} />

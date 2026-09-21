@@ -327,7 +327,7 @@ export const forum: Tool = {
     'knowledge base, for coordinating work, and for proposing and reviewing each other\'s work. ' +
     'Unlike your private memory, everything here is visible to every other agent and to the operator. ' +
     'This is where you hand off *work*: `ask_agent` is for something you need answered inside this ' +
-    'turn (a web search, a lookup); anything long, open-ended or multi-step goes on the board instead ' +
+    'turn (a web search, a lookup); anything long, open-ended or multi-step goes on the forum instead ' +
     '— post what you need and write `@agent name` to address whoever owns it, then carry on. ' +
     '**Mentioning and waking are two different things.** Writing `@name` in a post *tells* that ' +
     'agent: they are notified and your post shows up in their next turn, but nothing runs. To make ' +
@@ -399,8 +399,8 @@ export const forum: Tool = {
         description:
           'For `post_thread`/`reply`/`edit_post`: markdown. State what you verified versus what you ' +
           'are guessing — other agents will act on this. Writing `@name` tells that agent: it shows ' +
-          'on their next turn. It does not make them run, and it does not need to — work moves ' +
-          'because the board dispatches a task, not because somebody was named. Do not repeat what ' +
+          'on their next turn. It does not make them run — the `wake` argument of this call is what ' +
+          'does, and every post that names somebody has to pass it. Do not repeat what ' +
           'the thread already says; add only what is new. Each `kind` has a length limit and a post ' +
           'over it is refused, so say it once.',
       },
@@ -636,8 +636,7 @@ export const forum: Tool = {
               addressed,
               addressed_note:
                 'Told, not woken. They see your post on their next turn. If one of them has to act ' +
-                'before anything else can move, name them in `wake` — or, if it is a piece of work ' +
-                'with a deliverable, file it on the `board` as a task instead.',
+                'before anything else can move, name them in `wake`.',
             }
           : {}),
         ...(withheld.length ? { not_woken: withheld } : {}),
@@ -1013,7 +1012,7 @@ export const forum: Tool = {
               hub_thread_id: updated.hub_thread_id ? String(updated.hub_thread_id) : null,
               hint:
                 updated.assignee && updated.assignee.agent_id !== ctx.agentId
-                  ? `Assigning labels the thread; it starts nothing. If this is work that has to happen, file it on the \`board\` with acceptance criteria and an owner — that is what gets dispatched.`
+                  ? `Assigning labels the thread; it starts nothing. If this has to happen now, say what would finish it in a reply and name the owner in \`wake\`.`
                   : undefined,
             },
           };

@@ -11,7 +11,6 @@ import type { AutoLoopPromptState, ModuleScope, PromptContext, SubagentsPromptSt
 import { agentMemory, embedRecallQuery } from '../domain/memory/agent-memory.service';
 import { memoryDistiller } from '../domain/memory/memory-distiller';
 import { forumRecall } from '../domain/forum/forum-recall.service';
-import { loadProjectSnapshot, type BoardRunContext } from '../domain/forum/forum-project-context';
 import { settingsService } from '../domain/settings/settings.service';
 import { llamaClient, toWireTools, type ToolSchema, type TokenUsage } from '../inference/LlamaClient';
 import { scoringService } from '../domain/scoring/scoring.service';
@@ -33,7 +32,6 @@ import { loopDone } from '../tools/core/loopDone';
 import { todoRepository } from '../domain/todos/todo.repository';
 import { remember } from '../tools/core/remember';
 import { forget } from '../tools/core/forget';
-import { board } from '../tools/core/board';
 import { forum } from '../tools/core/forum';
 import { read } from '../tools/core/fs/read';
 import { askParent } from '../tools/core/askParent';
@@ -176,10 +174,9 @@ export interface RunInput {
    */
   persistMemory?: boolean;
   /**
-   * Run this turn on an endpoint/model that is not the agent's own
-   * (`BOARD_SUBAGENT_MODEL_PLAN.md`). Set by the work board so a task's *work* turn runs on a cheap
-   * model while the same agent, reached any other way, still answers on the model it was configured
-   * with — the override belongs to the dispatch, not to the agent.
+   * Run this turn on an endpoint/model that is not the agent's own. Set by a caller that wants this
+   * one turn on a different model while the same agent, reached any other way, still answers on the
+   * model it was configured with — the override belongs to the dispatch, not to the agent.
    *
    * Deliberately absent from `hop`'s `Pick`, so an `ask_agent` delegation inside an overridden turn
    * lands on the target's own model: the caller is asking a specialist a question, and the
@@ -193,14 +190,6 @@ export interface RunInput {
    * instead of the ordinary switches.
    */
   task?: { mode: 'explore' | 'work'; description: string; reportMaxChars: number; parentName: string };
-  /**
-   * Set when this run is a board item's manager (`BOARD_REFACTOR_PLAN.md` §5): by
-   * `forumPlanService.runManager` (`auto`) or by the socket for a message typed into the item's PM
-   * conversation (`chat`). Grants `board`, folds the item's snapshot into the prompt, and is what the
-   * tool reads to decide whether a write is allowed or has to be proposed. Never inherited by a hop
-   * or a `task` child — they are not the manager.
-   */
-  board?: BoardRunContext;
 }
 
 /**
@@ -424,9 +413,6 @@ export class AgentRunner {
         ...taskTools,
         ...(input.autoLoop ? [loopDone.name] : []),
         ...(input.caller ? [askParent.name] : []),
-        // A board item's manager holds `board` whatever its `tools_allowed` says: the conversation
-        // exists to plan that item, and a PM that cannot read its own project cannot answer for it.
-        ...(input.board ? [board.name] : []),
       ]),
     ].filter(
       (name) => !(isTask && TASK_WITHHELD_TOOLS.has(name)),
@@ -472,10 +458,6 @@ export class AgentRunner {
     // it is computed when *either* module is on and skipped entirely when neither is.
     const wantsMemory = mods.enabled('memory', scope);
     const hasForum = mods.enabled('forum', scope) && tools.some((t) => t.name === forum.name);
-    // The board half is gated separately from the forum half: an agent may hold one without the
-    // other, and a task line telling it to `submit` with a tool it does not have is worse than no
-    // line. `FORUM_WORKBOARD_PLAN.md` §8.
-    const hasBoard = mods.enabled('board', scope) && tools.some((t) => t.name === board.name);
 
     const recallQuery = buildRecallQuery(input);
     const recallVector = wantsMemory || hasForum ? await embedRecallQuery(recallQuery) : null;
@@ -485,7 +467,7 @@ export class AgentRunner {
 
     // Passive forum awareness (FORUM_PLAN.md §8), for agents that actually hold the `forum` tool —
     // never point an agent at a thread it has no way to open. Pointers only (thread id + title): the
-    // agent still has to call `forum` to read one, which is what keeps the board from flooding the
+    // agent still has to call `forum` to read one, which is what keeps the forum from flooding the
     // context.
     //
     // An auto-loop turn is the exception to the opt-in: it forces the reply pointers on and adds a
@@ -499,8 +481,6 @@ export class AgentRunner {
     // one indexed find plus one distinct (§11.2). Assignments ride every turn for a different reason
     // than either: a mention stops being pending the moment it is answered, but a work item this
     // agent owns is still its problem until it is marked done.
-    const boardWork = hasBoard && ctx.agentId ? await forumRecall.work(ctx.agentId) : { tasks: [], reviews: [] };
-    const boardProject = hasBoard && input.board && !isTask ? await loadProjectSnapshot(input.board) : null;
     const [forumRelated, forumReplyPointers, forumDigest, forumMentions, forumAssigned, forumRoster] =
       hasForum
         ? await Promise.all([
@@ -570,8 +550,6 @@ export class AgentRunner {
             autoReply: settings.forum_auto_reply === true,
           }
         : null,
-      board: hasBoard ? boardWork : null,
-      boardProject,
       images: {
         supportsVision: inference.supportsVision,
         current: currentImages,
@@ -878,7 +856,6 @@ export class AgentRunner {
             persistMemory: input.persistMemory !== false,
             batch: batchId ? { id: batchId, index: i, size: group.length } : undefined,
             readOnly: input.task?.mode === 'explore',
-            board: isTask ? undefined : input.board,
             subagents: subagents
               ? {
                   runtime: subagents,
@@ -1180,8 +1157,6 @@ export class AgentRunner {
       batch?: ToolBatchInfo;
       /** An `explore` subagent: a call that is not a read is refused instead of executed. */
       readOnly?: boolean;
-      /** The board item this run manages, if any — handed to the tool as `ctx.board`. */
-      board?: BoardRunContext;
       /** This run may start `task` subagents: where they run, and this call's report budget. */
       subagents?: { runtime: SubagentRuntime; agentName: string; reportMaxChars: number };
     },
@@ -1312,7 +1287,6 @@ export class AgentRunner {
           ? this.makeTaskInvoker(ctx, delegation.subagents, call.id, delegation.turnId, delegation.signal, taskSlot)
           : undefined,
       callId: call.id,
-      board: delegation.board,
       emitOutput: (chunk) =>
         eventBus.emit('tool:output_chunk', { ctx, callId: call.id, chunk }),
       emitVision: (payload) =>

@@ -48,7 +48,7 @@ export interface SubagentTaskInfo {
 }
 
 /**
- * Every agent run in flight on the backend, whoever started it (chat, cron, forum wake, board, flow,
+ * Every agent run in flight on the backend, whoever started it (chat, cron, forum wake, flow,
  * `ask_agent`…). Broadcast to every client as the whole picture on each change, and on connect.
  */
 export interface AgentActivityEvent {
@@ -572,7 +572,7 @@ export interface FlowAwaitingApprovalEvent {
 
 /**
  * A post landed on the agent forum (FORUM_PLAN.md §6). Broadcast to the global `forum` room, not a
- * session room: agents post from sessions the operator is not watching, and the board should still
+ * session room: agents post from sessions the operator is not watching, and the forum should still
  * update. Carries no body — the client refetches the thread it is showing.
  */
 export interface ForumPostCreatedEvent {
@@ -611,7 +611,7 @@ export interface ForumMentionCreatedEvent {
 
 /**
  * A mention just started running (`FORUM_AUTORUN_PLAN.md`). `reason` says who decided: a `summon`
- * was asked for, `manual` is the operator's Run, and `sweep` is the board getting to a mention
+ * was asked for, `manual` is the operator's Run, and `sweep` is the forum getting to a mention
  * nobody summoned — the one worth showing as it happens rather than discovering in a thread.
  */
 export interface ForumMentionRunEvent {

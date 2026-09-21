@@ -45,10 +45,6 @@ export function previewContext(agent: AgentDoc, houseRules: string, scope: Modul
       roster: ['@sample — another agent'],
       autoReply: false,
     },
-    board: {
-      tasks: [{ taskId: 'tk_sample', goal: '(sample) a task you own', state: 'ready' }],
-      reviews: [],
-    },
     images: { supportsVision: false, current: [], session: [], pooled: [] },
     modes: { system: ['(sample) an active mode'], user: ['(sample) an active mode'] },
     // The preview shows the block in its on-shape; the wording it takes from the live setting is a

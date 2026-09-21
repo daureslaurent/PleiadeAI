@@ -9,7 +9,7 @@ import { todoRepository } from '../../../domain/todos/todo.repository';
 /** CRUD for conversation sessions + their message history (backs the Workspace). */
 export const sessionsRouter = Router();
 
-const NARROWABLE_ORIGINS = new Set<string>(['synthetic', 'forum', 'cron', 'telegram', 'flow', 'board', 'all']);
+const NARROWABLE_ORIGINS = new Set<string>(['synthetic', 'forum', 'cron', 'telegram', 'flow', 'all']);
 
 /**
  * List sessions for an agent: `GET /api/sessions?agentId=…&origin=user|synthetic|forum|cron|telegram|flow|all[&limit=&skip=]`.

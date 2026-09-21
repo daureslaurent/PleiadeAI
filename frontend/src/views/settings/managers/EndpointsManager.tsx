@@ -197,8 +197,8 @@ export function EndpointsManager() {
           </label>
 
           {/* Concurrency: the server's own --parallel / -np. The gate admits this many calls to this
-              URL at once and queues the rest, so it is what makes the board's "tasks running at once"
-              mean anything. Over-declaring does not help — llama.cpp just queues internally instead,
+              URL at once and queues the rest, so it is what caps how many subagent runs actually
+              overlap. Over-declaring does not help — llama.cpp just queues internally instead,
               and every in-flight request takes its own slice of the shared KV cache. */}
           <label className="flex items-center gap-2">
             <span className="shrink-0 text-[11px] text-slate-400">Parallel streams</span>

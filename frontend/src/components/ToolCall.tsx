@@ -6,7 +6,6 @@ import { resourcesApi } from '../lib/api';
 import { describeTool, visualActDetail } from '../lib/toolSummary';
 import { useStickyScroll } from '../hooks/useStickyScroll';
 import { useChatLayout } from './workspace/ChatLayoutContext';
-import { BoardProposalBlock } from './BoardProposalBlock';
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
 
@@ -45,8 +44,6 @@ export function ToolCard({ block, defaultOpen = false }: { block: ToolBlock; def
       block.tool === 'analyze_image' || block.vision)
     return <VisionBlock block={block} />;
   if (MEDIA_TOOLS.has(block.tool) || block.mediaGen) return <MediaGenBlock block={block} />;
-  const proposed = proposalOf(block);
-  if (proposed) return <BoardProposalBlock proposalId={proposed.id} changes={proposed.changes} />;
   return <GenericToolBlock block={block} defaultOpen={defaultOpen} />;
 }
 
@@ -155,14 +152,6 @@ function DraftingBlock({ block }: { block: ToolBlock }) {
 }
 
 const MEDIA_TOOLS = new Set(['generate_image', 'generate_video', 'generate_sound', 'edit_image']);
-
-/** A successful `board` `propose` call, which renders as the proposal rather than as raw JSON. */
-function proposalOf(block: ToolBlock): { id: string; changes: string[] } | null {
-  if (block.tool !== 'board' || block.args?.action !== 'propose') return null;
-  const r = block.result as { ok?: boolean; proposal_id?: unknown; changes?: unknown } | undefined;
-  if (!r?.ok || typeof r.proposal_id !== 'string') return null;
-  return { id: r.proposal_id, changes: Array.isArray(r.changes) ? r.changes.map(String) : [] };
-}
 
 /**
  * Action-marker card for `visual_act`: shows the screenshot the action landed on with a marker at the

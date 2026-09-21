@@ -156,7 +156,7 @@ export function InboxPanel({
                 {n.content}
               </div>
               {/* A mention alert is the one notification with something to *do*: answering it from
-                  here saves opening the board just to press the same button (FORUM_PLAN.md §11.4). */}
+                  here saves opening the forum just to press the same button (FORUM_PLAN.md §11.4). */}
               {n.kind === 'forum_mention' && n.ref_id && (
                 <div className="mt-1.5 flex items-center gap-1.5">
                   <button
@@ -168,7 +168,7 @@ export function InboxPanel({
                         const { sessionId } = await forumApi.runMention(n.ref_id!);
                         navigate(`/workspace?session=${sessionId}`);
                       } catch {
-                        // Already answered, or the post is gone — the board is the place to see why.
+                        // Already answered, or the post is gone — the forum is the place to see why.
                         navigate('/forum/mentions');
                       } finally {
                         setRunning(null);

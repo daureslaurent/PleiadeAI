@@ -2,8 +2,7 @@ import type { AgentDoc } from '../domain/agents/agent.model';
 import type { ImageBlock } from '../core/event-bus/events.types';
 import type { RecalledMemory } from '../domain/memory/memory.types';
 import type { TodoItem } from '../domain/todos/todo.repository';
-import type { ForumBlockInput, TaskPointer } from '../domain/forum/forum-recall.service';
-import type { BoardProjectPromptState } from '../domain/forum/forum-project-context';
+import type { ForumBlockInput } from '../domain/forum/forum-recall.service';
 
 /**
  * The module system (`MODULES_PLAN.md`).
@@ -42,10 +41,6 @@ export interface PromptContext {
   memories: RecalledMemory[];
   /** Forum pointers for this turn, or null when the module is off / the agent lacks the tool. */
   forum: ForumBlockInput | null;
-  /** Work items owned by or awaiting this agent, or null when the board module is off. */
-  board: { tasks: TaskPointer[]; reviews: TaskPointer[] } | null;
-  /** The item this run manages (`BOARD_REFACTOR_PLAN.md` §8), or null for every other run. */
-  boardProject?: BoardProjectPromptState | null;
   images: ImagePromptState;
   /** Active `prompt` modes, already split by the placement each one declared. */
   modes: { system: string[]; user: string[] };
@@ -142,7 +137,7 @@ export interface PromptModule {
   /**
    * Whether the module also applies inside a `task` subagent run, until the operator says otherwise
    * (`SUBAGENT_PLAN.md` §3). Defaults to true. Off for what a child doing one narrow job has no use
-   * for — its memory silo, the forum, the board — so a small model's prompt starts lean.
+   * for — its memory silo, the forum — so a small model's prompt starts lean.
    */
   subagentDefault?: boolean;
   /** Core tools this module owns. Disabling the module drops them from every agent's toolset. */

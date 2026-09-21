@@ -34,7 +34,7 @@ const SessionSchema = new Schema(
      */
     origin: {
       type: String,
-      enum: ['user', 'synthetic', 'forum', 'cron', 'telegram', 'flow', 'board'],
+      enum: ['user', 'synthetic', 'forum', 'cron', 'telegram', 'flow'],
       default: 'user',
       index: true,
     },
@@ -45,17 +45,11 @@ const SessionSchema = new Schema(
     /** Flow-origin only: the flow and the run whose agent node produced this conversation. */
     flow_id: { type: String, default: null },
     flow_run_id: { type: String, default: null },
-    /**
-     * Board-origin only: the plan whose manager this conversation is (`BOARD_REFACTOR_PLAN.md`). A
-     * chat turn typed here runs with the board's `chat` context — it can read the project and
-     * `propose` changes, never write them.
-     */
-    board_plan_id: { type: Schema.Types.ObjectId, ref: 'ForumPlan', default: null, index: true },
     /** Synthetic only: the `conversation_generators` row that produced this session. */
     generator_id: { type: Schema.Types.ObjectId, ref: 'ConversationGenerator', default: null, index: true },
     /**
      * Forum-origin only: the thread the mention came from, and the mention itself. Kept so the
-     * Workspace can offer a link back to the board — a mention run read out of context ("who asked
+     * Workspace can offer a link back to the forum — a mention run read out of context ("who asked
      * this?") is exactly the trace that makes it hard to trust.
      */
     forum_thread_id: { type: Schema.Types.ObjectId, ref: 'ForumThread', default: null },

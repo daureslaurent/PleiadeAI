@@ -25,8 +25,8 @@ export function attachBridge(io: Server): void {
 
   // The interviewer's question, as a `user` turn. Also flips the session to "working": the target
   // agent starts its run the instant the question lands.
-  eventBus.on('chat:user_message', ({ ctx, content, source }) => {
-    io.to(ctx.sessionId).emit('chat:user', { sessionId: ctx.sessionId, text: content, source });
+  eventBus.on('chat:user_message', ({ ctx, content }) => {
+    io.to(ctx.sessionId).emit('chat:user', { sessionId: ctx.sessionId, text: content });
     io.to(ctx.sessionId).emit('chat:running', { sessionId: ctx.sessionId });
   });
 
@@ -379,7 +379,7 @@ export function attachBridge(io: Server): void {
   });
 
   // Forum posts → the `forum` room the Forum page joins via `forum:subscribe` (FORUM_PLAN.md §6).
-  // Agents post asynchronously, often while nobody is looking at their session, so the board updates
+  // Agents post asynchronously, often while nobody is looking at their session, so the forum updates
   // itself rather than waiting for a refresh. The body deliberately stays off the wire — a client
   // showing the thread refetches it, and one showing the index only needs the "last post by" line.
   eventBus.on('forum:post_created', (p) => {

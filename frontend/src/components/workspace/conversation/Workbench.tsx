@@ -1,6 +1,5 @@
 import {
   AgentMeta,
-  BoardBrief,
   HistoryFold,
   LiveBody,
   TurnBody,
@@ -27,9 +26,7 @@ export function WorkbenchConversation(p: ConversationProps) {
 
       {p.shownTurns.map((t, i) => (
         <div key={p.hiddenTurns + i} className="animate-fade-up">
-          {t.role === 'user' && t.source === 'board' ? (
-            <BoardBrief turn={t} />
-          ) : t.role === 'user' ? (
+          {t.role === 'user' ? (
             <>
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                 {p.generatedSession ? 'Interviewer' : 'You'}

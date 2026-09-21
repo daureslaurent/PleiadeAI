@@ -5,8 +5,6 @@ import { ForumThreadModel } from './forum-thread.model';
 import { forumIndexService } from './forum-index.service';
 import { ForumMentionModel } from './forum-mention.model';
 import { loadRoster, OPERATOR_HANDLE } from './forum-roster';
-import { forumTaskRepository } from './forum-task.repository';
-import type { ForumTaskDoc } from './forum-task.model';
 
 const log = createLogger('forum-recall');
 
@@ -306,36 +304,6 @@ export const forumRecall = {
       return [];
     }
   },
-  /**
-   * What this agent is on the hook for, for the block (spec `FORUM_WORKBOARD_PLAN.md` §8).
-   *
-   * Two indexed finds, and the only part of the block that is *addressed to* the agent rather than
-   * offered to it. Unlike a mention — which stops being pending the moment it is answered — a task
-   * stays here until somebody else accepts it, which is the point: it is what the agent still owes.
-   */
-  async work(agentId: string): Promise<{ tasks: TaskPointer[]; reviews: TaskPointer[] }> {
-    try {
-      const { owned, reviewing } = await forumTaskRepository.listForAgent(agentId);
-      return {
-        tasks: owned.map((t: ForumTaskDoc) => ({
-          taskId: String(t._id),
-          goal: clip(t.goal),
-          state: t.state,
-          blockedOn: t.blocked_on || undefined,
-        })),
-        reviews: reviewing.map((t: ForumTaskDoc) => ({
-          taskId: String(t._id),
-          goal: clip(t.goal),
-          state: t.state,
-          owner: t.owner?.display_name,
-        })),
-      };
-    } catch (err) {
-      // Same rule as every other pointer source here: a board lookup must never fail a turn.
-      log.warn({ err: String(err), agentId }, 'board work unavailable this turn');
-      return { tasks: [], reviews: [] };
-    }
-  },
 };
 
 /**
@@ -350,7 +318,7 @@ export const forumRecall = {
  * can't spell one can't address anybody — every instruction below is inert without it.
  *
  * And it draws the **routing rule**: `ask_agent` answers inside this turn and is right for a lookup
- * or a web search; anything long, open-ended or multi-step belongs on the board, where it survives
+ * or a web search; anything long, open-ended or multi-step belongs on the forum, where it survives
  * the turn, is visible to the operator, and can be picked up by whoever owns it. Without that
  * sentence the two paths look interchangeable and the model picks the synchronous one every time,
  * which is how a fleet ends up with a board that is an archive nobody writes to.
@@ -366,14 +334,6 @@ function files(p: ForumPointer): string {
 }
 
 /** One line of work in the block: what it is, where it stands, and nothing else. */
-export interface TaskPointer {
-  taskId: string;
-  goal: string;
-  state: string;
-  blockedOn?: string;
-  owner?: string;
-}
-
 export interface ForumBlockInput {
   related: ForumPointer[];
   replies: ForumPointer[];
@@ -383,40 +343,8 @@ export interface ForumBlockInput {
   roster?: string[];
   /** Open work items assigned to this agent (spec §13). */
   assigned?: ForumPointer[];
-  /** Whether the board runs mentions on its own (`settings.forum_auto_reply`, spec §11.6). */
+  /** Whether the forum runs mentions on its own (`settings.forum_auto_reply`, spec §11.6). */
   autoReply?: boolean;
-}
-
-/**
- * The board half of the block: work this agent owns or must sign off on. Rendered by the `board`
- * module (`MODULES_PLAN.md` §4) — split from the forum half because the two are separate switches:
- * an agent may hold one without the other, and a task line telling it to `submit` with a tool it
- * does not have is worse than no line.
- */
-export function buildBoardBlock(input: { tasks?: TaskPointer[]; reviews?: TaskPointer[] }): string | null {
-  const { tasks = [], reviews = [] } = input;
-  if (!tasks.length && !reviews.length) return null;
-
-  const lines: string[] = ['## Board'];
-  // Work leads, and it is the only part of this block that is *addressed to* the agent rather than
-  // offered to it. Everything in the forum half is a pointer it may ignore; this is what it is on
-  // the hook for.
-  if (tasks.length) {
-    lines.push(
-      '',
-      'Your open tasks. The board dispatches each one to you when it is ready — you do not have to',
-      'start them, and you do not have to tell anybody you have:',
-      ...tasks.map((t) => `- \`${t.taskId}\` [${t.state}] ${t.goal}${t.blockedOn ? ` · blocked: ${t.blockedOn}` : ''}`),
-    );
-  }
-  if (reviews.length) {
-    lines.push(
-      '',
-      'Submitted work waiting on **your** verdict — `board` `review`, pass or fail with reasons:',
-      ...reviews.map((t) => `- \`${t.taskId}\` ${t.goal} (from ${t.owner ?? 'unknown'})`),
-    );
-  }
-  return lines.join('\n');
 }
 
 export function buildForumBlock(input: ForumBlockInput): string | null {
@@ -433,7 +361,7 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
   const hasForum = mentions.length || assigned.length || related.length || replies.length || digest.length;
   // The block is omitted entirely when there is nothing on it. The old one was unconditional and
   // spent ~180 tokens a turn on doctrine about who to wake — doctrine for a mechanism that no
-  // longer exists, on a turn that may have nothing to do with the board at all.
+  // longer exists, on a turn that may have nothing to do with the forum at all.
   if (!hasForum) return null;
 
   const lines: string[] = ['## Forum'];
@@ -504,8 +432,8 @@ export function buildForumBlock(input: ForumBlockInput): string | null {
             'Naming somebody tells them; it starts nothing. The fleet is not running mentions on its',
             'own right now (Settings → Forum), so `wake` records the request and the operator runs it.',
           ]),
-      'Work with a deliverable belongs on the `board` as a task with acceptance criteria and an',
-      'owner — that is dispatched on its own and costs no coordination turns.',
+      'Work with a deliverable belongs on a thread of its own, with acceptance criteria and an',
+      'owner named in the opening post — so what it would take to finish is written down once.',
     );
   }
 
